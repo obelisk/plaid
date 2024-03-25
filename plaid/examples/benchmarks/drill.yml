@@ -1,0 +1,15 @@
+---
+# Example of a test plan with 10000 iterations and 4 requests each.
+# A plan with 40000 requests in total at maximum throughput.
+base: 'http://localhost:4554'
+iterations: 1000
+concurrency: 100
+
+plan:
+  - name: Post some data to a webhook and see how fast Plaid processes it
+    request:
+      url: /webhook/BBBB
+      method: POST
+      body: 'Some Data'
+      headers:
+        Content-Type: 'application/json'

@@ -1,0 +1,17 @@
+FROM messense/rust-musl-cross:x86_64-musl as builder
+
+RUN rustup component add rustfmt
+RUN mkdir /build
+WORKDIR /build
+COPY . .
+
+RUN cargo build --release
+
+FROM alpine:3.6 as alpine
+RUN apk add -U --no-cache ca-certificates
+
+from scratch as runtime
+COPY --from=alpine /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/plaid /plaid
+USER 1000
+CMD [ "/plaid", "--config", "/config/plaid.toml" ]

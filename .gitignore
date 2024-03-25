@@ -1,0 +1,5 @@
+/modules
+.DS_Store
+/target
+plaid-stl/target
+/plaid/private-resources

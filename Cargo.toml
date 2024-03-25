@@ -1,0 +1,10 @@
+[workspace]
+
+members = [
+    "plaid",
+    "plaid-stl",
+]
+
+[profile.release]
+lto = true
+strip = "symbols"
