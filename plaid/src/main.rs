@@ -105,8 +105,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         // If the webhook has a label, use that as the source, otherwise use the webhook address
                         let source = match webhook_configuration.label {
-                            Some(ref label) => LogSource::WebhookGet(label.to_string()),
-                            None => LogSource::WebhookGet(webhook.to_string()),
+                            Some(ref label) => LogSource::WebhookPost(label.to_string()),
+                            None => LogSource::WebhookPost(webhook.to_string()),
                         };
 
                         let logbacks_allowed = webhook_configuration.logbacks_allowed.clone();
