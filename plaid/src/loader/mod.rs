@@ -4,8 +4,8 @@ use limits::LimitingTunables;
 
 use lru::LruCache;
 use serde::Deserialize;
+use wasmer::{sys::BaseTunables, Engine, NativeEngineExt, Pages, Target};
 use wasmer::{wasmparser::Operator, CompilerConfig, Cranelift, Module};
-use wasmer::{BaseTunables, Engine, NativeEngineExt, Pages, Target};
 
 use wasmer_middlewares::Metering;
 
@@ -79,9 +79,7 @@ impl PlaidModules {
 
 const CALL_COST: u64 = 10;
 
-pub fn load(
-    config: Configuration,
-) -> Result<PlaidModules, ()> {
+pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
     let module_paths = fs::read_dir(config.module_dir).unwrap();
 
     let mut modules = PlaidModules::default();
@@ -206,7 +204,7 @@ pub fn load(
         let mut module = Module::new(&engine, module_bytes).unwrap();
         module.set_name(&filename);
         for import in module.imports() {
-           info!("\tImport: {}", import.name());
+            info!("\tImport: {}", import.name());
         }
 
         let plaid_module = PlaidModule {
