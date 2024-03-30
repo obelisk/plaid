@@ -58,6 +58,7 @@ pub struct Apis {
 #[derive(Debug)]
 pub enum ApiError {
     BadRequest,
+    ImpossibleError,
     ConfigurationError(String),
     MissingParameter(String),
 

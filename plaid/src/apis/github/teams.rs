@@ -1,60 +1,71 @@
 use std::collections::HashMap;
 
 use super::Github;
-use crate::apis::{ApiError, github::GitHubError};
+use crate::apis::{github::GitHubError, ApiError};
 
 impl Github {
-    pub async fn remove_user_from_team(&self, params: &str, _: &str) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+    pub async fn remove_user_from_team(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Parse out all the parameters from our parameter string
-        let org = request.get("org").ok_or(ApiError::BadRequest)?;
-        let team_slug = request.get("team_slug").ok_or(ApiError::BadRequest)?;
-        let user = request.get("user").ok_or(ApiError::BadRequest)?;
+        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
+        let team_slug =
+            self.validate_team_slug(request.get("team_slug").ok_or(ApiError::BadRequest)?)?;
+        let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
 
-        println!("Removing user [{user}] from [{team_slug}] in [{org}]");
-        let address = format!("https://api.github.com/orgs/{org}/teams/{team_slug}/memberships/{user}");
-        let request = self.client
-            .delete(address)
-            .header("User-Agent", "Rust/Plaid")
-            .header("Accept", "application/vnd.github.v3+json")
-            .header("Authorization", format!("token {}", self.config.token));
+        info!("Removing user [{user}] from [{team_slug}] in [{org}]");
+        let address =
+            format!("https://api.github.com/orgs/{org}/teams/{team_slug}/memberships/{user}");
 
-        match request.send().await {
-            Ok(r) => if r.status() == 204 {
-                Ok(0)
-            } else {
-                Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(r.status().as_u16())))
-            },
-            Err(e) => Err(ApiError::NetworkError(e)),
+        match self
+            .make_generic_delete_request(address, None, module)
+            .await
+        {
+            Ok((status, _)) => {
+                if status == 204 {
+                    Ok(0)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Err(e) => Err(e),
         }
     }
 
-    pub async fn add_user_to_team(&self, params: &str, _: &str) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+    pub async fn add_user_to_team(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Parse out all the parameters from our parameter string
-        let org = request.get("org").ok_or(ApiError::BadRequest)?;
-        let team_slug = request.get("team_slug").ok_or(ApiError::BadRequest)?;
-        let user = request.get("user").ok_or(ApiError::BadRequest)?;
+        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
+        let team_slug =
+            self.validate_team_slug(request.get("team_slug").ok_or(ApiError::BadRequest)?)?;
+        let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
+
         let role = request.get("role").ok_or(ApiError::BadRequest)?;
+        let role = format!("{{\"role\": \"{role}\"}}");
 
-        println!("Adding user [{user}] to [{team_slug}] in [{org}] as [{role}]");
-        let address = format!("https://api.github.com/orgs/{org}/teams/{team_slug}/memberships/{user}");
-        let request = self.client
-            .put(address)
-            .header("User-Agent", "Rust/Plaid")
-            .header("Accept", "application/vnd.github.v3+json")
-            .header("Authorization", format!("token {}", self.config.token))
-            .body(format!("{{\"role\": \"{role}\"}}"));
+        info!("Adding user [{user}] to [{team_slug}] in [{org}] as [{role}]");
+        let address =
+            format!("https://api.github.com/orgs/{org}/teams/{team_slug}/memberships/{user}");
 
-        match request.send().await {
-            Ok(r) => if r.status() == 200 {
-                Ok(0)
-            } else {
-                Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(r.status().as_u16())))
-            },
-            Err(e) => Err(ApiError::NetworkError(e)),
+        match self
+            .make_generic_put_request(address, Some(&role), module)
+            .await
+        {
+            Ok((status, _)) => {
+                if status == 204 {
+                    Ok(0)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Err(e) => Err(e),
         }
     }
 }
