@@ -15,10 +15,13 @@ impl Github {
         let repo =
             self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
 
-        let address = format!("https://api.github.com/repos/{repo}/collaborators/{user}",);
+        let address = format!("/repos/{repo}/collaborators/{user}",);
         info!("Removing user [{}] from [{}]", user, repo);
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_delete_request(address, None, module)
+            .await
+        {
             Ok((status, _)) => {
                 if status == 204 {
                     Ok(0)
@@ -44,7 +47,7 @@ impl Github {
         let permission = request.get("permission").unwrap_or(&"pull");
 
         info!("Adding user [{user}] to [{repo}] with permission [{permission}]");
-        let address = format!("https://api.github.com/repos/{repo}/collaborators/{user}");
+        let address = format!("/repos/{repo}/collaborators/{user}");
 
         let permission = format!("{{\"permission\": \"{permission}\"}}");
 
@@ -76,7 +79,7 @@ impl Github {
             self.validate_commit_hash(request.get("commit").ok_or(ApiError::BadRequest)?)?;
 
         info!("Fetching commit [{commit}] from [{repo}] by [{user}]");
-        let address = format!("https://api.github.com/repos/{user}/{repo}/commits/{commit}");
+        let address = format!("/repos/{user}/{repo}/commits/{commit}");
 
         match self.make_generic_get_request(address, module).await {
             Ok((status, Ok(body))) => {

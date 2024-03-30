@@ -30,7 +30,7 @@ struct AdvancedRequest {
     variables: HashMap<String, serde_json::Value>,
 }
 
-const GITHUB_GQL_API: &str = "https://api.github.com/graphql";
+const GITHUB_GQL_API: &str = "/graphql";
 
 impl Github {
     async fn make_gql_request(&self, query: String, module: &str) -> Result<String, ApiError> {

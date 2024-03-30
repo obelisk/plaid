@@ -41,7 +41,7 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     let mut validators = HashMap::new();
 
     // This should be the same as GitHub's actual validation.
-    define_regex_validator!(validators, "repository_name", r"^[\w\-\.]+$");
+    define_regex_validator!(validators, "repository_name", r"^[\w\-\./]+$");
 
     // This is less strict than GitHub's actual requirements but it's good enough
     // to ensure safety.

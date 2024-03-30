@@ -3,7 +3,7 @@ mod repos;
 mod teams;
 mod validators;
 
-use http::{header::USER_AGENT, HeaderMap};
+use http::header::USER_AGENT;
 use jsonwebtoken::EncodingKey;
 use octocrab::Octocrab;
 
@@ -24,7 +24,11 @@ pub enum Authentication {
     /// If you provide an app then we will initalize the system as a GitHub app
     /// This is more secure but requires more setup and is more prone to specific API
     /// failures if the app has not been granted permissions correctly.
-    App { app_id: u64, private_key: String },
+    App {
+        app_id: u64,
+        installation_id: u64,
+        private_key: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -60,21 +64,40 @@ pub enum GitHubError {
 
 impl Github {
     pub fn new(config: GithubConfig) -> Self {
-        let client = match &config.authentication {
-            Authentication::Token { token } => Octocrab::builder().personal_token(token.clone()),
+        let client_builder = match &config.authentication {
+            Authentication::Token { token } => {
+                info!("Configuring GitHub API with GitHub PAT");
+                Octocrab::builder().personal_token(token.clone())
+            }
             Authentication::App {
                 app_id,
                 private_key,
+                ..
             } => {
+                info!("Configuring GitHub API with GitHub App");
                 let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes())
                     .expect("Failed to create encoding key from private key for GitHub API");
 
                 Octocrab::builder().app((*app_id).into(), encoding_key)
             }
         }
-        .build()
-        .unwrap();
+        .add_header(
+            USER_AGENT,
+            format!("Rust/Plaid{}", env!("CARGO_PKG_VERSION")),
+        );
 
+        let mut client = client_builder
+            .build()
+            .expect("Failed to create GitHub client");
+
+        if let Authentication::App {
+            installation_id, ..
+        } = &config.authentication
+        {
+            client = client.installation((*installation_id).into());
+            println!("{:?}", client);
+        }
+        println!("{:?}", client);
         // Create all the validators and compile all the regexes. If the module contains
         // any invalid regexes it will panic.
         let validators = validators::create_validators();
@@ -97,17 +120,7 @@ impl Github {
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a get request to {uri} on behalf of {module}");
 
-        // Create a header map to track the Plaid version in logs that are
-        // created by this request.
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            http::header::ACCEPT,
-            "application/vnd.github.v3+json".parse().unwrap(),
-        );
-        let version = env!("CARGO_PKG_VERSION");
-        headers.insert(USER_AGENT, format!("Rust/Plaid{version}").parse().unwrap());
-
-        let request = self.client._get_with_headers(uri, Some(headers)).await;
+        let request = self.client._get(uri).await;
 
         match request {
             Ok(r) => {
@@ -157,7 +170,7 @@ impl Github {
         body: Option<&str>,
         module: &str,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
-        info!("Making a put request to {uri} on behalf of {module}");
+        info!("Making a delete request to {uri} on behalf of {module}");
 
         let request = self.client._delete(uri, body).await;
 

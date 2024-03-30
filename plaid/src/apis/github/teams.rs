@@ -15,8 +15,7 @@ impl Github {
         let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
 
         info!("Removing user [{user}] from [{team_slug}] in [{org}]");
-        let address =
-            format!("https://api.github.com/orgs/{org}/teams/{team_slug}/memberships/{user}");
+        let address = format!("/orgs/{org}/teams/{team_slug}/memberships/{user}");
 
         match self
             .make_generic_delete_request(address, None, module)
@@ -49,8 +48,7 @@ impl Github {
         let role = format!("{{\"role\": \"{role}\"}}");
 
         info!("Adding user [{user}] to [{team_slug}] in [{org}] as [{role}]");
-        let address =
-            format!("https://api.github.com/orgs/{org}/teams/{team_slug}/memberships/{user}");
+        let address = format!("/orgs/{org}/teams/{team_slug}/memberships/{user}");
 
         match self
             .make_generic_put_request(address, Some(&role), module)
