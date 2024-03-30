@@ -1,4 +1,5 @@
 mod graphql;
+mod pats;
 mod repos;
 mod teams;
 mod validators;
@@ -7,7 +8,7 @@ use http::header::USER_AGENT;
 use jsonwebtoken::EncodingKey;
 use octocrab::Octocrab;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 
@@ -95,9 +96,7 @@ impl Github {
         } = &config.authentication
         {
             client = client.installation((*installation_id).into());
-            println!("{:?}", client);
         }
-        println!("{:?}", client);
         // Create all the validators and compile all the regexes. If the module contains
         // any invalid regexes it will panic.
         let validators = validators::create_validators();
@@ -121,6 +120,32 @@ impl Github {
         info!("Making a get request to {uri} on behalf of {module}");
 
         let request = self.client._get(uri).await;
+
+        match request {
+            Ok(r) => {
+                let status = r.status().as_u16();
+                let body = self.client.body_to_string(r).await.map_err(|e| {
+                    ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
+                });
+                Ok((status, body))
+            }
+            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
+        }
+    }
+
+    /// Make a generic post request to the GitHub API using the GitHub app library. This exists
+    /// to help facilitate the conversion from a token usage to GitHub app. It also means that
+    /// extra parsing can be avoided since we need to re-serialize anyway to pass back to the rules
+    /// (at least currently).
+    async fn make_generic_post_request<T: Serialize>(
+        &self,
+        uri: String,
+        body: T,
+        module: &str,
+    ) -> Result<(u16, Result<String, ApiError>), ApiError> {
+        info!("Making a get request to {uri} on behalf of {module}");
+
+        let request = self.client._post(uri, Some(&body)).await;
 
         match request {
             Ok(r) => {

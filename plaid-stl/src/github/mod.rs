@@ -4,6 +4,11 @@ use serde::Serialize;
 
 use crate::PlaidFunctionError;
 
+pub enum ReviewPatAction {
+    Approve,
+    Deny,
+}
+
 // TODO: Do not use this function, it is deprecated and will be removed soon
 pub fn add_user_to_team(team: &str, user: &str, org: &str, role: &str) -> Result<(), i32> {
     add_user_to_team_detailed(team, user, org, role).map_err(|_| -4)
@@ -261,4 +266,79 @@ pub fn fetch_commit(user: &str, repo: &str, commit: &str) -> Result<String, Plai
     // This should be safe because unless the Plaid runtime is expressly trying
     // to mess with us, this came from a String in the API module.
     Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+pub fn list_fpat_requests_for_org(org: &str) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, list_fpat_requests_for_org);
+    }
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+
+    let mut params: HashMap<&'static str, &str> = HashMap::new();
+    params.insert("org", org);
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_list_fpat_requests_for_org(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+pub fn review_fpat_requests_for_org(
+    org: String,
+    pat_request_ids: &[u64],
+    action: ReviewPatAction,
+    reason: String,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, review_fpat_requests_for_org);
+    }
+    #[derive(Serialize)]
+    struct Request {
+        org: String,
+        pat_request_ids: Vec<u64>,
+        action: String,
+        reason: String,
+    }
+
+    let request = Request {
+        org,
+        pat_request_ids: pat_request_ids.to_vec(),
+        action: match action {
+            ReviewPatAction::Approve => "approve".to_string(),
+            ReviewPatAction::Deny => "deny".to_string(),
+        },
+        reason,
+    };
+
+    let request = serde_json::to_string(&request).unwrap();
+
+    let res = unsafe {
+        github_review_fpat_requests_for_org(request.as_bytes().as_ptr(), request.as_bytes().len())
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    match res {
+        0 => Ok(()),
+        x => Err(x.into()),
+    }
 }
