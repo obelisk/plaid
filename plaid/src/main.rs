@@ -152,23 +152,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(webhook_configuration) = webhook_config.webhooks.get(&webhook) {
                         match &webhook_configuration.get_mode {
                             Some(GetMode{ response_mode: ResponseMode::Static(data), ..}) => {
-                                Ok(data.clone())
+                                Ok(warp::reply::html(data.clone()))
                             }
                             Some(GetMode{ response_mode: ResponseMode::Facebook(secret), ..}) => {
                                 if let Some(fb_secret) = query.get("hub.verify_token") {
                                     if fb_secret == secret {
                                         info!("Received a valid get request to: {webhook}");
-                                        Ok::<String, Infallible>(query.get("hub.challenge").unwrap_or(&String::new()).to_owned())
+                                        Ok::<warp::reply::Html<String>, Infallible>(warp::reply::html(query.get("hub.challenge").unwrap_or(&String::new()).to_owned()))
                                     } else {
                                         error!("Got a request that didn't contain the right FB secret");
-                                        Ok(String::new())
+                                        Ok(warp::reply::html(String::new()))
                                     }
                                 } else {
                                     warn!("Got a call that didn't contain the right FB parameters. Webhook leaked?");
-                                    Ok(String::new())
+                                    Ok(warp::reply::html(String::new()))
                                 }
                             },
-                            Some(GetMode{ response_mode: ResponseMode::Rule(name), caching_mode }) => {
+                            Some(GetMode{ response_mode: ResponseMode::Rule(name), caching_mode}) => {
                                 if let Some(rule) = modules.get(name) {
                                     info!("Received get request to: {webhook}. Handling with rule [{name}] to generate response");
                                     let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
@@ -179,7 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 // I'm making the assumption here that getting the system time will never fail
                                                 if cached_response.0 + validity > current_time {
                                                     info!("Returning cached response (valid for {} more seconds) for get request to: {webhook}", cached_response.0 + validity - current_time);
-                                                    return Ok(cached_response.1.clone());
+                                                    return Ok(warp::reply::html(cached_response.1.clone()));
                                                 }
                                             }
                                             true
@@ -222,34 +222,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 let mut cache = get_cache.write().await;
                                                 cache.insert(webhook.clone(), (current_time, response.clone()));
                                             }
-                                        
-                                            Ok(response)
+                                            Ok(warp::reply::html(response))
                                         },
                                         Ok(Ok(None)) => {
                                             warn!("Got a get request to {webhook} but the rule [{name}] configured to handle it did not return a response");
-                                            Ok(String::new())
+                                            Ok(warp::reply::html(String::new()))
                                         }
                                         Ok(Err(e)) => {
                                             error!("Got a get request to {webhook} but the rule [{name}] configured to handle it threw an error: {e}");
-                                            Ok(String::new())
+                                            Ok(warp::reply::html(String::new()))
                                         }
                                         _ => {
                                             error!("Got a get request to {webhook} but errored spawing the blocking task. Perhaps server overloaded?");
-                                            Ok(String::new())
+                                            Ok(warp::reply::html(String::new()))
                                         }
                                     }
                                 } else {
                                     warn!("Got a get request to {webhook} but the rule [{name}] configured to handle it does not exist");
-                                    Ok(String::new())
+                                    Ok(warp::reply::html(String::new()))
                                 }
                             },
                             _ => {
                                 warn!("Got a get request to {webhook}. Are you sure the sending service is configured correctly?");
-                                Ok(String::new())
+                                Ok(warp::reply::html(String::new()))
                             },
                         }
                     } else {
-                        Ok(String::new())
+                        Ok(warp::reply::html(String::new()))
                     }
                 });
 
