@@ -18,7 +18,7 @@ pub struct Sled {
 impl Sled {
     pub fn new(config: Config) -> Result<Self, StorageError> {
         let db: sled::Db = sled::open(&config.path)
-            .map_err(|_| StorageError::CouldNotAccessStorage(config.path.clone()))?;
+            .map_err(|e| StorageError::CouldNotAccessStorage(e.to_string()))?;
         Ok(Self { db })
     }
 }

@@ -163,10 +163,10 @@ impl Github {
     /// to help facilitate the conversion from a token usage to GitHub app. It also means that
     /// extra parsing can be avoided since we need to re-serialize anyway to pass back to the rules
     /// (at least currently).
-    async fn make_generic_put_request(
+    async fn make_generic_put_request<T: Serialize>(
         &self,
         uri: String,
-        body: Option<&str>,
+        body: Option<&T>,
         module: &str,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a put request to {uri} on behalf of {module}");

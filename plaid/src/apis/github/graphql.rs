@@ -33,7 +33,11 @@ struct AdvancedRequest {
 const GITHUB_GQL_API: &str = "/graphql";
 
 impl Github {
-    async fn make_gql_request(&self, query: String, module: &str) -> Result<String, ApiError> {
+    async fn make_gql_request<T: Serialize>(
+        &self,
+        query: T,
+        module: &str,
+    ) -> Result<String, ApiError> {
         let request = self.client._post(GITHUB_GQL_API, Some(&query)).await;
 
         match request {
@@ -76,11 +80,10 @@ impl Github {
             }
         };
 
-        let query = serde_json::to_string(&GraphQLQuery {
+        let query = GraphQLQuery {
             query: query,
             variables: request.variables,
-        })
-        .map_err(|_| ApiError::GitHubError(GitHubError::GraphQLUnserializable))?;
+        };
 
         self.make_gql_request(query, module).await
     }
@@ -102,11 +105,10 @@ impl Github {
             }
         };
 
-        let query = serde_json::to_string(&AdvancedGraphQLQuery {
+        let query = AdvancedGraphQLQuery {
             query: query,
             variables: request.variables,
-        })
-        .map_err(|_| ApiError::GitHubError(GitHubError::GraphQLUnserializable))?;
+        };
 
         self.make_gql_request(query, module).await
     }

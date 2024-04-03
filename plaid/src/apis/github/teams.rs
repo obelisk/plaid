@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use super::Github;
 use crate::apis::{github::GitHubError, ApiError};
 
@@ -45,9 +47,17 @@ impl Github {
         let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
 
         let role = request.get("role").ok_or(ApiError::BadRequest)?;
-        let role = format!("{{\"role\": \"{role}\"}}");
 
         info!("Adding user [{user}] to [{team_slug}] in [{org}] as [{role}]");
+        #[derive(Serialize)]
+        struct Role {
+            role: String,
+        }
+
+        let role = Role {
+            role: role.to_string(),
+        };
+
         let address = format!("/orgs/{org}/teams/{team_slug}/memberships/{user}");
 
         match self

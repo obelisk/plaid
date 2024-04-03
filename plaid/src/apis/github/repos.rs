@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use crate::apis::{github::GitHubError, ApiError};
 
 use super::Github;
@@ -49,7 +51,14 @@ impl Github {
         info!("Adding user [{user}] to [{repo}] with permission [{permission}]");
         let address = format!("/repos/{repo}/collaborators/{user}");
 
-        let permission = format!("{{\"permission\": \"{permission}\"}}");
+        #[derive(Serialize)]
+        struct Permission {
+            permission: String,
+        }
+
+        let permission = Permission {
+            permission: permission.to_string(),
+        };
 
         match self
             .make_generic_put_request(address, Some(&permission), module)
