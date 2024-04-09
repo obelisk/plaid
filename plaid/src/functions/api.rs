@@ -147,6 +147,7 @@ impl_new_function_with_error_buffer!(github, fetch_commit);
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org);
 impl_new_function_with_error_buffer!(github, list_fpat_requests_for_org);
+impl_new_function_with_error_buffer!(github, get_repos_for_fpat);
 
 // Okta Functions
 impl_new_function!(okta, remove_user_from_group);
@@ -249,6 +250,9 @@ pub fn to_api_function(
         }
         "github_review_fpat_requests_for_org" => {
             Function::new_typed_with_env(&mut store, &env, github_review_fpat_requests_for_org)
+        }
+        "github_get_repos_for_fpat" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repos_for_fpat)
         }
         // Slack Calls
         "slack_post_to_named_webhook" => {

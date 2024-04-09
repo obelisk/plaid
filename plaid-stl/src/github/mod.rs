@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use serde::Serialize;
 
@@ -272,13 +272,13 @@ pub fn list_fpat_requests_for_org(org: &str) -> Result<String, PlaidFunctionErro
     extern "C" {
         new_host_function_with_error_buffer!(github, list_fpat_requests_for_org);
     }
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
     let mut params: HashMap<&'static str, &str> = HashMap::new();
     params.insert("org", org);
 
     let request = serde_json::to_string(&params).unwrap();
 
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let res = unsafe {
@@ -341,4 +341,47 @@ pub fn review_fpat_requests_for_org(
         0 => Ok(()),
         x => Err(x.into()),
     }
+}
+
+pub fn get_repos_for_fpat<T: Display>(
+    org: T,
+    request_id: u64,
+    per_page: Option<u64>,
+    page: Option<u64>,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_repos_for_fpat);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("org", org.to_string());
+    params.insert("request_id", request_id.to_string());
+    if let Some(per_page) = per_page {
+        params.insert("per_page", per_page.to_string());
+    }
+    if let Some(page) = page {
+        params.insert("page", page.to_string());
+    }
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_get_repos_for_fpat(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
 }

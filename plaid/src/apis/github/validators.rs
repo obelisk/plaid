@@ -57,6 +57,9 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     // This validates a SHA-1 hash which is what all commit hashes are.
     define_regex_validator!(validators, "commit_hash", r"^\b([a-f0-9]{40})\b$");
 
+    // This validates a postive integer
+    define_regex_validator!(validators, "pint", r"^\d+$");
+
     validators
 }
 
@@ -65,3 +68,4 @@ create_regex_validator_func!(username);
 create_regex_validator_func!(org);
 create_regex_validator_func!(team_slug);
 create_regex_validator_func!(commit_hash);
+create_regex_validator_func!(pint);

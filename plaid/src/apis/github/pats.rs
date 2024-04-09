@@ -35,6 +35,35 @@ impl Github {
         }
     }
 
+    pub async fn get_repos_for_fpat(&self, params: &str, module: &str) -> Result<String, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
+        let request_id =
+            self.validate_pint(request.get("request_id").ok_or(ApiError::BadRequest)?)?;
+        let per_page = self.validate_pint(request.get("per_page").unwrap_or(&"30"))?;
+        let page = self.validate_pint(request.get("page").unwrap_or(&"1"))?;
+
+        info!("Fetching Repos For FPAT {request_id} in {org}");
+        let address =
+            format!("/orgs/{org}/personal-access-token-requests/{request_id}/repositories?per_page={per_page}&page={page}");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
     pub async fn review_fpat_requests_for_org(
         &self,
         params: &str,
