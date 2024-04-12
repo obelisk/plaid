@@ -10,7 +10,7 @@ default = []
 #quorum = ["quorum-agent"]
 
 [dependencies]
-clap = { version = "4", default-features = false }
+clap = { version = "4", default-features = false, features = ["std"] }
 async-trait = "0.1.56"
 base64 = "0.13"
 crossbeam-channel = "0.5"
@@ -35,7 +35,7 @@ time = "0.3"
 tokio = { version = "1", features = ["full"] }
 toml = "0.5"
 warp = { version = "0.3", features = ["tls"] }
-wasmer = { version = "4" }
+wasmer = { version = "4", default-features = false, features = ["cranelift"] }
 wasmer-middlewares = "4"
 jsonwebtoken = { version = "9.2" }
 
