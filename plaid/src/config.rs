@@ -182,11 +182,10 @@ pub async fn configure() -> Result<Configuration, ConfigurationError> {
                 .help("Path to the configuration toml file")
                 .long("config")
                 .default_value("./plaid/resources/plaid.toml")
-                .takes_value(true),
         ).get_matches();
 
     // Read the configuration file
-    let config = match tokio::fs::read(matches.value_of("config").unwrap()).await {
+    let config = match tokio::fs::read(matches.get_one::<String>("config").unwrap()).await {
         Ok(config) => config,
         Err(e) => {
             println!("Encountered file error when trying to read configuration!");
