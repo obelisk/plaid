@@ -10,9 +10,9 @@ default = []
 #quorum = ["quorum-agent"]
 
 [dependencies]
+clap = { version = "4", default-features = false }
 async-trait = "0.1.56"
 base64 = "0.13"
-clap = "4"
 crossbeam-channel = "0.5"
 env_logger = "0.8"
 http = "1"
