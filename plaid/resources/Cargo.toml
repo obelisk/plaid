@@ -7,7 +7,7 @@ edition = "2021"
 
 [features]
 default = []
-#quorum = ["quorum-agent"]
+quorum = ["quorum-agent"]
 
 [dependencies]
 async-trait = "0.1.56"
@@ -45,7 +45,7 @@ jsonwebtoken = { version = "9.2" }
 # Uncomment to build with Quorum. This is needed
 # because otherwise cargo will try and find this
 # to build the lockfile.
-#quorum-agent = { path = "../../quorum/quorum-agent", default_features = false, optional = true }
+quorum-agent = { path = "../../quorum/quorum-agent", default_features = false, optional = true }
 rand = "0.8.5"
 
 [[example]]

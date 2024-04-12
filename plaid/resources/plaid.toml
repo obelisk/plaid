@@ -85,9 +85,9 @@ domain = ""
 # "Accept" = "application/vnd.github+json"
 # "User-Agent" = "Plaid/0.10"
 
-[apis."github"]
-token = ""
-[apis."github".graphql_queries]
+# [apis."github"]
+# token = ""
+# [apis."github".graphql_queries]
 
 [apis."slack"]
 [apis."slack"."webhooks"]
@@ -130,6 +130,8 @@ headers = ["notarealheader"]
 
 [webhooks."internal".webhooks."FFFF"]
 log_type = "testing"
+logbacks_allowed = "Unlimited"
+
 headers = ["x-forwarded-for"]
 [webhooks."internal".webhooks."FFFF".get_mode]
 response_mode = "rule:testing_test.wasm"

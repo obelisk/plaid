@@ -165,9 +165,11 @@ where
         "facebook" | "meta" => ResponseMode::Facebook(data.to_owned()),
         "Rule" | "rule" => ResponseMode::Rule(data.to_owned()),
         "Static" | "static" => ResponseMode::Static(data.to_owned()),
-        x => return Err(serde::de::Error::custom(
-            format!("{x} is an unknown response_mode. Must be 'facebook', 'rule', or 'static'"),
-        )),
+        x => {
+            return Err(serde::de::Error::custom(format!(
+                "{x} is an unknown response_mode. Must be 'facebook', 'rule', or 'static'"
+            )))
+        }
     })
 }
 pub async fn configure() -> Result<Configuration, ConfigurationError> {
