@@ -9,12 +9,11 @@ use executor::*;
 use plaid_stl::messages::LogSource;
 use reqwest::header::HeaderMap;
 use storage::Storage;
-use tokio::sync::RwLock;
+use tokio::{sync::RwLock, task::JoinSet};
 
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
 use crossbeam_channel::{bounded, TrySendError};
-use std::future::Future;
 use warp::{hyper::body::Bytes, path, Filter};
 
 #[tokio::main]
@@ -83,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let executor = Arc::new(executor);
 
     info!("Configured Webhook Servers");
-    let webhook_servers: Vec<Box<Pin<Box<dyn Future<Output = ()>>>>> = config
+    let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
         .webhooks
         .into_iter()
         .map(|(server_name, config)| {
@@ -91,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let server_address: SocketAddr = config
                 .listen_address
                 .parse()
-                .expect("{server_name} had an invalid address");
+                .expect("A server had an invalid address");
 
             let webhooks = config.webhooks.clone();
             let post_route = warp::post()
@@ -255,7 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let routes = post_route.or(get_route);
 
             info!("Web Server [{server_name}]: {server_address}");
-            Box::<Pin<Box<dyn Future<Output = ()>>>>::new(Box::pin(
+            Box::<Pin<Box<_>>>::new(Box::pin(
                 warp::serve(routes).run(server_address),
             ))
         })
@@ -263,7 +262,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting servers, boot up complete");
 
-    futures::future::join_all(webhook_servers).await;
+    let mut join_set = JoinSet::from_iter(webhook_servers);
+
+    while let Some(_) = join_set.join_next().await {}
+    //futures::future::join_all(webhook_servers).await;
 
     Ok(())
 }
