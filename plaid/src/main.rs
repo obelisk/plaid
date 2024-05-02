@@ -150,9 +150,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .and_then(|webhook: String, query: HashMap<String, String>, webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, executor: Arc<Executor>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>| async move {
                     if let Some(webhook_configuration) = webhook_config.webhooks.get(&webhook) {
                         match &webhook_configuration.get_mode {
+                            // Note that CacheMode is elided here as there is no caching for static data
                             Some(GetMode{ response_mode: ResponseMode::Static(data), ..}) => {
                                 Ok(warp::reply::html(data.clone()))
                             }
+                            // Note that CacheMode is elided here as there is no caching possible for
+                            // Facebook verification
                             Some(GetMode{ response_mode: ResponseMode::Facebook(secret), ..}) => {
                                 if let Some(fb_secret) = query.get("hub.verify_token") {
                                     if fb_secret == secret {
@@ -167,81 +170,110 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     Ok(warp::reply::html(String::new()))
                                 }
                             },
+                            // For rules, we do need to get the cache mode and dealing with it makes this
+                            // kind of reponse significantly more complex.
                             Some(GetMode{ response_mode: ResponseMode::Rule(name), caching_mode}) => {
-                                if let Some(rule) = modules.get(name) {
-                                    info!("Received get request to: {webhook}. Handling with rule [{name}] to generate response");
-                                    let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-                                    let update = match caching_mode {
-                                        CachingMode::Timed{validity} => {
-                                            let cache = get_cache.read().await;
-                                            if let Some(cached_response) = cache.get(&webhook) {
-                                                // I'm making the assumption here that getting the system time will never fail
-                                                if cached_response.0 + validity > current_time {
-                                                    info!("Returning cached response (valid for {} more seconds) for get request to: {webhook}", cached_response.0 + validity - current_time);
-                                                    return Ok(warp::reply::html(cached_response.1.clone()));
-                                                }
-                                            }
-                                            true
-                                        },
-                                        CachingMode::None => false,
-                                    };
-
-                                    // If the webhook has a label, use that as the source, otherwise use the webhook address
-                                    let source = match webhook_configuration.label {
-                                        Some(ref label) => LogSource::WebhookGet(label.to_string()),
-                                        None => LogSource::WebhookGet(webhook.to_string()),
-                                    };
-
-                                    let logbacks_allowed = webhook_configuration.logbacks_allowed.clone();
-
-                                    // Construct a message to send to the rule
-                                    let message = Message {
-                                        type_: name.to_string(),
-                                        data: String::new().into_bytes(),
-                                        accessory_data: query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
-                                        source,
-                                        logbacks_allowed,
-                                    };
-                                    // We need to spawn blocking here because the executor is not async
-                                    // and it will need to block inside the host API functions to call other async
-                                    // functions on a different runtime.
-                                    //
-                                    // As far as I can tell there is no way around this since WASM host functions
-                                    // cannot be async. I am afraid this prevents a denial of service risk because of
-                                    // the way this works but I don't see a way around it right now.
-                                    let rule = rule.clone();
-                                    let response = tokio::task::spawn_blocking(move || {
-                                        executor.immediate_execute(message, rule) 
-                                    }).await;
-
-                                    match response {
-                                        Ok(Ok(Some(response)))=> {
-                                            if update {
-                                                info!("Updating cache for get request to: {webhook}");
-                                                let mut cache = get_cache.write().await;
-                                                cache.insert(webhook.clone(), (current_time, response.clone()));
-                                            }
-                                            Ok(warp::reply::html(response))
-                                        },
-                                        Ok(Ok(None)) => {
-                                            warn!("Got a get request to {webhook} but the rule [{name}] configured to handle it did not return a response");
-                                            Ok(warp::reply::html(String::new()))
-                                        }
-                                        Ok(Err(e)) => {
-                                            error!("Got a get request to {webhook} but the rule [{name}] configured to handle it threw an error: {e}");
-                                            Ok(warp::reply::html(String::new()))
-                                        }
-                                        _ => {
-                                            error!("Got a get request to {webhook} but errored spawing the blocking task. Perhaps server overloaded?");
-                                            Ok(warp::reply::html(String::new()))
-                                        }
-                                    }
+                                // Ensure that the rule configured to generated the GET response actually exists
+                                let rule = if let Some(rule) = modules.get(name) {
+                                    rule
                                 } else {
                                     warn!("Got a get request to {webhook} but the rule [{name}] configured to handle it does not exist");
-                                    Ok(warp::reply::html(String::new()))
+                                    return Ok(warp::reply::html(String::new()));
+                                };
+
+                                info!("Received get request to: {webhook}. Handling with rule [{name}] to generate response");
+                                let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+                                // Determine if we need to update the cache at the end of this request 
+                                let update = match caching_mode {
+                                    CachingMode::Timed{validity} => {
+                                        let cache = get_cache.read().await;
+                                        if let Some(cached_response) = cache.get(&webhook) {
+                                            // I'm making the assumption here that getting the system time will never fail
+                                            if cached_response.0 + validity > current_time {
+                                                info!("Returning cached response (valid for {} more seconds) for get request to: {webhook}", cached_response.0 + validity - current_time);
+                                                return Ok(warp::reply::html(cached_response.1.clone()));
+                                            }
+                                        }
+                                        true
+                                    },
+                                    CachingMode::None => false,
+                                    CachingMode::UsePersistentResponse { call_on_none } => {
+                                        match rule.get_persistent_response_data() {
+                                            Some(data) => {
+                                                // There is persistent data available for this rule so we can just return it
+                                                info!("Returning persistent response for get request to: {webhook}");
+                                                return Ok(warp::reply::html(data));
+                                            },
+                                            // There is no persistent data. So we continue with the normal calling system
+                                            // if call on none is true but do not cache since "caching" is just the persistent data
+                                            None => {
+                                                // We don't want to call on none so even though there is no persistent response
+                                                // we don't run the rule and just return no data
+                                                if !call_on_none {
+                                                    return Ok(warp::reply::html(String::new()));
+                                                }
+                                                false
+                                            },
+                                        }
+                                    }, 
+                                };
+
+                                // If the webhook has a label, use that as the source, otherwise use the webhook address
+                                let source = match webhook_configuration.label {
+                                    Some(ref label) => LogSource::WebhookGet(label.to_string()),
+                                    None => LogSource::WebhookGet(webhook.to_string()),
+                                };
+
+                                let logbacks_allowed = webhook_configuration.logbacks_allowed.clone();
+
+                                // Construct a message to send to the rule
+                                let message = Message {
+                                    type_: name.to_string(),
+                                    data: String::new().into_bytes(),
+                                    accessory_data: query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
+                                    source,
+                                    logbacks_allowed,
+                                };
+                                // We need to spawn blocking here because the executor is not async
+                                // and it will need to block inside the host API functions to call other async
+                                // functions on a different runtime.
+                                //
+                                // As far as I can tell there is no way around this since WASM host functions
+                                // cannot be async. I am afraid this prevents a denial of service risk because of
+                                // the way this works but I don't see a way around it right now.
+                                let rule = rule.clone();
+                                let response = tokio::task::spawn_blocking(move || {
+                                    executor.immediate_execute(message, rule) 
+                                }).await;
+
+                                match response {
+                                    Ok(Ok(Some(response)))=> {
+                                        if update {
+                                            info!("Updating cache for get request to: {webhook}");
+                                            let mut cache = get_cache.write().await;
+                                            cache.insert(webhook.clone(), (current_time, response.clone()));
+                                        }
+                                        Ok(warp::reply::html(response))
+                                    },
+                                    Ok(Ok(None)) => {
+                                        warn!("Got a get request to {webhook} but the rule [{name}] configured to handle it did not return a response");
+                                        Ok(warp::reply::html(String::new()))
+                                    }
+                                    Ok(Err(e)) => {
+                                        error!("Got a get request to {webhook} but the rule [{name}] configured to handle it threw an error: {e}");
+                                        Ok(warp::reply::html(String::new()))
+                                    }
+                                    _ => {
+                                        error!("Got a get request to {webhook} but errored spawing the blocking task. Perhaps server overloaded?");
+                                        Ok(warp::reply::html(String::new()))
+                                    }
                                 }
                             },
-                            _ => {
+                            None => {
+                                // This occurs when a webhook receives a get request but there is no configuration for how
+                                // GET requests should be handled. Usually this is the result of a service misconfiguration
+                                // where it should be sending POSTs.
                                 warn!("Got a get request to {webhook}. Are you sure the sending service is configured correctly?");
                                 Ok(warp::reply::html(String::new()))
                             },

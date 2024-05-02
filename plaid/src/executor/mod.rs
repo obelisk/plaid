@@ -27,7 +27,12 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn new(type_: String, data: Vec<u8>, source: LogSource, logbacks_allowed: LogbacksAllowed) -> Self {
+    pub fn new(
+        type_: String,
+        data: Vec<u8>,
+        source: LogSource,
+        logbacks_allowed: LogbacksAllowed,
+    ) -> Self {
         Self {
             type_,
             data,
@@ -97,7 +102,19 @@ impl std::fmt::Display for ExecutorError {
 pub enum ModuleExecutionError {
     ComputationExhausted(u64),
     ModuleErrorCode(i32),
+    PersistentResponseNotAllowed,
+    PersistentResponseTooLarge {
+        max_size: usize,
+        response_size: usize,
+    },
+    LockingError(String),
     UnknownExecutionError(String),
+}
+
+impl Into<ExecutorError> for ModuleExecutionError {
+    fn into(self) -> ExecutorError {
+        ExecutorError::ModuleExecutionError(self)
+    }
 }
 
 impl std::fmt::Display for ModuleExecutionError {
@@ -111,6 +128,18 @@ impl std::fmt::Display for ModuleExecutionError {
             }
             ModuleExecutionError::UnknownExecutionError(error) => {
                 write!(f, "Unknown execution error. Error: [{error}]")
+            }
+            ModuleExecutionError::PersistentResponseNotAllowed => {
+                write!(f, "Persistent response not allowed")
+            }
+            ModuleExecutionError::PersistentResponseTooLarge {
+                max_size,
+                response_size,
+            } => {
+                write!(f, "Persistent response too large. Max size: [{max_size}], Response size: [{response_size}]")
+            }
+            ModuleExecutionError::LockingError(error) => {
+                write!(f, "CRITICAL Locking error. Error: [{error}]")
             }
         }
     }
@@ -130,6 +159,7 @@ fn prepare_for_execution(
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
     els: Logger,
+    response: Option<String>,
 ) -> Result<(Store, Instance, TypedFunction<(), i32>, FunctionEnv<Env>), ExecutorError> {
     // Prepare the structure for functions the module will use
     // AKA: Host Functions
@@ -154,7 +184,7 @@ fn prepare_for_execution(
         storage: storage.clone(),
         external_logging_system: els.clone(),
         memory: None,
-        response: None,
+        response,
     };
 
     let env = FunctionEnv::new(&mut store, env);
@@ -213,6 +243,48 @@ fn prepare_for_execution(
     Ok((store, instance, ep, envr))
 }
 
+fn update_persistent_response(
+    plaid_module: &Arc<PlaidModule>,
+    env: &FunctionEnv<Env>,
+    mut store: &mut Store,
+) -> Result<(), ExecutorError> {
+    match (
+        env.as_mut(&mut store).response.clone(),
+        &plaid_module.persistent_response,
+    ) {
+        (None, _) => {
+            // There was no response to save
+            return Ok(());
+        }
+        (Some(_), None) => {
+            warn!(
+                "{} tried to set a persistent response but it is not allowed to do so",
+                plaid_module.name
+            );
+            return Ok(());
+        }
+        (Some(response), Some(pr)) => {
+            // Check to see if the response size is within limits
+            if response.len() <= pr.max_size {
+                match pr.data.write() {
+                    Ok(mut data) => {
+                        *data = response;
+                        info!("{} updated its persistent response", plaid_module.name);
+                        Ok(())
+                    }
+                    Err(e) => Err(ModuleExecutionError::LockingError(format!("{e}")).into()),
+                }
+            } else {
+                Err(ModuleExecutionError::PersistentResponseTooLarge {
+                    max_size: pr.max_size,
+                    response_size: response.len(),
+                }
+                .into())
+            }
+        }
+    }
+}
+
 fn execution_loop(
     receiver: Receiver<Message>,
     modules: HashMap<String, Vec<Arc<PlaidModule>>>,
@@ -236,16 +308,21 @@ fn execution_loop(
 
         // For every module that operates on that log type
         for plaid_module in execution_modules {
+            // TODO @obelisk: This will quietly swallow locking errors on the persistent response
+            // This will eventually be caught if something tries to update the response but I don't
+            // know if that's good enough.
+            let persistent_response = plaid_module.get_persistent_response_data();
             // Message needs to be cloned because of the logback budget
             // which is separate for every rule running the same message.
-            let (mut store, instance, entrypoint) = match prepare_for_execution(
+            let (mut store, instance, entrypoint, env) = match prepare_for_execution(
                 message.clone(),
                 plaid_module.clone(),
                 api.clone(),
                 storage.clone(),
                 els.clone(),
+                persistent_response,
             ) {
-                Ok((store, instance, ep, _)) => (store, instance, ep),
+                Ok((store, instance, ep, env)) => (store, instance, ep, env),
                 Err(e) => {
                     els.log_module_error(
                         plaid_module.name.clone(),
@@ -282,13 +359,20 @@ fn execution_loop(
                 Err(e) => Some(determine_error(e, computation_limit, &instance, &mut store)),
             };
 
+            // If there was an error then log that it happened to the els
             if let Some(error) = error {
                 els.log_module_error(
                     plaid_module.name.clone(),
                     format!("{error}"),
                     message.data.clone(),
                 )?;
+
+                // Stop processing this log and move on to the next one
+                continue;
             }
+
+            // Update the persistent response
+            update_persistent_response(&plaid_module, &env, &mut store)?;
         }
     }
     Err(ExecutorError::IncomingLogError)
@@ -347,12 +431,20 @@ impl Executor {
     ) -> Result<Option<String>, ExecutorError> {
         let computation_limit = plaid_module.computation_limit;
         let name = plaid_module.name.clone();
+
+        let persistent_response = plaid_module
+            .persistent_response
+            .as_ref()
+            .map(|pr| pr.data.read().and_then(|x| Ok(x.to_string())).ok())
+            .flatten();
+
         let (mut store, instance, entrypoint, env) = prepare_for_execution(
             message,
-            plaid_module,
+            plaid_module.clone(),
             self.api.clone(),
             self.storage.clone(),
             self.els.clone(),
+            persistent_response,
         )?;
 
         match entrypoint.call(&mut store) {
@@ -375,6 +467,7 @@ impl Executor {
                             computation_used as i64,
                         )?;
                     }
+                    update_persistent_response(&plaid_module, &env, &mut store)?;
 
                     // Return the optional response
                     Ok(env.as_mut(&mut store).response.clone())
