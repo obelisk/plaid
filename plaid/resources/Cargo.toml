@@ -1,6 +1,6 @@
 [package]
 name = "plaid"
-version = "0.11.3"
+version = "0.11.5"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -10,14 +10,11 @@ default = []
 quorum = ["quorum-agent"]
 
 [dependencies]
+clap = { version = "4", default-features = false, features = ["std"] }
 async-trait = "0.1.56"
 base64 = "0.13"
-chrono = "0.4"
-clap = "3.0.0-beta.2"
 crossbeam-channel = "0.5"
 env_logger = "0.8"
-futures = "0.3"
-hex = "0.4"
 http = "1"
 log = "0.4"
 lru = "0.12"
@@ -26,7 +23,7 @@ paste = "1.0"
 plaid_stl = { path = "../plaid-stl" }
 rcgen = { version = "0.10", features = ["x509-parser"] }
 regex = "1"
-ring = "0.16.20"
+ring = "0.17"
 reqwest = { version = "0.11", default-features = false, features = [
     "rustls-tls",
     "json",
@@ -38,7 +35,7 @@ time = "0.3"
 tokio = { version = "1", features = ["full"] }
 toml = "0.5"
 warp = { version = "0.3", features = ["tls"] }
-wasmer = { version = "4", features = ["cranelift"] }
+wasmer = { version = "4", default-features = false, features = ["cranelift"] }
 wasmer-middlewares = "4"
 jsonwebtoken = { version = "9.2" }
 
@@ -46,7 +43,6 @@ jsonwebtoken = { version = "9.2" }
 # because otherwise cargo will try and find this
 # to build the lockfile.
 quorum-agent = { path = "../../quorum/quorum-agent", default_features = false, optional = true }
-rand = "0.8.5"
 
 [[example]]
 name = "github-tailer"

@@ -11,7 +11,7 @@ use std::{sync::Arc, time::Duration};
 
 use crossbeam_channel::Sender;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 pub use self::internal::DelayedMessage;
 
@@ -23,23 +23,6 @@ pub struct DataConfig {
     okta: Option<okta::OktaConfig>,
     internal: Option<internal::InternalConfig>,
     interval: Option<interval::IntervalConfig>,
-}
-
-#[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub enum Generator {
-    Github,
-    Okta,
-    Interval(String),
-}
-
-impl std::fmt::Display for Generator {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Generator::Github => write!(f, "github"),
-            Generator::Okta => write!(f, "okta"),
-            Generator::Interval(job) => write!(f, "interval/{job}"),
-        }
-    }
 }
 
 struct DataInternal {
