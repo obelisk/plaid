@@ -1,6 +1,7 @@
 use crate::PlaidFunctionError;
 
 pub mod cache;
+pub mod random;
 pub mod storage;
 
 pub fn print_debug_string(log: &str) {

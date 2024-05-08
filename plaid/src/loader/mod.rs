@@ -47,26 +47,26 @@ pub struct Configuration {
 /// as a data generator for a response.
 pub struct PersistentResponse {
     pub max_size: usize,
-    pub data: Arc<RwLock<String>>,
+    pub data: Arc<RwLock<Option<String>>>,
 }
 
 impl PersistentResponse {
     pub fn new(max_size: usize) -> Self {
         Self {
             max_size,
-            data: Arc::new(RwLock::new(String::new())),
+            data: Arc::new(RwLock::new(None)),
         }
     }
 
-    pub fn get_data(&self) -> String {
+    pub fn get_data(&self) -> Result<Option<String>, ()> {
         match self.data.read() {
-            Ok(data) => data.clone(),
+            Ok(data) => Ok(data.clone()),
             Err(e) => {
                 error!(
                     "Critical error getting a read lock on persistent response: {:?}",
                     e
                 );
-                String::new()
+                Err(())
             }
         }
     }
@@ -95,7 +95,10 @@ pub struct PlaidModule {
 
 impl PlaidModule {
     pub fn get_persistent_response_data(&self) -> Option<String> {
-        self.persistent_response.as_ref().map(|x| x.get_data())
+        self.persistent_response
+            .as_ref()
+            .map(|x| x.get_data().ok().flatten())
+            .flatten()
     }
 }
 
@@ -192,8 +195,9 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             type_[0].to_string()
         };
 
-        // See if a type is defined in the configuration file, if not then we will grab the first part
-        // of the filename up to the first underscore.
+        // Persistent response is available to be set per module. This allows it to persistently
+        // store the result of its run. It can use this during further runs, or it can be used
+        // as the target of GET request hooks.
         let persistent_response = config
             .persistent_response_size
             .get(&filename)

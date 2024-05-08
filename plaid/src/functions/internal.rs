@@ -319,7 +319,7 @@ pub fn storage_get(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Memory error in storage_get: {:?}", env_data.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -327,7 +327,7 @@ pub fn storage_get(
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Key error in storage_get: {:?}", env_data.name, e);
             return FunctionErrors::ParametersNotUtf8 as i32;
         }
     };
@@ -343,7 +343,7 @@ pub fn storage_get(
                 Ok(x) => x,
                 Err(e) => {
                     error!(
-                        "{}: Data write error in storage_insert: {:?}",
+                        "{}: Data write error in storage_get: {:?}",
                         env_data.name, e
                     );
                     e as i32
@@ -377,7 +377,7 @@ pub fn cache_insert(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Memory error in cache_insert: {:?}", env_data.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -385,7 +385,7 @@ pub fn cache_insert(
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Key error in cache_insert: {:?}", env_data.name, e);
             return FunctionErrors::ParametersNotUtf8 as i32;
         }
     };
@@ -394,7 +394,7 @@ pub fn cache_insert(
     let value = match safely_get_string(&memory_view, value_buf, value_buf_len) {
         Ok(d) => d,
         Err(e) => {
-            error!("{}: Value error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Value error in cache_insert: {:?}", env_data.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -410,7 +410,7 @@ pub fn cache_insert(
                 Ok(x) => x,
                 Err(e) => {
                     error!(
-                        "{}: Data write error in storage_insert: {:?}",
+                        "{}: Data write error in cache_insert: {:?}",
                         env_data.name, e
                     );
                     e as i32
@@ -450,7 +450,7 @@ pub fn cache_get(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Memory error in cache_get: {:?}", env_data.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -458,7 +458,7 @@ pub fn cache_get(
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Key error in cache_get: {:?}", env_data.name, e);
             return FunctionErrors::ParametersNotUtf8 as i32;
         }
     };
@@ -473,10 +473,7 @@ pub fn cache_get(
             ) {
                 Ok(x) => x,
                 Err(e) => {
-                    error!(
-                        "{}: Data write error in storage_insert: {:?}",
-                        env_data.name, e
-                    );
+                    error!("{}: Data write error in cache_get: {:?}", env_data.name, e);
                     e as i32
                 }
             }
@@ -490,6 +487,54 @@ pub fn cache_get(
                 error!("Logging system is not working!!: {:?}", e);
             }
             FunctionErrors::CacheDisabled as i32
+        }
+    }
+}
+
+/// Implement a way for randomness to get into the module
+pub fn fetch_random_bytes(
+    env: FunctionEnvMut<Env>,
+    data_buffer: WasmPtr<u8>,
+    data_buffer_len: u16,
+) -> i32 {
+    let store = env.as_store_ref();
+    let env_data = env.data();
+
+    let api = match env_data.api.general.as_ref() {
+        Some(api) => api,
+        None => {
+            error!("General API not configured");
+            return FunctionErrors::ApiNotConfigured as i32;
+        }
+    };
+
+    let bytes = match api.fetch_random_bytes(data_buffer_len) {
+        Ok(b) => b,
+        Err(e) => {
+            error!("Error fetching random bytes: {:?}", e);
+            return FunctionErrors::InternalApiError as i32;
+        }
+    };
+
+    let memory_view = match get_memory(&env, &store) {
+        Ok(memory_view) => memory_view,
+        Err(e) => {
+            error!(
+                "{}: Memory error in fetch_random_bytes: {:?}",
+                env_data.name, e
+            );
+            return FunctionErrors::CouldNotGetAdequateMemory as i32;
+        }
+    };
+
+    match safely_write_data_back(&memory_view, &bytes, data_buffer, data_buffer_len as u32) {
+        Ok(x) => x,
+        Err(e) => {
+            error!(
+                "{}: Data write error in fetch_random_bytes: {:?}",
+                env_data.name, e
+            );
+            e as i32
         }
     }
 }

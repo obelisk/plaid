@@ -1,6 +1,8 @@
 use crate::apis::Api;
 
-use crate::functions::{link_functions_to_module, LinkError};
+use crate::functions::{
+    create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
+};
 use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
 use crate::storage::Storage;
@@ -203,6 +205,14 @@ fn prepare_for_execution(
 
     // Set up the environment
     imports.register_namespace("env", exports);
+    imports.register_namespace(
+        "__wbindgen_placeholder__",
+        create_bindgen_placeholder(&mut store),
+    );
+    imports.register_namespace(
+        "__wbindgen_externref_xform__",
+        create_bindgen_externref_xform(&mut store),
+    );
     let instance = match Instance::new(&mut store, &plaid_module.module, &imports) {
         Ok(i) => i,
         Err(e) => {
@@ -268,7 +278,7 @@ fn update_persistent_response(
             if response.len() <= pr.max_size {
                 match pr.data.write() {
                     Ok(mut data) => {
-                        *data = response;
+                        *data = Some(response);
                         info!("{} updated its persistent response", plaid_module.name);
                         Ok(())
                     }
@@ -435,7 +445,8 @@ impl Executor {
         let persistent_response = plaid_module
             .persistent_response
             .as_ref()
-            .map(|pr| pr.data.read().and_then(|x| Ok(x.to_string())).ok())
+            .map(|pr| pr.get_data().ok())
+            .flatten()
             .flatten();
 
         let (mut store, instance, entrypoint, env) = prepare_for_execution(

@@ -1,5 +1,3 @@
-#[cfg(feature = "influx")]
-mod influx;
 mod splunk;
 mod webhook;
 
@@ -84,11 +82,6 @@ pub struct LoggingConfiguration {
     /// thin wrapper around it, however it lets us log to stdout the same way
     /// we log to other more complex systems.
     stdout: Option<stdout::Config>,
-    /// Log to InfluxDB for timerseries logging. Generally this is used in
-    /// conjuction with Grafana. The influx module contains more information
-    /// on configuring this logger.
-    #[cfg(feature = "influx")]
-    influx: Option<influx::Config>,
     /// Log to Splunk for standard logging. The splunk module contains more
     /// information on configuring this logger.
     splunk: Option<splunk::Config>,
@@ -194,15 +187,6 @@ impl Logger {
             }
         };
 
-        #[cfg(feature = "influx")]
-        let influx_logger = match config.influx {
-            Some(config) => {
-                info!("Configured logger: influx");
-                Some(influx::InfluxLogger::new(config, runtime.handle().clone()))
-            }
-            None => None,
-        };
-
         let splunk_logger = match config.splunk {
             Some(config) => {
                 info!("Configured logger: splunk");
@@ -237,13 +221,6 @@ impl Logger {
 
             if let Some(logger) = &stdout_logger {
                 logger.send_log(&log).unwrap();
-            }
-
-            #[cfg(feature = "influx")]
-            if let Some(logger) = &influx_logger {
-                if let Err(_) = logger.send_log(&log) {
-                    error!("Could not send logs to InfluxDB");
-                }
             }
 
             if let Some(logger) = &splunk_logger {
