@@ -385,3 +385,113 @@ pub fn get_repos_for_fpat<T: Display>(
     // to mess with us, this came from a String in the API module.
     Ok(String::from_utf8(return_buffer).unwrap())
 }
+
+pub fn get_branch_protection_rules<T: Display>(
+    owner: T,
+    repo: T,
+    branch: T,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_branch_protection_rules);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+    params.insert("branch", branch.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_get_branch_protection_rules(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+pub fn get_repository_collaborators<T: Display>(
+    owner: T,
+    repo: T,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_repository_collaborators);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_get_repository_collaborators(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+pub fn update_branch_protection_rule<T: Display>(
+    owner: T,
+    repo: T,
+    branch: T,
+    body: T,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, update_branch_protection_rule);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+    params.insert("branch", branch.to_string());
+    params.insert("body", body.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_update_branch_protection_rule(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
