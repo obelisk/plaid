@@ -439,16 +439,11 @@ pub fn get_repos_for_fpat<T: Display>(
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 /// * `branch` - The name of the branch. Cannot contain wildcard characters.
-pub fn get_branch_protection_rules<A, B, C>(
-    owner: A,
-    repo: B,
-    branch: C,
-) -> Result<String, PlaidFunctionError>
-where
-    A: Display,
-    B: Display,
-    C: Display,
-{
+pub fn get_branch_protection_rules(
+    owner: impl Display,
+    repo: impl Display,
+    branch: impl Display,
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, get_branch_protection_rules);
     }
@@ -486,11 +481,10 @@ where
 ///
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
-pub fn get_repository_collaborators<A, B>(owner: A, repo: B) -> Result<String, PlaidFunctionError>
-where
-    A: Display,
-    B: Display,
-{
+pub fn get_repository_collaborators(
+    owner: impl Display,
+    repo: impl Display,
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, get_repository_collaborators);
     }
@@ -529,18 +523,12 @@ where
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 /// * `branch` - The name of the branch. Cannot contain wildcard characters.
 /// * `body` - Body of the PUT request. See https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28#update-branch-protection
-pub fn update_branch_protection_rule<A, B, C, D>(
-    owner: A,
-    repo: B,
-    branch: C,
-    body: D,
-) -> Result<(), PlaidFunctionError>
-where
-    A: Display,
-    B: Display,
-    C: Display,
-    D: Display,
-{
+pub fn update_branch_protection_rule(
+    owner: impl Display,
+    repo: impl Display,
+    branch: impl Display,
+    body: impl Display,
+) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, update_branch_protection_rule);
     }
