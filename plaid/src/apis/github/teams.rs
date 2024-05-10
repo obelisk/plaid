@@ -16,7 +16,7 @@ impl Github {
             self.validate_team_slug(request.get("team_slug").ok_or(ApiError::BadRequest)?)?;
         let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
 
-        info!("Removing user [{user}] from [{team_slug}] in [{org}]");
+        info!("Removing user [{user}] from [{team_slug}] in [{org}] on behalf of {module}");
         let address = format!("/orgs/{org}/teams/{team_slug}/memberships/{user}");
 
         match self
@@ -48,7 +48,7 @@ impl Github {
 
         let role = request.get("role").ok_or(ApiError::BadRequest)?;
 
-        info!("Adding user [{user}] to [{team_slug}] in [{org}] as [{role}]");
+        info!("Adding user [{user}] to [{team_slug}] in [{org}] as [{role}] on behalf of {module}");
         #[derive(Serialize)]
         struct Role {
             role: String,

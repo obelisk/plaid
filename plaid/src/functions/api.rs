@@ -139,10 +139,13 @@ impl_new_function!(github, add_user_to_repo);
 impl_new_function!(github, remove_user_from_repo);
 impl_new_function!(github, add_user_to_team);
 impl_new_function!(github, remove_user_from_team);
+impl_new_function!(github, update_branch_protection_rule);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query);
 impl_new_function_with_error_buffer!(github, fetch_commit);
+impl_new_function_with_error_buffer!(github, get_branch_protection_rules);
+impl_new_function_with_error_buffer!(github, get_repository_collaborators);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org);
@@ -253,6 +256,15 @@ pub fn to_api_function(
         }
         "github_get_repos_for_fpat" => {
             Function::new_typed_with_env(&mut store, &env, github_get_repos_for_fpat)
+        }
+        "github_get_branch_protection_rules" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_branch_protection_rules)
+        }
+        "github_get_repository_collaborators" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repository_collaborators)
+        }
+        "github_update_branch_protection_rule" => {
+            Function::new_typed_with_env(&mut store, &env, github_update_branch_protection_rule)
         }
         // Slack Calls
         "slack_post_to_named_webhook" => {
