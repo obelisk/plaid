@@ -19,8 +19,8 @@ impl Github {
         let repo =
             self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
 
-        let address = format!("/repos/{repo}/collaborators/{user}",);
-        info!("Removing user [{}] from [{}]", user, repo);
+        let address = format!("/repos/{repo}/collaborators/{user}");
+        info!("Removing user [{user}] from [{repo}] on behalf of {module}");
 
         match self
             .make_generic_delete_request(address, None, module)
@@ -52,7 +52,9 @@ impl Github {
             self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
         let permission = request.get("permission").unwrap_or(&"pull");
 
-        info!("Adding user [{user}] to [{repo}] with permission [{permission}]");
+        info!(
+            "Adding user [{user}] to [{repo}] with permission [{permission}] on behalf of {module}"
+        );
         let address = format!("/repos/{repo}/collaborators/{user}");
 
         #[derive(Serialize)]
@@ -93,7 +95,7 @@ impl Github {
         let commit =
             self.validate_commit_hash(request.get("commit").ok_or(ApiError::BadRequest)?)?;
 
-        info!("Fetching commit [{commit}] from [{repo}] by [{user}]");
+        info!("Fetching commit [{commit}] from [{repo}] by [{user}] on behalf of {module}");
         let address = format!("/repos/{user}/{repo}/commits/{commit}");
 
         match self.make_generic_get_request(address, module).await {
@@ -127,7 +129,7 @@ impl Github {
         let branch =
             self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
 
-        info!("Fetching branch protection rules for branch [{branch}] in repo [{repo}]");
+        info!("Fetching branch protection rules for branch [{branch}] in repo [{repo}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/branches/{branch}/protection");
 
         match self.make_generic_get_request(address, module).await {
@@ -159,7 +161,7 @@ impl Github {
         let repo =
             self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
 
-        info!("Fetching collaborators for [{repo}]");
+        info!("Fetching collaborators for [{repo}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/collaborators");
 
         match self.make_generic_get_request(address, module).await {
@@ -194,7 +196,7 @@ impl Github {
             self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
         let body = request.get("body").ok_or(ApiError::BadRequest)?;
 
-        info!("Updating branch protection rules for branch [{branch}] in repo [{repo}]");
+        info!("Updating branch protection rules for branch [{branch}] in repo [{repo}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/branches/{branch}/protection");
 
         match self

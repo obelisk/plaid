@@ -17,7 +17,7 @@ impl Github {
 
         let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
 
-        info!("Fetching FPAT Requests For {org}");
+        info!("Fetching FPAT Requests For {org} on behalf of {module}");
         let address = format!("/orgs/{org}/personal-access-token-requests");
 
         match self.make_generic_get_request(address, module).await {
@@ -45,7 +45,7 @@ impl Github {
         let per_page = self.validate_pint(request.get("per_page").unwrap_or(&"30"))?;
         let page = self.validate_pint(request.get("page").unwrap_or(&"1"))?;
 
-        info!("Fetching Repos For FPAT {request_id} in {org}");
+        info!("Fetching Repos For FPAT {request_id} in {org} on behalf of {module}");
         let address =
             format!("/orgs/{org}/personal-access-token-requests/{request_id}/repositories?per_page={per_page}&page={page}");
 
@@ -83,13 +83,13 @@ impl Github {
         match request.action.as_str() {
             "approve" => {
                 info!(
-                    "Approving FPATs {:?} Requests For {org} because: {}",
+                    "Approving FPATs {:?} Requests For {org} on behalf of {module} because: {}",
                     request.pat_request_ids, request.reason,
                 );
             }
             "deny" => {
                 info!(
-                    "Denying FPATs {:?} Requests For {org} because: {}",
+                    "Denying FPATs {:?} Requests For {org} on behalf of {module} because: {}",
                     request.pat_request_ids, request.reason,
                 );
             }
