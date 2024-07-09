@@ -36,10 +36,10 @@ where
         match limit {
             1..=1000 => Ok(Some(limit)),
             0 => Err(serde::de::Error::custom(
-                "Invalid splay value provided. Minimum limit is 1",
+                "Invalid limit value provided. Minimum limit is 1",
             )),
             _ => Err(serde::de::Error::custom(
-                "Invalid splay value provided. Maximum limit is 1000",
+                "Invalid limit value provided. Maximum limit is 1000",
             )),
         }
     } else {
