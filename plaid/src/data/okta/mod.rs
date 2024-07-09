@@ -13,8 +13,38 @@ pub struct OktaConfig {
     token: String,
     /// Domain that API calls will be sent to
     domain: String,
+    /// Sets the number of results that are returned in the response
+    /// If no value is provided here, we will default to 100.
+    #[serde(deserialize_with = "parse_limit")]
+    limit: Option<u16>,
+    /// Number of milliseconds to wait in between calls to the Okta API.
+    /// Okta enforces a rate limit of 50 calls/sec for the `/logs` endpoint.
+    /// If no value is provided here, we will default to 1 milliseconds between calls
+    sleep_duration: Option<u64>,
     #[serde(default)]
     pub logbacks_allowed: LogbacksAllowed,
+}
+
+/// Custom parser for limit. Returns an error if a limit = 0 or limit > 1000 is given
+fn parse_limit<'de, D>(deserializer: D) -> Result<Option<u16>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let limit = Option::<u16>::deserialize(deserializer)?;
+
+    if let Some(limit) = limit {
+        match limit {
+            1..=1000 => Ok(Some(limit)),
+            0 => Err(serde::de::Error::custom(
+                "Invalid splay value provided. Minimum limit is 1",
+            )),
+            _ => Err(serde::de::Error::custom(
+                "Invalid splay value provided. Maximum limit is 1000",
+            )),
+        }
+    } else {
+        Ok(None)
+    }
 }
 
 pub struct Okta {
@@ -22,8 +52,7 @@ pub struct Okta {
     client: Client,
     /// Contains domain and token
     config: OktaConfig,
-    /// The most recent time we have polled Okta for new system logs. This value is used
-    /// to filter the response from the Okta API.
+    /// Filters the lower time bound of the log events published property for bounded queries or persistence time for polling queries
     since: OffsetDateTime,
     /// Sending channel used to send logs into the execution system
     logger: Sender<Message>,
@@ -95,6 +124,8 @@ impl Okta {
         // Start with the most recent logs
         let mut most_recent_log_seen = OffsetDateTime::UNIX_EPOCH;
 
+        let sleep_duration = Duration::from_millis(self.config.sleep_duration.unwrap_or(1));
+
         loop {
             // Okta requires the query parameter to be in RFC3339 format. We attempt to format it here.
             // On failure, we return and allow the data orchestrator to restart the loop
@@ -107,8 +138,9 @@ impl Okta {
             };
 
             let address = format!(
-                "https://{}/api/v1/logs?sortOrder=DESCENDING&since={since}",
+                "https://{}/api/v1/logs?sortOrder=DESCENDING&since={since}&limit={}",
                 self.config.domain,
+                self.config.limit.unwrap_or(100)
             );
 
             let response = self
@@ -165,6 +197,11 @@ impl Okta {
                 // Check if this is the latest log we've seen and update if so
                 // We'll use the new most_recent_log_seen time to filter the subsequent
                 // API calls to Okta afterwards
+                //
+                // By default, the Okta API returns the logs in ascending order so we could in theory just
+                // take the last timstamp and set it as our max log time. I'm okay with doing another check here in the
+                // case that Okta's sorting fails to ensure that we do not miss any logs. The number of comparisions here (1000 max)
+                // is nothing to be concerned about.
                 if log_timestamp > most_recent_log_seen {
                     most_recent_log_seen = log_timestamp;
                 }
@@ -196,8 +233,9 @@ impl Okta {
                 logs.len(),
             );
 
-            // Update the time of our most recent log
-            self.since = most_recent_log_seen + Duration::from_millis(1);
+            // Update the time of our most recent log and wait for the specified period
+            self.since = most_recent_log_seen + sleep_duration;
+            tokio::time::sleep(sleep_duration).await
         }
     }
 }
