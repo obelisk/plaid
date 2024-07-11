@@ -2,10 +2,12 @@ use crate::executor::Message;
 use crossbeam_channel::Sender;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+
+const OKTA_LOG_PUBLISHED_FIELD_KEY: &str = "published";
 
 #[derive(Deserialize)]
 pub struct OktaConfig {
@@ -20,7 +22,8 @@ pub struct OktaConfig {
     /// Number of milliseconds to wait in between calls to the Okta API.
     /// Okta enforces a rate limit of 50 calls/sec for the `/logs` endpoint.
     /// If no value is provided here, we will default to 1 milliseconds between calls
-    sleep_duration: Option<u64>,
+    #[serde(default = "default_sleep_milliseconds")]
+    sleep_duration: u64,
     #[serde(default)]
     pub logbacks_allowed: LogbacksAllowed,
 }
@@ -47,6 +50,13 @@ where
     }
 }
 
+/// This function provides the default sleep duration in milliseconds.
+/// It is used as the default value for deserialization of the `sleep_duration` field,
+/// of `OktaConfig` in the event that no value is provided.
+fn default_sleep_milliseconds() -> u64 {
+    1
+}
+
 pub struct Okta {
     /// A `reqwest` client to send API calls with
     client: Client,
@@ -56,53 +66,6 @@ pub struct Okta {
     since: OffsetDateTime,
     /// Sending channel used to send logs into the execution system
     logger: Sender<Message>,
-}
-
-/// We try not to parse anything complicated since our job is just
-/// to pass it on.
-/// See https://developer.okta.com/docs/reference/api/system-log/#logevent-object for full docs
-#[derive(Deserialize, Serialize)]
-struct OktaLog {
-    /// Timestamp when the event is published
-    published: String,
-    /// Describes the entity that performs an action
-    actor: Value,
-    /// The client that requests an action
-    client: Value,
-    /// Type of device that the client operates from (for example, Computer)
-    device: Value,
-    /// The authentication data of an action
-    #[serde(rename = "authenticationContext")]
-    authentication_context: Value,
-    /// The display message for an event
-    #[serde(rename = "displayMessage")]
-    display_message: Value,
-    /// Type of event that is published
-    #[serde(rename = "eventType")]
-    event_type: Value,
-    /// The outcome of an action
-    outcome: Value,
-    /// The security data of an action
-    #[serde(rename = "securityContext")]
-    security_context: Value,
-    /// Indicates how severe the event is: DEBUG, INFO, WARN, ERROR
-    severity: Value,
-    /// The debug request data of an action
-    #[serde(rename = "debugContext")]
-    debug_context: Value,
-    /// Associated Events API Action
-    #[serde(rename = "legacyEventType")]
-    legacy_event_type: Value,
-    /// The transaction details of an action
-    transaction: Value,
-    /// Unique identifier for an individual event
-    uuid: Value,
-    /// Versioning indicator
-    version: Value,
-    /// The request that initiates an action
-    request: Value,
-    /// Zero or more targets of an action
-    target: Value,
 }
 
 impl Okta {
@@ -124,7 +87,7 @@ impl Okta {
         // Start with the most recent logs
         let mut most_recent_log_seen = OffsetDateTime::UNIX_EPOCH;
 
-        let sleep_duration = Duration::from_millis(self.config.sleep_duration.unwrap_or(1));
+        let sleep_duration = Duration::from_millis(self.config.sleep_duration);
 
         loop {
             // Okta requires the query parameter to be in RFC3339 format. We attempt to format it here.
@@ -174,7 +137,7 @@ impl Okta {
                 .map_err(|e| error!("Could not get logs from Okta: {e}"))?;
 
             // Attempt to deserialize the response from Okta
-            let logs: Vec<OktaLog> = serde_json::from_str(body.as_str())
+            let logs: Vec<Value> = serde_json::from_str(body.as_str())
                 .map_err(|e| error!("Could not parse data from Okta: {e}\n\n{body}"))?;
 
             // If there have been no new logs since we last polled, we can exit the loop early
@@ -186,10 +149,25 @@ impl Okta {
 
             // Loop over the logs we did get from Okta, attempt to parse their timestamps, and send them into the logging system
             for log in &logs {
-                let log_timestamp = match OffsetDateTime::parse(&log.published, &Rfc3339) {
+                let published = match log
+                    .as_object()
+                    .and_then(|obj| obj.get(OKTA_LOG_PUBLISHED_FIELD_KEY))
+                    .and_then(|val| val.as_str())
+                {
+                    Some(published) => published,
+                    None => {
+                        error!(
+                            "Missing or invalid 'published' field in Okta log: {:?}",
+                            log
+                        );
+                        continue;
+                    }
+                };
+
+                let log_timestamp = match OffsetDateTime::parse(published, &Rfc3339) {
                     Ok(dt) => dt,
                     Err(_) => {
-                        error!("Got an invalid date from Okta: {}", log.published);
+                        error!("Got an invalid date from Okta: {}", published);
                         continue;
                     }
                 };
