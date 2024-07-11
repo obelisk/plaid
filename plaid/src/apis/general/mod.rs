@@ -12,9 +12,15 @@ use std::time::Duration;
 
 use crate::{data::DelayedMessage, executor::Message};
 
+use super::default_timeout_seconds;
+
 #[derive(Deserialize)]
 pub struct GeneralConfig {
     network: network::Config,
+    /// The number of seconds until an external API request times out.
+    /// If no value is provided, the result of `default_timeout_seconds()` will be used.
+    #[serde(default = "default_timeout_seconds")]
+    api_timeout_seconds: u64,
 }
 
 pub struct General {
@@ -32,7 +38,7 @@ impl General {
         delayed_log_sender: Sender<DelayedMessage>,
     ) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(config.api_timeout_seconds))
             .build()
             .unwrap();
 

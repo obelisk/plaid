@@ -1,7 +1,9 @@
 use reqwest::Client;
-use serde::{Deserialize};
+use serde::Deserialize;
 
 use std::{collections::HashMap, time::Duration};
+
+use super::default_timeout_seconds;
 
 mod trigger;
 
@@ -11,8 +13,11 @@ pub struct PagerDutyConfig {
     /// the integration key relevant to creating an incident in PagerDuty under that
     /// same service
     services: HashMap<String, String>,
+    /// The number of seconds until an external API request times out.
+    /// If no value is provided, the result of `default_timeout_seconds()` will be used.
+    #[serde(default = "default_timeout_seconds")]
+    api_timeout_seconds: u64,
 }
-
 
 pub struct PagerDuty {
     config: PagerDutyConfig,
@@ -21,18 +26,16 @@ pub struct PagerDuty {
 
 #[derive(Debug)]
 pub enum PagerDutyError {
-    NetworkError(reqwest::Error)
+    NetworkError(reqwest::Error),
 }
 
 impl PagerDuty {
     pub fn new(config: PagerDutyConfig) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build().unwrap();
+            .timeout(Duration::from_secs(config.api_timeout_seconds))
+            .build()
+            .unwrap();
 
-        Self {
-            config,
-            client,
-        }
+        Self { config, client }
     }
 }
