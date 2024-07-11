@@ -156,10 +156,7 @@ impl Okta {
                 {
                     Some(published) => published,
                     None => {
-                        error!(
-                            "Missing or invalid 'published' field in Okta log: {:?}",
-                            log
-                        );
+                        error!("Missing or invalid 'published' field in Okta log: {log:?}",);
                         continue;
                     }
                 };
