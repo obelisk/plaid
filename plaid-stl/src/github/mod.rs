@@ -14,6 +14,13 @@ pub fn add_user_to_team(team: &str, user: &str, org: &str, role: &str) -> Result
     add_user_to_team_detailed(team, user, org, role).map_err(|_| -4)
 }
 
+/// Add a user to a team
+/// ## Arguments
+///
+/// * `team` - The team to add the user to
+/// * `user` - The user to add to `team`
+/// * `org` - Github organization that `team` exists in
+/// * `role` - Role to grant `user` on `team`
 pub fn add_user_to_team_detailed(
     team: &str,
     user: &str,
@@ -48,6 +55,12 @@ pub fn remove_user_from_team(team: &str, user: &str, org: &str) -> Result<(), i3
     remove_user_from_team_detailed(team, user, org).map_err(|_| -4)
 }
 
+/// Remove a user from a team
+/// ## Arguments
+///
+/// * `team` - The team to remove the user from
+/// * `user` - The user to remove from `team`
+/// * `org` - Github organization that `team` exists in
 pub fn remove_user_from_team_detailed(
     team: &str,
     user: &str,
@@ -81,6 +94,11 @@ pub fn remove_user_from_repo(repo: &str, user: &str) -> Result<(), i32> {
     remove_user_from_repo_detailed(repo, user).map_err(|_| -4)
 }
 
+/// Remove a user from a repo
+/// ## Arguments
+///
+/// * `repo` - The repo to remove the user from
+/// * `user` - The user to remove from `repo`
 pub fn remove_user_from_repo_detailed(repo: &str, user: &str) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(github, remove_user_from_repo);
@@ -109,6 +127,11 @@ pub fn add_user_to_repo(repo: &str, user: &str, permission: Option<&str>) -> Res
     add_user_to_repo_detailed(repo, user, permission).map_err(|_| -4)
 }
 
+/// Add a user to a repo
+/// ## Arguments
+///
+/// * `repo` - The repo to add the user to
+/// * `user` - The user to add to `repo`
 pub fn add_user_to_repo_detailed(
     repo: &str,
     user: &str,
@@ -228,6 +251,12 @@ pub fn make_advanced_graphql_query(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+/// Returns the contents of a single commit reference
+/// ## Arguments
+///
+/// * `user` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `commit` - The commit reference. Can be a commit SHA, branch name (heads/BRANCH_NAME), or tag name (tags/TAG_NAME)
 pub fn fetch_commit(user: &str, repo: &str, commit: &str) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, fetch_commit);
@@ -268,6 +297,10 @@ pub fn fetch_commit(user: &str, repo: &str, commit: &str) -> Result<String, Plai
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+/// Lists approved fine-grained personal access tokens owned by organization members that can access organization resources
+/// ## Arguments
+///
+/// * `org` - The organization name. The name is not case sensitive.
 pub fn list_fpat_requests_for_org(org: &str) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, list_fpat_requests_for_org);
@@ -302,6 +335,13 @@ pub fn list_fpat_requests_for_org(org: &str) -> Result<String, PlaidFunctionErro
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+/// Approves or denies multiple pending requests to access organization resources via a fine-grained personal access token
+/// ## Arguments
+///
+/// * `org` - The organization name. The name is not case sensitive.
+/// * `pat_request_ids` - Unique identifiers of the requests for access via fine-grained personal access token. Must be formed of between 1 and 100 pat_request_id values
+/// * `action` - Action to apply to the requests.
+/// * `reason` - Reason for approving or denying the requests. Max 1024 characters.
 pub fn review_fpat_requests_for_org(
     org: String,
     pat_request_ids: &[u64],
@@ -343,6 +383,13 @@ pub fn review_fpat_requests_for_org(
     }
 }
 
+/// Lists the repositories a fine-grained personal access token request is requesting access to
+/// ## Arguments
+///
+/// * `org` - The organization name. The name is not case sensitive.
+/// * `request_id` - Unique identifier of the request for access via fine-grained personal access token.
+/// * `per_page` - The number of results per page (max 100)
+/// * `page` - The page number of the results to fetch.
 pub fn get_repos_for_fpat<T: Display>(
     org: T,
     request_id: u64,
@@ -384,4 +431,132 @@ pub fn get_repos_for_fpat<T: Display>(
     // This should be safe because unless the Plaid runtime is expressly trying
     // to mess with us, this came from a String in the API module.
     Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+/// Get protection rules for a branch
+/// ## Arguments
+///
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `branch` - The name of the branch. Cannot contain wildcard characters.
+pub fn get_branch_protection_rules(
+    owner: impl Display,
+    repo: impl Display,
+    branch: impl Display,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_branch_protection_rules);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+    params.insert("branch", branch.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_get_branch_protection_rules(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+/// Get all collaborators on a repository
+/// ## Arguments
+///
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+pub fn get_repository_collaborators(
+    owner: impl Display,
+    repo: impl Display,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_repository_collaborators);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_get_repository_collaborators(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+/// Update branch protection rule for a single branch
+/// ## Arguments
+///
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `branch` - The name of the branch. Cannot contain wildcard characters.
+/// * `body` - Body of the PUT request. See https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28#update-branch-protection
+pub fn update_branch_protection_rule(
+    owner: impl Display,
+    repo: impl Display,
+    branch: impl Display,
+    body: impl Display,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, update_branch_protection_rule);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+    params.insert("branch", branch.to_string());
+    params.insert("body", body.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_update_branch_protection_rule(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
 }

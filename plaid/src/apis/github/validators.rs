@@ -60,6 +60,10 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     // This validates a postive integer
     define_regex_validator!(validators, "pint", r"^\d+$");
 
+    // Follows Github's guidelines on branch naming conventions
+    // https://docs.github.com/en/get-started/using-git/dealing-with-special-characters-in-branch-and-tag-names#naming-branches-and-tags
+    define_regex_validator!(validators, "branch_name", r"^[a-zA-Z][a-zA-Z0-9./_-]*$");
+
     validators
 }
 
@@ -69,3 +73,4 @@ create_regex_validator_func!(org);
 create_regex_validator_func!(team_slug);
 create_regex_validator_func!(commit_hash);
 create_regex_validator_func!(pint);
+create_regex_validator_func!(branch_name);
