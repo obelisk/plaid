@@ -1,6 +1,6 @@
 use crossbeam_channel::Sender;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
-use rand::Rng;
+use ring::rand::SecureRandom;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::{max, Reverse},
@@ -18,8 +18,6 @@ pub struct IntervalConfig {
     /// Maximum percentage of internal time to shift all jobs for better work distribution    
     #[serde(deserialize_with = "parse_splay")]
     splay: u32,
-    #[serde(default)]
-    pub logbacks_allowed: LogbacksAllowed,
 }
 
 /// Custom parser for splay. Returns an error if a splay > 100 is given
@@ -47,6 +45,9 @@ struct IntervalJob {
     log_type: String,
     /// Optional data to log to the rule
     data: Option<String>,
+    /// The number of Logbacks this interval is allowed to trigger
+    #[serde(default)]
+    pub logbacks_allowed: LogbacksAllowed,
 }
 
 #[derive(PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +89,8 @@ impl std::cmp::Ord for ScheduledJob {
 
 /// Manages storage and sending of interval based jobs
 pub struct Interval {
+    /// The original configuration. Not currently included but may be useful in the future
+    // config: IntervalConfig,
     /// Sends logs to executor
     sender: Sender<Message>,
     /// Stores jobs while they are waiting to be processed
@@ -98,10 +101,11 @@ impl Interval {
     pub fn new(config: IntervalConfig, log_sender: Sender<Message>) -> Self {
         let mut job_heap = BinaryHeap::new();
         let current_time = get_current_time();
+        let srand = ring::rand::SystemRandom::new();
 
         // Initialize job heap
         // Iterates over interval job config and pushes job onto heap
-        for (name, job) in config.jobs.into_iter() {
+        for (name, job) in config.jobs.iter() {
             // Offset the start times of our job to reduce Plaid's workload of jobs hitting at the same time
             // We calculate a job's splay by taking the configured splay as a percentage of our job interval.
             // A random number between 0 and the calculated value is then added to the job's execution time
@@ -113,22 +117,29 @@ impl Interval {
                 1,
             );
 
-            let job_splay = rand::thread_rng().gen_range(0..splay);
+            // Generate a random number between 0 and splay
+            let mut bytes = [0u8; 8];
+            // We assume we will always be able to generate randomness
+            srand.fill(&mut bytes).unwrap();
+            // Yes there is a slight randomness bias here but we're just calculating a splay
+            // so this is not a security critical operation.
+            let job_splay = u64::from_be_bytes(bytes) % splay;
 
             let message = ScheduledJob::new(
                 job.interval + job_splay + current_time,
                 job.interval,
                 Message::new(
                     job.log_type.to_string(),
-                    job.data.unwrap_or_default().into(),
-                    LogSource::Generator(Generator::Interval(name)),
-                    config.logbacks_allowed.clone(),
+                    job.data.clone().unwrap_or_default().into(),
+                    LogSource::Generator(Generator::Interval(name.clone())),
+                    job.logbacks_allowed.clone(),
                 ),
             );
             job_heap.push(Reverse(message));
         }
 
         Interval {
+            //config,
             sender: log_sender,
             job_heap,
         }

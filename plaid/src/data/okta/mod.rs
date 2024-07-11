@@ -7,10 +7,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use serde_json::Value;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use std::time::Duration;
-
-use chrono::{DateTime, Utc};
 
 use crate::executor::Message;
 
@@ -25,7 +24,7 @@ pub struct OktaConfig {
 pub struct Okta {
     client: Client,
     config: OktaConfig,
-    since: DateTime<Utc>,
+    since: OffsetDateTime,
     logger: Sender<Message>,
 }
 
@@ -65,7 +64,7 @@ impl Okta {
             .build()
             .unwrap();
 
-        let date = Utc::now();
+        let date = OffsetDateTime::now_utc();
 
         Self {
             client,
@@ -110,8 +109,8 @@ impl Okta {
 
             let mut counter = 0;
             for log in &logs {
-                let log_timestamp = match DateTime::parse_from_rfc3339(&log.published) {
-                    Ok(dt) => dt.with_timezone(&Utc),
+                let log_timestamp = match OffsetDateTime::parse(&log.published, &Rfc3339) {
+                    Ok(dt) => dt,
                     Err(_) => {
                         error!("Got an invalid date from Okta: {}", log.published);
                         continue;
@@ -149,7 +148,7 @@ impl Okta {
                 "Sent {} logs for processing. Newest time seen is: {:?}",
                 counter, newest_timestamp
             );
-            self.since = newest_timestamp.unwrap() + chrono::Duration::milliseconds(1);
+            self.since = newest_timestamp.unwrap() + Duration::from_millis(1);
         }
     }
 }

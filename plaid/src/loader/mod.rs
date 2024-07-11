@@ -35,16 +35,71 @@ pub struct Configuration {
     pub lru_cache_size: Option<usize>,
     /// The secrets that are available to modules
     pub secrets: HashMap<String, HashMap<String, String>>,
+    /// See persistent_response_size in PlaidModule for an explanation on how to use this
+    pub persistent_response_size: HashMap<String, usize>,
 }
 
+/// The persistent response allowed for the module. This is used for
+/// modules to store data that was generated from their last invocation which can be
+/// accessed by the next invocation or by GET requests configured to use it as a
+/// response. The max size here only determines how much data can be stored, it does
+/// not affect how much data can be returned by GET requests configured to use a module
+/// as a data generator for a response.
+pub struct PersistentResponse {
+    pub max_size: usize,
+    pub data: Arc<RwLock<Option<String>>>,
+}
+
+impl PersistentResponse {
+    pub fn new(max_size: usize) -> Self {
+        Self {
+            max_size,
+            data: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    pub fn get_data(&self) -> Result<Option<String>, ()> {
+        match self.data.read() {
+            Ok(data) => Ok(data.clone()),
+            Err(e) => {
+                error!(
+                    "Critical error getting a read lock on persistent response: {:?}",
+                    e
+                );
+                Err(())
+            }
+        }
+    }
+}
+
+/// Defines a loaded Plaid module that can be run on incoming messages or to handle
+/// GET requests.
 pub struct PlaidModule {
+    /// The name of the module
     pub name: String,
+    /// The compiled WASM module
     pub module: Module,
+    /// The WASM enginer used to run the module
     pub engine: Engine,
+    /// The maximum computation allowed for the module
     pub computation_limit: u64,
+    /// The maximum number of memory pages allowed to be mapped for the module
     pub page_limit: u32,
+    /// Any defined secrets the module is allowed to access
     pub secrets: Option<HashMap<String, Vec<u8>>>,
+    /// An LRU cache for the module if the runtime has allowed LRU caches for modules
     pub cache: Option<Arc<RwLock<LruCache<String, String>>>>,
+    /// See the PersistentResponse type.
+    pub persistent_response: Option<PersistentResponse>,
+}
+
+impl PlaidModule {
+    pub fn get_persistent_response_data(&self) -> Option<String> {
+        self.persistent_response
+            .as_ref()
+            .map(|x| x.get_data().ok().flatten())
+            .flatten()
+    }
 }
 
 /// We need multiple ways of referencing the modules. To prevent duplication we use `Arc`s.
@@ -140,6 +195,15 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             type_[0].to_string()
         };
 
+        // Persistent response is available to be set per module. This allows it to persistently
+        // store the result of its run. It can use this during further runs, or it can be used
+        // as the target of GET request hooks.
+        let persistent_response = config
+            .persistent_response_size
+            .get(&filename)
+            .copied()
+            .map(PersistentResponse::new);
+
         // Get the computation limit for the module by checking the following in order:
         // Module Override
         // Log Type amount
@@ -215,6 +279,7 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             name: filename.clone(),
             module,
             engine,
+            persistent_response,
         };
 
         // Put it in an Arc because we're going to have multiple references to it

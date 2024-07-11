@@ -1,6 +1,7 @@
 use crate::PlaidFunctionError;
 
 pub mod cache;
+pub mod random;
 pub mod storage;
 
 pub fn print_debug_string(log: &str) {
@@ -27,7 +28,12 @@ pub fn log_back(type_: &str, log: &[u8], delay: u32) -> Result<(), i32> {
 /// budget and the call will fail if it is exceeded. Calling this function itself
 /// costs 1 budget, with a budget of 1, you must set logbacks_allowed to 0. This
 /// means that those further invocations will not be able to trigger logbacks.
-pub fn log_back_with_budget(type_: &str, log: &[u8], delay: u32, logbacks_allowed: u32) -> Result<(), i32> {
+pub fn log_back_with_budget(
+    type_: &str,
+    log: &[u8],
+    delay: u32,
+    logbacks_allowed: u32,
+) -> Result<(), i32> {
     extern "C" {
         /// Send a log to the logback system
         fn log_back(
@@ -101,6 +107,40 @@ pub fn get_accessory_data_by_name(name: &str) -> Result<String, PlaidFunctionErr
             buffer_size,
         )
     };
+    let copied_size = if copied_size < 0 {
+        return Err(copied_size.into());
+    } else {
+        copied_size as u32
+    };
+
+    if copied_size != buffer_size {
+        return Err(PlaidFunctionError::InternalApiError);
+    }
+
+    match String::from_utf8(data_buffer) {
+        Ok(s) => Ok(s),
+        Err(_) => Err(PlaidFunctionError::ParametersNotUtf8),
+    }
+}
+
+/// Get the persistent response set by a previous invocation
+/// of the module
+pub fn get_response() -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        fn get_response(data_buffer: *mut u8, buffer_size: u32) -> i32;
+    }
+
+    let buffer_size = unsafe { get_response(vec![].as_mut_ptr(), 0) };
+
+    let buffer_size = if buffer_size < 0 {
+        return Err(buffer_size.into());
+    } else {
+        buffer_size as u32
+    };
+
+    let mut data_buffer = vec![0; buffer_size as usize];
+
+    let copied_size = unsafe { get_response(data_buffer.as_mut_ptr(), buffer_size) };
     let copied_size = if copied_size < 0 {
         return Err(copied_size.into());
     } else {

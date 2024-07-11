@@ -22,6 +22,14 @@ pub enum CachingMode {
     /// cache will be invalidated after the given period of time has
     /// passed.
     Timed { validity: u64 },
+    /// This will use a stored cache from whatever the response method is
+    /// before running the response method again. This means that GET calls
+    /// should always be fast as the cache is only updated by other means.
+    ///
+    /// The exception is if call_on_none is set to true, in which case if
+    /// nothing is stored, this will act as if Cache::None was set for the first
+    /// call.
+    UsePersistentResponse { call_on_none: bool },
 }
 
 /// How should a webhook respond to a GET request
@@ -44,6 +52,9 @@ pub enum ResponseMode {
 /// requests.
 #[derive(Deserialize, Clone)]
 pub struct GetMode {
+    /// Set how the data sent in GET responses should be cached. This is really
+    /// only useful when the response_mode is set to ResponseMode::Rule but in future
+    /// this may be applicable to other, newer, modes.
     #[serde(default)]
     pub caching_mode: CachingMode,
     #[serde(deserialize_with = "response_mode_deserializer")]
@@ -182,11 +193,10 @@ pub async fn configure() -> Result<Configuration, ConfigurationError> {
                 .help("Path to the configuration toml file")
                 .long("config")
                 .default_value("./plaid/resources/plaid.toml")
-                .takes_value(true),
         ).get_matches();
 
     // Read the configuration file
-    let config = match tokio::fs::read(matches.value_of("config").unwrap()).await {
+    let config = match tokio::fs::read(matches.get_one::<String>("config").unwrap()).await {
         Ok(config) => config,
         Err(e) => {
             println!("Encountered file error when trying to read configuration!");

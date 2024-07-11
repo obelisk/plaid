@@ -3,10 +3,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use plaid_stl::messages::LogbacksAllowed;
 use wasmer::{AsStoreRef, FunctionEnvMut, WasmPtr};
 
-use crate::{executor::Env, functions::{get_memory, safely_get_string}};
+use crate::{
+    executor::Env,
+    functions::{get_memory, safely_get_string},
+};
 
 use super::{safely_get_memory, safely_write_data_back, FunctionErrors};
-
 
 /// Implement a way for a module to print to env_logger
 pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log_buffer_size: u32) {
@@ -14,9 +16,13 @@ pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in fetch_from_module: {:?}", env.data().name, e);
+            error!(
+                "{}: Memory error in fetch_from_module: {:?}",
+                env.data().name,
+                e
+            );
             return;
-        },
+        }
     };
 
     let message = match safely_get_string(&memory_view, log_buffer, log_buffer_size) {
@@ -24,30 +30,84 @@ pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log
         Err(e) => {
             error!("{}: Error in print_debug_string: {:?}", env.data().name, e);
             return;
-        },
+        }
     };
 
     debug!("Message from [{}]: {message}", env.data().name);
 }
 
-/// Implement a way for a module to set a response which is used for
-/// get responses.
-pub fn set_response(mut env: FunctionEnvMut<Env>, response_buffer: WasmPtr<u8>, response_buffer_size: u32) {
+/// Implement a way for a module to get the existing response. This would have been
+/// set by previous invocations of the module and allows an additional basic form of state.
+pub fn get_response(
+    env: FunctionEnvMut<Env>,
+    response_buffer: WasmPtr<u8>,
+    response_buffer_size: u32,
+) -> i32 {
     let store = env.as_store_ref();
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in fetch_from_module: {:?}", env.data().name, e);
+            error!(
+                "{}: Memory error in fetch_from_module: {:?}",
+                env.data().name,
+                e
+            );
+            return FunctionErrors::CouldNotGetAdequateMemory as i32;
+        }
+    };
+
+    let response = match &env.data().response {
+        Some(r) => r,
+        None => {
+            error!("{}: No response set", env.data().name);
+            return 0;
+        }
+    };
+
+    match safely_write_data_back(
+        &memory_view,
+        response.as_bytes(),
+        response_buffer,
+        response_buffer_size,
+    ) {
+        Ok(x) => x,
+        Err(e) => {
+            error!(
+                "{}: Data write error in get_response: {:?}",
+                env.data().name,
+                e
+            );
+            e as i32
+        }
+    }
+}
+
+/// Implement a way for a module to set a response which is used for
+/// get responses.
+pub fn set_response(
+    mut env: FunctionEnvMut<Env>,
+    response_buffer: WasmPtr<u8>,
+    response_buffer_size: u32,
+) {
+    let store = env.as_store_ref();
+    let memory_view = match get_memory(&env, &store) {
+        Ok(memory_view) => memory_view,
+        Err(e) => {
+            error!(
+                "{}: Memory error in fetch_from_module: {:?}",
+                env.data().name,
+                e
+            );
             return;
-        },
+        }
     };
 
     let message = match safely_get_string(&memory_view, response_buffer, response_buffer_size) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Error in print_debug_string: {:?}", env.data().name, e);
+            error!("{}: Error in set_response: {:?}", env.data().name, e);
             return;
-        },
+        }
     };
 
     let mut env = env.as_mut();
@@ -105,9 +165,8 @@ pub fn log_back(
             *x -= 1; // Subtract the one that this logback costs
 
             logbacks_requested
-        },
+        }
     };
-
 
     let store = env.as_store_ref();
     let env_data = env.data();
@@ -117,7 +176,7 @@ pub fn log_back(
         Err(e) => {
             error!("{}: Memory error in log_back: {:?}", env_data.name, e);
             return 1;
-        },
+        }
     };
 
     let type_ = match safely_get_string(&memory_view, type_buf, type_buf_len) {
@@ -125,7 +184,7 @@ pub fn log_back(
         Err(e) => {
             error!("{}: Error in log_back: {:?}", env_data.name, e);
             return 1;
-        },
+        }
     };
 
     // Safely get the data from the guest's memory
@@ -134,14 +193,20 @@ pub fn log_back(
         Err(e) => {
             error!("{}: Error in log_back: {:?}", env_data.name, e);
             return 1;
-        },
+        }
     };
 
     let api = env_data.api.clone();
     api.clone().runtime.block_on(async move {
         match api.general.as_ref() {
             Some(general) => {
-                if general.log_back(&type_, &log, &env_data.name, delay as u64, LogbacksAllowed::Limited(assigned_budget)) {
+                if general.log_back(
+                    &type_,
+                    &log,
+                    &env_data.name,
+                    delay as u64,
+                    LogbacksAllowed::Limited(assigned_budget),
+                ) {
                     0
                 } else {
                     1
@@ -176,7 +241,7 @@ pub fn storage_insert(
         Err(e) => {
             error!("{}: Memory error in storage_insert: {:?}", env_data.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
-        },
+        }
     };
 
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
@@ -184,7 +249,7 @@ pub fn storage_insert(
         Err(e) => {
             error!("{}: Key error in storage_insert: {:?}", env_data.name, e);
             return FunctionErrors::ParametersNotUtf8 as i32;
-        },
+        }
     };
 
     // Get the storage data from the client's memory
@@ -193,15 +258,15 @@ pub fn storage_insert(
         Err(e) => {
             error!("{}: Value error in storage_insert: {:?}", env_data.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
-        },
+        }
     };
 
     let storage_key = key.clone();
-    let result = env_data
-        .api
-        .clone()
-        .runtime
-        .block_on(async move { storage.insert(env_data.name.clone(), storage_key, value).await });
+    let result = env_data.api.clone().runtime.block_on(async move {
+        storage
+            .insert(env_data.name.clone(), storage_key, value)
+            .await
+    });
 
     match result {
         Ok(Some(data)) => {
@@ -212,9 +277,12 @@ pub fn storage_insert(
             match safely_write_data_back(&memory_view, &data, data_buffer, data_buffer_len) {
                 Ok(x) => x,
                 Err(e) => {
-                    error!("{}: Data write error in storage_insert: {:?}", env_data.name, e);
+                    error!(
+                        "{}: Data write error in storage_insert: {:?}",
+                        env_data.name, e
+                    );
                     e as i32
-                },
+                }
             }
         }
         // This occurs when there is no such key so the number of bytes that have been copied back are 0
@@ -251,17 +319,17 @@ pub fn storage_get(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Memory error in storage_get: {:?}", env_data.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
-        },
+        }
     };
 
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Key error in storage_get: {:?}", env_data.name, e);
             return FunctionErrors::ParametersNotUtf8 as i32;
-        },
+        }
     };
     let result = env_data
         .api
@@ -274,9 +342,12 @@ pub fn storage_get(
             match safely_write_data_back(&memory_view, &data, data_buffer, data_buffer_len) {
                 Ok(x) => x,
                 Err(e) => {
-                    error!("{}: Data write error in storage_insert: {:?}", env_data.name, e);
+                    error!(
+                        "{}: Data write error in storage_get: {:?}",
+                        env_data.name, e
+                    );
                     e as i32
-                },
+                }
             }
         }
         Ok(None) => 0,
@@ -306,36 +377,44 @@ pub fn cache_insert(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Memory error in cache_insert: {:?}", env_data.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
-        },
+        }
     };
 
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Key error in cache_insert: {:?}", env_data.name, e);
             return FunctionErrors::ParametersNotUtf8 as i32;
-        },
+        }
     };
 
     // Get the storage data from the client's memory
     let value = match safely_get_string(&memory_view, value_buf, value_buf_len) {
         Ok(d) => d,
         Err(e) => {
-            error!("{}: Value error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Value error in cache_insert: {:?}", env_data.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
-        },
+        }
     };
 
     match cache.write().map(|mut cache| cache.put(key, value)) {
         Ok(Some(previous_value)) => {
-            match safely_write_data_back(&memory_view, &previous_value.as_bytes(), data_buffer, data_buffer_len) {
+            match safely_write_data_back(
+                &memory_view,
+                &previous_value.as_bytes(),
+                data_buffer,
+                data_buffer_len,
+            ) {
                 Ok(x) => x,
                 Err(e) => {
-                    error!("{}: Data write error in storage_insert: {:?}", env_data.name, e);
+                    error!(
+                        "{}: Data write error in cache_insert: {:?}",
+                        env_data.name, e
+                    );
                     e as i32
-                },
+                }
             }
         }
         Ok(None) => 0,
@@ -371,27 +450,32 @@ pub fn cache_get(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Memory error in cache_get: {:?}", env_data.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
-        },
+        }
     };
 
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in storage_insert: {:?}", env_data.name, e);
+            error!("{}: Key error in cache_get: {:?}", env_data.name, e);
             return FunctionErrors::ParametersNotUtf8 as i32;
-        },
+        }
     };
 
     match cache.write().map(|mut cache| cache.get(&key).cloned()) {
         Ok(Some(value)) => {
-            match safely_write_data_back(&memory_view, &value.as_bytes(), data_buffer, data_buffer_len) {
+            match safely_write_data_back(
+                &memory_view,
+                &value.as_bytes(),
+                data_buffer,
+                data_buffer_len,
+            ) {
                 Ok(x) => x,
                 Err(e) => {
-                    error!("{}: Data write error in storage_insert: {:?}", env_data.name, e);
+                    error!("{}: Data write error in cache_get: {:?}", env_data.name, e);
                     e as i32
-                },
+                }
             }
         }
         Ok(None) => 0,
@@ -403,6 +487,54 @@ pub fn cache_get(
                 error!("Logging system is not working!!: {:?}", e);
             }
             FunctionErrors::CacheDisabled as i32
+        }
+    }
+}
+
+/// Implement a way for randomness to get into the module
+pub fn fetch_random_bytes(
+    env: FunctionEnvMut<Env>,
+    data_buffer: WasmPtr<u8>,
+    data_buffer_len: u16,
+) -> i32 {
+    let store = env.as_store_ref();
+    let env_data = env.data();
+
+    let api = match env_data.api.general.as_ref() {
+        Some(api) => api,
+        None => {
+            error!("General API not configured");
+            return FunctionErrors::ApiNotConfigured as i32;
+        }
+    };
+
+    let bytes = match api.fetch_random_bytes(data_buffer_len) {
+        Ok(b) => b,
+        Err(e) => {
+            error!("Error fetching random bytes: {:?}", e);
+            return FunctionErrors::InternalApiError as i32;
+        }
+    };
+
+    let memory_view = match get_memory(&env, &store) {
+        Ok(memory_view) => memory_view,
+        Err(e) => {
+            error!(
+                "{}: Memory error in fetch_random_bytes: {:?}",
+                env_data.name, e
+            );
+            return FunctionErrors::CouldNotGetAdequateMemory as i32;
+        }
+    };
+
+    match safely_write_data_back(&memory_view, &bytes, data_buffer, data_buffer_len as u32) {
+        Ok(x) => x,
+        Err(e) => {
+            error!(
+                "{}: Data write error in fetch_random_bytes: {:?}",
+                env_data.name, e
+            );
+            e as i32
         }
     }
 }

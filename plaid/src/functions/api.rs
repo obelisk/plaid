@@ -197,10 +197,16 @@ pub fn to_api_function(
             &env,
             super::message::fetch_accessory_data_by_name,
         ),
+        "fetch_random_bytes" => {
+            Function::new_typed_with_env(&mut store, &env, super::internal::fetch_random_bytes)
+        }
 
         // The below are types that deal with Plaid specific internals like
         // the data base or caching systems. These usually have specific implementations
         // so are broken out into their own module.
+        "get_response" => {
+            Function::new_typed_with_env(&mut store, &env, super::internal::get_response)
+        }
         "set_response" => {
             Function::new_typed_with_env(&mut store, &env, super::internal::set_response)
         }
