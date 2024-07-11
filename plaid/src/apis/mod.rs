@@ -148,3 +148,10 @@ impl Api {
         }
     }
 }
+
+/// This function provides the default timeout value in seconds.
+/// It is used as the default value for deserialization of various API configs,
+/// in the event that no value is provided.
+fn default_timeout_seconds() -> u64 {
+    5
+}

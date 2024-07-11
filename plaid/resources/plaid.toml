@@ -15,6 +15,7 @@ path = "/tmp/sled"
 [loading]
 module_dir = "modules"
 lru_cache_size = 200
+[loading.persistent_response_size]
 
 [loading.secrets]
 [loading.secrets."testing"]
