@@ -27,6 +27,8 @@ use crate::{data::DelayedMessage, executor::Message};
 
 use self::rustica::{Rustica, RusticaConfig};
 
+const DEFAULT_TIMEOUT_SECONDS: u64 = 5;
+
 pub struct Api {
     pub runtime: Runtime,
     pub general: Option<General>,

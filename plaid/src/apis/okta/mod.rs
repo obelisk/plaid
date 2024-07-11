@@ -5,7 +5,9 @@ use reqwest::Client;
 
 use serde::Deserialize;
 
-use std::{time::Duration, string::FromUtf8Error};
+use std::{string::FromUtf8Error, time::Duration};
+
+use super::DEFAULT_TIMEOUT_SECONDS;
 
 #[derive(Deserialize)]
 pub struct OktaConfig {
@@ -13,6 +15,7 @@ pub struct OktaConfig {
     pub domain: String,
     /// The permissioned API key to get user information
     pub token: String,
+    api_timeout_seconds: Option<u64>,
 }
 
 pub struct Okta {
@@ -28,13 +31,14 @@ pub enum OktaError {
 
 impl Okta {
     pub fn new(config: OktaConfig) -> Self {
+        let timeout_seconds = config
+            .api_timeout_seconds
+            .unwrap_or(DEFAULT_TIMEOUT_SECONDS);
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build().unwrap();
+            .timeout(Duration::from_secs(timeout_seconds))
+            .build()
+            .unwrap();
 
-        Self {
-            config,
-            client,
-        }
+        Self { config, client }
     }
 }

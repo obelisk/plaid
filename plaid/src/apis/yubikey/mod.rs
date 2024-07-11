@@ -11,6 +11,7 @@ use ring::{
     rand::SystemRandom,
 };
 
+use super::DEFAULT_TIMEOUT_SECONDS;
 
 #[derive(Deserialize)]
 pub struct YubikeyConfig {
@@ -18,6 +19,9 @@ pub struct YubikeyConfig {
     client_id: u64,
     /// Secret key for the Yubico API service
     secret_key: String,
+    /// The number of seconds until an external API request times out.
+    /// If `None`, the `DEFAULT_TIMEOUT_SECONDS` will be used.
+    api_timeout_seconds: Option<u64>,
 }
 
 pub struct Yubikey {
@@ -45,21 +49,27 @@ pub enum YubikeyError {
     Other(String),
 }
 
-
 impl Yubikey {
     pub fn new(config: YubikeyConfig) -> Self {
+        let timeout_seconds = config
+            .api_timeout_seconds
+            .unwrap_or(DEFAULT_TIMEOUT_SECONDS);
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build().unwrap();
+            .timeout(Duration::from_secs(timeout_seconds))
+            .build()
+            .unwrap();
 
-        let key = Key::new(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, &base64::decode(&config.secret_key).unwrap());
+        let key = Key::new(
+            hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+            &base64::decode(&config.secret_key).unwrap(),
+        );
         let rng = SystemRandom::new();
 
         Self {
             config,
             client,
             key,
-            rng
+            rng,
         }
     }
 }
