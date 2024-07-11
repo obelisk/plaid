@@ -11,7 +11,7 @@ use ring::{
     rand::SystemRandom,
 };
 
-use super::DEFAULT_TIMEOUT_SECONDS;
+use super::default_timeout_seconds;
 
 #[derive(Deserialize)]
 pub struct YubikeyConfig {
@@ -20,8 +20,9 @@ pub struct YubikeyConfig {
     /// Secret key for the Yubico API service
     secret_key: String,
     /// The number of seconds until an external API request times out.
-    /// If `None`, the `DEFAULT_TIMEOUT_SECONDS` will be used.
-    api_timeout_seconds: Option<u64>,
+    /// If no value is provided, the result of `default_timeout_seconds()` will be used.
+    #[serde(default = "default_timeout_seconds")]
+    api_timeout_seconds: u64,
 }
 
 pub struct Yubikey {
@@ -51,11 +52,8 @@ pub enum YubikeyError {
 
 impl Yubikey {
     pub fn new(config: YubikeyConfig) -> Self {
-        let timeout_seconds = config
-            .api_timeout_seconds
-            .unwrap_or(DEFAULT_TIMEOUT_SECONDS);
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_seconds))
+            .timeout(Duration::from_secs(config.api_timeout_seconds))
             .build()
             .unwrap();
 

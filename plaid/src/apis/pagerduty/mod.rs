@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use std::{collections::HashMap, time::Duration};
 
-use super::DEFAULT_TIMEOUT_SECONDS;
+use super::default_timeout_seconds;
 
 mod trigger;
 
@@ -14,8 +14,9 @@ pub struct PagerDutyConfig {
     /// same service
     services: HashMap<String, String>,
     /// The number of seconds until an external API request times out.
-    /// If `None`, the `DEFAULT_TIMEOUT_SECONDS` will be used.
-    api_timeout_seconds: Option<u64>,
+    /// If no value is provided, the result of `default_timeout_seconds()` will be used.
+    #[serde(default = "default_timeout_seconds")]
+    api_timeout_seconds: u64,
 }
 
 pub struct PagerDuty {
@@ -30,11 +31,8 @@ pub enum PagerDutyError {
 
 impl PagerDuty {
     pub fn new(config: PagerDutyConfig) -> Self {
-        let timeout_seconds = config
-            .api_timeout_seconds
-            .unwrap_or(DEFAULT_TIMEOUT_SECONDS);
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_seconds))
+            .timeout(Duration::from_secs(config.api_timeout_seconds))
             .build()
             .unwrap();
 

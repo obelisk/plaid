@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use std::collections::HashMap;
 
-use super::DEFAULT_TIMEOUT_SECONDS;
+use super::default_timeout_seconds;
 
 #[derive(Deserialize)]
 pub struct SlackConfig {
@@ -20,8 +20,9 @@ pub struct SlackConfig {
     /// be used in various Slack API calls
     bot_tokens: HashMap<String, String>,
     /// The number of seconds until an external API request times out.
-    /// If `None`, the `DEFAULT_TIMEOUT_SECONDS` will be used.
-    api_timeout_seconds: Option<u64>,
+    /// If no value is provided, the result of `default_timeout_seconds()` will be used.
+    #[serde(default = "default_timeout_seconds")]
+    api_timeout_seconds: u64,
 }
 
 pub struct Slack {
@@ -38,11 +39,8 @@ pub enum SlackError {
 
 impl Slack {
     pub fn new(config: SlackConfig) -> Self {
-        let timeout_seconds = config
-            .api_timeout_seconds
-            .unwrap_or(DEFAULT_TIMEOUT_SECONDS);
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_seconds))
+            .timeout(Duration::from_secs(config.api_timeout_seconds))
             .build()
             .unwrap();
 
