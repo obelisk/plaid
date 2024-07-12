@@ -1,30 +1,11 @@
 use super::errors::Errors;
-use super::limits::LimitingTunables;
 use super::LimitAmount;
 
 use std::collections::HashMap;
 use std::fs::DirEntry;
-use std::sync::Arc;
-use wasmer::{sys::BaseTunables, Engine, NativeEngineExt, Pages, Target};
-use wasmer::{wasmparser::Operator, CompilerConfig, Cranelift, Module};
-use wasmer_middlewares::Metering;
+use wasmer::wasmparser::Operator;
 
 const CALL_COST: u64 = 10;
-
-/// Returns the cost associated with a given WebAssembly operator.
-///
-/// This function is used as part of the Wasmer middleware to determine the computational
-/// cost of executing various WebAssembly operators. It assigns a specific cost to call-related
-/// operators and a default cost to all other operators.
-pub fn cost_function(operator: &Operator) -> u64 {
-    match operator {
-        Operator::Call { .. } => CALL_COST,
-        Operator::CallIndirect { .. } => CALL_COST,
-        Operator::ReturnCall { .. } => CALL_COST,
-        Operator::ReturnCallIndirect { .. } => CALL_COST,
-        _ => 1,
-    }
-}
 
 /// Get the module file name and read in the bytes
 pub fn read_and_parse_modules(path: &DirEntry) -> Result<(String, Vec<u8>), Errors> {
@@ -67,6 +48,21 @@ pub fn get_module_computation_limit(
     }
 }
 
+/// Returns the cost associated with a given WebAssembly operator.
+///
+/// This function is used as part of the Wasmer middleware to determine the computational
+/// cost of executing various WebAssembly operators. It assigns a specific cost to call-related
+/// operators and a default cost to all other operators.
+pub fn cost_function(operator: &Operator) -> u64 {
+    match operator {
+        Operator::Call { .. } => CALL_COST,
+        Operator::CallIndirect { .. } => CALL_COST,
+        Operator::ReturnCall { .. } => CALL_COST,
+        Operator::ReturnCallIndirect { .. } => CALL_COST,
+        _ => 1,
+    }
+}
+
 /// Get the memory limit for the module by checking the following in order:
 /// 1. Module Override
 /// 2. Log Type amount
@@ -90,48 +86,20 @@ pub fn get_module_page_count(limit_amount: &LimitAmount, filename: &str, log_typ
     }
 }
 
-/// Configure and compile a module with specified computation limits and memory page count.
-///
-/// This function sets up the computation metering, configures the module tunables, and
-/// compiles the module using the provided bytecode and settings.
-pub fn configure_and_compile_module(
-    computation_limit: u64,
-    page_count: u32,
-    module_bytes: Vec<u8>,
-    filename: &str,
-) -> Result<(Module, Engine), Errors> {
-    let metering = Arc::new(Metering::new(computation_limit, cost_function));
-    let mut compiler = Cranelift::default();
-    compiler.push_middleware(metering);
-
-    // Configure module tunables - this includes our computation limit and page count
-    let base = BaseTunables::for_target(&Target::default());
-    let tunables = LimitingTunables::new(base, Pages(page_count));
-    let mut engine: Engine = compiler.into();
-    engine.set_tunables(tunables);
-
-    // Compile the module using the middleware and tunables we just set up
-    let mut module = Module::new(&engine, module_bytes).map_err(|e| {
-        error!("Failed to compile module [{filename}]. Error: {e}");
-        Errors::ModuleCompilationFailure
-    })?;
-    module.set_name(&filename);
-
-    Ok((module, engine))
-}
-
 /// Configures secrets for modules.
 pub fn read_and_configure_secrets(
-    secrets_configuration: HashMap<String, HashMap<String, String>>,
+    secrets_configuration: &HashMap<String, HashMap<String, String>>,
 ) -> HashMap<String, HashMap<String, Vec<u8>>> {
     secrets_configuration
         .into_iter()
         .map(|(key, value)| {
             (
-                key,
+                key.to_string(),
                 value
                     .into_iter()
-                    .map(|(inner_key, inner_value)| (inner_key, inner_value.as_bytes().to_vec()))
+                    .map(|(inner_key, inner_value)| {
+                        (inner_key.to_string(), inner_value.as_bytes().to_vec())
+                    })
                     .collect(),
             )
         })

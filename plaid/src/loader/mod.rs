@@ -2,19 +2,22 @@ mod errors;
 mod limits;
 mod utils;
 
+use errors::Errors;
+use limits::LimitingTunables;
 use lru::LruCache;
 use serde::Deserialize;
-use utils::{
-    configure_and_compile_module, get_module_computation_limit, get_module_page_count,
-    read_and_configure_secrets, read_and_parse_modules,
-};
-use wasmer::Engine;
-use wasmer::Module;
-
 use std::collections::HashMap;
 use std::fs::{self};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
+use utils::{
+    cost_function, get_module_computation_limit, get_module_page_count, read_and_configure_secrets,
+    read_and_parse_modules,
+};
+use wasmer::{
+    sys::BaseTunables, CompilerConfig, Cranelift, Engine, Module, NativeEngineExt, Pages, Target,
+};
+use wasmer_middlewares::Metering;
 
 #[derive(Deserialize)]
 pub struct LimitAmount {
@@ -104,6 +107,60 @@ impl PlaidModule {
             .map(|x| x.get_data().ok().flatten())
             .flatten()
     }
+
+    /// Configure and compiles a Plaid module with specified computation limits and memory page count.
+    ///
+    /// This function sets up the computation metering, configures the module tunables, and
+    /// compiles the module using the provided bytecode and settings.
+    ///
+    /// This function returns a PlaidModule with
+    fn configure_and_compile(
+        filename: &str,
+        computation_amount: &LimitAmount,
+        memory_page_count: &LimitAmount,
+        module_bytes: Vec<u8>,
+        log_type: &str,
+    ) -> Result<Self, Errors> {
+        // Get the computation limit for the module
+        let computation_limit =
+            get_module_computation_limit(computation_amount, &filename, log_type);
+
+        // Get the memory limit for the module
+        let page_limit = get_module_page_count(memory_page_count, &filename, log_type);
+
+        let metering = Arc::new(Metering::new(computation_limit, cost_function));
+        let mut compiler = Cranelift::default();
+        compiler.push_middleware(metering);
+
+        // Configure module tunables - this includes our computation limit and page count
+        let base = BaseTunables::for_target(&Target::default());
+        let tunables = LimitingTunables::new(base, Pages(page_limit));
+        let mut engine: Engine = compiler.into();
+        engine.set_tunables(tunables);
+
+        // Compile the module using the middleware and tunables we just set up
+        let mut module = Module::new(&engine, module_bytes).map_err(|e| {
+            error!("Failed to compile module [{filename}]. Error: {e}");
+            Errors::ModuleCompilationFailure
+        })?;
+        module.set_name(&filename);
+
+        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]");
+        for import in module.imports() {
+            info!("\tImport: {}", import.name());
+        }
+
+        Ok(Self {
+            name: filename.to_string(),
+            module,
+            engine,
+            computation_limit,
+            page_limit,
+            secrets: None,
+            cache: None,
+            persistent_response: None,
+        })
+    }
 }
 
 /// We need multiple ways of referencing the modules. To prevent duplication we use `Arc`s.
@@ -141,7 +198,7 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
 
     let mut modules = PlaidModules::default();
 
-    let byte_secrets = read_and_configure_secrets(config.secrets);
+    let byte_secrets = read_and_configure_secrets(&config.secrets);
 
     for path in module_paths {
         let (filename, module_bytes) = match path {
@@ -167,33 +224,16 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             type_[0].to_string()
         };
 
-        // Persistent response is available to be set per module. This allows it to persistently
-        // store the result of its run. It can use this during further runs, or it can be used
-        // as the target of GET request hooks.
-        let persistent_response = config
-            .persistent_response_size
-            .get(&filename)
-            .copied()
-            .map(PersistentResponse::new);
-
-        // Get the computation limit for the module
-        let computation_limit =
-            get_module_computation_limit(&config.computation_amount, &filename, &type_);
-
-        // Get the memory limit for the module
-        let page_count = get_module_page_count(&config.memory_page_count, &filename, &type_);
-
         // Configure and compile module
-        let Ok((module, engine)) =
-            configure_and_compile_module(computation_limit, page_count, module_bytes, &filename)
-        else {
+        let Ok(mut plaid_module) = PlaidModule::configure_and_compile(
+            &filename,
+            &config.computation_amount,
+            &config.memory_page_count,
+            module_bytes,
+            &type_,
+        ) else {
             continue;
         };
-
-        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_count} pages] Log Type: [{type_}]");
-        for import in module.imports() {
-            info!("\tImport: {}", import.name());
-        }
 
         // Configure cache for module
         let cache = config.lru_cache_size.and_then(|size| {
@@ -205,16 +245,19 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             }
         });
 
-        let plaid_module = PlaidModule {
-            computation_limit,
-            page_limit: page_count,
-            secrets: byte_secrets.get(&type_).map(|x| x.clone()),
-            cache,
-            name: filename.clone(),
-            module,
-            engine,
-            persistent_response,
-        };
+        // Persistent response is available to be set per module. This allows it to persistently
+        // store the result of its run. It can use this during further runs, or it can be used
+        // as the target of GET request hooks.
+        let persistent_response = config
+            .persistent_response_size
+            .get(&filename)
+            .copied()
+            .map(PersistentResponse::new);
+
+        // Set optional fields on our new module
+        plaid_module.cache = cache;
+        plaid_module.persistent_response = persistent_response;
+        plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
 
         // Put it in an Arc because we're going to have multiple references to it
         let plaid_module = Arc::new(plaid_module);

@@ -233,7 +233,7 @@ pub async fn configure() -> Result<Configuration, ConfigurationError> {
     let config: Configuration = match toml::from_str(&config) {
         Ok(config) => config,
         Err(e) => {
-            error!("Encountered parsing error while reading configuration!. Error: {e}");
+            error!("Encountered parsing error while reading configuration with interpolated secrets!. Error: {e}");
             return Err(ConfigurationError::ParsingError);
         }
     };
