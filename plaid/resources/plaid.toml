@@ -19,7 +19,7 @@ lru_cache_size = 200
 
 [loading.secrets]
 [loading.secrets."testing"]
-"test_secret" = "modulesecret_test_secret"
+"test_secret" = "plaid-secret{test-secret}"
 
 [loading.log_type_overrides]
 

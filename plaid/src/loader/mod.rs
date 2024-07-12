@@ -113,7 +113,8 @@ impl PlaidModule {
     /// This function sets up the computation metering, configures the module tunables, and
     /// compiles the module using the provided bytecode and settings.
     ///
-    /// This function returns a PlaidModule with
+    /// This function returns a PlaidModule with `secrets`, `cache`, and `persistent_response` set to `None.`
+    /// __Ensure that you set these values if needed after calling this function__.
     fn configure_and_compile(
         filename: &str,
         computation_amount: &LimitAmount,
