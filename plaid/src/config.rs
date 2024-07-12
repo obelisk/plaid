@@ -121,6 +121,8 @@ pub struct Configuration {
     /// Set what modules will be loaded, what logging channels they're going to use
     /// and their computation and memory limits.
     pub loading: LoaderConfiguration,
+    /// Path to the file where secrets are stored.
+    pub secrets_file: String,
 }
 
 #[derive(Debug)]

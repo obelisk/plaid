@@ -1,16 +1,21 @@
+mod errors;
 mod limits;
-
-use limits::LimitingTunables;
+mod utils;
 
 use lru::LruCache;
 use serde::Deserialize;
-use wasmer::{sys::BaseTunables, Engine, NativeEngineExt, Pages, Target};
-use wasmer::{wasmparser::Operator, CompilerConfig, Cranelift, Module};
-
-use wasmer_middlewares::Metering;
+use serde_json::Map;
+use serde_json::Value;
+use utils::read_and_configure_secrets;
+use utils::{
+    configure_and_compile_module, get_module_computation_limit, get_module_page_count,
+    read_and_parse_modules,
+};
+use wasmer::Engine;
+use wasmer::Module;
 
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
 
@@ -33,7 +38,9 @@ pub struct Configuration {
     pub memory_page_count: LimitAmount,
     /// The size of the LRU cache for each module. Not setting it means LRUs are disabled
     pub lru_cache_size: Option<usize>,
-    /// The secrets that are available to modules
+    /// The secrets that are available to modules. No actual secrets should be included in this map.
+    /// Instead, the values here should be names of secrets whose values are present in
+    /// `secrets_file`. This makes it possible for to check in your Plaid config without exposing secrets.
     pub secrets: HashMap<String, HashMap<String, String>>,
     /// See persistent_response_size in PlaidModule for an explanation on how to use this
     pub persistent_response_size: HashMap<String, usize>,
@@ -132,58 +139,26 @@ impl PlaidModules {
     }
 }
 
-const CALL_COST: u64 = 10;
-
-pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
+pub fn load(config: Configuration, secrets: &Map<String, Value>) -> Result<PlaidModules, ()> {
     let module_paths = fs::read_dir(config.module_dir).unwrap();
 
     let mut modules = PlaidModules::default();
 
-    let cost_function = |operator: &Operator| -> u64 {
-        match operator {
-            Operator::Call { .. } => CALL_COST,
-            Operator::CallIndirect { .. } => CALL_COST,
-            Operator::ReturnCall { .. } => CALL_COST,
-            Operator::ReturnCallIndirect { .. } => CALL_COST,
-            _ => 1,
-        }
-    };
-
-    let byte_secrets: HashMap<String, HashMap<String, Vec<u8>>> = config
-        .secrets
-        .into_iter()
-        .map(|(key, value)| {
-            (
-                key,
-                value
-                    .into_iter()
-                    .map(|(inner_key, inner_value)| (inner_key, inner_value.as_bytes().to_vec()))
-                    .collect(),
-            )
-        })
-        .collect();
+    let byte_secrets = read_and_configure_secrets(secrets, config.secrets);
 
     for path in module_paths {
-        // Get the module file name and read in the bytes
-        let (filename, module_bytes) = if let Ok(path) = path {
-            // Path's can be weird so we just try to make it a UTF8 string,
-            // if it's not UTF8, we'll fail reading it and skip it.
-            let filename = path.file_name().to_string_lossy().to_string();
-
-            // Also skip any files that aren't wasm files
-            if !filename.ends_with(".wasm") {
+        let (filename, module_bytes) = match path {
+            Ok(path) => {
+                if let Ok(filename_and_bytes) = read_and_parse_modules(&path) {
+                    filename_and_bytes
+                } else {
+                    continue;
+                }
+            }
+            Err(e) => {
+                error!("Bad entry in modules directory - skipping. Error: {e}");
                 continue;
             }
-
-            // Read in the bytes of the module
-            let module_bytes = match std::fs::read(path.path()) {
-                Ok(b) => b,
-                _ => continue,
-            };
-
-            (filename, module_bytes)
-        } else {
-            continue;
         };
 
         // See if a type is defined in the configuration file, if not then we will grab the first part
@@ -204,72 +179,34 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             .copied()
             .map(PersistentResponse::new);
 
-        // Get the computation limit for the module by checking the following in order:
-        // Module Override
-        // Log Type amount
-        // Default amount
-        let computation_limit = match (
-            config
-                .computation_amount
-                .module_overrides
-                .get(&filename.to_string()),
-            config.computation_amount.log_type.get(&type_),
-            config.computation_amount.default,
-        ) {
-            (Some(amount), _, _) => *amount,
-            (None, Some(amount), _) => *amount,
-            (None, None, amount) => amount,
+        // Get the computation limit for the module
+        let computation_limit =
+            get_module_computation_limit(&config.computation_amount, &filename, &type_);
+
+        // Get the memory limit for the module
+        let page_count = get_module_page_count(&config.memory_page_count, &filename, &type_);
+
+        // Configure and compile module
+        let Ok((module, engine)) =
+            configure_and_compile_module(computation_limit, page_count, module_bytes, &filename)
+        else {
+            continue;
         };
-
-        // Get the memory limit for the module by checking the following in order:
-        // Module Override
-        // Log Type amount
-        // Default amount
-        let page_count = match (
-            config
-                .memory_page_count
-                .module_overrides
-                .get(&filename.to_string()),
-            config.memory_page_count.log_type.get(&type_),
-            config.memory_page_count.default,
-        ) {
-            (Some(amount), _, _) => *amount,
-            (None, Some(amount), _) => *amount,
-            (None, None, amount) => amount,
-        };
-
-        // Page count is at max 32 bits. Nothing should ever allocate that many pages
-        // but we're likely to hit this if someone spams the number key on their keyboard
-        // for "unlimited memory".
-        let page_count = if page_count > u32::MAX as u64 {
-            u32::MAX
-        } else {
-            page_count as u32
-        };
-
-        let metering = Arc::new(Metering::new(computation_limit, cost_function));
-        let mut compiler = Cranelift::default();
-        compiler.push_middleware(metering);
-
-        let base = BaseTunables::for_target(&Target::default());
-        let tunables = LimitingTunables::new(base, Pages(page_count));
-        let mut engine: Engine = compiler.into();
-        engine.set_tunables(tunables);
 
         info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_count} pages] Log Type: [{type_}]");
-
-        let cache = match config.lru_cache_size {
-            None | Some(0) => None,
-            Some(size) => Some(Arc::new(RwLock::new(LruCache::new(
-                NonZeroUsize::new(size).unwrap(),
-            )))),
-        };
-
-        let mut module = Module::new(&engine, module_bytes).unwrap();
-        module.set_name(&filename);
         for import in module.imports() {
             info!("\tImport: {}", import.name());
         }
+
+        // Configure cache for module
+        let cache = config.lru_cache_size.and_then(|size| {
+            if size == 0 {
+                None // No cache if provided size is 0
+            } else {
+                NonZeroUsize::new(size)
+                    .map(|non_zero_size| Arc::new(RwLock::new(LruCache::new(non_zero_size))))
+            }
+        });
 
         let plaid_module = PlaidModule {
             computation_limit,
