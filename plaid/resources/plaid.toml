@@ -19,7 +19,7 @@ lru_cache_size = 200
 
 [loading.secrets]
 [loading.secrets."testing"]
-"test_secret" = "This is a test secret and it's data that should be passed to a module"
+"test_secret" = "{plaid-secret{test-secret}}"
 
 [loading.log_type_overrides]
 
