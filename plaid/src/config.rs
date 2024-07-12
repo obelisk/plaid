@@ -2,6 +2,7 @@ use clap::{Arg, Command};
 
 use plaid_stl::messages::LogbacksAllowed;
 use serde::{de, Deserialize};
+use serde_json::Value;
 
 use std::collections::HashMap;
 
@@ -121,8 +122,6 @@ pub struct Configuration {
     /// Set what modules will be loaded, what logging channels they're going to use
     /// and their computation and memory limits.
     pub loading: LoaderConfiguration,
-    /// Path to the file where secrets are stored.
-    pub secrets_file: String,
 }
 
 #[derive(Debug)]
@@ -195,24 +194,46 @@ pub async fn configure() -> Result<Configuration, ConfigurationError> {
                 .help("Path to the configuration toml file")
                 .long("config")
                 .default_value("./plaid/resources/plaid.toml")
+        )
+        .arg(
+            Arg::new("secrets")
+                .help("Path to the secrets json file")
+                .long("secrets")
+                .default_value("./plaid/private-resources/secrets.json")
         ).get_matches();
 
     // Read the configuration file
-    let config = match tokio::fs::read(matches.get_one::<String>("config").unwrap()).await {
-        Ok(config) => config,
+    let mut config =
+        match tokio::fs::read_to_string(matches.get_one::<String>("config").unwrap()).await {
+            Ok(config) => config,
+            Err(e) => {
+                error!("Encountered file error when trying to read configuration!. Error: {e}");
+                return Err(ConfigurationError::FileError);
+            }
+        };
+
+    // Read the secrets file and parse into a serde object
+    let secrets = match tokio::fs::read(matches.get_one::<String>("secrets").unwrap()).await {
+        Ok(secret_bytes) => {
+            let secrets = serde_json::from_slice::<Value>(&secret_bytes).unwrap();
+            secrets.as_object().cloned().unwrap()
+        }
         Err(e) => {
-            println!("Encountered file error when trying to read configuration!");
-            println!("{}", e);
+            error!("Encountered file error when trying to read secrets file!. Error: {e}");
             return Err(ConfigurationError::FileError);
         }
     };
 
+    // Iterate over the secrets we just parsed and replace matching keys in the config
+    for (secret, value) in secrets {
+        config = config.replace(&secret, value.as_str().unwrap());
+    }
+
     // Parse the TOML into our configuration structures
-    let config: Configuration = match toml::from_slice(&config) {
+    let config: Configuration = match toml::from_str(&config) {
         Ok(config) => config,
         Err(e) => {
-            println!("Encountered parsing error while reading configuration!");
-            println!("{}", e);
+            error!("Encountered parsing error while reading configuration!. Error: {e}");
             return Err(ConfigurationError::ParsingError);
         }
     };

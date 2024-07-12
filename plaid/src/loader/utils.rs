@@ -2,7 +2,6 @@ use super::errors::Errors;
 use super::limits::LimitingTunables;
 use super::LimitAmount;
 
-use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fs::DirEntry;
 use std::sync::Arc;
@@ -132,7 +131,6 @@ pub fn configure_and_compile_module(
 /// This setup allows for configuration files to be checked in, referencing secret names
 /// that are mapped to actual secret values stored in the secrets file.
 pub fn read_and_configure_secrets(
-    secrets: &Map<String, Value>,
     secrets_configuration: HashMap<String, HashMap<String, String>>,
 ) -> HashMap<String, HashMap<String, Vec<u8>>> {
     secrets_configuration
@@ -142,18 +140,7 @@ pub fn read_and_configure_secrets(
                 key,
                 value
                     .into_iter()
-                    .map(|(inner_key, inner_value)| {
-                        (
-                            inner_key,
-                            secrets
-                                .get(&inner_value)
-                                .unwrap()
-                                .as_str()
-                                .unwrap()
-                                .as_bytes()
-                                .to_vec(),
-                        )
-                    })
+                    .map(|(inner_key, inner_value)| (inner_key, inner_value.as_bytes().to_vec()))
                     .collect(),
             )
         })

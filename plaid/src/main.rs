@@ -8,11 +8,10 @@ use data::Data;
 use executor::*;
 use plaid_stl::messages::LogSource;
 use reqwest::header::HeaderMap;
-use serde_json::Value;
 use storage::Storage;
 use tokio::{sync::RwLock, task::JoinSet};
 
-use std::{collections::HashMap, convert::Infallible, fs, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
 use crossbeam_channel::{bounded, TrySendError};
 use warp::{hyper::body::Bytes, path, Filter};
@@ -25,13 +24,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Reading configuration");
     let config = config::configure().await?;
     let (log_sender, log_receiver) = bounded(2048);
-
-    // Read secrets and parse into a serde_json Value. This will be used by the APIs module, the data module, 
-    // and the loader module to configure secrets
-    info!("Reading secrets file at {}", config.secrets_file);
-    let secret_bytes = fs::read(config.secrets_file).expect("Could not read from provided secrets");
-    let secrets = serde_json::from_slice::<Value>(&secret_bytes).expect("Invalid JSON in secrets file"); 
-    let secrets_map = secrets.as_object().expect("Invalid secrets file formatting");
 
     info!("Starting logging subsystem");
     let (els, _logging_handler) = Logger::start(config.logging);
@@ -68,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Loading all the modules");
     // Load all the modules that form our Nanoservices and Plaid rules
-    let modules = Arc::new(loader::load(config.loading, secrets_map).unwrap());
+    let modules = Arc::new(loader::load(config.loading).unwrap());
     let modules_by_name = Arc::new(modules.get_modules());
 
     info!(

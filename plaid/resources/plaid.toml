@@ -1,5 +1,4 @@
 execution_threads = 2
-secrets_file = "/plaid/private-resources/secrets.json"
 
 [storage.sled]
 path = "/tmp/sled"

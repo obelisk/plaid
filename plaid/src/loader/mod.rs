@@ -4,12 +4,9 @@ mod utils;
 
 use lru::LruCache;
 use serde::Deserialize;
-use serde_json::Map;
-use serde_json::Value;
-use utils::read_and_configure_secrets;
 use utils::{
     configure_and_compile_module, get_module_computation_limit, get_module_page_count,
-    read_and_parse_modules,
+    read_and_configure_secrets, read_and_parse_modules,
 };
 use wasmer::Engine;
 use wasmer::Module;
@@ -139,12 +136,12 @@ impl PlaidModules {
     }
 }
 
-pub fn load(config: Configuration, secrets: &Map<String, Value>) -> Result<PlaidModules, ()> {
+pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
     let module_paths = fs::read_dir(config.module_dir).unwrap();
 
     let mut modules = PlaidModules::default();
 
-    let byte_secrets = read_and_configure_secrets(secrets, config.secrets);
+    let byte_secrets = read_and_configure_secrets(config.secrets);
 
     for path in module_paths {
         let (filename, module_bytes) = match path {
