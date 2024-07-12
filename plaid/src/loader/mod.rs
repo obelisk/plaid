@@ -37,7 +37,7 @@ pub struct Configuration {
     pub lru_cache_size: Option<usize>,
     /// The secrets that are available to modules. No actual secrets should be included in this map.
     /// Instead, the values here should be names of secrets whose values are present in
-    /// `secrets_file`. This makes it possible for to check in your Plaid config without exposing secrets.
+    /// the secrets file. This makes it possible for to check in your Plaid config without exposing secrets.
     pub secrets: HashMap<String, HashMap<String, String>>,
     /// See persistent_response_size in PlaidModule for an explanation on how to use this
     pub persistent_response_size: HashMap<String, usize>,

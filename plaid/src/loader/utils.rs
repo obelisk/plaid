@@ -120,16 +120,7 @@ pub fn configure_and_compile_module(
     Ok((module, engine))
 }
 
-/// Reads and configures secrets for modules.
-///
-/// This function takes a `Map<String, Value>` representing the secrets read from a file,
-/// and a `HashMap<String, HashMap<String, String>>` representing the secrets configuration.
-/// The secrets configuration maps a user-defined secret name to the actual secret name in the read file.
-/// It returns a `HashMap<String, HashMap<String, Vec<u8>>>` where the secrets have been
-/// configured according to the provided configuration.
-///
-/// This setup allows for configuration files to be checked in, referencing secret names
-/// that are mapped to actual secret values stored in the secrets file.
+/// Configures secrets for modules.
 pub fn read_and_configure_secrets(
     secrets_configuration: HashMap<String, HashMap<String, String>>,
 ) -> HashMap<String, HashMap<String, Vec<u8>>> {
