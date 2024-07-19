@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Reading configuration");
     let config = config::configure().await?;
-    let (log_sender, log_receiver) = bounded(2048);
+    let (log_sender, log_receiver) = bounded(config.log_queue_size);
 
     info!("Starting logging subsystem");
     let (els, _logging_handler) = Logger::start(config.logging);

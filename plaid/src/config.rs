@@ -111,6 +111,8 @@ pub struct Configuration {
     /// Modules do not get more than one thread, this just means that modules can
     /// execute in parallel
     pub execution_threads: u8,
+    /// The maximum number of logs in the queue to be processed at once
+    pub log_queue_size: usize,
     /// Configuration for persistent data. This allows modules to store data between
     /// invocations
     pub storage: Option<StorageConfig>,
