@@ -111,6 +111,9 @@ pub struct Configuration {
     /// Modules do not get more than one thread, this just means that modules can
     /// execute in parallel
     pub execution_threads: u8,
+    /// The maximum number of logs in the queue to be processed at once
+    #[serde(default = "default_log_queue_size")]
+    pub log_queue_size: usize,
     /// Configuration for persistent data. This allows modules to store data between
     /// invocations
     pub storage: Option<StorageConfig>,
@@ -122,6 +125,11 @@ pub struct Configuration {
     /// Set what modules will be loaded, what logging channels they're going to use
     /// and their computation and memory limits.
     pub loading: LoaderConfiguration,
+}
+
+/// This function provides the default log queue size in the event that one isn't provided
+fn default_log_queue_size() -> usize {
+    2048
 }
 
 #[derive(Debug)]
