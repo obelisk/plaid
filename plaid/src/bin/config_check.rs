@@ -1,8 +1,8 @@
 use clap::{Arg, Command};
-use serde_json::Value;
-use sha3::{Digest, Sha3_256};
+use plaid::config::read_and_interpolate;
 
 fn main() {
+    env_logger::init();
     let matches = Command::new("Config Check")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Confirm that secrets interpolated config is what you expect it to be")
@@ -20,33 +20,8 @@ fn main() {
         )
         .get_matches();
 
-    // Read the configuration file
-    let mut config = std::fs::read_to_string(matches.get_one::<String>("config").unwrap())
-        .expect("Failed to read configuration file");
+    let config_path = matches.get_one::<String>("config").unwrap();
+    let secrets_path = matches.get_one::<String>("secrets").unwrap();
 
-    // Read the secrets file and parse into a serde object
-    let secrets = std::fs::read(matches.get_one::<String>("secrets").unwrap())
-        .expect("Failed to read secrets file");
-
-    let secret_map = serde_json::from_slice::<Value>(&secrets)
-        .unwrap()
-        .as_object()
-        .cloned()
-        .unwrap();
-
-    // Iterate over the secrets we just parsed and replace matching keys in the config
-    for (secret, value) in secret_map {
-        config = config.replace(&secret, value.as_str().unwrap());
-    }
-
-    let mut hasher = Sha3_256::new();
-    hasher.update(config.as_bytes());
-    let config_hash = hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{:02x}", byte))
-        .collect::<String>();
-
-    println!("---------- Plaid Config ----------\n{config}");
-    println!("---------- Configuration Hash ----------\n{config_hash}")
+    read_and_interpolate(config_path, secrets_path, true).expect("Invalid config!");
 }
