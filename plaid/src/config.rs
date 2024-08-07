@@ -193,7 +193,7 @@ where
         }
     })
 }
-pub async fn configure() -> Result<Configuration, ConfigurationError> {
+pub fn configure() -> Result<Configuration, ConfigurationError> {
     let matches = Command::new("Plaid - A sandboxed automation engine")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Mitchell Grenier <mitchell@confurious.io>")
