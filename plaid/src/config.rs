@@ -1,9 +1,9 @@
 use clap::{Arg, Command};
 
 use plaid_stl::messages::LogbacksAllowed;
+use ring::digest::{self, digest};
 use serde::{de, Deserialize};
 use serde_json::Value;
-
 use std::collections::HashMap;
 
 use super::apis::Apis;
@@ -192,7 +192,7 @@ where
         }
     })
 }
-pub async fn configure() -> Result<Configuration, ConfigurationError> {
+pub fn configure() -> Result<Configuration, ConfigurationError> {
     let matches = Command::new("Plaid - A sandboxed automation engine")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Mitchell Grenier <mitchell@confurious.io>")
@@ -210,18 +210,30 @@ pub async fn configure() -> Result<Configuration, ConfigurationError> {
                 .default_value("./plaid/private-resources/secrets.json")
         ).get_matches();
 
+    let config_path = matches.get_one::<String>("config").unwrap();
+    let secrets_path = matches.get_one::<String>("secrets").unwrap();
+
+    read_and_interpolate(config_path, secrets_path, false)
+}
+
+/// Reads a configuration file and a secrets file, interpolates the secrets into the configuration,
+/// and parses the result into a `Configuration` struct.
+pub fn read_and_interpolate(
+    config_path: &str,
+    secrets_path: &str,
+    show_config: bool,
+) -> Result<Configuration, ConfigurationError> {
     // Read the configuration file
-    let mut config =
-        match tokio::fs::read_to_string(matches.get_one::<String>("config").unwrap()).await {
-            Ok(config) => config,
-            Err(e) => {
-                error!("Encountered file error when trying to read configuration!. Error: {e}");
-                return Err(ConfigurationError::FileError);
-            }
-        };
+    let mut config = match std::fs::read_to_string(config_path) {
+        Ok(config) => config,
+        Err(e) => {
+            error!("Encountered file error when trying to read configuration!. Error: {e}");
+            return Err(ConfigurationError::FileError);
+        }
+    };
 
     // Read the secrets file and parse into a serde object
-    let secrets = match tokio::fs::read(matches.get_one::<String>("secrets").unwrap()).await {
+    let secrets = match std::fs::read(secrets_path) {
         Ok(secret_bytes) => {
             let secrets = serde_json::from_slice::<Value>(&secret_bytes).unwrap();
             secrets.as_object().cloned().unwrap()
@@ -235,6 +247,16 @@ pub async fn configure() -> Result<Configuration, ConfigurationError> {
     // Iterate over the secrets we just parsed and replace matching keys in the config
     for (secret, value) in secrets {
         config = config.replace(&secret, value.as_str().unwrap());
+    }
+
+    if show_config {
+        println!("---------- Plaid Config ----------\n{config}");
+        let config_hash = digest(&digest::SHA256, config.as_bytes())
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect::<String>();
+        println!("---------- Configuration Hash ----------\n{config_hash}")
     }
 
     // Parse the TOML into our configuration structures

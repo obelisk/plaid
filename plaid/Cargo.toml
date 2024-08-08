@@ -47,3 +47,11 @@ jsonwebtoken = { version = "9.2" }
 [[example]]
 name = "github-tailer"
 path = "examples/tailers/github.rs"
+
+[[bin]]
+name = "plaid"
+path = "src/bin/plaid.rs"
+
+[[bin]]
+name = "config_check"
+path = "src/bin/config_check.rs"

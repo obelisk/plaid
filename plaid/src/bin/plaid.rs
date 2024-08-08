@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Plaid is booting up, please standby...");
 
     info!("Reading configuration");
-    let config = config::configure().await?;
+    let config = config::configure()?;
     let (log_sender, log_receiver) = bounded(config.log_queue_size);
 
     info!("Starting logging subsystem");
