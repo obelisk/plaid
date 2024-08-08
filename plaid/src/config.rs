@@ -1,10 +1,9 @@
 use clap::{Arg, Command};
 
 use plaid_stl::messages::LogbacksAllowed;
+use ring::digest::{self, digest};
 use serde::{de, Deserialize};
 use serde_json::Value;
-use sha3::{Digest, Sha3_256};
-
 use std::collections::HashMap;
 
 use super::apis::Apis;
@@ -252,10 +251,8 @@ pub fn read_and_interpolate(
 
     if show_config {
         println!("---------- Plaid Config ----------\n{config}");
-        let mut hasher = Sha3_256::new();
-        hasher.update(config.as_bytes());
-        let config_hash = hasher
-            .finalize()
+        let config_hash = digest(&digest::SHA256, config.as_bytes())
+            .as_ref()
             .iter()
             .map(|byte| format!("{:02x}", byte))
             .collect::<String>();
