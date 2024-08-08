@@ -18,7 +18,8 @@ pub struct OktaConfig {
     /// Sets the number of results that are returned in the response
     /// If no value is provided here, we will default to 100.
     #[serde(deserialize_with = "parse_limit")]
-    limit: Option<u16>,
+    #[serde(default = "default_okta_limit")]
+    limit: u16,
     /// Number of milliseconds to wait in between calls to the Okta API.
     /// Okta enforces a rate limit of 50 calls/sec for the `/logs` endpoint.
     /// If no value is provided here, we will default to 1 milliseconds between calls
@@ -29,24 +30,20 @@ pub struct OktaConfig {
 }
 
 /// Custom parser for limit. Returns an error if a limit = 0 or limit > 1000 is given
-fn parse_limit<'de, D>(deserializer: D) -> Result<Option<u16>, D::Error>
+fn parse_limit<'de, D>(deserializer: D) -> Result<u16, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let limit = Option::<u16>::deserialize(deserializer)?;
+    let limit = u16::deserialize(deserializer)?;
 
-    if let Some(limit) = limit {
-        match limit {
-            1..=1000 => Ok(Some(limit)),
-            0 => Err(serde::de::Error::custom(
-                "Invalid limit value provided. Minimum limit is 1",
-            )),
-            _ => Err(serde::de::Error::custom(
-                "Invalid limit value provided. Maximum limit is 1000",
-            )),
-        }
-    } else {
-        Ok(None)
+    match limit {
+        1..=1000 => Ok(limit),
+        0 => Err(serde::de::Error::custom(
+            "Invalid limit value provided. Minimum limit is 1",
+        )),
+        _ => Err(serde::de::Error::custom(
+            "Invalid limit value provided. Maximum limit is 1000",
+        )),
     }
 }
 
@@ -55,6 +52,13 @@ where
 /// of `OktaConfig` in the event that no value is provided.
 fn default_sleep_milliseconds() -> u64 {
     1
+}
+
+/// This function provides the default limit for the number of system logs returned from Okta.
+/// It is used as the default value for deserialization of the `limit` field,
+/// of `OktaConfig` in the event that no value is provided.
+fn default_okta_limit() -> u16 {
+    100
 }
 
 pub struct Okta {
@@ -102,8 +106,7 @@ impl Okta {
 
             let address = format!(
                 "https://{}/api/v1/logs?sortOrder=DESCENDING&since={since}&limit={}",
-                self.config.domain,
-                self.config.limit.unwrap_or(100)
+                self.config.domain, self.config.limit
             );
 
             let response = self
