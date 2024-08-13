@@ -2,6 +2,8 @@ pub mod github;
 mod internal;
 mod interval;
 mod okta;
+mod websocket;
+
 use crate::{
     executor::Message,
     storage::{Storage, StorageError},
@@ -23,6 +25,7 @@ pub struct DataConfig {
     okta: Option<okta::OktaConfig>,
     internal: Option<internal::InternalConfig>,
     interval: Option<interval::IntervalConfig>,
+    websocket: Option<websocket::WebsocketDataGenerator>,
 }
 
 struct DataInternal {
@@ -34,6 +37,8 @@ struct DataInternal {
     internal: Option<internal::Internal>,
     /// Interval manages tracking and execution of jobs that are executed on a defined interval
     interval: Option<interval::Interval>,
+    /// Websocket manages the creation and maintenance of WebSockets that provide data to the executor
+    websocket: Option<websocket::WebsocketGenerator>,
 }
 
 pub struct Data {}
@@ -49,38 +54,44 @@ impl DataInternal {
         logger: Sender<Message>,
         storage: Option<Arc<Storage>>,
     ) -> Result<Self, DataError> {
-        let github = if let Some(gh) = config.github {
-            Some(github::Github::new(gh, logger.clone()))
-        } else {
-            None
-        };
+        let github = config
+            .github
+            .map(|gh| github::Github::new(gh, logger.clone()));
 
-        let okta = if let Some(okta) = config.okta {
-            Some(okta::Okta::new(okta, logger.clone()))
-        } else {
-            None
-        };
+        let okta = config
+            .okta
+            .map(|okta| okta::Okta::new(okta, logger.clone()));
 
-        let internal = if let Some(internal) = config.internal {
-            internal::Internal::new(internal, logger.clone(), storage.clone()).await
-        } else {
-            internal::Internal::new(
-                internal::InternalConfig::default(),
-                logger.clone(),
-                storage.clone(),
-            )
-            .await
+        let internal = match config.internal {
+            Some(internal) => {
+                internal::Internal::new(internal, logger.clone(), storage.clone()).await
+            }
+            None => {
+                internal::Internal::new(
+                    internal::InternalConfig::default(),
+                    logger.clone(),
+                    storage.clone(),
+                )
+                .await
+            }
         };
 
         let interval = config
             .interval
             .map(|config| interval::Interval::new(config, logger.clone()));
 
+        let websocket = if let Some(config) = config.websocket {
+            Some(websocket::WebsocketGenerator::new(config, logger.clone()).await)
+        } else {
+            None
+        };
+
         Ok(Self {
             github,
             okta,
             internal: Some(internal?),
             interval,
+            websocket,
         })
     }
 }
@@ -151,6 +162,13 @@ impl Data {
                 }
             });
         }
+
+        if let Some(websocket) = di.websocket {
+            handle.spawn(async move {
+                websocket.start().await;
+            });
+        }
+
         info!("Started Data collection tasks");
         Ok(internal_sender)
     }
