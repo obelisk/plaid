@@ -80,11 +80,9 @@ impl DataInternal {
             .interval
             .map(|config| interval::Interval::new(config, logger.clone()));
 
-        let websocket = if let Some(config) = config.websocket {
-            Some(websocket::WebsocketGenerator::new(config, logger.clone()).await)
-        } else {
-            None
-        };
+        let websocket = config
+            .websocket
+            .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone()));
 
         Ok(Self {
             github,

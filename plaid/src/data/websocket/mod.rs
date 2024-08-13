@@ -130,7 +130,7 @@ pub struct WebsocketGenerator {
 /// # Returns
 /// A new `WebsocketGenerator` instance.
 impl WebsocketGenerator {
-    pub async fn new(config: WebsocketDataGenerator, sender: Sender<Message>) -> Self {
+    pub fn new(config: WebsocketDataGenerator, sender: Sender<Message>) -> Self {
         let clients = config
             .websockets
             .into_iter()
