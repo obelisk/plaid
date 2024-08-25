@@ -1,6 +1,6 @@
 [package]
 name = "plaid"
-version = "0.13.4"
+version = "0.14.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -69,3 +69,7 @@ path = "src/bin/plaid.rs"
 [[bin]]
 name = "config_check"
 path = "src/bin/config_check.rs"
+
+[[bin]]
+name = "request_handler"
+path = "src/bin/request_handler.rs"
