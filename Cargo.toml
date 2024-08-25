@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["plaid", "plaid-stl"]
+members = ["plaid", "plaid-stl", "test_modules/time"]
 
 [profile.release]
 lto = true
