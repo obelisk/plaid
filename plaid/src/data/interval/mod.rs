@@ -50,7 +50,7 @@ struct IntervalJob {
     pub logbacks_allowed: LogbacksAllowed,
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 /// Scheduled jobs are stored in a heap and contain all required data to execute and reschedule jobs
 pub struct ScheduledJob {
     /// Timestamp that the job will be executed at
@@ -68,6 +68,14 @@ impl ScheduledJob {
             interval,
             message,
         }
+    }
+}
+
+impl std::cmp::Eq for ScheduledJob {}
+
+impl std::cmp::PartialEq for ScheduledJob {
+    fn eq(&self, other: &Self) -> bool {
+        self.execution_time == other.execution_time
     }
 }
 
@@ -165,12 +173,12 @@ impl Interval {
 
             // Send job to executor
             let job = self.job_heap.pop().unwrap();
-            self.sender.send(job.0.message.clone()).unwrap();
+            self.sender.send(job.0.message.create_duplicate()).unwrap();
 
             // Reschedule the job by adding it back to the heap with an updated execution time
             let new_message = ScheduledJob {
                 execution_time: job.0.interval + current_time,
-                message: job.0.message.clone(),
+                message: job.0.message.create_duplicate(),
                 interval: job.0.interval,
             };
 
