@@ -22,6 +22,7 @@ lru_cache_size = 200
 "test_secret" = "{plaid-secret{test-secret}}"
 
 [loading.log_type_overrides]
+"time.wasm" = "time"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -45,14 +46,14 @@ okta = 200
 
 [apis."general"]
 [apis."general".network.web_requests]
-# [apis."general"."network"."web_requests"."test_request"]
-# verb = "get"
-# uri = "http://localhost:8998/test_full_uri"
-# return_body = true
-# return_code = true
-# allowed_rules = ["testing_test.wasm"]
-# [apis."general"."network"."web_requests"."test_request"."headers"]
-# testheader = "Some data here"
+[apis."general"."network"."web_requests"."test-response"]
+verb = "post"
+uri = "http://localhost:8998/response"
+return_body = true
+return_code = true
+allowed_rules = ["time.wasm"]
+[apis."general"."network"."web_requests"."test-response"."headers"]
+testheader = "Some data here"
 
 # [apis."general"."network"."web_requests"."google_test"]
 # verb = "get"
@@ -151,8 +152,8 @@ secret_key = ""
 
 [webhooks."internal"]
 listen_address = "0.0.0.0:4554"
-[webhooks."internal".webhooks."AAAA"]
-log_type = "testingone"
+[webhooks."internal".webhooks."timetest"]
+log_type = "time"
 headers = []
 
 [webhooks."internal".webhooks."BBBB"]
