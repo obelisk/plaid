@@ -8,6 +8,7 @@ use crate::logging::{Logger, LoggingError};
 use crate::storage::Storage;
 
 use crossbeam_channel::Receiver;
+use tokio::sync::oneshot::Sender as OneShotSender;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Serialize};
@@ -19,13 +20,40 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// When a rule is used to generate a response to a GET request, this structure
+/// is what is passed from the executor to the async webhook runtime.
+#[derive(Serialize, Deserialize)]
+pub struct ResponseMessage {
+    /// Currently unused because there is no API to set this and how it should
+    /// treated by the higher level cache is still to be defined.
+    pub code: u16,
+    /// The data the rule intends to return in the serviced GET request.
+    pub body: String,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Message {
+    /// The message channel that this message is going to run on
     pub type_: String,
+    /// The data passed to the module
     pub data: Vec<u8>,
+    /// Any additional data that is provided as context to the module
+    /// This is usually either headers, or secrets
     pub accessory_data: HashMap<String, Vec<u8>>,
+    /// Where the message came from
     pub source: LogSource,
+    /// If this message is allowed to trigger additional messages to the same
+    /// or other message channels
     pub logbacks_allowed: LogbacksAllowed,
+    /// If a response is should be sent back to the source of the message
+    /// This is used in the GET request system to handle responses
+    #[serde(skip)]
+    pub response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
+    /// If this is some, the entire channel will not be run, just a specific
+    /// module. This is used in the GET system because only one rule can
+    /// be run to generate a response.
+    #[serde(skip)]
+    pub module: Option<Arc<PlaidModule>>,
 }
 
 impl Message {
@@ -41,11 +69,26 @@ impl Message {
             accessory_data: HashMap::new(),
             source,
             logbacks_allowed,
+            response_sender: None,
+            module: None,
+        }
+    }
+
+    /// Create a duplicate of the message that does
+    /// not have the response sender.
+    pub fn create_duplicate(&self) -> Self {
+        Self {
+            type_: self.type_.clone(),
+            data: self.data.clone(),
+            accessory_data: self.accessory_data.clone(),
+            source: self.source.clone(),
+            logbacks_allowed: self.logbacks_allowed.clone(),
+            response_sender: None,
+            module: None,
         }
     }
 }
 
-#[derive(Clone)]
 pub struct Env {
     // Name of the current module
     pub name: String,
@@ -69,9 +112,6 @@ pub struct Env {
 
 pub struct Executor {
     _handles: Vec<JoinHandle<Result<(), ExecutorError>>>,
-    api: Arc<Api>,
-    storage: Option<Arc<Storage>>,
-    els: Logger,
 }
 
 pub enum ExecutorError {
@@ -186,7 +226,7 @@ fn prepare_for_execution(
     let env = Env {
         name: plaid_module.name.clone(),
         cache: plaid_module.cache.clone(),
-        message: message.clone(),
+        message: message.create_duplicate(),
         api: api.clone(),
         storage: storage.clone(),
         external_logging_system: els.clone(),
@@ -263,12 +303,23 @@ fn update_persistent_response(
     plaid_module: &Arc<PlaidModule>,
     env: &FunctionEnv<Env>,
     mut store: &mut Store,
+    response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
 ) -> Result<(), ExecutorError> {
     match (
         env.as_mut(&mut store).response.clone(),
         &plaid_module.persistent_response,
     ) {
         (None, _) => {
+            // We need to check if there might be a tokio task serving a GET
+            // that is waiting on this response. If the rule doesn't give one, we
+            // need to ensure we send a None to wake up that task and complete it
+            if let Some(sender) = response_sender {
+                if let Err(_) = sender.send(None) {
+                    error!("[{}] was servicing a request that returned no response and failed to send!", plaid_module.name);
+                } else {
+                    error!("[{}] was servicing a request that returned no response!", plaid_module.name);
+                }
+            }
             // There was no response to save
             return Ok(());
         }
@@ -284,7 +335,12 @@ fn update_persistent_response(
             if response.len() <= pr.max_size {
                 match pr.data.write() {
                     Ok(mut data) => {
-                        *data = Some(response);
+                        *data = Some(response.clone());
+                        if let Some(sender) = response_sender {
+                            if let Err(_) = sender.send(Some(ResponseMessage{code: 200, body: response})) {
+                                error!("[{}] was servicing a request but sending the response failed!", plaid_module.name);
+                            }
+                        }
                         info!("{} updated its persistent response", plaid_module.name);
                         Ok(())
                     }
@@ -301,6 +357,118 @@ fn update_persistent_response(
     }
 }
 
+/// This runs a message through a module and will handle module level errors.
+///
+/// If there is a runtime level error then this function returns an error which
+/// will stop Plaid. This means that a module should NEVER be able to cause such
+/// an error. The only time this should return an error is if the runtime itself
+/// encounters a critical, unrecoverable error.
+fn process_message_with_module(
+    message: Message,
+    module: Arc<PlaidModule>,
+    api: Arc<Api>,
+    storage: Option<Arc<Storage>>,
+    els: Logger,
+) -> Result<(), ExecutorError> {
+    // For every module that operates on that log type
+    // Mark this rule as currently being processed by locking the mutex
+    // This lock will be dropped at the end of the iteration so we don't
+    // need to handle unlocking it
+    let _lock = match module.concurrency_unsafe {
+        Some(ref mutex) => match mutex.lock() {
+            Ok(guard) => Some(guard),
+            Err(p_err) => {
+                error!(
+                    "Lock was poisoned on [{}]. Clearing and continuing: {p_err}.",
+                    module.name
+                );
+                mutex.clear_poison();
+                mutex.lock().ok()
+            }
+        },
+        None => None,
+    };
+    // TODO @obelisk: This will quietly swallow locking errors on the persistent response
+    // This will eventually be caught if something tries to update the response but I don't
+    // know if that's good enough.
+    let persistent_response = module.get_persistent_response_data();
+    // Message needs to be cloned because of the logback budget
+    // which is separate for every rule running the same message.
+    let (mut store, instance, entrypoint, env) = match prepare_for_execution(
+        message.create_duplicate(),
+        module.clone(),
+        api.clone(),
+        storage.clone(),
+        els.clone(),
+        persistent_response,
+    ) {
+        Ok((store, instance, ep, env)) => (store, instance, ep, env),
+        Err(e) => {
+            els.log_module_error(
+                module.name.clone(),
+                format!("Failed to prepare for execution: {e}"),
+                message.data.clone(),
+            )?;
+            return Ok(());
+        }
+    };
+
+    let computation_limit = module.computation_limit;
+    // Call the entrypoint
+    let error = match entrypoint.call(&mut store) {
+        Ok(n) => {
+            if n != 0 {
+                Some(ModuleExecutionError::ModuleError(
+                    env.as_ref(&store)
+                        .execution_error_context
+                        .clone()
+                        .unwrap_or("None".to_string()),
+                ))
+            } else {
+                // This should always work because when computation is exhausted,
+                // we end up in the RuntimeError block.
+                if let MeteringPoints::Remaining(remaining) =
+                    get_remaining_points(&mut store, &instance)
+                {
+                    let computation_remaining_percentage =
+                        (remaining as f32 / computation_limit as f32) * 100.;
+                    let computation_used = 100. - computation_remaining_percentage;
+                    els.log_ts(
+                        format!("{}_computation_percentage_used", module.name),
+                        computation_used as i64,
+                    )?;
+                }
+                None
+            }
+        }
+        Err(e) => Some(determine_error(e, computation_limit, &instance, &mut store, &env)),
+    };
+
+    // If there was an error then log that it happened to the els
+    if let Some(error) = error {
+        els.log_module_error(
+            module.name.clone(),
+            format!("{error}"),
+            message.data.clone(),
+        )?;
+
+        // Stop processing this log and move on to the next one
+        return Ok(());
+    }
+
+    // Update the persistent response
+    if let Err(e) = update_persistent_response(&module, &env, &mut store, message.response_sender) {
+        els.log_module_error(
+            module.name.clone(),
+            format!("Failed to update persistent response: {e}"),
+            message.data.clone(),
+        )
+        .unwrap();
+    }
+
+    Ok(())
+}
+
 fn execution_loop(
     receiver: Receiver<Message>,
     modules: HashMap<String, Vec<Arc<PlaidModule>>>,
@@ -311,117 +479,40 @@ fn execution_loop(
     // Wait on our receiver for logs to come in
     while let Ok(message) = receiver.recv() {
         // Check that we know what modules to send this new log to
-        let execution_modules = match modules.get(&message.type_) {
-            None => {
+        match (&message.module, modules.get(&message.type_)) {
+            // If this message has a response sender, we only
+            // want to run it on that rule, not any defined logging
+            // channel.
+            (Some(ref module), _) => {
+                let module = module.clone();
+                process_message_with_module(
+                    message,
+                    module,
+                    api.clone(),
+                    storage.clone(),
+                    els.clone(),
+                )?;
+            }
+            (None, Some(modules)) => {
+                // For every module that operates on that log type
+                for module in modules {
+                    process_message_with_module(
+                        message.create_duplicate(),
+                        module.clone(),
+                        api.clone(),
+                        storage.clone(),
+                        els.clone(),
+                    )?;
+                }
+            }
+            (None, None) => {
                 warn!(
                     "Got logs of a type we have no modules for? Type was: {}",
                     message.type_
                 );
                 continue;
             }
-            Some(module) => module,
         };
-
-        // For every module that operates on that log type
-        for plaid_module in execution_modules {
-            // Mark this rule as currently being processed by locking the mutex
-            // This lock will be dropped at the end of the iteration so we don't
-            // need to handle unlocking it
-            let _lock = match plaid_module.concurrency_unsafe {
-                Some(ref mutex) => match mutex.lock() {
-                    Ok(guard) => Some(guard),
-                    Err(poisoned) => {
-                        error!(
-                                "Failed to acquire lock on [{}] due to poisoning. This log will be discarded. Error: {}.",
-                                plaid_module.name, poisoned
-                            );
-
-                        debug!("Clearing poison from the lock on [{}]", plaid_module.name);
-                        mutex.clear_poison();
-
-                        continue;
-                    }
-                },
-                None => None,
-            };
-
-            // TODO @obelisk: This will quietly swallow locking errors on the persistent response
-            // This will eventually be caught if something tries to update the response but I don't
-            // know if that's good enough.
-            let persistent_response = plaid_module.get_persistent_response_data();
-            // Message needs to be cloned because of the logback budget
-            // which is separate for every rule running the same message.
-            let (mut store, instance, entrypoint, env) = match prepare_for_execution(
-                message.clone(),
-                plaid_module.clone(),
-                api.clone(),
-                storage.clone(),
-                els.clone(),
-                persistent_response,
-            ) {
-                Ok((store, instance, ep, env)) => (store, instance, ep, env),
-                Err(e) => {
-                    els.log_module_error(
-                        plaid_module.name.clone(),
-                        format!("Failed to prepare for execution: {e}"),
-                        message.data.clone(),
-                    )?;
-                    continue;
-                }
-            };
-
-            let computation_limit = plaid_module.computation_limit;
-            // Call the entrypoint
-            let error = match entrypoint.call(&mut store) {
-                Ok(n) => {
-                    if n != 0 {
-                        Some(ModuleExecutionError::ModuleError(
-                            env.as_ref(&store)
-                                .execution_error_context
-                                .clone()
-                                .unwrap_or("None".to_string()),
-                        ))
-                    } else {
-                        // This should always work because when computation is exhausted,
-                        // we end up in the RuntimeError block.
-                        if let MeteringPoints::Remaining(remaining) =
-                            get_remaining_points(&mut store, &instance)
-                        {
-                            let computation_remaining_percentage =
-                                (remaining as f32 / computation_limit as f32) * 100.;
-                            let computation_used = 100. - computation_remaining_percentage;
-                            els.log_ts(
-                                format!("{}_computation_percentage_used", plaid_module.name),
-                                computation_used as i64,
-                            )?;
-                        }
-                        None
-                    }
-                }
-                Err(e) => Some(determine_error(
-                    e,
-                    computation_limit,
-                    &instance,
-                    &mut store,
-                    &env,
-                )),
-            };
-
-            // If there was an error then log that it happened to the els
-            if let Some(error) = error {
-                els.log_module_error(
-                    plaid_module.name.clone(),
-                    format!("{error}"),
-                    message.data.clone(),
-                )?;
-
-                // Stop processing this log and move on to the next one
-                continue;
-            }
-
-            // Update the persistent response
-            update_persistent_response(&plaid_module, &env, &mut store)?;
-        }
     }
     Err(ExecutorError::IncomingLogError)
 }
@@ -470,77 +561,6 @@ impl Executor {
             }));
         }
 
-        Self {
-            _handles,
-            api,
-            storage,
-            els,
-        }
-    }
-
-    /// For executing a module immediately and getting the response back from it
-    pub fn immediate_execute(
-        &self,
-        message: Message,
-        plaid_module: Arc<PlaidModule>,
-    ) -> Result<Option<String>, ExecutorError> {
-        let computation_limit = plaid_module.computation_limit;
-        let name = plaid_module.name.clone();
-
-        let persistent_response = plaid_module
-            .persistent_response
-            .as_ref()
-            .map(|pr| pr.get_data().ok())
-            .flatten()
-            .flatten();
-
-        let (mut store, instance, entrypoint, env) = prepare_for_execution(
-            message,
-            plaid_module.clone(),
-            self.api.clone(),
-            self.storage.clone(),
-            self.els.clone(),
-            persistent_response,
-        )?;
-
-        match entrypoint.call(&mut store) {
-            Ok(n) => {
-                if n != 0 {
-                    Err(ExecutorError::ModuleExecutionError(
-                        ModuleExecutionError::ModuleError(
-                            env.as_ref(&store)
-                                .execution_error_context
-                                .clone()
-                                .unwrap_or("None".to_string()),
-                        ),
-                    ))
-                } else {
-                    // This should always work because when computation is exhausted,
-                    // we end up in the RuntimeError block.
-                    if let MeteringPoints::Remaining(remaining) =
-                        get_remaining_points(&mut store, &instance)
-                    {
-                        let computation_remaining_percentage =
-                            (remaining as f32 / computation_limit as f32) * 100.;
-                        let computation_used = 100. - computation_remaining_percentage;
-                        self.els.log_ts(
-                            format!("{}_immediate_computation_percentage_used", name),
-                            computation_used as i64,
-                        )?;
-                    }
-                    update_persistent_response(&plaid_module, &env, &mut store)?;
-
-                    // Return the optional response
-                    Ok(env.as_mut(&mut store).response.clone())
-                }
-            }
-            Err(e) => Err(ExecutorError::ModuleExecutionError(determine_error(
-                e,
-                computation_limit,
-                &instance,
-                &mut store,
-                &env,
-            ))),
-        }
+        Self { _handles }
     }
 }

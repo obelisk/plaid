@@ -1,0 +1,39 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches:  "**"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ubuntu-integration-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Get Rust Nightly
+      run: rustup toolchain install nightly
+
+    - name: Use Rust Nightly
+      run: rustup default nightly
+
+    - name: Get Wasm32
+      run: rustup target add wasm32-unknown-unknown
+
+    - uses: actions/checkout@v4
+
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Run Integration Tests
+      run: ./testing/integration.sh
