@@ -552,7 +552,7 @@ pub fn fetch_random_bytes(
         }
     };
 
-    let bytes = match api.fetch_random_bytes(data_buffer_len) {
+    let bytes: Vec<u8> = match api.fetch_random_bytes(data_buffer_len) {
         Ok(b) => b,
         Err(e) => {
             error!("Error fetching random bytes: {:?}", e);
