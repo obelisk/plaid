@@ -18,6 +18,7 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
 };
 
+/// Represents errors that a WebSocket data generator can encounter
 #[derive(Debug)]
 enum Errors {
     SocketCreationFailure,
