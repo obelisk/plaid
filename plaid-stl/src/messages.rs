@@ -5,7 +5,7 @@ pub enum Generator {
     Github,
     Okta,
     Interval(String),
-    Websocket(String),
+    WebSocketExternal(String),
 }
 
 impl std::fmt::Display for Generator {
@@ -14,7 +14,7 @@ impl std::fmt::Display for Generator {
             Generator::Github => write!(f, "github"),
             Generator::Okta => write!(f, "okta"),
             Generator::Interval(job) => write!(f, "interval/{job}"),
-            Generator::Websocket(ws) => write!(f, "websocket/{ws}"),
+            Generator::WebSocketExternal(ws) => write!(f, "websocket/{ws}"),
         }
     }
 }

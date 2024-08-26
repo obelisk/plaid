@@ -298,7 +298,7 @@ impl WebSocketClient {
     ) -> JoinHandle<()> {
         let name = self.name.clone();
         let log_type = self.configuration.log_type.clone();
-        let log_source = LogSource::Generator(Generator::Websocket(name.clone()));
+        let log_source = LogSource::Generator(Generator::WebSocketExternal(name.clone()));
         let logbacks_allowed = self.configuration.logbacks_allowed.clone();
 
         tokio::spawn(async move {
