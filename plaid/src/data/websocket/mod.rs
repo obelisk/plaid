@@ -24,8 +24,10 @@ enum Errors {
     SocketCreationFailure,
 }
 
+/// Configuration of all WebSocket data generators.
 #[derive(Deserialize)]
-pub struct WebsocketDataGenerator {
+pub struct WebSocketDataGenerator {
+    /// A map of WebSocket configurations, identified by its name.
     websockets: HashMap<String, WebSocket>,
 }
 
@@ -171,7 +173,7 @@ pub struct WebsocketGenerator {
 /// # Returns
 /// A new `WebsocketGenerator` instance.
 impl WebsocketGenerator {
-    pub fn new(config: WebsocketDataGenerator, sender: Sender<Message>, logger: Logger) -> Self {
+    pub fn new(config: WebSocketDataGenerator, sender: Sender<Message>, logger: Logger) -> Self {
         let clients = config
             .websockets
             .into_iter()

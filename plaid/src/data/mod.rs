@@ -26,7 +26,7 @@ pub struct DataConfig {
     okta: Option<okta::OktaConfig>,
     internal: Option<internal::InternalConfig>,
     interval: Option<interval::IntervalConfig>,
-    websocket: Option<websocket::WebsocketDataGenerator>,
+    websocket: Option<websocket::WebSocketDataGenerator>,
 }
 
 struct DataInternal {
