@@ -167,7 +167,7 @@ impl Data {
             });
         }
 
-        info!("Started Data collection tasks");
+        info!("Started Data Generators");
         Ok(internal_sender)
     }
 }
