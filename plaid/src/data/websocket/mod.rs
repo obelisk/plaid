@@ -49,20 +49,22 @@ pub struct Websocket {
     logbacks_allowed: LogbacksAllowed,
     /// The minimum amount of time (in milliseconds) to wait before retrying a connection to a WebSocket
     #[serde(default = "min_retry_duration")]
-    min_retry_duration: u64,
+    #[serde(deserialize_with = "parse_duration")]
+    min_retry_duration: Duration,
     /// The maximum amount of time (in milliseconds) to wait before retrying a connection to a WebSocket
     #[serde(default = "max_retry_duration")]
-    max_retry_duration: u64,
+    #[serde(deserialize_with = "parse_duration")]
+    max_retry_duration: Duration,
 }
 
 /// The default value for `min_retry_duration` if none is provided in the configuration.
-fn min_retry_duration() -> u64 {
-    100
+fn min_retry_duration() -> Duration {
+    Duration::from_millis(100)
 }
 
 /// The default value for `max_retry_duration` if none is provided in the configuration.
-fn max_retry_duration() -> u64 {
-    60000
+fn max_retry_duration() -> Duration {
+    Duration::from_millis(60000)
 }
 
 /// Custom parser for URI. Returns an error if an invalid URI is provided
@@ -108,6 +110,17 @@ where
     } else {
         Ok(None)
     }
+}
+
+/// Custom parser to convert user provided duration (in milliseconds) to a `Duration`.
+/// Returns an error if deserialization to `u64` fails.
+fn parse_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let duration: u64 = u64::deserialize(deserializer)?;
+
+    Ok(Duration::from_millis(duration))
 }
 
 /// A generator that manages multiple WebSocket clients for data generation.
@@ -184,8 +197,8 @@ impl WebSocketClient {
     fn new(configuration: Websocket, sender: Sender<Message>, name: String) -> Self {
         let uri_selector = UriSelector::new(
             configuration.uris.clone(),
-            Duration::from_millis(configuration.min_retry_duration),
-            Duration::from_millis(configuration.max_retry_duration),
+            configuration.min_retry_duration,
+            configuration.max_retry_duration,
         );
 
         Self {
