@@ -32,8 +32,10 @@ pub struct WebsocketDataGenerator {
 /// Represents the configuration for a WebSocket connection.
 #[derive(Deserialize)]
 pub struct WebSocket {
-    /// The URI(s) of the WebSocket endpoint. The config allows multiple URIs in the event that one fails,
-    /// a new one can be used in its place.
+    /// A map of URIs for the WebSocket endpoint(s). The configuration supports multiple URIs
+    /// to allow for failover scenarios. If a connection fails, the system implements exponential
+    /// backoff, selecting the URI whose retry period has elapsed. If none are available, the URI
+    /// with the shortest remaining retry time is chosen.
     #[serde(deserialize_with = "parse_uris")]
     uris: HashMap<String, Uri>,
     /// A string indicating the type of log associated with the WebSocket.
