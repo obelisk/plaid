@@ -26,24 +26,23 @@ enum Errors {
 
 #[derive(Deserialize)]
 pub struct WebsocketDataGenerator {
-    websockets: HashMap<String, Websocket>,
+    websockets: HashMap<String, WebSocket>,
 }
 
+/// Represents the configuration for a WebSocket connection.
 #[derive(Deserialize)]
-pub struct Websocket {
+pub struct WebSocket {
     /// The URI(s) of the WebSocket endpoint. The config allows multiple URIs in the event that one fails,
     /// a new one can be used in its place.
     #[serde(deserialize_with = "parse_uris")]
     uris: HashMap<String, Uri>,
     /// A string indicating the type of log associated with the WebSocket.
     log_type: String,
-    /// The message to be sent over the WebSocket connection.
-    message: Option<String>,
+    /// An optional configuration for the message to be sent over the WebSocket connection.
+    message_config: Option<SocketMessage>,
     /// An optional field containing a map of headers to be included in the WebSocket request.
     #[serde(deserialize_with = "parse_headers")]
     headers: Option<HeaderMap>,
-    /// Time (in milliseconds) between sending new messages to the receiving end
-    sleep_duration: u64,
     /// The number of Logbacks this generator is allowed to trigger
     #[serde(default)]
     logbacks_allowed: LogbacksAllowed,
@@ -55,6 +54,18 @@ pub struct Websocket {
     #[serde(default = "max_retry_duration")]
     #[serde(deserialize_with = "parse_duration")]
     max_retry_duration: Duration,
+}
+
+/// Represents the configuration of a message to be sent over a WebSocket connection.
+#[derive(Deserialize)]
+struct SocketMessage {
+    /// The message content to be sent over the WebSocket.
+    /// This could be a command, heartbeat, or any other data that needs to be transmitted to the server.
+    message: String,
+    /// The duration (in milliseconds) to wait before sending the next message over the WebSocket connection.
+    /// This defines the frequency of message dispatches. Typically, you might send periodic messages
+    /// to keep the connection alive, monitor connection health, or transmit data at regular intervals.
+    sleep_duration: u64,
 }
 
 /// The default value for `min_retry_duration` if none is provided in the configuration.
@@ -198,7 +209,7 @@ impl WebsocketGenerator {
 /// Represents a WebSocket client responsible for generating and sending logs.
 struct WebSocketClient {
     /// The configuration of the client
-    configuration: Websocket,
+    configuration: WebSocket,
     /// The sending channel to send logs to the executor.
     sender: Sender<Message>,
     /// The name of the WebSocket as defined in the configuration.
@@ -210,7 +221,7 @@ struct WebSocketClient {
 impl WebSocketClient {
     /// Establishes a WebSocket connection to the given URI and initializes the struct
     /// with the provided parameters.
-    fn new(configuration: Websocket, sender: Sender<Message>, name: String) -> Self {
+    fn new(configuration: WebSocket, sender: Sender<Message>, name: String) -> Self {
         let uri_selector = UriSelector::new(
             configuration.uris.clone(),
             configuration.min_retry_duration,
@@ -289,9 +300,9 @@ impl WebSocketClient {
         uri: Uri,
         uri_name: String,
     ) -> Option<JoinHandle<()>> {
-        if let Some(message) = &self.configuration.message {
-            let socket_msg = message.clone();
-            let sleep_duration = self.configuration.sleep_duration;
+        if let Some(message_config) = &self.configuration.message_config {
+            let socket_msg = message_config.message.clone();
+            let sleep_duration = message_config.sleep_duration;
 
             Some(tokio::spawn(async move {
                 loop {
