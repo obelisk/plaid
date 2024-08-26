@@ -1,0 +1,16 @@
+cargo-features = ["per-package-target"]
+
+[package]
+name = "persistent_response"
+description = "Test rule that tests all the persistent response functionality"
+version = "0.1.0"
+edition = "2021"
+forced-target = "wasm32-unknown-unknown"
+
+[dependencies]
+plaid_stl = { path = "../../plaid-stl" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+crate-type = ["cdylib"]

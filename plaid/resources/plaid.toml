@@ -16,6 +16,7 @@ path = "/tmp/sled"
 module_dir = "modules"
 lru_cache_size = 200
 [loading.persistent_response_size]
+"persistent_response.wasm" = 1024
 
 [loading.secrets]
 [loading.secrets."testing"]
@@ -156,18 +157,14 @@ listen_address = "0.0.0.0:4554"
 log_type = "time"
 headers = []
 
-[webhooks."internal".webhooks."BBBB"]
-log_type = "testrules"
-headers = ["notarealheader"]
-
-[webhooks."internal".webhooks."FFFF"]
-log_type = "testing"
+[webhooks."internal".webhooks."persistentresponsetest"]
+log_type = "prtest"
 logbacks_allowed = "Unlimited"
 
 headers = ["x-forwarded-for"]
-[webhooks."internal".webhooks."FFFF".get_mode]
-response_mode = "rule:testing_test.wasm"
-[webhooks."internal".webhooks."FFFF".get_mode.caching_mode]
+[webhooks."internal".webhooks."persistentresponsetest".get_mode]
+response_mode = "rule:persistent_response.wasm"
+[webhooks."internal".webhooks."persistentresponsetest".get_mode.caching_mode]
 type = "None"
 
 [webhooks."internal".webhooks."FFFFA"]

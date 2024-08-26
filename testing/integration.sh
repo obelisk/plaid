@@ -3,8 +3,12 @@
 # Build all of the Plaid workspace
 cargo build --all
 
+# Copy all the test modules in for loading
+mkdir -p modules
+cp -r target/wasm32-unknown-unknown/debug/*.wasm modules/
+
 # Run Plaid and wait for it to finish starting
-RUST_LOG=debug cargo run --bin=plaid -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
+RUST_LOG=plaid=debug cargo run --bin=plaid -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
 sleep 10
 
