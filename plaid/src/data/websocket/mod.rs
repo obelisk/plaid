@@ -77,7 +77,18 @@ where
     let uris = uris_raw
         .iter()
         .filter_map(|uri| match Uri::from_str(uri) {
-            Ok(valid_uri) => Some(valid_uri),
+            Ok(valid_uri) => {
+                if let Some(scheme) = valid_uri.scheme() {
+                    if scheme != "wss" {
+                        warn!(
+                            "Insecure protocol detected: [{}] for URI: [{}]. Consider using 'wss' if possible.",
+                            scheme, uri
+                        );
+                    }
+                }
+
+                Some(valid_uri)
+            },
             Err(e) => {
                 error!("Invalid URI provided: {}. Error: {}", uri, e);
                 None
