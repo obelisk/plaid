@@ -180,6 +180,7 @@ impl WebsocketGenerator {
         );
 
         for mut client in self.clients {
+            info!("Starting [{}]", client.name);
             let logger = self.logger.clone();
             tokio::spawn(async move {
                 loop {
