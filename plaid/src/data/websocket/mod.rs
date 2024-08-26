@@ -1,6 +1,6 @@
 mod selector;
 
-use crate::executor::Message;
+use crate::{executor::Message, logging::Logger};
 use crossbeam_channel::Sender;
 use futures_util::{
     stream::{SplitSink, SplitStream},
@@ -34,7 +34,7 @@ pub struct Websocket {
     /// The URI(s) of the WebSocket endpoint. The config allows multiple URIs in the event that one fails,
     /// a new one can be used in its place.
     #[serde(deserialize_with = "parse_uris")]
-    uris: Vec<Uri>,
+    uris: HashMap<String, Uri>,
     /// A string indicating the type of log associated with the WebSocket.
     log_type: String,
     /// The message to be sent over the WebSocket connection.
@@ -68,33 +68,32 @@ fn max_retry_duration() -> Duration {
 }
 
 /// Custom parser for URI. Returns an error if an invalid URI is provided
-fn parse_uris<'de, D>(deserializer: D) -> Result<Vec<Uri>, D::Error>
+fn parse_uris<'de, D>(deserializer: D) -> Result<HashMap<String, Uri>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let uris_raw = <Vec<String>>::deserialize(deserializer)?;
+    let uris_raw = <HashMap<String, String>>::deserialize(deserializer)?;
 
     let uris = uris_raw
-        .iter()
-        .filter_map(|uri| match Uri::from_str(uri) {
+        .into_iter()
+        .filter_map(|(name, uri)| match Uri::from_str(&uri) {
             Ok(valid_uri) => {
                 if let Some(scheme) = valid_uri.scheme() {
                     if scheme != "wss" {
                         warn!(
-                            "Insecure protocol detected: [{}] for URI: [{}]. Consider using 'wss' if possible.",
-                            scheme, uri
+                            "Insecure protocol detected: [{scheme}] for URI: [{name}]. Consider using 'wss' if possible.",
                         );
                     }
                 }
 
-                Some(valid_uri)
+                Some((name, valid_uri))
             },
             Err(e) => {
                 error!("Invalid URI provided: {}. Error: {}", uri, e);
                 None
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<HashMap<String, Uri>>();
 
     if uris.is_empty() {
         Err(serde::de::Error::custom(&format!("No valid URIs provided")))
@@ -139,7 +138,11 @@ where
 /// The `WebsocketGenerator` struct holds a collection of `WebSocketClient` instances and provides
 /// methods to initialize and start these clients.
 pub struct WebsocketGenerator {
+    /// A list of configured data generators that will fetch data from sockets and forward to rules.
     clients: Vec<WebSocketClient>,
+    /// Logs unexpected socket drops using Plaid's external logging system.
+    /// This data is sent to Splunk and other configured sources to help identify consistently unhealthy sockets.
+    logger: Logger,
 }
 
 /// Creates a new `WebsocketGenerator` instance with the specified configuration and message sender.
@@ -155,14 +158,14 @@ pub struct WebsocketGenerator {
 /// # Returns
 /// A new `WebsocketGenerator` instance.
 impl WebsocketGenerator {
-    pub fn new(config: WebsocketDataGenerator, sender: Sender<Message>) -> Self {
+    pub fn new(config: WebsocketDataGenerator, sender: Sender<Message>, logger: Logger) -> Self {
         let clients = config
             .websockets
             .into_iter()
             .map(|(name, config)| WebSocketClient::new(config, sender.clone(), name))
             .collect();
 
-        Self { clients }
+        Self { clients, logger }
     }
 
     /// Starts all WebSocket clients managed by this generator.
@@ -177,11 +180,12 @@ impl WebsocketGenerator {
         );
 
         for mut client in self.clients {
+            let logger = self.logger.clone();
             tokio::spawn(async move {
                 loop {
                     // This will only return if an error occurred - indicating that we need to reopen the connection with a new URI
-                    client.start().await;
-                    error!("Socket [{}] closed. Attempting to restart...", client.name);
+                    let socket_name = client.start().await;
+                    logger.log_websocket_dropped(socket_name).unwrap();
 
                     client.uri_selector.mark_failed();
                 }
@@ -237,8 +241,8 @@ impl WebSocketClient {
     /// - The WebSocket is split into write and read halves.
     /// - Separate asynchronous tasks are spawned to handle writing to and reading from the WebSocket.
     /// - The function waits for both tasks to complete, handling any unexpected terminations.
-    async fn start(&mut self) {
-        let uri = self.uri_selector.next_uri();
+    async fn start(&mut self) -> String {
+        let (uri_name, uri) = self.uri_selector.next_uri();
 
         if let Ok(socket) = establish_connection(&uri, &self.configuration.headers).await {
             // Mark the WebSocket as healthy again
@@ -246,13 +250,18 @@ impl WebSocketClient {
 
             let (write, read) = socket.split();
 
-            let write_handle = self.spawn_write_task(write, uri.clone()).await;
-            let read_handle = self
-                .spawn_read_task(read, self.sender.clone(), uri.clone())
+            let write_handle = self
+                .spawn_write_task(write, uri.clone(), uri_name.clone())
                 .await;
 
-            self.await_tasks(write_handle, read_handle).await;
+            let read_handle = self
+                .spawn_read_task(read, self.sender.clone(), uri.clone(), uri_name.clone())
+                .await;
+
+            self.await_tasks(write_handle, read_handle, &uri_name).await;
         }
+
+        uri_name
     }
 
     /// Spawns a task to periodically send a predefined message to the WebSocket.
@@ -277,16 +286,16 @@ impl WebSocketClient {
         &self,
         mut write: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WSMessage>,
         uri: Uri,
+        uri_name: String,
     ) -> Option<JoinHandle<()>> {
         if let Some(message) = &self.configuration.message {
-            let name = self.name.clone();
             let socket_msg = message.clone();
             let sleep_duration = self.configuration.sleep_duration;
 
             Some(tokio::spawn(async move {
                 loop {
                     if let Err(e) = write.send(WSMessage::Text(socket_msg.clone())).await {
-                        error!("Failed to send message to WS: [{name}] at [{uri}]. Error: {e}");
+                        error!("Failed to send message to WS: [{uri_name}] at [{uri}]. Error: {e}",);
                         return;
                     }
                     tokio::time::sleep(Duration::from_millis(sleep_duration)).await;
@@ -320,10 +329,11 @@ impl WebSocketClient {
         mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
         sender: Sender<Message>,
         uri: Uri,
+        uri_name: String,
     ) -> JoinHandle<()> {
-        let name = self.name.clone();
+        let generator_name = self.name.clone();
         let log_type = self.configuration.log_type.clone();
-        let log_source = LogSource::Generator(Generator::WebSocketExternal(name.clone()));
+        let log_source = LogSource::Generator(Generator::WebSocketExternal(generator_name.clone()));
         let logbacks_allowed = self.configuration.logbacks_allowed.clone();
 
         tokio::spawn(async move {
@@ -342,7 +352,9 @@ impl WebSocketClient {
                         }
                     }
                     Err(e) => {
-                        error!("Failed to read from WebSocket: [{name}] at [{uri}]. Error: {e}");
+                        error!(
+                            "Failed to read from WebSocket: [{uri_name}] at [{uri}]. Error: {e}"
+                        );
                         return;
                     }
                 }
@@ -365,22 +377,27 @@ impl WebSocketClient {
     /// - If both write and read tasks are provided, it waits for both tasks to complete.
     /// - If only the read task is provided, it waits for the read task to complete.
     /// - Logs an error message if either task finishes unexpectedly.
-    async fn await_tasks(&self, write_handle: Option<JoinHandle<()>>, read_handle: JoinHandle<()>) {
+    async fn await_tasks(
+        &self,
+        write_handle: Option<JoinHandle<()>>,
+        read_handle: JoinHandle<()>,
+        uri_name: &str,
+    ) {
         match write_handle {
             Some(write_handle) => {
                 tokio::select! {
                     _ = write_handle => {
-                        error!("Write task for WebSocket: [{}] finished unexpectedly", &self.name);
+                        error!("Write task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
                     },
                     _ = read_handle => {
-                        error!("Read task for WebSocket: [{}] finished unexpectedly", &self.name);
+                        error!("Write task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
                     },
                 }
             }
             None => {
                 tokio::select! {
                     _ = read_handle => {
-                        error!("Read task for WebSocket: [{}] finished unexpectedly", &self.name);
+                        error!("Write task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
                     },
                 }
             }

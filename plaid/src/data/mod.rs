@@ -6,6 +6,7 @@ mod websocket;
 
 use crate::{
     executor::Message,
+    logging::Logger,
     storage::{Storage, StorageError},
 };
 
@@ -53,6 +54,7 @@ impl DataInternal {
         config: DataConfig,
         logger: Sender<Message>,
         storage: Option<Arc<Storage>>,
+        els: Logger,
     ) -> Result<Self, DataError> {
         let github = config
             .github
@@ -82,7 +84,7 @@ impl DataInternal {
 
         let websocket = config
             .websocket
-            .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone()));
+            .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
         Ok(Self {
             github,
@@ -99,8 +101,9 @@ impl Data {
         config: DataConfig,
         sender: Sender<Message>,
         storage: Option<Arc<Storage>>,
+        els: Logger,
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
-        let di = DataInternal::new(config, sender, storage).await?;
+        let di = DataInternal::new(config, sender, storage, els).await?;
         let handle = tokio::runtime::Handle::current();
 
         // Start the Github Audit task if there is one

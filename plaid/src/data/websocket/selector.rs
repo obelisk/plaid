@@ -1,5 +1,8 @@
 use http::Uri;
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 /// Represents a single URI entry with backoff duration and next attempt time.
 ///
@@ -8,6 +11,7 @@ use std::time::{Duration, Instant};
 /// should be made.
 #[derive(Debug)]
 struct UriEntry {
+    name: String,
     /// The URI to connect to.
     uri: Uri,
     /// The duration to wait before retrying a connection.
@@ -44,12 +48,17 @@ impl UriSelector {
     /// # Returns
     ///
     /// A `UriSelector` instance with the given URIs and retry durations.
-    pub fn new(uris: Vec<Uri>, initial_retry_after: Duration, max_retry_after: Duration) -> Self {
+    pub fn new(
+        uris: HashMap<String, Uri>,
+        initial_retry_after: Duration,
+        max_retry_after: Duration,
+    ) -> Self {
         let now = Instant::now();
         UriSelector {
             uris: uris
                 .into_iter()
-                .map(|uri| UriEntry {
+                .map(|(name, uri)| UriEntry {
+                    name,
                     uri,
                     backoff_duration: initial_retry_after,
                     next_attempt: now,
@@ -64,16 +73,17 @@ impl UriSelector {
     /// Selects the next URI to use, prioritizing URIs with the shortest backoff duration.
     ///
     /// This function sorts the URIs by their next attempt time,
-    /// and returns the URI with the shortest backoff duration that is ready for the next attempt.
+    /// and returns a tuple containing the name and URI of the entry with the shortest backoff duration that is ready for the next attempt.
+    /// If no URIs are ready, it selects and returns the name and URI of the entry with the earliest next attempt time.
     ///
     /// # Returns
     ///
-    /// The `Uri` of the next URI to use.
+    /// A tuple `(String, Uri)` where the `String` is the name of the URI and the `Uri` is the next URI to use.
     ///
     /// # Panics
     ///
     /// Panics if the URI list is empty, although in practice this should never be possible.
-    pub fn next_uri(&mut self) -> Uri {
+    pub fn next_uri(&mut self) -> (String, Uri) {
         // Sort URIs by next attempt time
         self.uris.sort_by_key(|entry| entry.next_attempt);
 
@@ -82,17 +92,14 @@ impl UriSelector {
         for (index, entry) in self.uris.iter().enumerate() {
             if now >= entry.next_attempt {
                 self.current_index = index;
-                return entry.uri.clone();
+                return (entry.name.clone(), entry.uri.clone());
             }
         }
 
         // If no URIs are ready, select the one with the earliest next attempt time
         self.current_index = 0;
-        self.uris
-            .first()
-            .expect("URI list should never be empty")
-            .uri
-            .clone()
+        let earliest_entry = self.uris.first().expect("URI list should never be empty");
+        (earliest_entry.name.clone(), earliest_entry.uri.clone())
     }
 
     /// Marks the currently selected URI as failed, updating its backoff duration and next attempt time.
