@@ -39,7 +39,7 @@ struct DataInternal {
     /// Interval manages tracking and execution of jobs that are executed on a defined interval
     interval: Option<interval::Interval>,
     /// Websocket manages the creation and maintenance of WebSockets that provide data to the executor
-    websocket: Option<websocket::WebsocketGenerator>,
+    websocket_external: Option<websocket::WebsocketGenerator>,
 }
 
 pub struct Data {}
@@ -82,7 +82,7 @@ impl DataInternal {
             .interval
             .map(|config| interval::Interval::new(config, logger.clone()));
 
-        let websocket = config
+        let websocket_external = config
             .websocket
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
@@ -91,7 +91,7 @@ impl DataInternal {
             okta,
             internal: Some(internal?),
             interval,
-            websocket,
+            websocket_external,
         })
     }
 }
@@ -164,7 +164,7 @@ impl Data {
             });
         }
 
-        if let Some(websocket) = di.websocket {
+        if let Some(websocket) = di.websocket_external {
             handle.spawn(async move {
                 websocket.start().await;
             });
