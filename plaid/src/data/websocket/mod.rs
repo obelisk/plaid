@@ -406,14 +406,14 @@ impl WebSocketClient {
                         error!("Write task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
                     },
                     _ = read_handle => {
-                        error!("Write task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Read task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
                     },
                 }
             }
             None => {
                 tokio::select! {
                     _ = read_handle => {
-                        error!("Write task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Read task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
                     },
                 }
             }
