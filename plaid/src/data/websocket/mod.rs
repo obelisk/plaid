@@ -29,6 +29,18 @@ enum Errors {
 pub struct WebSocketDataGenerator {
     /// A map of WebSocket configurations, identified by its name.
     websockets: HashMap<String, WebSocket>,
+    /// The maximum size of a message received from a socket that will be processed.
+    /// If not specified, the default value from `default_message_size` is used (`64 kB`)
+    #[serde(default = "default_message_size")]
+    max_message_size: usize,
+}
+
+/// Returns the default maximum size, in bytes, for a message received from a WebSocket
+/// that will be processed. The default value is set to 64 KB (65,536 bytes).
+///
+/// This default is used if no specific maximum message size is provided in the configuration.
+fn default_message_size() -> usize {
+    65536
 }
 
 /// Represents the configuration for a WebSocket connection.
@@ -177,7 +189,9 @@ impl WebsocketGenerator {
         let clients = config
             .websockets
             .into_iter()
-            .map(|(name, config)| WebSocketClient::new(config, sender.clone(), name))
+            .map(|(name, socket_config)| {
+                WebSocketClient::new(socket_config, sender.clone(), name, config.max_message_size)
+            })
             .collect();
 
         Self { clients, logger }
@@ -225,12 +239,20 @@ struct WebSocketClient {
     name: String,
     /// Manages a list of URI entries and handles the selection and retry logic for connection attempts.
     uri_selector: UriSelector,
+    /// The maximum size of a message received from a socket that will be processed.
+    /// If not specified, the default value from `default_message_size` is used (`64 kB`)
+    max_message_size: usize,
 }
 
 impl WebSocketClient {
     /// Establishes a WebSocket connection to the given URI and initializes the struct
     /// with the provided parameters.
-    fn new(configuration: WebSocket, sender: Sender<Message>, name: String) -> Self {
+    fn new(
+        configuration: WebSocket,
+        sender: Sender<Message>,
+        name: String,
+        max_message_size: usize,
+    ) -> Self {
         let uri_selector = UriSelector::new(
             configuration.uris.clone(),
             configuration.min_retry_duration,
@@ -242,6 +264,7 @@ impl WebSocketClient {
             sender,
             name,
             uri_selector,
+            max_message_size,
         }
     }
 
@@ -359,11 +382,17 @@ impl WebSocketClient {
         let log_type = self.configuration.log_type.clone();
         let log_source = LogSource::Generator(Generator::WebSocketExternal(generator_name.clone()));
         let logbacks_allowed = self.configuration.logbacks_allowed.clone();
+        let max_message_size = self.max_message_size.clone();
 
         tokio::spawn(async move {
             while let Some(message) = read.next().await {
                 match message {
                     Ok(msg) => {
+                        if msg.len() > max_message_size {
+                            warn!("Message of size {} bytes exceeded the maximum allowed size of {max_message_size} bytes and was not processed.", msg.len());
+                            continue;
+                        }
+
                         let log_message = Message::new(
                             log_type.clone(),
                             msg.into_data(),
