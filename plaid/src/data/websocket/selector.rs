@@ -84,33 +84,34 @@ impl UriSelector {
         }
     }
 
-    /// Selects the next URI to use, prioritizing URIs with the shortest backoff duration.
-    ///
-    /// This function sorts the URIs by their next attempt time,
-    /// and returns a tuple containing the name and URI of the entry with the shortest backoff duration that is ready for the next attempt.
-    /// If no URIs are ready, it selects and returns the name and URI of the entry with the earliest next attempt time.
+    /// Selects the next URI to use, prioritizing URIs with the shortest backoff duration that are ready for another attempt.
     ///
     /// # Returns
     ///
-    /// A tuple `(String, Uri)` where the `String` is the name of the URI and the `Uri` is the next URI to use.
+    /// Returns an `Option<(String, Uri)>` where:
+    /// - `String` is the name associated with the selected URI.
+    /// - `Uri` is the next URI to use.
     ///
-    /// # Panics
+    /// If the URIs collection is empty, it returns `None`.
     ///
-    /// Panics if the URI list is empty, although in practice this should never be possible.
+    /// # Behavior
+    ///
+    /// - If a URI is ready for its next attempt, i.e., its `next_attempt` time has passed or is equal to the current time,
+    ///   this function immediately returns that URI.
+    /// - If no URIs are ready, the function calculates the duration until the earliest `next_attempt` time,
+    ///   sleeps for that duration, and then returns the URI once it is ready.
     pub async fn next_uri(&self) -> Option<(String, Uri)> {
         // Select the URI with the shortest backoff duration that is ready for the next attempt
         let uri = self.uris.peek()?;
         let now = Instant::now();
 
-        if now >= uri.next_attempt {
-            Some((uri.name.clone(), uri.uri.clone()))
-        } else {
+        // If the next attempt hasn't passed, sleep until the socket is ready
+        if uri.next_attempt < now {
             let sleep_duration = uri.next_attempt - now;
-
-            // Sleep until a URI is ready
             sleep_until((now + sleep_duration).into()).await;
-            Some((uri.name.clone(), uri.uri.clone()))
         }
+
+        Some((uri.name.clone(), uri.uri.clone()))
     }
 
     /// Marks the currently selected URI as failed, updating its backoff duration and next attempt time.

@@ -127,7 +127,7 @@ secret_key = ""
 # simplystaking = "wss://some_websocket"
 # [data.websocket."websockets"."demo_rpc_call".message_config]
 # message = "{ \"id\": 1, \"jsonrpc\": \"2.0\", \"method\": \"eth_getBlockByNumber\", \"params\": [ \"finalized\", false ]}"
-# sleep_duration = 100
+# sleep_duration = 100 ## This means the message is sent every 0.1 seconds
 # [data.websocket."websockets"."demo_rpc_call"."headers"]
 
 [webhooks."internal"]
