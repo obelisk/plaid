@@ -1,15 +1,16 @@
 use http::Uri;
 use std::{
-    collections::HashMap,
+    collections::{BinaryHeap, HashMap},
     time::{Duration, Instant},
 };
+use tokio::time::sleep_until;
 
 /// Represents a single URI entry with backoff duration and next attempt time.
 ///
 /// The `UriEntry` struct contains information about a URI, including the duration to wait before
 /// retrying a connection (`backoff_duration`) and the time when the next connection attempt
 /// should be made.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 struct UriEntry {
     name: String,
     /// The URI to connect to.
@@ -26,14 +27,27 @@ struct UriEntry {
 /// for selecting the next URI to attempt a connection to, including backoff and retry mechanisms.
 #[derive(Debug)]
 pub struct UriSelector {
-    /// A list of `UriEntry` instances.
-    uris: Vec<UriEntry>,
-    /// The index of the currently selected URI.
-    current_index: usize,
+    /// A priority queue of `UriEntry` instances, organized as a min-heap.
+    /// The URI with the earliest `next_attempt` time is prioritized. If `next_attempt`
+    /// has not yet passed, the process will wait until it has before retrying.
+    uris: BinaryHeap<UriEntry>,
     /// The initial duration to wait before retrying a connection.
     initial_retry_after: Duration,
     /// The maximum duration to wait before retrying a connection.
     max_retry_after: Duration,
+}
+
+impl Ord for UriEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Reverse the comparison to make the BinaryHeap a min-heap
+        self.next_attempt.cmp(&other.next_attempt).reverse()
+    }
+}
+
+impl PartialOrd for UriEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl UriSelector {
@@ -55,16 +69,16 @@ impl UriSelector {
     ) -> Self {
         let now = Instant::now();
         UriSelector {
-            uris: uris
-                .into_iter()
-                .map(|(name, uri)| UriEntry {
-                    name,
-                    uri,
-                    backoff_duration: initial_retry_after,
-                    next_attempt: now,
-                })
-                .collect(),
-            current_index: 0,
+            uris: BinaryHeap::from(
+                uris.into_iter()
+                    .map(|(name, uri)| UriEntry {
+                        name,
+                        uri,
+                        backoff_duration: initial_retry_after,
+                        next_attempt: now,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
             initial_retry_after,
             max_retry_after,
         }
@@ -83,30 +97,30 @@ impl UriSelector {
     /// # Panics
     ///
     /// Panics if the URI list is empty, although in practice this should never be possible.
-    pub fn next_uri(&mut self) -> (String, Uri) {
-        // Sort URIs by next attempt time
-        self.uris.sort_by_key(|entry| entry.next_attempt);
-
+    pub async fn next_uri(&self) -> Option<(String, Uri)> {
         // Select the URI with the shortest backoff duration that is ready for the next attempt
+        let uri = self.uris.peek()?;
         let now = Instant::now();
-        for (index, entry) in self.uris.iter().enumerate() {
-            if now >= entry.next_attempt {
-                self.current_index = index;
-                return (entry.name.clone(), entry.uri.clone());
-            }
-        }
 
-        // If no URIs are ready, select the one with the earliest next attempt time
-        self.current_index = 0;
-        let earliest_entry = self.uris.first().expect("URI list should never be empty");
-        (earliest_entry.name.clone(), earliest_entry.uri.clone())
+        if now >= uri.next_attempt {
+            Some((uri.name.clone(), uri.uri.clone()))
+        } else {
+            let sleep_duration = uri.next_attempt - now;
+
+            // Sleep until a URI is ready
+            sleep_until((now + sleep_duration).into()).await;
+            Some((uri.name.clone(), uri.uri.clone()))
+        }
     }
 
     /// Marks the currently selected URI as failed, updating its backoff duration and next attempt time.
     pub fn mark_failed(&mut self) {
-        if let Some(entry) = self.uris.get_mut(self.current_index) {
-            entry.backoff_duration = (entry.backoff_duration * 2).min(self.max_retry_after);
-            entry.next_attempt = Instant::now() + entry.backoff_duration;
+        if let Some(mut uri) = self.uris.pop() {
+            uri.backoff_duration = (uri.backoff_duration * 2).min(self.max_retry_after);
+            uri.next_attempt = Instant::now() + uri.backoff_duration;
+
+            // Push back onto heap
+            self.uris.push(uri);
         }
     }
 
@@ -116,9 +130,12 @@ impl UriSelector {
     /// and sets the next attempt time to now.
     /// It can be used after a successful connection to a URI to indicate that it is healthy again.
     pub fn reset_failure(&mut self) {
-        if let Some(entry) = self.uris.get_mut(self.current_index) {
-            entry.backoff_duration = self.initial_retry_after;
-            entry.next_attempt = Instant::now();
+        if let Some(mut uri) = self.uris.pop() {
+            uri.backoff_duration = self.initial_retry_after;
+            uri.next_attempt = Instant::now();
+
+            // Push back onto heap
+            self.uris.push(uri);
         }
     }
 }

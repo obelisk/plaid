@@ -200,7 +200,12 @@ impl WebsocketGenerator {
             tokio::spawn(async move {
                 loop {
                     // This will only return if an error occurred - indicating that we need to reopen the connection with a new URI
-                    let socket_name = client.start().await;
+                    let Some(socket_name) = client.start().await else {
+                        // If this ever returns None - it means that there are no remaining URIs in the heap. In this case, we can exit as there is no point in
+                        // trying to reconnect.
+                        return;
+                    };
+
                     logger.log_websocket_dropped(socket_name).unwrap();
 
                     client.uri_selector.mark_failed();
@@ -257,8 +262,11 @@ impl WebSocketClient {
     /// - The WebSocket is split into write and read halves.
     /// - Separate asynchronous tasks are spawned to handle writing to and reading from the WebSocket.
     /// - The function waits for both tasks to complete, handling any unexpected terminations.
-    async fn start(&mut self) -> String {
-        let (uri_name, uri) = self.uri_selector.next_uri();
+    async fn start(&mut self) -> Option<String> {
+        let Some((uri_name, uri)) = self.uri_selector.next_uri().await else {
+            error!("No URIs found in heap for: {}", self.name);
+            return None;
+        };
 
         if let Ok(socket) = establish_connection(&uri, &self.configuration.headers).await {
             // Mark the WebSocket as healthy again
@@ -277,7 +285,7 @@ impl WebSocketClient {
             self.await_tasks(write_handle, read_handle, &uri_name).await;
         }
 
-        uri_name
+        Some(uri_name)
     }
 
     /// Spawns a task to periodically send a predefined message to the WebSocket.
