@@ -2,8 +2,11 @@ pub mod github;
 mod internal;
 mod interval;
 mod okta;
+mod websocket;
+
 use crate::{
     executor::Message,
+    logging::Logger,
     storage::{Storage, StorageError},
 };
 
@@ -23,6 +26,7 @@ pub struct DataConfig {
     okta: Option<okta::OktaConfig>,
     internal: Option<internal::InternalConfig>,
     interval: Option<interval::IntervalConfig>,
+    websocket: Option<websocket::WebSocketDataGenerator>,
 }
 
 struct DataInternal {
@@ -34,6 +38,8 @@ struct DataInternal {
     internal: Option<internal::Internal>,
     /// Interval manages tracking and execution of jobs that are executed on a defined interval
     interval: Option<interval::Interval>,
+    /// Websocket manages the creation and maintenance of WebSockets that provide data to the executor
+    websocket_external: Option<websocket::WebsocketGenerator>,
 }
 
 pub struct Data {}
@@ -48,39 +54,44 @@ impl DataInternal {
         config: DataConfig,
         logger: Sender<Message>,
         storage: Option<Arc<Storage>>,
+        els: Logger,
     ) -> Result<Self, DataError> {
-        let github = if let Some(gh) = config.github {
-            Some(github::Github::new(gh, logger.clone()))
-        } else {
-            None
-        };
+        let github = config
+            .github
+            .map(|gh| github::Github::new(gh, logger.clone()));
 
-        let okta = if let Some(okta) = config.okta {
-            Some(okta::Okta::new(okta, logger.clone()))
-        } else {
-            None
-        };
+        let okta = config
+            .okta
+            .map(|okta| okta::Okta::new(okta, logger.clone()));
 
-        let internal = if let Some(internal) = config.internal {
-            internal::Internal::new(internal, logger.clone(), storage.clone()).await
-        } else {
-            internal::Internal::new(
-                internal::InternalConfig::default(),
-                logger.clone(),
-                storage.clone(),
-            )
-            .await
+        let internal = match config.internal {
+            Some(internal) => {
+                internal::Internal::new(internal, logger.clone(), storage.clone()).await
+            }
+            None => {
+                internal::Internal::new(
+                    internal::InternalConfig::default(),
+                    logger.clone(),
+                    storage.clone(),
+                )
+                .await
+            }
         };
 
         let interval = config
             .interval
             .map(|config| interval::Interval::new(config, logger.clone()));
 
+        let websocket_external = config
+            .websocket
+            .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
+
         Ok(Self {
             github,
             okta,
             internal: Some(internal?),
             interval,
+            websocket_external,
         })
     }
 }
@@ -90,8 +101,9 @@ impl Data {
         config: DataConfig,
         sender: Sender<Message>,
         storage: Option<Arc<Storage>>,
+        els: Logger,
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
-        let di = DataInternal::new(config, sender, storage).await?;
+        let di = DataInternal::new(config, sender, storage, els).await?;
         let handle = tokio::runtime::Handle::current();
 
         // Start the Github Audit task if there is one
@@ -151,7 +163,14 @@ impl Data {
                 }
             });
         }
-        info!("Started Data collection tasks");
+
+        if let Some(websocket) = di.websocket_external {
+            handle.spawn(async move {
+                websocket.start().await;
+            });
+        }
+
+        info!("Started Data Generators");
         Ok(internal_sender)
     }
 }

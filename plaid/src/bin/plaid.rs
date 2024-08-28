@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This sender provides an internal route to sending logs. This is what
     // powers the logback functions.
 
-    let delayed_log_sender = Data::start(config.data, log_sender.clone(), storage.clone())
+    let delayed_log_sender = Data::start(config.data, log_sender.clone(), storage.clone(), els.clone())
         .await
         .expect("The data system failed to start")
         .unwrap();

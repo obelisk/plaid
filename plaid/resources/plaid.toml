@@ -119,6 +119,17 @@ secret_key = ""
 
 [data]
 
+# [data.websocket]
+# [data.websocket.websockets]
+# [data.websocket."websockets"."demo_rpc_call"]
+# log_type = "testing"
+# [data.websocket."websockets"."demo_rpc_call".uris]
+# simplystaking = "wss://some_websocket"
+# [data.websocket."websockets"."demo_rpc_call".message_config]
+# message = "{ \"id\": 1, \"jsonrpc\": \"2.0\", \"method\": \"eth_getBlockByNumber\", \"params\": [ \"finalized\", false ]}"
+# sleep_duration = 100 ## This means the message is sent every 0.1 seconds
+# [data.websocket."websockets"."demo_rpc_call"."headers"]
+
 [webhooks."internal"]
 listen_address = "0.0.0.0:4554"
 [webhooks."internal".webhooks."AAAA"]

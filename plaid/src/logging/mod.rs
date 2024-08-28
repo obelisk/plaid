@@ -47,6 +47,9 @@ pub enum Log {
         error: String,
         log: String,
     },
+    WebSocketConnectionDropped {
+        socket_name: String,
+    },
     /// Is not used by other components of Plaid. This is created and sent
     /// by the logging system if it has not received a message from the server
     /// module for a period of time.
@@ -160,6 +163,12 @@ impl Logger {
     ) -> Result<(), LoggingError> {
         self.sender
             .send(Log::InternalMessage { severity, message })
+            .map_err(|_| LoggingError::LoggingSystemDead)
+    }
+
+    pub fn log_websocket_dropped(&self, socket_name: String) -> Result<(), LoggingError> {
+        self.sender
+            .send(Log::WebSocketConnectionDropped { socket_name })
             .map_err(|_| LoggingError::LoggingSystemDead)
     }
 
