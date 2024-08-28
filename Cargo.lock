@@ -101,7 +101,7 @@ dependencies = [
  "num-traits",
  "rusticata-macros",
  "thiserror",
- "time",
+ "time 0.3.36",
 ]
 
 [[package]]
@@ -1688,6 +1688,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
+name = "persistent_response"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1727,7 +1736,7 @@ checksum = "d231b230927b5e4ad203db57bbcbee2802f6bce620b1e4a9024a07d94e2907ec"
 
 [[package]]
 name = "plaid"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "async-trait",
  "base64 0.13.1",
@@ -1749,7 +1758,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled",
- "time",
+ "time 0.3.36",
  "tokio",
  "tokio-tungstenite 0.23.1",
  "toml",
@@ -1760,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "plaid_stl"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "paste",
  "serde",
@@ -1905,7 +1914,7 @@ checksum = "ffbe84efe2f38dea12e9bfc1f65377fdf03e53a18cb3b995faedf7934c7e785b"
 dependencies = [
  "pem 1.1.1",
  "ring 0.16.20",
- "time",
+ "time 0.3.36",
  "x509-parser",
  "yasna",
 ]
@@ -2400,7 +2409,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "thiserror",
- "time",
+ "time 0.3.36",
 ]
 
 [[package]]
@@ -2608,6 +2617,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.58",
+]
+
+[[package]]
+name = "time"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3511,7 +3529,7 @@ dependencies = [
  "ring 0.16.20",
  "rusticata-macros",
  "thiserror",
- "time",
+ "time 0.3.36",
 ]
 
 [[package]]
@@ -3520,7 +3538,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd"
 dependencies = [
- "time",
+ "time 0.3.36",
 ]
 
 [[package]]
