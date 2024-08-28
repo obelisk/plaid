@@ -107,8 +107,7 @@ impl UriSelector {
 
         // If the next attempt hasn't passed, sleep until the socket is ready
         if uri.next_attempt < now {
-            let sleep_duration = uri.next_attempt - now;
-            sleep_until((now + sleep_duration).into()).await;
+            sleep_until((uri.next_attempt).into()).await;
         }
 
         Some((uri.name.clone(), uri.uri.clone()))
