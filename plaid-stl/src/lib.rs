@@ -61,6 +61,7 @@ impl From<PlaidFunctionError> for i32 {
 }
 
 pub mod github;
+pub mod kms;
 pub mod network;
 pub mod okta;
 pub mod pagerduty;

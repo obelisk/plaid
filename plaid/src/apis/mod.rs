@@ -1,5 +1,7 @@
 pub mod general;
 pub mod github;
+#[cfg(feature = "kms")]
+pub mod kms;
 pub mod okta;
 pub mod pagerduty;
 pub mod quorum;
@@ -9,7 +11,9 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
+use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 use crossbeam_channel::Sender;
+use kms::{Kms, KmsConfig};
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 
@@ -31,6 +35,7 @@ pub struct Api {
     pub runtime: Runtime,
     pub general: Option<General>,
     pub github: Option<Github>,
+    pub kms: Option<Kms>,
     pub okta: Option<Okta>,
     pub pagerduty: Option<PagerDuty>,
     pub quorum: Option<Quorum>,
@@ -45,6 +50,7 @@ pub struct Api {
 pub struct Apis {
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
+    pub kms: Option<KmsConfig>,
     pub okta: Option<OktaConfig>,
     pub pagerduty: Option<PagerDutyConfig>,
     pub quorum: Option<QuorumConfig>,
@@ -61,8 +67,8 @@ pub enum ApiError {
     ImpossibleError,
     ConfigurationError(String),
     MissingParameter(String),
-
     GitHubError(github::GitHubError),
+    KmsSignError(SdkError<SignError>),
     NetworkError(reqwest::Error),
     OktaError(okta::OktaError),
     PagerDutyError(pagerduty::PagerDutyError),
@@ -75,7 +81,7 @@ pub enum ApiError {
 }
 
 impl Api {
-    pub fn new(
+    pub async fn new(
         config: Apis,
         log_sender: Sender<Message>,
         delayed_log_sender: Sender<DelayedMessage>,
@@ -87,6 +93,12 @@ impl Api {
 
         let github = match config.github {
             Some(gh) => Some(Github::new(gh)),
+            _ => None,
+        };
+
+        #[cfg(feature = "kms")]
+        let kms = match config.kms {
+            Some(kms) => Some(Kms::new(kms).await),
             _ => None,
         };
 
@@ -137,6 +149,7 @@ impl Api {
             runtime: Runtime::new().unwrap(),
             general,
             github,
+            kms,
             okta,
             pagerduty,
             quorum,

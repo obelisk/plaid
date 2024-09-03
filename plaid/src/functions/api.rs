@@ -152,6 +152,9 @@ impl_new_function!(github, review_fpat_requests_for_org);
 impl_new_function_with_error_buffer!(github, list_fpat_requests_for_org);
 impl_new_function_with_error_buffer!(github, get_repos_for_fpat);
 
+// KMS functions
+impl_new_function_with_error_buffer!(kms, make_named_signing_request);
+
 // Okta Functions
 impl_new_function!(okta, remove_user_from_group);
 impl_new_function_with_error_buffer!(okta, get_user_data);
@@ -288,6 +291,11 @@ pub fn to_api_function(
         }
         "general_make_named_request" => {
             Function::new_typed_with_env(&mut store, &env, general_make_named_request)
+        }
+
+        // KMS calls
+        "kms_make_named_signing_request" => {
+            Function::new_typed_with_env(&mut store, &env, kms_make_named_signing_request)
         }
 
         // PagerDuty Calls
