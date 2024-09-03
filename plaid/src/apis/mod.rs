@@ -1,7 +1,7 @@
+#[cfg(feature = "aws")]
+pub mod aws;
 pub mod general;
 pub mod github;
-#[cfg(feature = "kms")]
-pub mod kms;
 pub mod okta;
 pub mod pagerduty;
 pub mod quorum;
@@ -11,21 +11,21 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
-#[cfg(feature = "kms")]
+#[cfg(feature = "aws")]
+use aws::kms::Kms;
+use aws::kms::KmsConfig;
+#[cfg(feature = "aws")]
 use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 use crossbeam_channel::Sender;
-#[cfg(feature = "kms")]
-use kms::{Kms, KmsConfig};
-use serde::Deserialize;
-use tokio::runtime::Runtime;
-
 use general::{General, GeneralConfig};
 use github::{Github, GithubConfig};
 use okta::{Okta, OktaConfig};
 use pagerduty::{PagerDuty, PagerDutyConfig};
 use quorum::{Quorum, QuorumConfig};
+use serde::Deserialize;
 use slack::{Slack, SlackConfig};
 use splunk::{Splunk, SplunkConfig};
+use tokio::runtime::Runtime;
 use web::{Web, WebConfig};
 use yubikey::{Yubikey, YubikeyConfig};
 
@@ -37,7 +37,7 @@ pub struct Api {
     pub runtime: Runtime,
     pub general: Option<General>,
     pub github: Option<Github>,
-    #[cfg(feature = "kms")]
+    #[cfg(feature = "aws")]
     pub kms: Option<Kms>,
     pub okta: Option<Okta>,
     pub pagerduty: Option<PagerDuty>,
@@ -53,8 +53,8 @@ pub struct Api {
 pub struct Apis {
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
-    #[cfg(feature = "kms")]
-    pub kms: Option<KmsConfig>,
+    #[cfg(feature = "aws")]
+    pub aws: Option<KmsConfig>,
     pub okta: Option<OktaConfig>,
     pub pagerduty: Option<PagerDutyConfig>,
     pub quorum: Option<QuorumConfig>,
@@ -72,7 +72,7 @@ pub enum ApiError {
     ConfigurationError(String),
     MissingParameter(String),
     GitHubError(github::GitHubError),
-    #[cfg(feature = "kms")]
+    #[cfg(feature = "aws")]
     KmsSignError(SdkError<SignError>),
     NetworkError(reqwest::Error),
     OktaError(okta::OktaError),
@@ -101,9 +101,9 @@ impl Api {
             _ => None,
         };
 
-        #[cfg(feature = "kms")]
-        let kms = match config.kms {
-            Some(kms) => Some(Kms::new(kms).await),
+        #[cfg(feature = "aws")]
+        let kms = match config.aws {
+            Some(aws) => Some(Kms::new(aws).await),
             _ => None,
         };
 
@@ -154,7 +154,7 @@ impl Api {
             runtime: Runtime::new().unwrap(),
             general,
             github,
-            #[cfg(feature = "kms")]
+            #[cfg(feature = "aws")]
             kms,
             okta,
             pagerduty,

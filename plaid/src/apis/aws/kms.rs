@@ -1,4 +1,4 @@
-use super::ApiError;
+use crate::apis::ApiError;
 use aws_config::{BehaviorVersion, Region};
 use aws_sdk_kms::{
     config::Credentials,

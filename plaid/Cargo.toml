@@ -8,7 +8,7 @@ edition = "2021"
 [features]
 default = []
 #quorum = ["quorum-agent"]
-kms = ["k256", "aws-sdk-kms", "aws-config"]
+aws = ["k256", "aws-sdk-kms", "aws-config"]
 
 [dependencies]
 clap = { version = "4", default-features = false, features = ["std"] }
