@@ -58,6 +58,8 @@ pub struct KmsConfig {
     /// - `IAM`: Uses the IAM role assigned to the instance or environment.
     /// - `ApiKey`: Uses explicit credentials, including an access key ID, secret access key, and region.
     authentication: Authentication,
+    /// Preconfigured requests - keyed by name. Rules will use the name assigned here to access the request's
+    /// specification at runtime.
     sign_requests: HashMap<String, Request>,
 }
 
