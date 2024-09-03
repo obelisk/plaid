@@ -58,14 +58,14 @@ pub struct KmsConfig {
     /// - `IAM`: Uses the IAM role assigned to the instance or environment.
     /// - `ApiKey`: Uses explicit credentials, including an access key ID, secret access key, and region.
     authentication: Authentication,
-
     sign_requests: HashMap<String, Request>,
 }
 
 /// Defines methods to authenticate to KMS with
 #[derive(Deserialize)]
+#[serde(untagged)]
 enum Authentication {
-    IAM,
+    Iam {},
     ApiKey {
         access_key_id: String,
         secret_access_key: String,
@@ -167,6 +167,7 @@ impl Kms {
                 secret_access_key,
                 region,
             } => {
+                info!("Using API keys to authenticate to KMS");
                 let credentials =
                     Credentials::new(access_key_id, secret_access_key, None, None, "Plaid");
 
@@ -176,7 +177,10 @@ impl Kms {
                     .load()
                     .await
             }
-            Authentication::IAM => aws_config::load_defaults(BehaviorVersion::latest()).await,
+            Authentication::Iam {} => {
+                info!("Using IAM role assigned to environment for KMS authentication");
+                aws_config::load_defaults(BehaviorVersion::latest()).await
+            }
         };
 
         let client = aws_sdk_kms::Client::new(&sdk_config);
