@@ -11,8 +11,10 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
+#[cfg(feature = "kms")]
 use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 use crossbeam_channel::Sender;
+#[cfg(feature = "kms")]
 use kms::{Kms, KmsConfig};
 use serde::Deserialize;
 use tokio::runtime::Runtime;
@@ -35,6 +37,7 @@ pub struct Api {
     pub runtime: Runtime,
     pub general: Option<General>,
     pub github: Option<Github>,
+    #[cfg(feature = "kms")]
     pub kms: Option<Kms>,
     pub okta: Option<Okta>,
     pub pagerduty: Option<PagerDuty>,
@@ -50,6 +53,7 @@ pub struct Api {
 pub struct Apis {
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
+    #[cfg(feature = "kms")]
     pub kms: Option<KmsConfig>,
     pub okta: Option<OktaConfig>,
     pub pagerduty: Option<PagerDutyConfig>,
@@ -68,6 +72,7 @@ pub enum ApiError {
     ConfigurationError(String),
     MissingParameter(String),
     GitHubError(github::GitHubError),
+    #[cfg(feature = "kms")]
     KmsSignError(SdkError<SignError>),
     NetworkError(reqwest::Error),
     OktaError(okta::OktaError),
@@ -149,6 +154,7 @@ impl Api {
             runtime: Runtime::new().unwrap(),
             general,
             github,
+            #[cfg(feature = "kms")]
             kms,
             okta,
             pagerduty,

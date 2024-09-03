@@ -153,6 +153,7 @@ impl_new_function_with_error_buffer!(github, list_fpat_requests_for_org);
 impl_new_function_with_error_buffer!(github, get_repos_for_fpat);
 
 // KMS functions
+#[cfg(feature = "kms")]
 impl_new_function_with_error_buffer!(kms, make_named_signing_request);
 
 // Okta Functions
@@ -294,6 +295,7 @@ pub fn to_api_function(
         }
 
         // KMS calls
+        #[cfg(feature = "kms")]
         "kms_make_named_signing_request" => {
             Function::new_typed_with_env(&mut store, &env, kms_make_named_signing_request)
         }
