@@ -147,7 +147,9 @@ impl Github {
         }
     }
 
-    /// Get all collaborators on a repository.
+    /// Get collaborators on a repository, with support for paginated responses.
+    /// Optionally supports specifying how many results each page should contain (default=30, max=100) and which page is requested (default=1).
+    /// Repeatedly calling this function with different page numbers allows one to get all collaborators on a repository.
     /// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2022-11-28#list-repository-collaborators for more detail
     pub async fn get_repository_collaborators(
         &self,
@@ -160,9 +162,16 @@ impl Github {
         let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
         let repo =
             self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let per_page: u8 = request.get("per_page").unwrap_or(&"30").parse::<u8>().map_err(|_| ApiError::BadRequest)?;
+        let page: u16 = request.get("page").unwrap_or(&"1").parse::<u16>().map_err(|_| ApiError::BadRequest)?;
+
+        if per_page > 100 {
+            // GitHub supports up to 100 results per page
+            return Err(ApiError::BadRequest);
+        }
 
         info!("Fetching collaborators for [{repo}] on behalf of {module}");
-        let address = format!("/repos/{owner}/{repo}/collaborators");
+        let address = format!("/repos/{owner}/{repo}/collaborators?per_page={per_page}&page={page}");
 
         match self.make_generic_get_request(address, module).await {
             Ok((status, Ok(body))) => {
