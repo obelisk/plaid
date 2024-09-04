@@ -130,6 +130,95 @@ macro_rules! impl_new_function_with_error_buffer {
     }
 }
 
+/// Macro to implement a function in a specific API's submodule.
+///
+/// This macro generates two functions:
+/// - A private implementation function (`_impl`) that handles the actual logic:
+///   - Accessing and validating memory from the guest
+///   - Checking that the API is configured.
+///   - Running the function + returning the result and handling errors
+/// - A public wrapper function that calls the implementation function and returns the result as an integer.
+///
+/// # Parameters
+/// - `$api`: The name of the API (e.g., `aws`).
+/// - `$sub_module`: The name of the submodule within the API (e.g., `kms`).
+/// - `$function_name`: The name of the function to be implemented (e.g., `put_object`, `encrypt`).
+///
+/// # Error Handling
+/// The generated implementation function returns `FunctionErrors` in case of failures, which are then
+/// converted to int error codes by the wrapper function. These errors include:
+/// - `FunctionErrors::InternalApiError`: For internal API-related errors.
+/// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
+/// - `FunctionErrors::ReturnBufferTooSmall`: If the provided return buffer is too small to hold the result.
+macro_rules! impl_new_sub_module_function_with_error_buffer {
+    ($api:ident, $sub_module:ident, $function_name:ident) => {
+        paste::item! {
+            fn [< $api _ $sub_module _ $function_name _impl>] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> Result<i32, FunctionErrors> {
+                let store = env.as_store_ref();
+                let env_data = env.data();
+
+                // Log function call by module
+                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.name.clone(), stringify!([< $api _ $sub_module _ $function_name >]).to_string()) {
+                    error!("Logging system is not working!!: {:?}", e);
+                    return Err(FunctionErrors::InternalApiError);
+                }
+
+                let memory_view = match get_memory(&env, &store) {
+                    Ok(memory_view) => memory_view,
+                    Err(e) => {
+                        error!("{}: Memory error in {}: {:?}", env.data().name, stringify!([< $api _ $sub_module _ $function_name >]), e);
+                        return Err(FunctionErrors::InternalApiError);
+                    },
+                };
+
+                let params = safely_get_string(&memory_view, params_buffer, params_buffer_len)?;
+
+                // Check that AWS API is configured
+                let aws = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
+                let sub_module = &aws.$sub_module;
+
+                // Clone the APIs Arc to use in Tokio closure
+                let env_api = env_data.api.clone();
+                let name = &env_data.name.clone();
+                // Run the function on the Tokio runtime and wait for the result
+                let result = env_api.runtime.block_on(async move {
+                    sub_module.$function_name(&params, name).await
+                });
+
+                let return_data = match result {
+                    Ok(return_data) => return_data,
+                    Err(e) => {
+                        error!("{} experienced an issue calling {}: {:?}", env_data.name, stringify!([< $api _ $sub_module _ $function_name >]), e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+                };
+
+                if return_data.len() > ret_buffer_len as usize {
+                    error!("{} could not receive data from {} because it provided a return buffer that was too small. Got {}, needed {}", env_data.name,  stringify!([< $api _ $sub_module _ $function_name >]), ret_buffer_len, return_data.len());
+                    trace!("Data: {}", return_data);
+                    return Err(FunctionErrors::ReturnBufferTooSmall);
+                }
+
+                safely_write_data_back(&memory_view, return_data.as_bytes(), ret_buffer, ret_buffer_len)?;
+
+                trace!("{} is calling {} got a return data length of {}", env_data.name,  stringify!([< $api _ $sub_module _ $function_name >]), return_data.len());
+                return Ok(return_data.len() as i32);
+            }
+
+            fn [< $api _ $sub_module _ $function_name >] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> i32 {
+                let name = env.data().name.clone();
+                match [< $api _ $sub_module _ $function_name _impl>](env, params_buffer, params_buffer_len, ret_buffer, ret_buffer_len) {
+                    Ok(res) => res,
+                    Err(e) => {
+                        error!("{} experienced an issue calling {}: {:?}", name,  stringify!([< $api _ $sub_module _ $function_name >]), e);
+                        e as i32
+                    }
+                }
+            }
+        }
+    }
+}
+
 // General Functions
 impl_new_function!(general, simple_json_post_request);
 impl_new_function_with_error_buffer!(general, make_named_request);
@@ -152,9 +241,9 @@ impl_new_function!(github, review_fpat_requests_for_org);
 impl_new_function_with_error_buffer!(github, list_fpat_requests_for_org);
 impl_new_function_with_error_buffer!(github, get_repos_for_fpat);
 
-// KMS functions
+// AWS functions
 #[cfg(feature = "aws")]
-impl_new_function_with_error_buffer!(kms, make_named_signing_request);
+impl_new_sub_module_function_with_error_buffer!(aws, kms, make_named_signing_request);
 
 // Okta Functions
 impl_new_function!(okta, remove_user_from_group);
@@ -297,7 +386,7 @@ pub fn to_api_function(
         // KMS calls
         #[cfg(feature = "aws")]
         "kms_make_named_signing_request" => {
-            Function::new_typed_with_env(&mut store, &env, kms_make_named_signing_request)
+            Function::new_typed_with_env(&mut store, &env, aws_kms_make_named_signing_request)
         }
 
         // PagerDuty Calls

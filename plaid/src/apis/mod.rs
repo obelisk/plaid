@@ -12,8 +12,7 @@ pub mod web;
 pub mod yubikey;
 
 #[cfg(feature = "aws")]
-use aws::kms::Kms;
-use aws::kms::KmsConfig;
+use aws::{Aws, AwsConfig};
 #[cfg(feature = "aws")]
 use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 use crossbeam_channel::Sender;
@@ -35,10 +34,10 @@ use self::rustica::{Rustica, RusticaConfig};
 
 pub struct Api {
     pub runtime: Runtime,
+    #[cfg(feature = "aws")]
+    pub aws: Option<Aws>,
     pub general: Option<General>,
     pub github: Option<Github>,
-    #[cfg(feature = "aws")]
-    pub kms: Option<Kms>,
     pub okta: Option<Okta>,
     pub pagerduty: Option<PagerDuty>,
     pub quorum: Option<Quorum>,
@@ -51,10 +50,10 @@ pub struct Api {
 
 #[derive(Deserialize)]
 pub struct Apis {
+    #[cfg(feature = "aws")]
+    pub aws: Option<AwsConfig>,
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
-    #[cfg(feature = "aws")]
-    pub aws: Option<KmsConfig>,
     pub okta: Option<OktaConfig>,
     pub pagerduty: Option<PagerDutyConfig>,
     pub quorum: Option<QuorumConfig>,
@@ -91,6 +90,12 @@ impl Api {
         log_sender: Sender<Message>,
         delayed_log_sender: Sender<DelayedMessage>,
     ) -> Self {
+        #[cfg(feature = "aws")]
+        let aws = match config.aws {
+            Some(aws) => Some(Aws::new(aws).await),
+            _ => None,
+        };
+
         let general = match config.general {
             Some(gc) => Some(General::new(gc, log_sender, delayed_log_sender)),
             _ => None,
@@ -98,12 +103,6 @@ impl Api {
 
         let github = match config.github {
             Some(gh) => Some(Github::new(gh)),
-            _ => None,
-        };
-
-        #[cfg(feature = "aws")]
-        let kms = match config.aws {
-            Some(aws) => Some(Kms::new(aws).await),
             _ => None,
         };
 
@@ -152,10 +151,10 @@ impl Api {
 
         Self {
             runtime: Runtime::new().unwrap(),
+            #[cfg(feature = "aws")]
+            aws,
             general,
             github,
-            #[cfg(feature = "aws")]
-            kms,
             okta,
             pagerduty,
             quorum,
