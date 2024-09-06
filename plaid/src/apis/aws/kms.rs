@@ -2,7 +2,7 @@ use crate::apis::ApiError;
 use aws_config::{BehaviorVersion, Region};
 use aws_sdk_kms::{
     config::Credentials,
-    operation::sign::SignOutput,
+    operation::{get_public_key::GetPublicKeyOutput, sign::SignOutput},
     primitives::Blob,
     types::{MessageType, SigningAlgorithmSpec},
     Client,
@@ -142,6 +142,34 @@ impl SignRequestResponse {
     }
 }
 
+/// Represents the response from `get_public_key`. There are more fields that KMS sends us
+/// but we won't include them for now.
+/// See https://docs.rs/aws-sdk-kms/1.42.0/aws_sdk_kms/operation/get_public_key/struct.GetPublicKeyOutput.html
+/// for entire output.
+#[derive(Serialize)]
+struct PublicKey {
+    /// The Amazon Resource Name (key ARN) of the asymmetric KMS key that was used to sign the message.
+    key_id: Option<String>,
+    /// The exported public key.
+    /// The value is a DER-encoded X.509 public key, also known as SubjectPublicKeyInfo (SPKI), as defined in RFC 5280.
+    /// When you use the HTTP API or the Amazon Web Services CLI, the value is Base64-encoded.
+    /// Otherwise, it is not Base64-encoded.
+    pub public_key: Option<Vec<u8>>,
+}
+
+impl PublicKey {
+    /// Creates a `PublicKey` instance from a `GetPublicKeyOutput` object,
+    /// extracting the key ID and public key
+    fn from_aws_response(pub_key_output: GetPublicKeyOutput) -> Self {
+        let public_key: Option<Vec<u8>> = pub_key_output.public_key.map(|sig| sig.into_inner());
+
+        Self {
+            key_id: pub_key_output.key_id,
+            public_key,
+        }
+    }
+}
+
 /// Represents the KMS API that handles all requests to KMS
 pub struct Kms {
     /// The underlying KMS client used to interact with the KMS API.
@@ -201,17 +229,8 @@ impl Kms {
         let request: SignRequestRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        // Attempt to fetch config for provided KMS key id
-        let allowed_rules = match self.key_configuration.get(&request.key_id) {
-            Some(rules) => rules,
-            None => {
-                error!(
-                    "{module} tried to use a KMS key that is not configured: {}",
-                    request.key_id
-                );
-                return Err(ApiError::BadRequest);
-            }
-        };
+        // Fetch rules that are allowd to use this key
+        let allowed_rules = self.fetch_key_configuration(module, &request.key_id)?;
 
         // Verify that caller is allowed to use this key
         if !allowed_rules.contains(&module.to_string()) {
@@ -236,5 +255,49 @@ impl Kms {
         let output = SignRequestResponse::from_sign_output(output);
 
         serde_json::to_string(&output).map_err(|_| ApiError::BadRequest)
+    }
+
+    /// Returns the public key of an asymmetric KMS key. Unlike the private key of a asymmetric KMS key,
+    /// which never leaves KMS unencrypted, callers with `kms:GetPublicKey` permission can download the public key of an asymmetric KMS key.
+    pub async fn get_public_key(&self, params: &str, module: &str) -> Result<String, ApiError> {
+        // Parse the information needed to make the request
+        let request: HashMap<String, String> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let key_id = request
+            .get("key_id")
+            .ok_or(ApiError::MissingParameter("key_id".to_string()))?
+            .to_string();
+
+        // Fetch rules that are allowd to use this key
+        let allowed_rules = self.fetch_key_configuration(module, &key_id)?;
+
+        // Verify that caller is allowed to use this key
+        if !allowed_rules.contains(&module.to_string()) {
+            error!("{module} tried to use KMS key which it's not allowed to: {key_id}",);
+            return Err(ApiError::BadRequest);
+        }
+
+        let output = self
+            .client
+            .get_public_key()
+            .key_id(key_id)
+            .send()
+            .await
+            .map_err(|e| ApiError::KmsGetPublicKeyError(e))?;
+
+        let output = PublicKey::from_aws_response(output);
+
+        serde_json::to_string(&output).map_err(|_| ApiError::BadRequest)
+    }
+
+    fn fetch_key_configuration(&self, module: &str, key_id: &str) -> Result<Vec<String>, ApiError> {
+        match self.key_configuration.get(key_id) {
+            Some(config) => Ok(config.to_vec()),
+            None => {
+                error!("{module} tried to use a KMS key that is not configured: {key_id}",);
+                return Err(ApiError::BadRequest);
+            }
+        }
     }
 }

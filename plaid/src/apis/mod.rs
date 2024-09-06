@@ -14,6 +14,8 @@ pub mod yubikey;
 #[cfg(feature = "aws")]
 use aws::{Aws, AwsConfig};
 #[cfg(feature = "aws")]
+use aws_sdk_kms::operation::get_public_key::GetPublicKeyError;
+#[cfg(feature = "aws")]
 use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 use crossbeam_channel::Sender;
 use general::{General, GeneralConfig};
@@ -73,6 +75,8 @@ pub enum ApiError {
     GitHubError(github::GitHubError),
     #[cfg(feature = "aws")]
     KmsSignError(SdkError<SignError>),
+    #[cfg(feature = "aws")]
+    KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
     NetworkError(reqwest::Error),
     OktaError(okta::OktaError),
     PagerDutyError(pagerduty::PagerDutyError),

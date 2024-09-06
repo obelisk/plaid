@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
@@ -18,6 +20,18 @@ pub struct SignRequestResponse {
     pub signature: Option<Vec<u8>>,
     /// The signing algorithm that was used to sign the message.
     pub signing_algorithm: Option<String>,
+}
+
+/// Contains metadata about a KMS key
+#[derive(Deserialize)]
+pub struct GetPublicKeyResponse {
+    /// The Amazon Resource Name (key ARN) of the asymmetric KMS key that was used to sign the message.
+    pub key_id: Option<String>,
+    /// The exported public key.
+    ///
+    /// The value is a DER-encoded X.509 public key, also known as SubjectPublicKeyInfo (SPKI), as defined in RFC 5280.
+    /// When you use the HTTP API or the Amazon Web Services CLI, the value is Base64-encoded. Otherwise, it is not Base64-encoded.
+    pub public_key: Option<Vec<u8>>,
 }
 
 /// Tells KMS whether the value of the Message parameter should be hashed as part of the signing algorithm.
@@ -91,7 +105,7 @@ pub fn sign_arbitrary_message(
     signing_algorithm: SigningAlgorithm,
 ) -> Result<SignRequestResponse, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(kms, make_named_signing_request);
+        new_host_function_with_error_buffer!(kms, sign_arbitrary_message);
     }
 
     #[derive(Serialize)]
@@ -114,7 +128,7 @@ pub fn sign_arbitrary_message(
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let res = unsafe {
-        kms_make_named_signing_request(
+        kms_sign_arbitrary_message(
             request.as_ptr(),
             request.len(),
             return_buffer.as_mut_ptr(),
@@ -127,6 +141,48 @@ pub fn sign_arbitrary_message(
     if res < 0 {
         return Err(res.into());
     }
+
+    return_buffer.truncate(res as usize);
+
+    match serde_json::from_slice(&return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
+/// Returns the public key of an asymmetric KMS key. Unlike the private key of a asymmetric KMS key,
+/// which never leaves KMS unencrypted, callers with `kms:GetPublicKey` permission can download the public key of an asymmetric KMS key.
+///
+/// # Parameters
+/// - `key_id`:  To specify a KMS key, use its key ID, key ARN, alias name, or alias ARN.
+/// When using an alias name, prefix it with "alias/".
+///     To specify a KMS key in a different Amazon Web Services account, you must use the key ARN or alias ARN.
+///     For example:
+///     - Key ID: 1234abcd-12ab-34cd-56ef-1234567890ab
+///     - Key ARN: arn:aws:kms:us-east-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
+///     - Alias name: alias/ExampleAlias
+///     - Alias ARN: arn:aws:kms:us-east-2:111122223333:alias/ExampleAlias
+/// - `message`: The message or message digest to be signed by KMS.
+pub fn get_public_key(key_id: &str) -> Result<GetPublicKeyResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(kms, get_public_key);
+    }
+
+    let mut request = HashMap::new();
+    request.insert("key_id", key_id);
+
+    let request = serde_json::to_string(&request).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        kms_get_public_key(
+            request.as_ptr(),
+            request.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
 
     return_buffer.truncate(res as usize);
 

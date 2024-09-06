@@ -244,6 +244,8 @@ impl_new_function_with_error_buffer!(github, get_repos_for_fpat);
 // AWS functions
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, kms, sign_arbitrary_message);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key);
 
 // Okta Functions
 impl_new_function!(okta, remove_user_from_group);
@@ -387,6 +389,11 @@ pub fn to_api_function(
         #[cfg(feature = "aws")]
         "aws_kms_sign_arbitrary_message" => {
             Function::new_typed_with_env(&mut store, &env, aws_kms_sign_arbitrary_message)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_kms_get_public_key" => {
+            Function::new_typed_with_env(&mut store, &env, aws_kms_get_public_key)
         }
 
         // PagerDuty Calls
