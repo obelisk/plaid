@@ -1,3 +1,5 @@
+#[cfg(feature = "aws")]
+pub mod aws;
 pub mod general;
 pub mod github;
 pub mod okta;
@@ -9,17 +11,22 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
+#[cfg(feature = "aws")]
+use aws::{Aws, AwsConfig};
+#[cfg(feature = "aws")]
+use aws_sdk_kms::operation::get_public_key::GetPublicKeyError;
+#[cfg(feature = "aws")]
+use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 use crossbeam_channel::Sender;
-use serde::Deserialize;
-use tokio::runtime::Runtime;
-
 use general::{General, GeneralConfig};
 use github::{Github, GithubConfig};
 use okta::{Okta, OktaConfig};
 use pagerduty::{PagerDuty, PagerDutyConfig};
 use quorum::{Quorum, QuorumConfig};
+use serde::Deserialize;
 use slack::{Slack, SlackConfig};
 use splunk::{Splunk, SplunkConfig};
+use tokio::runtime::Runtime;
 use web::{Web, WebConfig};
 use yubikey::{Yubikey, YubikeyConfig};
 
@@ -29,6 +36,8 @@ use self::rustica::{Rustica, RusticaConfig};
 
 pub struct Api {
     pub runtime: Runtime,
+    #[cfg(feature = "aws")]
+    pub aws: Option<Aws>,
     pub general: Option<General>,
     pub github: Option<Github>,
     pub okta: Option<Okta>,
@@ -43,6 +52,8 @@ pub struct Api {
 
 #[derive(Deserialize)]
 pub struct Apis {
+    #[cfg(feature = "aws")]
+    pub aws: Option<AwsConfig>,
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
     pub okta: Option<OktaConfig>,
@@ -61,8 +72,11 @@ pub enum ApiError {
     ImpossibleError,
     ConfigurationError(String),
     MissingParameter(String),
-
     GitHubError(github::GitHubError),
+    #[cfg(feature = "aws")]
+    KmsSignError(SdkError<SignError>),
+    #[cfg(feature = "aws")]
+    KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
     NetworkError(reqwest::Error),
     OktaError(okta::OktaError),
     PagerDutyError(pagerduty::PagerDutyError),
@@ -75,11 +89,17 @@ pub enum ApiError {
 }
 
 impl Api {
-    pub fn new(
+    pub async fn new(
         config: Apis,
         log_sender: Sender<Message>,
         delayed_log_sender: Sender<DelayedMessage>,
     ) -> Self {
+        #[cfg(feature = "aws")]
+        let aws = match config.aws {
+            Some(aws) => Some(Aws::new(aws).await),
+            _ => None,
+        };
+
         let general = match config.general {
             Some(gc) => Some(General::new(gc, log_sender, delayed_log_sender)),
             _ => None,
@@ -135,6 +155,8 @@ impl Api {
 
         Self {
             runtime: Runtime::new().unwrap(),
+            #[cfg(feature = "aws")]
+            aws,
             general,
             github,
             okta,

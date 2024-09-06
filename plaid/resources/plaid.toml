@@ -117,6 +117,25 @@ allowed_rules = ["testing_test.wasm"]
 client_id = 99999
 secret_key = ""
 
+# KMS USING IAM
+
+# [apis."aws"]
+# [apis."aws"."kms".authentication]
+# [apis."aws"."kms".key_configuration]
+# "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
+
+# KMS USING API KEY
+
+# [apis."aws"]
+# [apis."aws"."kms"]
+# [apis."aws"."kms".authentication]
+# access_key_id = "asdf"
+# secret_access_key = "asdf"
+# region = "asdf"
+# [apis."aws"."kms".key_configuration]
+# "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
+
+
 [data]
 
 # [data.websocket]
