@@ -12,15 +12,25 @@ use std::collections::HashMap;
 
 #[derive(Deserialize)]
 struct SignRequestRequest {
+    /// To specify a KMS key, use its key ID, key ARN, alias name, or alias ARN.
+    /// When using an alias name, prefix it with "alias/".
+    /// To specify a KMS key in a different Amazon Web Services account, you must use the key ARN or alias ARN.
+    /// For example:
+    /// - Key ID: 1234abcd-12ab-34cd-56ef-1234567890ab
+    /// - Key ARN: arn:aws:kms:us-east-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
+    /// - Alias name: alias/ExampleAlias
+    /// - Alias ARN: arn:aws:kms:us-east-2:111122223333:alias/ExampleAlias
+    key_id: String,
     /// Specifies the message or message digest to sign. Messages can be 0-4096 bytes. To sign a larger message, provide a message digest.
     #[serde(deserialize_with = "parse_message")]
     message: Blob,
-    /// Name of the request - defined in plaid.toml
-    request_name: String,
     /// Tells KMS whether the value of the Message parameter should be hashed as part of the signing algorithm.
     /// Use RAW for unhashed messages; use DIGEST for message digests, which are already hashed.
     #[serde(deserialize_with = "parse_message_type")]
     message_type: MessageType,
+    #[serde(deserialize_with = "parse_signing_algorithm")]
+    /// The signing algorithm to use in signing this request
+    signing_algorithm: SigningAlgorithmSpec,
 }
 
 /// Custom parser for message_type. Returns an error if an invalid message type is provided.
@@ -58,40 +68,20 @@ pub struct KmsConfig {
     /// - `IAM`: Uses the IAM role assigned to the instance or environment.
     /// - `ApiKey`: Uses explicit credentials, including an access key ID, secret access key, and region.
     authentication: Authentication,
-    /// Preconfigured requests - keyed by name. Rules will use the name assigned here to access the request's
-    /// specification at runtime.
-    sign_requests: HashMap<String, Request>,
+    /// Configured keys - maps a KMS key ID to a list of rules that are allowed to use it
+    key_configuration: HashMap<String, Vec<String>>,
 }
 
 /// Defines methods to authenticate to KMS with
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Authentication {
-    Iam {},
     ApiKey {
         access_key_id: String,
         secret_access_key: String,
         region: String,
     },
-}
-
-/// Defines the configuration of a signing request to KMS.
-#[derive(Deserialize)]
-pub struct Request {
-    /// To specify a KMS key, use its key ID, key ARN, alias name, or alias ARN.
-    /// When using an alias name, prefix it with "alias/".
-    /// To specify a KMS key in a different Amazon Web Services account, you must use the key ARN or alias ARN.
-    /// For example:
-    /// - Key ID: 1234abcd-12ab-34cd-56ef-1234567890ab
-    /// - Key ARN: arn:aws:kms:us-east-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
-    /// - Alias name: alias/ExampleAlias
-    /// - Alias ARN: arn:aws:kms:us-east-2:111122223333:alias/ExampleAlias
-    key_id: String,
-    /// The modules allowed to use this request
-    allowed_rules: Vec<String>,
-    /// The signing algorithm to use in signing this request
-    #[serde(deserialize_with = "parse_signing_algorithm")]
-    signing_algorithm: SigningAlgorithmSpec,
+    Iam {},
 }
 
 /// Custom parser for signing_algorithm. Returns an error if an invalid message type is provided.
@@ -156,8 +146,8 @@ impl SignRequestResponse {
 pub struct Kms {
     /// The underlying KMS client used to interact with the KMS API.
     client: Client,
-    /// A collection of pre-configured signing requests, keyed by their names.
-    sign_requests: HashMap<String, Request>,
+    /// A collection of KMS key IDs and the rules that are allowed to interact with them
+    key_configuration: HashMap<String, Vec<String>>,
 }
 
 impl Kms {
@@ -189,20 +179,20 @@ impl Kms {
 
         Self {
             client,
-            sign_requests: config.sign_requests,
+            key_configuration: config.key_configuration,
         }
     }
 
-    /// Makes a named signing request to the KMS API using the specified parameters.
+    /// Signs an arbitrary message using the provided KMS key
     ///
     /// This function:
     /// - Parses the request parameters from a JSON string.
-    /// - Fetches the corresponding signing request specification from the configuration.
-    /// - Verifies that the calling module is allowed to use this request.
+    /// - Fetches the configuration settings for the parsed out KMS key ID
+    /// - Verifies that the calling module is allowed to use this KMS key
     /// - Sends the signing request to the KMS API and returns the signed result as a JSON string.
     ///
     /// Returns a `Result` containing the signed output as a `String` or an `ApiError` if any step fails.
-    pub async fn make_named_signing_request(
+    pub async fn sign_arbitrary_message(
         &self,
         params: &str,
         module: &str,
@@ -211,32 +201,33 @@ impl Kms {
         let request: SignRequestRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let request_name = &request.request_name;
-
-        // Attempt to fetch signing request specificaation from config
-        let request_specification = match self.sign_requests.get(request_name) {
-            Some(x) => x,
+        // Attempt to fetch config for provided KMS key id
+        let allowed_rules = match self.key_configuration.get(&request.key_id) {
+            Some(rules) => rules,
             None => {
-                error!("{module} tried to use sign-request which doesn't exist: {request_name}");
+                error!(
+                    "{module} tried to use a KMS key that is not configured: {}",
+                    request.key_id
+                );
                 return Err(ApiError::BadRequest);
             }
         };
 
-        // Verify that caller is allowed to use this request
-        if !request_specification
-            .allowed_rules
-            .contains(&module.to_string())
-        {
-            error!("{module} tried to use sign-request which it's not allowed to: {request_name}");
+        // Verify that caller is allowed to use this key
+        if !allowed_rules.contains(&module.to_string()) {
+            error!(
+                "{module} tried to use KMS key which it's not allowed to: {}",
+                request.key_id
+            );
             return Err(ApiError::BadRequest);
         }
 
         let output = self
             .client
             .sign()
-            .key_id(&request_specification.key_id)
+            .key_id(&request.key_id)
             .message_type(request.message_type)
-            .signing_algorithm(request_specification.signing_algorithm.clone())
+            .signing_algorithm(request.signing_algorithm.clone())
             .message(request.message)
             .send()
             .await

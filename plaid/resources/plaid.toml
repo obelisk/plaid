@@ -121,22 +121,19 @@ secret_key = ""
 
 # [apis."aws"]
 # [apis."aws"."kms".authentication]
-# [apis."aws"."kms".sign_requests."demo_sign_request"]
-# key_id = "arn:aws:kms:us-east-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab"
-# allowed_rules = ["testing_test.wasm"]
-# signing_algorithm = "ECDSA_SHA_256"
+# [apis."aws"."kms".key_configuration]
+# "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
 
 # KMS USING API KEY
 
+# [apis."aws"]
 # [apis."aws"."kms"]
 # [apis."aws"."kms".authentication]
 # access_key_id = "asdf"
 # secret_access_key = "asdf"
 # region = "asdf"
-# [apis."aws"."kms".sign_requests."demo_sign_request"]
-# key_id = "arn:aws:kms:us-east-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab"
-# allowed_rules = ["testing_test.wasm"]
-# signing_algorithm = "ECDSA_SHA_256"
+# [apis."aws"."kms".key_configuration]
+# "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
 
 
 [data]

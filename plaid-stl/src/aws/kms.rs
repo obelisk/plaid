@@ -28,6 +28,38 @@ pub enum MessageType {
     Digest,
 }
 
+/// The signing algorithm to use in signing this request
+pub enum SigningAlgorithm {
+    EcdsaSha256,
+    EcdsaSha384,
+    EcdsaSha512,
+    RsassaPkcs1V15Sha256,
+    RsassaPkcs1V15Sha384,
+    RsassaPkcs1V15Sha512,
+    RsassaPssSha256,
+    RsassaPssSha384,
+    RsassaPssSha512,
+}
+
+impl Serialize for SigningAlgorithm {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::EcdsaSha256 => serializer.serialize_str("ECDSA_SHA_256"),
+            Self::EcdsaSha384 => serializer.serialize_str("ECDSA_SHA_384"),
+            Self::EcdsaSha512 => serializer.serialize_str("ECDSA_SHA_512"),
+            Self::RsassaPkcs1V15Sha256 => serializer.serialize_str("RSASSA_PKCS1_V1_5_SHA_256"),
+            Self::RsassaPkcs1V15Sha384 => serializer.serialize_str("RSASSA_PKCS1_V1_5_SHA_384"),
+            Self::RsassaPkcs1V15Sha512 => serializer.serialize_str("RSASSA_PKCS1_V1_5_SHA_512"),
+            Self::RsassaPssSha256 => serializer.serialize_str("RSASSA_PSS_SHA_256"),
+            Self::RsassaPssSha384 => serializer.serialize_str("RSASSA_PSS_SHA_384"),
+            Self::RsassaPssSha512 => serializer.serialize_str("RSASSA_PSS_SHA_512"),
+        }
+    }
+}
+
 /// Creates and sends a named signing request to the KMS API.
 ///
 /// This function:
@@ -37,16 +69,26 @@ pub enum MessageType {
 /// - Deserializes the response into a `SignRequestResponse`, which includes details like the key ID, signature, and signing algorithm used.
 ///
 /// # Parameters
-/// - `request_name`: The name of the signing request as defined in the configuration (e.g., `plaid.toml`).
+/// - `key_id`:  To specify a KMS key, use its key ID, key ARN, alias name, or alias ARN.
+/// When using an alias name, prefix it with "alias/".
+///     To specify a KMS key in a different Amazon Web Services account, you must use the key ARN or alias ARN.
+///     For example:
+///     - Key ID: 1234abcd-12ab-34cd-56ef-1234567890ab
+///     - Key ARN: arn:aws:kms:us-east-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
+///     - Alias name: alias/ExampleAlias
+///     - Alias ARN: arn:aws:kms:us-east-2:111122223333:alias/ExampleAlias
 /// - `message`: The message or message digest to be signed by KMS.
 /// - `message_type`: Specifies whether the message should be hashed (use `Raw` for unhashed, `Digest` for pre-hashed).
+/// - `signing_algorithm`: The signing algorithm to use in signing this request
 ///
 /// # Returns
+///
 /// A `Result` containing either the `SignRequestResponse` with the signing details or a `PlaidFunctionError` if something went wrong.
-pub fn make_named_signing_request(
-    request_name: &str,
+pub fn sign_arbitrary_message(
+    key_id: &str,
     message: &str,
     message_type: MessageType,
+    signing_algorithm: SigningAlgorithm,
 ) -> Result<SignRequestResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(kms, make_named_signing_request);
@@ -54,19 +96,17 @@ pub fn make_named_signing_request(
 
     #[derive(Serialize)]
     struct SignRequestRequest {
-        /// Specifies the message or message digest to sign. Messages can be 0-4096 bytes. To sign a larger message, provide a message digest.
+        key_id: String,
         message: String,
-        /// Name of the request - defined in plaid.toml
-        request_name: String,
-        /// Tells KMS whether the value of the Message parameter should be hashed as part of the signing algorithm.
-        /// Use RAW for unhashed messages; use DIGEST for message digests, which are already hashed.
         message_type: MessageType,
+        signing_algorithm: SigningAlgorithm,
     }
 
     let request = SignRequestRequest {
-        request_name: request_name.to_owned(),
-        message: message.to_owned(),
+        key_id: key_id.to_string(),
+        message: message.to_string(),
         message_type,
+        signing_algorithm,
     };
 
     let request = serde_json::to_string(&request).unwrap();
