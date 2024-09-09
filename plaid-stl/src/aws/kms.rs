@@ -100,7 +100,7 @@ impl Serialize for SigningAlgorithm {
 /// A `Result` containing either the `SignRequestResponse` with the signing details or a `PlaidFunctionError` if something went wrong.
 pub fn sign_arbitrary_message(
     key_id: &str,
-    message: &str,
+    message: Vec<u8>,
     message_type: MessageType,
     signing_algorithm: SigningAlgorithm,
 ) -> Result<SignRequestResponse, PlaidFunctionError> {
@@ -111,14 +111,14 @@ pub fn sign_arbitrary_message(
     #[derive(Serialize)]
     struct SignRequestRequest {
         key_id: String,
-        message: String,
+        message: Vec<u8>,
         message_type: MessageType,
         signing_algorithm: SigningAlgorithm,
     }
 
     let request = SignRequestRequest {
         key_id: key_id.to_string(),
-        message: message.to_string(),
+        message,
         message_type,
         signing_algorithm,
     };
