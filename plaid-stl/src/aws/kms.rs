@@ -105,7 +105,7 @@ pub fn sign_arbitrary_message(
     signing_algorithm: SigningAlgorithm,
 ) -> Result<SignRequestResponse, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(kms, sign_arbitrary_message);
+        new_host_function_with_error_buffer!(aws_kms, sign_arbitrary_message);
     }
 
     #[derive(Serialize)]
@@ -128,7 +128,7 @@ pub fn sign_arbitrary_message(
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let res = unsafe {
-        kms_sign_arbitrary_message(
+        aws_kms_sign_arbitrary_message(
             request.as_ptr(),
             request.len(),
             return_buffer.as_mut_ptr(),
@@ -165,7 +165,7 @@ pub fn sign_arbitrary_message(
 /// - `message`: The message or message digest to be signed by KMS.
 pub fn get_public_key(key_id: &str) -> Result<GetPublicKeyResponse, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(kms, get_public_key);
+        new_host_function_with_error_buffer!(aws_kms, get_public_key);
     }
 
     let mut request = HashMap::new();
@@ -176,7 +176,7 @@ pub fn get_public_key(key_id: &str) -> Result<GetPublicKeyResponse, PlaidFunctio
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let res = unsafe {
-        kms_get_public_key(
+        aws_kms_get_public_key(
             request.as_ptr(),
             request.len(),
             return_buffer.as_mut_ptr(),

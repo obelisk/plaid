@@ -387,12 +387,12 @@ pub fn to_api_function(
 
         // KMS calls
         #[cfg(feature = "aws")]
-        "kms_sign_arbitrary_message" => {
+        "aws_kms_sign_arbitrary_message" => {
             Function::new_typed_with_env(&mut store, &env, aws_kms_sign_arbitrary_message)
         }
 
         #[cfg(feature = "aws")]
-        "kms_get_public_key" => {
+        "aws_kms_get_public_key" => {
             Function::new_typed_with_env(&mut store, &env, aws_kms_get_public_key)
         }
 
