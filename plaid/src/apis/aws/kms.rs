@@ -22,8 +22,7 @@ struct SignRequestRequest {
     /// - Alias ARN: arn:aws:kms:us-east-2:111122223333:alias/ExampleAlias
     key_id: String,
     /// Specifies the message or message digest to sign. Messages can be 0-4096 bytes. To sign a larger message, provide a message digest.
-    #[serde(deserialize_with = "parse_message")]
-    message: Blob,
+    message: Vec<u8>,
     /// Tells KMS whether the value of the Message parameter should be hashed as part of the signing algorithm.
     /// Use RAW for unhashed messages; use DIGEST for message digests, which are already hashed.
     #[serde(deserialize_with = "parse_message_type")]
@@ -49,16 +48,6 @@ where
     }
 }
 
-/// Custom parser for message_type. Returns an error if an invalid message type is provided.
-fn parse_message<'de, D>(deserializer: D) -> Result<Blob, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let message = String::deserialize(deserializer)?;
-
-    Ok(Blob::new(message))
-}
-
 /// Defines configuration for the KMS API
 #[derive(Deserialize)]
 pub struct KmsConfig {
@@ -79,6 +68,7 @@ enum Authentication {
     ApiKey {
         access_key_id: String,
         secret_access_key: String,
+        session_token: Option<String>,
         region: String,
     },
     Iam {},
@@ -185,11 +175,17 @@ impl Kms {
             Authentication::ApiKey {
                 access_key_id,
                 secret_access_key,
+                session_token,
                 region,
             } => {
                 info!("Using API keys to authenticate to KMS");
-                let credentials =
-                    Credentials::new(access_key_id, secret_access_key, None, None, "Plaid");
+                let credentials = Credentials::new(
+                    access_key_id,
+                    secret_access_key,
+                    session_token,
+                    None,
+                    "Plaid",
+                );
 
                 aws_config::defaults(BehaviorVersion::latest())
                     .region(Region::new(region.clone()))
@@ -247,7 +243,7 @@ impl Kms {
             .key_id(&request.key_id)
             .message_type(request.message_type)
             .signing_algorithm(request.signing_algorithm.clone())
-            .message(request.message)
+            .message(Blob::new(request.message))
             .send()
             .await
             .map_err(|e| ApiError::KmsSignError(e))?;
