@@ -1,12 +1,32 @@
 use std::{collections::HashMap, fmt::Display};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
 
 pub enum ReviewPatAction {
     Approve,
     Deny,
+}
+
+#[derive(Debug, Deserialize)]
+/// Set of user permissions, as returned by GitHub's API
+pub struct Permission {
+    pub pull: bool,
+    pub triage: bool,
+    pub push: bool,
+    pub maintain: bool,
+    pub admin: bool,
+}
+
+#[derive(Debug, Deserialize)]
+/// A collaborator on a GitHub repository
+pub struct RepositoryCollaborator {
+    pub login: String,
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub role_name: String,
+    pub permissions: Permission,
 }
 
 // TODO: Do not use this function, it is deprecated and will be removed soon
@@ -476,7 +496,8 @@ pub fn get_branch_protection_rules(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
-/// Get all collaborators on a repository
+/// DEPRECATED - DO NOT USE. Instead, use get_all_repository_collaborators
+/// Get first 30 collaborators on a repository
 /// ## Arguments
 ///
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
@@ -514,6 +535,63 @@ pub fn get_repository_collaborators(
     // This should be safe because unless the Plaid runtime is expressly trying
     // to mess with us, this came from a String in the API module.
     Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+/// Get all collaborators on a repository. Returns a vector of strings, where each string is a JSON-encoded
+/// page of results, as returned by the GitHub API.
+/// ## Arguments
+///
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+pub fn get_all_repository_collaborators(
+    owner: impl Display,
+    repo: impl Display,
+) -> Result<Vec<RepositoryCollaborator>, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_repository_collaborators);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+
+    let mut collaborators = Vec::<RepositoryCollaborator>::new();
+    let mut page = 0;
+    
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+
+    loop {
+        page += 1;
+        params.insert("page", page.to_string());
+        // params.insert("per_page", "30".to_owned()"); // Default: 30 items per page
+        
+        let request = serde_json::to_string(&params).unwrap();
+        
+        let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+        
+        let res = unsafe {
+            github_get_repository_collaborators(
+                request.as_bytes().as_ptr(),
+                request.as_bytes().len(),
+                return_buffer.as_mut_ptr(),
+                RETURN_BUFFER_SIZE,
+            )
+        };
+        
+        if res < 0 {
+            return Err(res.into());
+        }
+        
+        return_buffer.truncate(res as usize);
+        // This should be safe because unless the Plaid runtime is expressly trying
+        // to mess with us, this came from a String in the API module.
+        let this_page = String::from_utf8(return_buffer).unwrap();
+        if this_page == "[]" {
+            break;
+        }
+        collaborators.extend(serde_json::from_str::<Vec<RepositoryCollaborator>>(&this_page).map_err(|_| PlaidFunctionError::InternalApiError)?);
+    }
+
+    Ok(collaborators)
 }
 
 /// Update branch protection rule for a single branch

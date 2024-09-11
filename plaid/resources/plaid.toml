@@ -33,7 +33,7 @@ okta = 9_000_000
 "example_rule.wasm" = 5_000_000
 
 [loading.memory_page_count]
-default = 250
+default = 300
 [loading.memory_page_count.log_type]
 okta = 200
 [loading.memory_page_count.module_overrides]
