@@ -13,7 +13,7 @@ impl Okta {
         let group_id = request.get("group_id").ok_or(ApiError::BadRequest)?;
 
         let res = self.client.delete(format!("https://{}/api/v1/groups/{group_id}/users/{user_id}", &self.config.domain))
-            .header("Authorization", format!("SSWS {}", &self.config.token))
+            .header("Authorization", self.get_authorization_header(&super::OktaOperation::RemoveUserFromGroup).await.map_err(|e| ApiError::OktaError(e))?)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
 
