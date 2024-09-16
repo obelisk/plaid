@@ -113,6 +113,64 @@ impl Github {
         }
     }
 
+    /// Returns a list of all Files in a Pull Request.
+    /// See https://docs.github.com/en/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests-files for more detail
+    pub async fn list_files(&self, params: &str, module: &str) -> Result<String, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let organization = self.validate_org(request.get("organization").ok_or(ApiError::BadRequest)?)?;
+        let repository_name =
+            self.validate_repository_name(request.get("repository_name").ok_or(ApiError::BadRequest)?)?;
+        let pull_request = self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
+
+        info!("Fetching files for Pull Request Nr {pull_request} from [{organization}/{repository_name}] on behalf of {module}");
+        let address = format!("/repos/{organization}/{repository_name}/pulls/{pull_request}/files");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Returns the contents of a file at a specific URI.
+    pub async fn fetch_file(&self, params: &str, module: &str) -> Result<String, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let organization = self.validate_org(request.get("organization").ok_or(ApiError::BadRequest)?)?;
+        let repository_name =
+            self.validate_repository_name(request.get("repository_name").ok_or(ApiError::BadRequest)?)?;
+        let file_path = request.get("file_path").ok_or(ApiError::BadRequest)?;
+        let reference = self.validate_commit_hash(request.get("reference").ok_or(ApiError::BadRequest)?)?;
+
+        info!("Fetching contents of file in reporitory [{organization}/{repository_name}] at {file_path} and reference {reference}");
+        let address = format!("/repos/{organization}/{repository_name}/contents/{file_path}?ref={reference}");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Fetches branch protection rules.
     /// See https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28#get-branch-protection for more detail
     pub async fn get_branch_protection_rules(

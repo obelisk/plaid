@@ -233,6 +233,8 @@ impl_new_function!(github, update_branch_protection_rule);
 impl_new_function_with_error_buffer!(github, make_graphql_query);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query);
 impl_new_function_with_error_buffer!(github, fetch_commit);
+impl_new_function_with_error_buffer!(github, list_files);
+impl_new_function_with_error_buffer!(github, fetch_file);
 impl_new_function_with_error_buffer!(github, get_branch_protection_rules);
 impl_new_function_with_error_buffer!(github, get_repository_collaborators);
 
@@ -348,6 +350,12 @@ pub fn to_api_function(
         }
         "github_fetch_commit" => {
             Function::new_typed_with_env(&mut store, &env, github_fetch_commit)
+        }
+        "github_list_files" => {
+            Function::new_typed_with_env(&mut store, &env, github_list_files)
+        }
+        "github_fetch_file" => {
+            Function::new_typed_with_env(&mut store, &env, github_fetch_file)
         }
         "github_list_fpat_requests_for_org" => {
             Function::new_typed_with_env(&mut store, &env, github_list_fpat_requests_for_org)

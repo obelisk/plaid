@@ -317,6 +317,87 @@ pub fn fetch_commit(user: &str, repo: &str, commit: &str) -> Result<String, Plai
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+pub fn list_files(organization: &str, repository_name: &str, pull_request: &str) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, list_files);
+    }
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+
+    #[derive(Serialize)]
+    struct Request<'a> {
+        organization: &'a str,
+        repository_name: &'a str,
+        pull_request: &'a str,
+    }
+
+    let request = Request { organization, repository_name, pull_request };
+
+    let request = serde_json::to_string(&request).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_list_files(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+pub fn fetch_file(organization: &str, repository_name: &str, file_path: &str, reference: &str) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, fetch_file);
+    }
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+
+    #[derive(Serialize)]
+    struct Request<'a> {
+        organization: &'a str,
+        repository_name: &'a str,
+        file_path: &'a str,
+        reference: &'a str,
+    }
+
+    let request = Request { organization, repository_name, file_path, reference };
+
+    let request = serde_json::to_string(&request).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_fetch_file(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
 /// Lists approved fine-grained personal access tokens owned by organization members that can access organization resources
 /// ## Arguments
 ///
@@ -556,18 +637,18 @@ pub fn get_all_repository_collaborators(
 
     let mut collaborators = Vec::<RepositoryCollaborator>::new();
     let mut page = 0;
-    
+
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
     loop {
         page += 1;
         params.insert("page", page.to_string());
         // params.insert("per_page", "30".to_owned()"); // Default: 30 items per page
-        
+
         let request = serde_json::to_string(&params).unwrap();
-        
+
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
-        
+
         let res = unsafe {
             github_get_repository_collaborators(
                 request.as_bytes().as_ptr(),
@@ -576,11 +657,11 @@ pub fn get_all_repository_collaborators(
                 RETURN_BUFFER_SIZE,
             )
         };
-        
+
         if res < 0 {
             return Err(res.into());
         }
-        
+
         return_buffer.truncate(res as usize);
         // This should be safe because unless the Plaid runtime is expressly trying
         // to mess with us, this came from a String in the API module.
@@ -638,3 +719,5 @@ pub fn update_branch_protection_rule(
 
     Ok(())
 }
+
+
