@@ -249,6 +249,19 @@ impl_new_sub_module_function_with_error_buffer!(aws, kms, sign_arbitrary_message
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key);
 
+// Npm Functions
+impl_new_function!(npm, publish_empty_stub);
+impl_new_function!(npm, set_team_permission_on_package);
+impl_new_function_with_error_buffer!(npm, create_granular_token_for_package);
+impl_new_function_with_error_buffer!(npm, list_granular_tokens);
+impl_new_function!(npm, delete_package);
+impl_new_function!(npm, add_user_to_team);
+impl_new_function!(npm, remove_user_from_team);
+impl_new_function!(npm, remove_user_from_organization);
+impl_new_function!(npm, invite_user_to_organization);
+impl_new_function_with_error_buffer!(npm, get_org_user_list);
+impl_new_function_with_error_buffer!(npm, get_org_users_without_2fa);
+
 // Okta Functions
 impl_new_function!(okta, remove_user_from_group);
 impl_new_function_with_error_buffer!(okta, get_user_data);
@@ -323,6 +336,52 @@ pub fn to_api_function(
         }
         "cache_get" => Function::new_typed_with_env(&mut store, &env, super::internal::cache_get),
         "log_back" => Function::new_typed_with_env(&mut store, &env, super::internal::log_back),
+        
+        // Npm Calls
+        "npm_publish_empty_stub" => {
+            Function::new_typed_with_env(&mut store, &env, npm_publish_empty_stub)
+        }
+
+        "npm_set_team_permission_on_package" => {
+            Function::new_typed_with_env(&mut store, &env, npm_set_team_permission_on_package)
+        }
+
+        "npm_create_granular_token_for_package" => {
+            Function::new_typed_with_env(&mut store, &env, npm_create_granular_token_for_package)
+        }
+
+        "npm_list_granular_tokens" => {
+            Function::new_typed_with_env(&mut store, &env, npm_list_granular_tokens)
+        }
+
+        "npm_delete_package" => {
+            Function::new_typed_with_env(&mut store, &env, npm_delete_package)
+        }
+
+        "npm_add_user_to_team" => {
+            Function::new_typed_with_env(&mut store, &env, npm_add_user_to_team)
+        }
+
+        "npm_remove_user_from_team" => {
+            Function::new_typed_with_env(&mut store, &env, npm_remove_user_from_team)
+        }
+
+        "npm_remove_user_from_organization" => {
+            Function::new_typed_with_env(&mut store, &env, npm_remove_user_from_organization)
+        }
+
+        "npm_invite_user_to_organization" => {
+            Function::new_typed_with_env(&mut store, &env, npm_invite_user_to_organization)
+        }
+
+        "npm_get_org_user_list" => {
+            Function::new_typed_with_env(&mut store, &env, npm_get_org_user_list)
+        }
+
+        "npm_get_org_users_without_2fa" => {
+            Function::new_typed_with_env(&mut store, &env, npm_get_org_users_without_2fa)
+        }
+        
         // Okta Calls
         "okta_remove_user_from_group" => {
             Function::new_typed_with_env(&mut store, &env, okta_remove_user_from_group)

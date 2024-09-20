@@ -1,0 +1,716 @@
+use regex::Regex;
+use reqwest::cookie::CookieStore;
+use serde::Serialize;
+use serde_json::Value;
+use std::collections::HashMap;
+use totp_rs::{Algorithm, Secret, TOTP};
+use url::Url;
+
+use crate::apis::ApiError;
+
+use plaid_stl::npm::{
+    AddRemoveUserToFromTeamParams, CreateGranularTokenForPackageParams,
+    InviteUserToOrganizationParams, NpmToken, NpmUser, NpmUserRole,
+    SetTeamPermissionOnPackageParams,
+};
+
+use super::{Npm, NpmError};
+
+const NPMJS_COM_URL: &str = "https://www.npmjs.com";
+
+#[derive(Serialize)]
+/// Payload sent to npm website to change a team's permissions over a package
+struct PermissionChangePayload<'a> {
+    csrftoken: &'a str,
+    package: &'a str,
+    permissions: &'a str,
+}
+
+#[derive(Serialize)]
+/// Payload sent to npm website to generate a new granular token
+struct GenerateGranularTokenPayload<'a> {
+    #[serde(rename = "allowedIPRanges")]
+    allowed_ip_ranges: Vec<String>,
+    csrftoken: &'a str,
+    #[serde(rename = "expirationDays")]
+    expiration_days: &'a str,
+    #[serde(rename = "orgsPermission")]
+    orgs_permission: &'a str,
+    #[serde(rename = "packagesAndScopesPermission")]
+    packages_and_scopes_permission: &'a str,
+    #[serde(rename = "selectedOrgs")]
+    selected_orgs: Vec<String>,
+    #[serde(rename = "selectedPackages")]
+    selected_packages: Vec<String>,
+    #[serde(rename = "selectedPackagesAndScopes")]
+    selected_packages_and_scopes: &'a str,
+    #[serde(rename = "selectedScopes")]
+    selected_scopes: Vec<String>,
+    #[serde(rename = "tokenDescription")]
+    token_description: &'a str,
+    #[serde(rename = "tokenName")]
+    token_name: &'a str,
+}
+
+impl Npm {
+    /// Retrieve the CSRF token from the client's cookie jar
+    fn get_csrftoken_from_cookies(&self) -> Result<String, NpmError> {
+        let cookies: Vec<String> = self
+            .cookie_jar
+            .as_ref()
+            .cookies(&Url::parse(NPMJS_COM_URL).unwrap())
+            .ok_or(NpmError::FailedToGetCsrfTokenFromCookies)?
+            .to_str()
+            .map_err(|_| NpmError::FailedToGetCsrfTokenFromCookies)?
+            .to_string()
+            .split("; ")
+            .map(|v| v.to_string())
+            .collect();
+        let mut csrf_token: Option<String> = None;
+        for c in cookies {
+            if c.starts_with("cs=") {
+                csrf_token = Some(
+                    c.split("=")
+                        .collect::<Vec<&str>>()
+                        .get(1)
+                        .ok_or(NpmError::FailedToGetCsrfTokenFromCookies)?
+                        .to_string(),
+                );
+                break;
+            }
+        }
+        csrf_token.ok_or(NpmError::FailedToGetCsrfTokenFromCookies)
+    }
+
+    /// Execute the web login flow (with username/password + OTP 2FA). As a side effect, this
+    /// updates the client's cookie jar, from which we can later extract necessary values.
+    async fn login(&self) -> Result<(), NpmError> {
+        let response = self
+            .client
+            .get(format!("{}/login", NPMJS_COM_URL))
+            .send()
+            .await
+            .map_err(|_| NpmError::LoginFlowError)?;
+        // Get the CSRF token (which is in a cookie) because we need to send it back later on
+        let cs_cookie = match response.cookies().find(|c| c.name() == "cs") {
+            None => return Ok(()), // we do not get this cookie if we are _already_ logged in
+            Some(c) => c.value().to_string(),
+        };
+
+        // Login step 1: send the username and password, together with the CSRF token
+        self.client
+            .post(format!("{}/login", NPMJS_COM_URL))
+            .form(&[
+                ("username", &self.config.username),
+                ("password", &self.config.password),
+                ("csrftoken", &cs_cookie),
+            ])
+            .send()
+            .await
+            .map_err(|_| NpmError::LoginFlowError)?;
+
+        // Prepare the TOTP code for the 2FA
+        let otp_token = TOTP::new(
+            Algorithm::SHA1,
+            6,
+            1,
+            30,
+            Secret::Encoded(self.config.otp_secret.to_string())
+                .to_bytes()
+                .map_err(|_| NpmError::LoginFlowError)?,
+        )
+        .map_err(|_| NpmError::LoginFlowError)?
+        .generate_current()
+        .map_err(|_| NpmError::LoginFlowError)?;
+
+        // Login step 2: send the TOTP code to a well-known URL
+        self.client
+            .post(format!("{}/login/otp?next=%2F", NPMJS_COM_URL))
+            .form(&[
+                ("otp", &otp_token),
+                ("formName", &"totp".to_string()),
+                ("originalUrl", &"".to_string()),
+                ("csrftoken", &cs_cookie),
+            ])
+            .send()
+            .await
+            .map(|_| ())
+            .map_err(|_| NpmError::LoginFlowError)
+    }
+
+    /// Set a team's permissions over a package
+    pub async fn set_team_permission_on_package(
+        &self,
+        params: &str,
+        module: &str,
+    ) -> Result<i32, ApiError> {
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let params: SetTeamPermissionOnPackageParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        info!(
+            "Setting permission [{}] on package [{}] for team [{}] on behalf of [{module}]",
+            params.permission.to_string(),
+            params.package,
+            params.team
+        );
+
+        // Prepare the request body
+        let csrf_token = self
+            .get_csrftoken_from_cookies()
+            .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
+        let payload = PermissionChangePayload {
+            package: &format!("@{}/{}", self.config.npm_scope, params.package),
+            permissions: &params.permission.to_string(),
+            csrftoken: &csrf_token,
+        };
+        self.client
+            .post(format!(
+                "{}/settings/{}/teams/team/{}/access",
+                NPMJS_COM_URL, self.config.npm_scope, params.team
+            ))
+            .json(&payload)
+            .send()
+            .await
+            .map(|_| Ok(0))
+            .map_err(|_| ApiError::NpmError(NpmError::PermissionChangeError))?
+    }
+
+    /// Create a granular token for a package, with given name and description.
+    ///
+    /// The token has the following features:
+    /// * read/write permission
+    /// * expires after 365 days
+    /// * scoped to the given package
+    pub async fn create_granular_token_for_package(
+        &self,
+        params: &str,
+        module: &str,
+    ) -> Result<String, ApiError> {
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let params: CreateGranularTokenForPackageParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        info!(
+            "Creating npm granular token for package [{}] on behalf of [{module}]",
+            params.package
+        );
+
+        let scoped_package = format!("@{}/{}", self.config.npm_scope, params.package);
+        // Prepare the request body
+        let csrf_token = self
+            .get_csrftoken_from_cookies()
+            .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
+        let payload = GenerateGranularTokenPayload {
+            allowed_ip_ranges: params
+                .specs
+                .allowed_ip_ranges
+                .clone()
+                .unwrap_or(vec!["".to_string()]),
+            csrftoken: &csrf_token,
+            expiration_days: &params.specs.expiration_days.unwrap_or(365).to_string(),
+            orgs_permission: &params
+                .specs
+                .orgs_permission
+                .clone()
+                .map_or("No access".to_string(), |v| v.to_string()),
+            packages_and_scopes_permission: &params
+                .specs
+                .packages_and_scopes_permission
+                .clone()
+                .map_or("Read and write".to_string(), |v| v.to_string()),
+            selected_orgs: params.specs.selected_orgs.clone().unwrap_or(vec![]),
+            selected_packages: params
+                .specs
+                .selected_packages
+                .clone()
+                .unwrap_or(vec![scoped_package]),
+            selected_packages_and_scopes: &params
+                .specs
+                .selected_packages_and_scopes
+                .clone()
+                .map_or("packagesAndScopesSome".to_string(), |v| v.to_string()),
+            selected_scopes: params.specs.selected_scopes.clone().unwrap_or(vec![]),
+            token_description: &params.specs.token_description,
+            token_name: &params.specs.token_name,
+        };
+        let response = self
+            .client
+            .post(format!(
+                "{}/settings/{}/tokens/new-gat",
+                NPMJS_COM_URL, self.config.username
+            ))
+            .json(&payload)
+            .header("X-Spiferack", "1") // to get JSON instead of HTML
+            .send()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::TokenGenerationError))?;
+
+        // The new token is in the JSON response, under the key "newToken"
+        response
+            .json::<Value>()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::TokenGenerationError))?
+            .get("newToken")
+            .map(|v| Ok(v.to_string()))
+            .ok_or(ApiError::NpmError(NpmError::TokenGenerationError))?
+    }
+
+    /// Retrieve a list of granular tokens for the account whose credentials have been configured for this client.
+    ///
+    /// Note: only granular tokens are returned. Other types of tokens (publish, automation, etc.) are filtered out.
+    pub async fn list_granular_tokens(&self, _: &str, module: &str) -> Result<String, ApiError> {
+        info!("Listing npm granular tokens on behalf of [{module}]");
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let response = self
+            .client
+            .get(format!(
+                "{}/settings/{}/tokens",
+                NPMJS_COM_URL, self.config.username
+            ))
+            .header("X-Spiferack", "1") // to get JSON instead of HTML
+            .send()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?;
+
+        // Tokens are returned in a JSON structure under "list > objects". We first deserialize to a
+        // generic Value, then get "list > objects" and convert to a vector of NpmTokens. Finally, we
+        // keep only granular tokens and return the result.
+        let granular_tokens = serde_json::from_value::<Vec<NpmToken>>(
+            response
+                .json::<Value>()
+                .await
+                .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?
+                .get("list")
+                .ok_or(ApiError::NpmError(NpmError::FailedToListGranularTokens))?
+                .get("objects")
+                .ok_or(ApiError::NpmError(NpmError::FailedToListGranularTokens))?
+                .clone(),
+        )
+        .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?
+        .iter()
+        .filter(|v| v.token_type == Some("granular".to_string()))
+        .cloned()
+        .collect::<Vec<NpmToken>>();
+
+        serde_json::to_string(&granular_tokens)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))
+    }
+
+    /// Delete a package from the npm registry.
+    ///
+    /// Note: The package name should be unscoped. If you are trying to delete
+    /// @scope/package_name, then you should pass only "package_name". The scope is
+    /// preconfigured in the client and will be added automatically.
+    pub async fn delete_package(&self, package: &str, module: &str) -> Result<i32, ApiError> {
+        info!("Deleting npm package [{package}] on behalf of [{module}]");
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        // Step 1. Make a GET request to /delete in order to retrieve the dsrManifestHash.
+        // This will later be sent as form data when actually performing the deletion.
+        let response = self
+            .client
+            .get(format!(
+                "{}/package/%40{}%2F{}/delete",
+                NPMJS_COM_URL, self.config.npm_scope, package
+            ))
+            .send()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?;
+        // Safe unwrap: hardcoded data.
+        // TODO best to precompile regex? This is likely an infrequent operation.
+        let dsr_manifest_hash = Regex::new(r#"dsrManifestHash\"\s+?value=\"([a-z0-9]{64})\""#)
+            .unwrap()
+            .captures(
+                &response
+                    .text()
+                    .await
+                    .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?,
+            )
+            .ok_or(ApiError::NpmError(NpmError::FailedToDeletePackage))?
+            .get(1) // get the content of the capturing group, which contains the token we need
+            .ok_or(ApiError::NpmError(NpmError::FailedToDeletePackage))?
+            .as_str()
+            .to_string();
+
+        // Step 2. Perform the actual package deletion with a POST request to /delete
+        let scoped_package_name = format!("@{}/{}", self.config.npm_scope, package);
+        let csrf_token = self
+            .get_csrftoken_from_cookies()
+            .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
+        let form_data: HashMap<&str, &str> = [
+            ("package", scoped_package_name.as_str()),
+            ("dsrManifestHash", &dsr_manifest_hash),
+            ("csrftoken", &csrf_token),
+        ]
+        .into();
+        self.client
+            .post(format!(
+                "{}/package/%40{}%2F{}/delete",
+                NPMJS_COM_URL, self.config.npm_scope, package
+            ))
+            .form(&form_data)
+            .send()
+            .await
+            .map(|_| Ok(0))
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?
+    }
+
+    /// Add a user to an npm team
+    pub async fn add_user_to_team(&self, params: &str, module: &str) -> Result<i32, ApiError> {
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let params: AddRemoveUserToFromTeamParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        info!(
+            "Adding user [{}] to team [{}] on behalf of [{module}]",
+            params.user,
+            params.team.to_string()
+        );
+
+        let csrf_token = self
+            .get_csrftoken_from_cookies()
+            .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
+        let body = format!(
+            r#"{{"csrftoken": "{}", "user": "{}"}}"#,
+            &csrf_token, params.user
+        );
+        self.client
+            .post(format!(
+                "{}/settings/{}/teams/team/{}/users",
+                NPMJS_COM_URL,
+                self.config.npm_scope,
+                params.team.to_string()
+            ))
+            .header("Content-Type", "text/plain;charset=UTF-8")
+            .body(body)
+            .send()
+            .await
+            .map(|_| Ok(0))
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToAddUserToTeam))?
+    }
+
+    /// Remove a user from an npm team
+    pub async fn remove_user_from_team(&self, params: &str, module: &str) -> Result<i32, ApiError> {
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let params: AddRemoveUserToFromTeamParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        info!(
+            "Removing user [{}] from team [{}] on behalf of [{module}]",
+            params.user,
+            params.team.to_string()
+        );
+
+        let body = format!(
+            r#"{{"csrftoken": "{}"}}"#,
+            self.get_csrftoken_from_cookies()
+                .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?
+        );
+        self.client
+            .post(format!(
+                "{}/settings/{}/teams/team/{}/users/{}/delete",
+                NPMJS_COM_URL,
+                self.config.npm_scope,
+                params.team.to_string(),
+                params.user
+            ))
+            .header("Content-Type", "text/plain;charset=UTF-8")
+            .body(body)
+            .send()
+            .await
+            .map(|_| Ok(0))
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromTeam))?
+    }
+
+    /// Remove a user from the npm organization
+    pub async fn remove_user_from_organization(
+        &self,
+        user: &str,
+        module: &str,
+    ) -> Result<i32, ApiError> {
+        #[derive(Serialize)]
+        struct RemoveUserPayload<'a> {
+            csrftoken: &'a str,
+        }
+
+        info!("Removing user [{user}] from npm organization on behalf of [{module}]");
+
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let csrf_token = self
+            .get_csrftoken_from_cookies()
+            .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
+        let payload = RemoveUserPayload {
+            csrftoken: &csrf_token,
+        };
+
+        self.client
+            .post(format!(
+                "{}/settings/{}/members/{}/delete",
+                NPMJS_COM_URL, self.config.npm_scope, user
+            ))
+            .json(&payload)
+            .send()
+            .await
+            .map(|_| Ok(0))
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromOrg))?
+    }
+
+    /// Invite a user to the npm organization.
+    ///
+    /// If `team` is specified then the user is added to that team upon accepting the invite.
+    /// If `team` is `None`, then the user is added to the default "developers" team.
+    pub async fn invite_user_to_organization(
+        &self,
+        params: &str,
+        module: &str,
+    ) -> Result<i32, ApiError> {
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let params: InviteUserToOrganizationParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let team = params.team.unwrap_or(plaid_stl::npm::NpmTeam::Developers);
+
+        info!(
+            "Inviting user [{}] to npm organization and team [{}] on behalf of [{module}]",
+            params.user,
+            team.to_string()
+        );
+
+        let body = format!(
+            r#"{{
+  "csrftoken": "{}",
+  "user": {{
+    "name": "{}"
+    }},
+  "team": "{}"
+    }}"#,
+            self.get_csrftoken_from_cookies()
+                .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?,
+            params.user,
+            team.to_string()
+        );
+
+        self.client
+            .post(format!(
+                "{}/settings/{}/invite/create",
+                NPMJS_COM_URL, self.config.npm_scope
+            ))
+            .header("Content-Type", "text/plain;charset=UTF-8")
+            .body(body)
+            .send()
+            .await
+            .map(|_| Ok(0))
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToInviteUserToOrg))?
+    }
+
+    /// Return all users in the npm organization
+    pub async fn get_org_user_list(&self, _: &str, module: &str) -> Result<String, ApiError> {
+        info!("Listing all members of npm organization on behalf of [{module}]");
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let response = self
+            .client
+            .get(format!(
+                "{}/settings/{}/members",
+                NPMJS_COM_URL, self.config.npm_scope
+            ))
+            .header("X-Spiferack", "1")
+            .send()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
+            .json::<Value>()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
+
+        // Get total number of users that we will need to retrieve
+        let total_users: u16 = serde_json::from_value(
+            response
+                .get("list")
+                .ok_or(ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
+                .get("total")
+                .ok_or(ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
+                .clone(),
+        )
+        .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
+
+        let users = self
+            .get_users_from_npm_website(
+                &format!(
+                    "{}/settings/{}/members",
+                    NPMJS_COM_URL, self.config.npm_scope
+                ),
+                total_users,
+            )
+            .await?;
+
+        serde_json::to_string(&users)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))
+    }
+
+    /// Utility function that retrieves users from a certain URL under the npm website.
+    /// The function keeps querying more pages until it has retrieved the target number of users.
+    async fn get_users_from_npm_website(
+        &self,
+        url: &str,
+        target_num_users: u16,
+    ) -> Result<Vec<NpmUser>, ApiError> {
+        // Get the first page, which contains the first users (max 10)
+        let response = self
+            .client
+            .get(url)
+            .header("X-Spiferack", "1")
+            .send()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
+            .json::<Value>()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
+
+        let mut all_users = json_value_to_user_vec(response)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToConvertToNpmUser))?;
+
+        if target_num_users <= 10 {
+            // We should have already got 10 users from the first page
+            if all_users.len() == target_num_users as usize {
+                // OK we got them all and we are done
+                return Ok(all_users);
+            }
+            // We _should_ have got all the users but something went wrong. Not good.
+            return Err(ApiError::NpmError(NpmError::FailedToRetrieveUserList));
+        }
+
+        // If we are here, then there are more than 10 users, so we make more requests
+        let mut page_num = 1; // pages start from 0
+
+        loop {
+            let response = self
+                .client
+                .get(url)
+                .header("X-Spiferack", "1") // to get JSON instead of HTML
+                .query(&[("page", page_num.to_string().as_str()), ("perPage", "10")])
+                .send()
+                .await
+                .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
+                .json::<Value>()
+                .await
+                .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
+
+            all_users.extend(
+                json_value_to_user_vec(response)
+                    .map_err(|_| ApiError::NpmError(NpmError::FailedToConvertToNpmUser))?,
+            );
+
+            if all_users.len() == target_num_users as usize {
+                // We got all the users
+                return Ok(all_users);
+            }
+
+            // There are more users
+            page_num += 1;
+        }
+    }
+
+    /// Retrieve all users in the npm org that do not have 2FA enabled
+    pub async fn get_org_users_without_2fa(
+        &self,
+        _: &str,
+        module: &str,
+    ) -> Result<String, ApiError> {
+        info!("Listing all members of npm organization without 2FA on behalf of [{module}]");
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let response = self
+            .client
+            .get(format!(
+                "{}/settings/{}/members",
+                NPMJS_COM_URL, self.config.npm_scope
+            ))
+            .query(&[("selectedTab", "tfa_disabled")])
+            .header("X-Spiferack", "1")
+            .send()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
+            .json::<Value>()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
+
+        // Get total number of users that we will need to retrieve
+        let total_users: u16 = serde_json::from_value(
+            response
+                .get("memberCounts")
+                .ok_or(ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
+                .get("tfa_disabled")
+                .ok_or(ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
+                .clone(),
+        )
+        .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
+
+        let users = self
+            .get_users_from_npm_website(
+                &format!(
+                    "{}/settings/{}/members?selectedTab=tfa_disabled",
+                    NPMJS_COM_URL, self.config.npm_scope
+                ),
+                total_users,
+            )
+            .await?;
+
+        serde_json::to_string(&users)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))
+    }
+}
+
+/// Convert a JSON value received from npm website into a list of `NpmUser` objects.
+/// Users are in a JSON array under "list > objects".
+fn json_value_to_user_vec(value: Value) -> Result<Vec<NpmUser>, NpmError> {
+    let users = serde_json::from_value::<Vec<Value>>(
+        value
+            .get("list")
+            .ok_or(NpmError::FailedToConvertToNpmUser)?
+            .get("objects")
+            .ok_or(NpmError::FailedToConvertToNpmUser)?
+            .clone(),
+    )
+    .map_err(|_| NpmError::FailedToConvertToNpmUser)?;
+
+    let mut all_users: Vec<NpmUser> = vec![];
+
+    for u in users {
+        all_users.push(NpmUser {
+            username: serde_json::from_value::<String>(
+                u.get("user")
+                    .ok_or(NpmError::FailedToConvertToNpmUser)?
+                    .get("name")
+                    .ok_or(NpmError::FailedToConvertToNpmUser)?
+                    .clone(),
+            )
+            .map_err(|_| NpmError::FailedToConvertToNpmUser)?,
+            role: NpmUserRole::try_from(
+                u.get("role")
+                    .ok_or(NpmError::FailedToConvertToNpmUser)?
+                    .to_string()
+                    .replace("\"", ""),
+            )
+            .map_err(|_| NpmError::FailedToConvertToNpmUser)?,
+        });
+    }
+
+    Ok(all_users)
+}

@@ -2,6 +2,7 @@
 pub mod aws;
 pub mod general;
 pub mod github;
+pub mod npm;
 pub mod okta;
 pub mod pagerduty;
 pub mod quorum;
@@ -20,6 +21,7 @@ use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 use crossbeam_channel::Sender;
 use general::{General, GeneralConfig};
 use github::{Github, GithubConfig};
+use npm::{Npm, NpmConfig};
 use okta::{Okta, OktaConfig};
 use pagerduty::{PagerDuty, PagerDutyConfig};
 use quorum::{Quorum, QuorumConfig};
@@ -40,6 +42,7 @@ pub struct Api {
     pub aws: Option<Aws>,
     pub general: Option<General>,
     pub github: Option<Github>,
+    pub npm: Option<Npm>,
     pub okta: Option<Okta>,
     pub pagerduty: Option<PagerDuty>,
     pub quorum: Option<Quorum>,
@@ -56,6 +59,7 @@ pub struct Apis {
     pub aws: Option<AwsConfig>,
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
+    pub npm: Option<NpmConfig>,
     pub okta: Option<OktaConfig>,
     pub pagerduty: Option<PagerDutyConfig>,
     pub quorum: Option<QuorumConfig>,
@@ -78,6 +82,7 @@ pub enum ApiError {
     #[cfg(feature = "aws")]
     KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
     NetworkError(reqwest::Error),
+    NpmError(npm::NpmError),
     OktaError(okta::OktaError),
     PagerDutyError(pagerduty::PagerDutyError),
     QuorumError(quorum::QuorumError),
@@ -108,6 +113,11 @@ impl Api {
         let github = match config.github {
             Some(gh) => Some(Github::new(gh)),
             _ => None,
+        };
+
+        let npm = match config.npm {
+            Some(npm) => Some(Npm::new(npm)),
+            _ => None
         };
 
         let okta = match config.okta {
@@ -159,6 +169,7 @@ impl Api {
             aws,
             general,
             github,
+            npm,
             okta,
             pagerduty,
             quorum,
