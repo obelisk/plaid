@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 // All the structs which are also used in the Plaid API
 
 /// Permission that is granted to a team over an npm package
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum NpmPackagePermission {
     READ,
     WRITE,
@@ -18,6 +18,19 @@ impl ToString for NpmPackagePermission {
         match self {
             Self::READ => "read".to_string(),
             Self::WRITE => "write".to_string(),
+        }
+    }
+}
+
+impl NpmPackagePermission {
+    // We do not implement the TryFrom trait because of the error type. We do not want to carry the
+    // NpmError struct here in the STL. Also, we don't care about which error we get from here. If
+    // it fails, the caller will know what to do.
+    pub fn try_from(value: String) -> Result<Self, ()> {
+        match value.as_str() {
+            "read" => Ok(NpmPackagePermission::READ),
+            "write" => Ok(NpmPackagePermission::WRITE),
+            _ => Err(()),
         }
     }
 }
@@ -99,7 +112,7 @@ impl ToString for GranularTokenPackagesAndScopesPermission {
     }
 }
 
-/// TODO I don't exactly know what this means
+/// TODO I don't know what this means
 #[derive(Clone, Serialize, Deserialize)]
 pub enum GranularTokenSelectedPackagesAndScopes {
     PackagesAndScopesSome,
@@ -225,6 +238,12 @@ impl PkgAccessLevel {
 pub struct PublishEmptyStubParams {
     pub package_name: String,
     pub access_level: PkgAccessLevel,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ListPackagesWithTeamPermissionParams {
+    pub team: NpmTeam,
+    pub permission: NpmPackagePermission,
 }
 
 // End of "All the structs which are also used in the Plaid API"
@@ -537,4 +556,52 @@ pub fn delete_package(package_name: &str) -> Result<(), PlaidFunctionError> {
     }
 
     Ok(())
+}
+
+/// Return a list of npm packages over which a team has a certain permission (read or write)
+pub fn list_packages_with_team_permission(
+    team: NpmTeam,
+    permission: NpmPackagePermission,
+) -> Result<Vec<String>, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(npm, list_packages_with_team_permission);
+    }
+
+    let params = serde_json::to_string(&ListPackagesWithTeamPermissionParams { team, permission })
+        .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        npm_list_packages_with_team_permission(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    // The response that comes back contains package name and permission.
+    // However, we only care about the name so we keep only that.
+    #[derive(Deserialize)]
+    struct Package {
+        package_name: String,
+    }
+
+    let v: Vec<String> = serde_json::from_str::<Vec<Package>>(&res)
+        .map_err(|_| PlaidFunctionError::InternalApiError)?
+        .iter()
+        .map(|v| v.package_name.clone())
+        .collect();
+    Ok(v)
 }

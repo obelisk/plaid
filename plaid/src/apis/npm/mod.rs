@@ -112,4 +112,6 @@ pub enum NpmError {
     FailedToRetrieveUsersWithout2FA,
     FailedToConvertToNpmUser,
     FailedToGetCsrfTokenFromCookies,
+    FailedToRetrievePaginatedData,
+    FailedToRetrievePackages
 }

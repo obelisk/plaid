@@ -10,8 +10,8 @@ use crate::apis::ApiError;
 
 use plaid_stl::npm::{
     AddRemoveUserToFromTeamParams, CreateGranularTokenForPackageParams,
-    InviteUserToOrganizationParams, NpmToken, NpmUser, NpmUserRole,
-    SetTeamPermissionOnPackageParams,
+    InviteUserToOrganizationParams, ListPackagesWithTeamPermissionParams, NpmPackagePermission,
+    NpmToken, NpmUser, NpmUserRole, SetTeamPermissionOnPackageParams,
 };
 
 use super::{Npm, NpmError};
@@ -550,7 +550,7 @@ impl Npm {
         .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
 
         let users = self
-            .get_users_from_npm_website(
+            .get_paginated_data_from_npm_website::<NpmUser>(
                 &format!(
                     "{}/settings/{}/members",
                     NPMJS_COM_URL, self.config.npm_scope
@@ -561,69 +561,6 @@ impl Npm {
 
         serde_json::to_string(&users)
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))
-    }
-
-    /// Utility function that retrieves users from a certain URL under the npm website.
-    /// The function keeps querying more pages until it has retrieved the target number of users.
-    async fn get_users_from_npm_website(
-        &self,
-        url: &str,
-        target_num_users: u16,
-    ) -> Result<Vec<NpmUser>, ApiError> {
-        // Get the first page, which contains the first users (max 10)
-        let response = self
-            .client
-            .get(url)
-            .header("X-Spiferack", "1")
-            .send()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
-            .json::<Value>()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
-
-        let mut all_users = json_value_to_user_vec(response)
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToConvertToNpmUser))?;
-
-        if target_num_users <= 10 {
-            // We should have already got 10 users from the first page
-            if all_users.len() == target_num_users as usize {
-                // OK we got them all and we are done
-                return Ok(all_users);
-            }
-            // We _should_ have got all the users but something went wrong. Not good.
-            return Err(ApiError::NpmError(NpmError::FailedToRetrieveUserList));
-        }
-
-        // If we are here, then there are more than 10 users, so we make more requests
-        let mut page_num = 1; // pages start from 0
-
-        loop {
-            let response = self
-                .client
-                .get(url)
-                .header("X-Spiferack", "1") // to get JSON instead of HTML
-                .query(&[("page", page_num.to_string().as_str()), ("perPage", "10")])
-                .send()
-                .await
-                .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
-                .json::<Value>()
-                .await
-                .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
-
-            all_users.extend(
-                json_value_to_user_vec(response)
-                    .map_err(|_| ApiError::NpmError(NpmError::FailedToConvertToNpmUser))?,
-            );
-
-            if all_users.len() == target_num_users as usize {
-                // We got all the users
-                return Ok(all_users);
-            }
-
-            // There are more users
-            page_num += 1;
-        }
     }
 
     /// Retrieve all users in the npm org that do not have 2FA enabled
@@ -663,7 +600,7 @@ impl Npm {
         .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
 
         let users = self
-            .get_users_from_npm_website(
+            .get_paginated_data_from_npm_website::<NpmUser>(
                 &format!(
                     "{}/settings/{}/members?selectedTab=tfa_disabled",
                     NPMJS_COM_URL, self.config.npm_scope
@@ -675,42 +612,216 @@ impl Npm {
         serde_json::to_string(&users)
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))
     }
-}
 
-/// Convert a JSON value received from npm website into a list of `NpmUser` objects.
-/// Users are in a JSON array under "list > objects".
-fn json_value_to_user_vec(value: Value) -> Result<Vec<NpmUser>, NpmError> {
-    let users = serde_json::from_value::<Vec<Value>>(
-        value
-            .get("list")
-            .ok_or(NpmError::FailedToConvertToNpmUser)?
-            .get("objects")
-            .ok_or(NpmError::FailedToConvertToNpmUser)?
-            .clone(),
-    )
-    .map_err(|_| NpmError::FailedToConvertToNpmUser)?;
+    /// Retrieve a list of packages for which a given team has a given permission
+    /// (useful to spot misconfigured package permissions).
+    pub async fn list_packages_with_team_permission(
+        &self,
+        params: &str,
+        module: &str,
+    ) -> Result<String, ApiError> {
+        let params: ListPackagesWithTeamPermissionParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-    let mut all_users: Vec<NpmUser> = vec![];
+        info!(
+            "Listing all packages for which team [{}] has [{}] access on behalf of [{module}]",
+            params.team.to_string(),
+            params.permission.to_string()
+        );
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
 
-    for u in users {
-        all_users.push(NpmUser {
-            username: serde_json::from_value::<String>(
-                u.get("user")
-                    .ok_or(NpmError::FailedToConvertToNpmUser)?
-                    .get("name")
-                    .ok_or(NpmError::FailedToConvertToNpmUser)?
-                    .clone(),
+        let response: Value = self
+            .client
+            .get(format!(
+                "{}/settings/{}/teams/team/{}/access",
+                NPMJS_COM_URL,
+                self.config.npm_scope,
+                params.team.to_string()
+            ))
+            .header("X-Spiferack", "1")
+            .send()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))?
+            .json()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))?;
+
+        // Get total number of packages that we will need to retrieve
+        let total_packages: u16 = serde_json::from_value(
+            response
+                .get("list")
+                .ok_or(ApiError::NpmError(NpmError::FailedToRetrievePackages))?
+                .get("total")
+                .ok_or(ApiError::NpmError(NpmError::FailedToRetrievePackages))?
+                .clone(),
+        )
+        .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))?;
+
+        // Get all packages the team can access and keep only those
+        // that have the desired permission (specified in the params)
+        let packages = self
+            .get_paginated_data_from_npm_website::<NpmPackageWithPermission>(
+                &format!(
+                    "{}/settings/{}/teams/team/{}/access",
+                    NPMJS_COM_URL,
+                    self.config.npm_scope,
+                    params.team.to_string()
+                ),
+                total_packages,
             )
-            .map_err(|_| NpmError::FailedToConvertToNpmUser)?,
-            role: NpmUserRole::try_from(
-                u.get("role")
-                    .ok_or(NpmError::FailedToConvertToNpmUser)?
-                    .to_string()
-                    .replace("\"", ""),
-            )
-            .map_err(|_| NpmError::FailedToConvertToNpmUser)?,
-        });
+            .await?
+            .iter()
+            .filter(|v| v.permission.to_string() == params.permission.to_string())
+            .cloned()
+            .collect::<Vec<NpmPackageWithPermission>>();
+
+        serde_json::to_string(&packages)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))
     }
 
-    Ok(all_users)
+    /// Utility function that retrieves paginated data from a certain URL under the npm website.
+    /// The function keeps querying more pages until it has retrieved the target number of items.
+    async fn get_paginated_data_from_npm_website<T: Paginable>(
+        &self,
+        url: &str,
+        target_num_items: u16,
+    ) -> Result<Vec<T>, ApiError> {
+        // Get the first page, which contains the first items (max 10)
+        let response = self
+            .client
+            .get(url)
+            .header("X-Spiferack", "1")
+            .send()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?
+            .json::<Value>()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
+
+        let mut all_items = T::from_paginated_response(&response)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
+
+        if target_num_items <= 10 {
+            // We should have already got 10 items from the first page
+            if all_items.len() == target_num_items as usize {
+                // OK we got them all and we are done
+                return Ok(all_items);
+            }
+            // We _should_ have got all the items but something went wrong. Not good.
+            return Err(ApiError::NpmError(NpmError::FailedToRetrievePaginatedData));
+        }
+
+        // If we are here, then there are more than 10 items, so we make more requests
+        let mut page_num = 1; // pages start from 0
+
+        loop {
+            let response = self
+                .client
+                .get(url)
+                .header("X-Spiferack", "1") // to get JSON instead of HTML
+                .query(&[("page", page_num.to_string().as_str()), ("perPage", "10")])
+                .send()
+                .await
+                .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?
+                .json::<Value>()
+                .await
+                .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
+
+            all_items.extend(
+                T::from_paginated_response(&response)
+                    .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?,
+            );
+
+            if all_items.len() == target_num_items as usize {
+                // We got all the items
+                return Ok(all_items);
+            }
+
+            // There are more items
+            page_num += 1;
+        }
+    }
+}
+
+impl Paginable for NpmUser {
+    fn from_paginated_response(value: &Value) -> Result<Vec<Self>, ()>
+    where
+        Self: Sized,
+    {
+        let users = serde_json::from_value::<Vec<Value>>(
+            value
+                .get("list")
+                .ok_or(())?
+                .get("objects")
+                .ok_or(())?
+                .clone(),
+        )
+        .map_err(|_| ())?;
+
+        let mut all_users: Vec<NpmUser> = vec![];
+
+        for u in users {
+            all_users.push(NpmUser {
+                username: serde_json::from_value::<String>(
+                    u.get("user").ok_or(())?.get("name").ok_or(())?.clone(),
+                )
+                .map_err(|_| ())?,
+                role: NpmUserRole::try_from(u.get("role").ok_or(())?.to_string().replace("\"", ""))
+                    .map_err(|_| ())?,
+            });
+        }
+
+        Ok(all_users)
+    }
+}
+
+impl Paginable for NpmPackageWithPermission {
+    fn from_paginated_response(value: &Value) -> Result<Vec<Self>, ()>
+    where
+        Self: Sized,
+    {
+        let packages = serde_json::from_value::<Vec<Value>>(
+            value
+                .get("list")
+                .ok_or(())?
+                .get("objects")
+                .ok_or(())?
+                .clone(),
+        )
+        .map_err(|_| ())?;
+
+        let mut all_packages: Vec<NpmPackageWithPermission> = vec![];
+
+        for p in packages {
+            all_packages.push(NpmPackageWithPermission {
+                package_name: serde_json::from_value::<String>(
+                    p.get("package").ok_or(())?.get("name").ok_or(())?.clone(),
+                )
+                .map_err(|_| ())?,
+                permission: NpmPackagePermission::try_from(
+                    p.get("permissions")
+                        .ok_or(())?
+                        .to_string()
+                        .replace("\"", ""),
+                )
+                .map_err(|_| ())?,
+            });
+        }
+
+        Ok(all_packages)
+    }
+}
+
+#[derive(Serialize, Clone)]
+struct NpmPackageWithPermission {
+    package_name: String,
+    permission: NpmPackagePermission,
+}
+
+trait Paginable {
+    fn from_paginated_response(value: &Value) -> Result<Vec<Self>, ()>
+    where
+        Self: Sized;
 }
