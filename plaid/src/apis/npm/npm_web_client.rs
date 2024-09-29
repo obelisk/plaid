@@ -8,7 +8,7 @@ use url::Url;
 
 use crate::apis::ApiError;
 
-use plaid_stl::npm::{
+use plaid_stl::npm::shared_structs::{
     AddRemoveUserToFromTeamParams, CreateGranularTokenForPackageParams,
     InviteUserToOrganizationParams, ListPackagesWithTeamPermissionParams, NpmPackagePermission,
     NpmToken, NpmUser, NpmUserRole, SetTeamPermissionOnPackageParams,
@@ -98,7 +98,8 @@ impl Npm {
         };
 
         // Login step 1: send the username and password, together with the CSRF token
-        self.client
+        let output = self
+            .client
             .post(format!("{}/login", NPMJS_COM_URL))
             .form(&[
                 ("username", &self.config.username),
@@ -107,35 +108,43 @@ impl Npm {
             ])
             .send()
             .await
+            .map(|_| ())
+            .map_err(|_| NpmError::LoginFlowError);
+
+        // If we have a configured OTP secret, we proceed with the 2FA flow
+        if let Some(ref otp_secret) = self.config.otp_secret {
+            let otp_token = TOTP::new(
+                Algorithm::SHA1,
+                6,
+                1,
+                30,
+                Secret::Encoded(otp_secret.to_string())
+                    .to_bytes()
+                    .map_err(|_| NpmError::LoginFlowError)?,
+            )
+            .map_err(|_| NpmError::LoginFlowError)?
+            .generate_current()
             .map_err(|_| NpmError::LoginFlowError)?;
 
-        // Prepare the TOTP code for the 2FA
-        let otp_token = TOTP::new(
-            Algorithm::SHA1,
-            6,
-            1,
-            30,
-            Secret::Encoded(self.config.otp_secret.to_string())
-                .to_bytes()
-                .map_err(|_| NpmError::LoginFlowError)?,
-        )
-        .map_err(|_| NpmError::LoginFlowError)?
-        .generate_current()
-        .map_err(|_| NpmError::LoginFlowError)?;
-
-        // Login step 2: send the TOTP code to a well-known URL
-        self.client
-            .post(format!("{}/login/otp?next=%2F", NPMJS_COM_URL))
-            .form(&[
-                ("otp", &otp_token),
-                ("formName", &"totp".to_string()),
-                ("originalUrl", &"".to_string()),
-                ("csrftoken", &cs_cookie),
-            ])
-            .send()
-            .await
-            .map(|_| ())
-            .map_err(|_| NpmError::LoginFlowError)
+            // Login step 2: send the TOTP code to a well-known URL
+            let output = self
+                .client
+                .post(format!("{}/login/otp?next=%2F", NPMJS_COM_URL))
+                .form(&[
+                    ("otp", &otp_token),
+                    ("formName", &"totp".to_string()),
+                    ("originalUrl", &"".to_string()),
+                    ("csrftoken", &cs_cookie),
+                ])
+                .send()
+                .await
+                .map(|_| ())
+                .map_err(|_| NpmError::LoginFlowError);
+            return output;
+        } else {
+            // We do not have an OTP secret, so we are done with the login
+            return output;
+        }
     }
 
     /// Set a team's permissions over a package
@@ -149,12 +158,14 @@ impl Npm {
             .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
         let params: SetTeamPermissionOnPackageParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let team = self.validate_npm_team_name(&params.team)?;
+        let package = self.validate_npm_package_name(&params.package)?;
 
         info!(
             "Setting permission [{}] on package [{}] for team [{}] on behalf of [{module}]",
             params.permission.to_string(),
-            params.package,
-            params.team
+            package,
+            team
         );
 
         // Prepare the request body
@@ -162,14 +173,14 @@ impl Npm {
             .get_csrftoken_from_cookies()
             .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
         let payload = PermissionChangePayload {
-            package: &format!("@{}/{}", self.config.npm_scope, params.package),
+            package: &format!("@{}/{}", self.config.npm_scope, package),
             permissions: &params.permission.to_string(),
             csrftoken: &csrf_token,
         };
         self.client
             .post(format!(
                 "{}/settings/{}/teams/team/{}/access",
-                NPMJS_COM_URL, self.config.npm_scope, params.team
+                NPMJS_COM_URL, self.config.npm_scope, team
             ))
             .json(&payload)
             .send()
@@ -194,13 +205,15 @@ impl Npm {
             .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
         let params: CreateGranularTokenForPackageParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let package = self.validate_npm_package_name(&params.package)?;
+        let specs = self.validate_granular_token_specs(&params.specs)?;
 
         info!(
             "Creating npm granular token for package [{}] on behalf of [{module}]",
-            params.package
+            package
         );
 
-        let scoped_package = format!("@{}/{}", self.config.npm_scope, params.package);
+        let scoped_package = format!("@{}/{}", self.config.npm_scope, package);
         // Prepare the request body
         let csrf_token = self
             .get_csrftoken_from_cookies()
@@ -212,7 +225,7 @@ impl Npm {
                 .clone()
                 .unwrap_or(vec!["".to_string()]),
             csrftoken: &csrf_token,
-            expiration_days: &params.specs.expiration_days.unwrap_or(365).to_string(),
+            expiration_days: &specs.expiration_days.unwrap_or(365).to_string(),
             orgs_permission: &params
                 .specs
                 .orgs_permission
@@ -223,7 +236,7 @@ impl Npm {
                 .packages_and_scopes_permission
                 .clone()
                 .map_or("Read and write".to_string(), |v| v.to_string()),
-            selected_orgs: params.specs.selected_orgs.clone().unwrap_or(vec![]),
+            selected_orgs: specs.selected_orgs.clone().unwrap_or(vec![]),
             selected_packages: params
                 .specs
                 .selected_packages
@@ -234,9 +247,9 @@ impl Npm {
                 .selected_packages_and_scopes
                 .clone()
                 .map_or("packagesAndScopesSome".to_string(), |v| v.to_string()),
-            selected_scopes: params.specs.selected_scopes.clone().unwrap_or(vec![]),
-            token_description: &params.specs.token_description,
-            token_name: &params.specs.token_name,
+            selected_scopes: specs.selected_scopes.clone().unwrap_or(vec![]),
+            token_description: &specs.token_description,
+            token_name: &specs.token_name,
         };
         let response = self
             .client
@@ -309,6 +322,7 @@ impl Npm {
     /// @scope/package_name, then you should pass only "package_name". The scope is
     /// preconfigured in the client and will be added automatically.
     pub async fn delete_package(&self, package: &str, module: &str) -> Result<i32, ApiError> {
+        let package = self.validate_npm_package_name(package)?;
         info!("Deleting npm package [{package}] on behalf of [{module}]");
         self.login()
             .await
@@ -370,26 +384,22 @@ impl Npm {
             .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
         let params: AddRemoveUserToFromTeamParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let user = self.validate_npm_username(&params.user)?;
+        let team = self.validate_npm_team_name(&params.team)?;
 
         info!(
             "Adding user [{}] to team [{}] on behalf of [{module}]",
-            params.user,
-            params.team.to_string()
+            user, team
         );
 
         let csrf_token = self
             .get_csrftoken_from_cookies()
             .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
-        let body = format!(
-            r#"{{"csrftoken": "{}", "user": "{}"}}"#,
-            &csrf_token, params.user
-        );
+        let body = format!(r#"{{"csrftoken": "{}", "user": "{}"}}"#, &csrf_token, user);
         self.client
             .post(format!(
                 "{}/settings/{}/teams/team/{}/users",
-                NPMJS_COM_URL,
-                self.config.npm_scope,
-                params.team.to_string()
+                NPMJS_COM_URL, self.config.npm_scope, team
             ))
             .header("Content-Type", "text/plain;charset=UTF-8")
             .body(body)
@@ -406,11 +416,12 @@ impl Npm {
             .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
         let params: AddRemoveUserToFromTeamParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let user = self.validate_npm_username(&params.user)?;
+        let team = self.validate_npm_team_name(&params.team)?;
 
         info!(
             "Removing user [{}] from team [{}] on behalf of [{module}]",
-            params.user,
-            params.team.to_string()
+            user, team
         );
 
         let body = format!(
@@ -421,10 +432,7 @@ impl Npm {
         self.client
             .post(format!(
                 "{}/settings/{}/teams/team/{}/users/{}/delete",
-                NPMJS_COM_URL,
-                self.config.npm_scope,
-                params.team.to_string(),
-                params.user
+                NPMJS_COM_URL, self.config.npm_scope, team, user
             ))
             .header("Content-Type", "text/plain;charset=UTF-8")
             .body(body)
@@ -444,7 +452,7 @@ impl Npm {
         struct RemoveUserPayload<'a> {
             csrftoken: &'a str,
         }
-
+        let user = self.validate_npm_username(user)?;
         info!("Removing user [{user}] from npm organization on behalf of [{module}]");
 
         self.login()
@@ -483,12 +491,13 @@ impl Npm {
             .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
         let params: InviteUserToOrganizationParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
-        let team = params.team.unwrap_or(plaid_stl::npm::NpmTeam::Developers);
+        let user = self.validate_npm_username(&params.user)?;
+        let team = params.team.unwrap_or("developers".to_string());
+        let team = self.validate_npm_team_name(&team)?;
 
         info!(
             "Inviting user [{}] to npm organization and team [{}] on behalf of [{module}]",
-            params.user,
-            team.to_string()
+            user, team
         );
 
         let body = format!(
@@ -501,8 +510,8 @@ impl Npm {
     }}"#,
             self.get_csrftoken_from_cookies()
                 .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?,
-            params.user,
-            team.to_string()
+            user,
+            team
         );
 
         self.client
@@ -622,10 +631,11 @@ impl Npm {
     ) -> Result<String, ApiError> {
         let params: ListPackagesWithTeamPermissionParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let team = self.validate_npm_team_name(&params.team)?;
 
         info!(
             "Listing all packages for which team [{}] has [{}] access on behalf of [{module}]",
-            params.team.to_string(),
+            team,
             params.permission.to_string()
         );
         self.login()
@@ -636,9 +646,7 @@ impl Npm {
             .client
             .get(format!(
                 "{}/settings/{}/teams/team/{}/access",
-                NPMJS_COM_URL,
-                self.config.npm_scope,
-                params.team.to_string()
+                NPMJS_COM_URL, self.config.npm_scope, team
             ))
             .header("X-Spiferack", "1")
             .send()
@@ -665,9 +673,7 @@ impl Npm {
             .get_paginated_data_from_npm_website::<NpmPackageWithPermission>(
                 &format!(
                     "{}/settings/{}/teams/team/{}/access",
-                    NPMJS_COM_URL,
-                    self.config.npm_scope,
-                    params.team.to_string()
+                    NPMJS_COM_URL, self.config.npm_scope, team
                 ),
                 total_packages,
             )

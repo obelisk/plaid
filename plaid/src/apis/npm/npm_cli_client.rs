@@ -3,7 +3,7 @@ use crate::apis::ApiError;
 use super::{hashes, Npm, NpmError};
 
 use flate2::{write::GzEncoder, Compression};
-use plaid_stl::npm::PublishEmptyStubParams;
+use plaid_stl::npm::shared_structs::PublishEmptyStubParams;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,6 +12,15 @@ use tar::{Builder, Header};
 const REGISTRY_URL: &str = "https://registry.npmjs.org";
 const NODE_VERSION: &str = "20.16.0";
 const NPM_VERSION: &str = "10.8.3";
+
+// The following structs are used to build the payload which is sent to the npm registry when
+// publishing a new package. They have been derived by observing what happens when `npm publish`
+// is executed.
+// As such, unless there are changes in how the npm CLI behaves, these should not be modified.
+//
+// Note - We are publishing an _empty_ package, so several fields will have meaningless values.
+// The idea is that, once the initial package stub is published, this can be updated by different
+// automations and its fields can be filled with more meaningful content.
 
 #[derive(Serialize)]
 struct PkgAttachment<'a> {
@@ -70,19 +79,23 @@ impl Npm {
     pub async fn publish_empty_stub(&self, params: &str, module: &str) -> Result<i32, ApiError> {
         let params: PublishEmptyStubParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
-        
-        info!("Publishing new empty npm package [{}] on behalf of [{module}]", params.package_name);
-        
+        let package_name = self.validate_npm_package_name(&params.package_name)?;
+
+        info!(
+            "Publishing new empty npm package [{}] on behalf of [{module}]",
+            package_name
+        );
+
         let (package_json, tarball_data) =
-            create_package_tarball(&self.config.npm_scope, &params.package_name)?;
+            create_package_tarball(&self.config.npm_scope, &package_name)?;
         let data_length = tarball_data.len();
         let sha1_digest = hashes::sha1_hex(&tarball_data);
         let sha512_digest = hashes::sha512_base64(&tarball_data);
 
-        // Safe unwrap: we are hardcoding the json content, so the deserialization will not fail
-        let manifest = serde_json::from_str::<PkgManifest>(&package_json).unwrap();
+        let manifest = serde_json::from_str::<PkgManifest>(&package_json)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToGenerateArchive))?;
 
-        let scoped_pkg_name = format!("@{}/{}", self.config.npm_scope, params.package_name);
+        let scoped_pkg_name = format!("@{}/{}", self.config.npm_scope, package_name);
 
         // Build the (somewhat complex) data structure that npm expects
         let pkg_version_obj = PkgVersion {

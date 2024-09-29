@@ -1,8 +1,10 @@
 mod hashes;
+mod validators;
+
 pub mod npm_cli_client;
 pub mod npm_web_client;
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use regex::Regex;
 use reqwest::{cookie::Jar, Client};
@@ -14,6 +16,7 @@ pub struct Npm {
     config: NpmConfig,
     client: Client,
     cookie_jar: Arc<Jar>,
+    validators: HashMap<&'static str, regex::Regex>,
 }
 
 impl Npm {
@@ -22,11 +25,18 @@ impl Npm {
         let client = Client::builder()
             .cookie_provider(cookie_jar.clone())
             .build()
-            .map_err(|_| NpmError::GenericError).unwrap(); // TODO @obelisk OK to unwrap here? If we cannot build the client, perhaps we should just panic?
+            .map_err(|_| NpmError::GenericError)
+            .unwrap(); // TODO @obelisk OK to unwrap here? If we cannot build the client, perhaps we should just panic?
+
+        // Create all the validators and compile all the regexes. If the module contains
+        // any invalid regexes it will panic.
+        let validators = validators::create_validators();
+
         Self {
             config,
             client,
             cookie_jar,
+            validators,
         }
     }
 }
@@ -39,7 +49,7 @@ pub struct NpmConfig {
     /// Password for the npm account
     pub password: String,
     /// Secret for the TOTP-based 2FA on the npm account
-    pub otp_secret: String,
+    pub otp_secret: Option<String>,
     /// Automation (not publish!) token for the npm account. This is a type of token that can
     /// be created through the npm website and allows this user to publish packages without
     /// having to complete the 2FA flow. It is used in the CLI client, for publishing a new package
@@ -55,17 +65,20 @@ impl NpmConfig {
     pub fn new(
         username: String,
         password: String,
-        otp_secret: String,
+        otp_secret: Option<String>,
         automation_token: String,
         npm_scope: String,
         user_agent: String,
     ) -> Result<Self, NpmError> {
         // Check the OTP secret looks OK: it should be 32 alphanumerical characters
-        let otp_regex = Regex::new(r"^[a-zA-Z0-9]{32}$").unwrap();
-        if !otp_regex.is_match(&otp_secret) {
-            return Err(NpmError::WrongConfig(
-                "Wrong format for OTP secret".to_string(),
-            ));
+        if let Some(ref otp_secret) = otp_secret {
+            // Safe unwrap: hardcoded regex
+            let otp_regex = Regex::new(r"^[a-zA-Z0-9]{32}$").unwrap();
+            if !otp_regex.is_match(otp_secret) {
+                return Err(NpmError::WrongConfig(
+                    "Wrong format for OTP secret".to_string(),
+                ));
+            }
         }
 
         // Check the automation_token looks OK: it should be "npm_" followed by 36 alphanum characters
@@ -75,11 +88,6 @@ impl NpmConfig {
                 "Wrong format for automation token".to_string(),
             ));
         }
-
-        // TODO Quickly try to do a login and see if the credentials work? Otherwise we will discover
-        // if they do not work only later, when actually trying to use them.
-        // This way we could verify username + password + OTP secret, but the automation token could still be wrong.
-        // If we want to be 100% sure, then we should _generate_ the automation token ourselves via calls to the website.
 
         Ok(Self {
             username,
@@ -94,6 +102,7 @@ impl NpmConfig {
 
 #[derive(Debug)]
 pub enum NpmError {
+    InvalidInput(String),
     RegistryUploadError,
     FailedToGenerateArchive,
     PermissionChangeError,
@@ -113,5 +122,5 @@ pub enum NpmError {
     FailedToConvertToNpmUser,
     FailedToGetCsrfTokenFromCookies,
     FailedToRetrievePaginatedData,
-    FailedToRetrievePackages
+    FailedToRetrievePackages,
 }
