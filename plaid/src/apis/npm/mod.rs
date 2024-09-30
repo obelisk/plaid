@@ -20,24 +20,23 @@ pub struct Npm {
 }
 
 impl Npm {
-    pub fn new(config: NpmConfig) -> Self {
+    pub fn new(config: NpmConfig) -> Result<Self, NpmError> {
         let cookie_jar = Arc::new(Jar::default());
         let client = Client::builder()
             .cookie_provider(cookie_jar.clone())
             .build()
-            .map_err(|_| NpmError::GenericError)
-            .unwrap(); // TODO @obelisk OK to unwrap here? If we cannot build the client, perhaps we should just panic?
+            .map_err(|_| NpmError::GenericError)?;
 
         // Create all the validators and compile all the regexes. If the module contains
         // any invalid regexes it will panic.
         let validators = validators::create_validators();
 
-        Self {
+        Ok(Self {
             config,
             client,
             cookie_jar,
             validators,
-        }
+        })
     }
 }
 

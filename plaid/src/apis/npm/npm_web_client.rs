@@ -419,10 +419,7 @@ impl Npm {
         let user = self.validate_npm_username(&params.user)?;
         let team = self.validate_npm_team_name(&params.team)?;
 
-        info!(
-            "Removing user [{}] from team [{}] on behalf of [{module}]",
-            user, team
-        );
+        info!("Removing [{user}] from [{team}] on behalf of [{module}]");
 
         let body = format!(
             r#"{{"csrftoken": "{}"}}"#,
@@ -492,6 +489,9 @@ impl Npm {
         let params: InviteUserToOrganizationParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let user = self.validate_npm_username(&params.user)?;
+        
+        // See https://docs.npmjs.com/about-developers-team
+        // We use "developers" as default since all organizations have a "developers" team
         let team = params.team.unwrap_or("developers".to_string());
         let team = self.validate_npm_team_name(&team)?;
 

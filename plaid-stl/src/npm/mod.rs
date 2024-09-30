@@ -1,5 +1,7 @@
 pub mod shared_structs;
 
+use std::fmt::Display;
+
 use crate::PlaidFunctionError;
 use serde::Deserialize;
 
@@ -70,8 +72,8 @@ pub fn get_org_users_without_2fa() -> Result<Vec<NpmUser>, PlaidFunctionError> {
 /// Invite a user to join the npm organization. If the user accepts the invite, they will be added
 /// to the default team "developers".
 pub fn invite_user_to_organization(
-    user: &str,
-    team: Option<&str>,
+    user: impl Display,
+    team: Option<impl Display>,
 ) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(npm, invite_user_to_organization);
@@ -95,7 +97,7 @@ pub fn invite_user_to_organization(
 }
 
 /// Remove a user from the npm organization
-pub fn remove_user_from_organization(user: &str) -> Result<(), PlaidFunctionError> {
+pub fn remove_user_from_organization(user: impl Display) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(npm, remove_user_from_organization);
     }
@@ -118,7 +120,7 @@ pub fn remove_user_from_organization(user: &str) -> Result<(), PlaidFunctionErro
 /// If you are not sure about the token configuration, use `create_granular_token_for_package_simple` which only
 /// requires specifying a name and a description.
 pub fn create_granular_token_for_package(
-    package_name: &str,
+    package_name: impl Display,
     token_specs: GranularTokenSpecs,
 ) -> Result<String, PlaidFunctionError> {
     extern "C" {
@@ -156,9 +158,9 @@ pub fn create_granular_token_for_package(
 /// Create a granular npm token for a package, specifying only the token name and a suitable description.
 /// Other token configurations default to sensible values.
 pub fn create_granular_token_for_package_simple(
-    package_name: &str,
-    token_name: &str,
-    token_description: &str,
+    package_name: impl Display,
+    token_name: impl Display,
+    token_description: impl Display,
 ) -> Result<String, PlaidFunctionError> {
     let token_specs = GranularTokenSpecs::with_name_and_description(token_name, token_description);
     create_granular_token_for_package(package_name, token_specs)
@@ -197,7 +199,7 @@ pub fn list_granular_tokens() -> Result<Vec<NpmToken>, PlaidFunctionError> {
 }
 
 /// Add a user to an npm team
-pub fn add_user_to_team(user: &str, team: &str) -> Result<(), PlaidFunctionError> {
+pub fn add_user_to_team(user: impl Display, team: impl Display) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(npm, add_user_to_team);
     }
@@ -218,7 +220,10 @@ pub fn add_user_to_team(user: &str, team: &str) -> Result<(), PlaidFunctionError
 }
 
 /// Remove a user from an npm team
-pub fn remove_user_from_team(user: &str, team: &str) -> Result<(), PlaidFunctionError> {
+pub fn remove_user_from_team(
+    user: impl Display,
+    team: impl Display,
+) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(npm, remove_user_from_team);
     }
@@ -242,7 +247,7 @@ pub fn remove_user_from_team(user: &str, team: &str) -> Result<(), PlaidFunction
 /// Publish an empty npm package, to be later updated.
 /// If an access level is not specified (i.e., None is passed), it defaults to "restricted".
 pub fn publish_empty_stub(
-    package_name: &str,
+    package_name: impl Display,
     access_level: Option<PkgAccessLevel>,
 ) -> Result<(), PlaidFunctionError> {
     extern "C" {
@@ -269,8 +274,8 @@ pub fn publish_empty_stub(
 
 /// Set permissions for a team on a specific npm package
 pub fn set_team_permission_on_package(
-    package_name: &str,
-    team: &str,
+    package_name: impl Display,
+    team: impl Display,
     permission: NpmPackagePermission,
 ) -> Result<(), PlaidFunctionError> {
     extern "C" {
@@ -300,7 +305,7 @@ pub fn set_team_permission_on_package(
 /// Note: The package name should be unscoped. If you are trying to delete
 /// @scope/package_name, then you should pass only "package_name". The scope is
 /// preconfigured in the client and will be added automatically.
-pub fn delete_package(package_name: &str) -> Result<(), PlaidFunctionError> {
+pub fn delete_package(package_name: impl Display) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(npm, delete_package);
     }
@@ -318,7 +323,7 @@ pub fn delete_package(package_name: &str) -> Result<(), PlaidFunctionError> {
 
 /// Return a list of npm packages over which a team has a certain permission (read or write)
 pub fn list_packages_with_team_permission(
-    team: &str,
+    team: impl Display,
     permission: NpmPackagePermission,
 ) -> Result<Vec<String>, PlaidFunctionError> {
     extern "C" {

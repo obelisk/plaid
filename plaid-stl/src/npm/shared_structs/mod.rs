@@ -139,7 +139,10 @@ pub struct GranularTokenSpecs {
 impl GranularTokenSpecs {
     /// Provide a name and description for the token, and set all other fields to None, which
     /// will result in default values being used.
-    pub fn with_name_and_description(token_name: &str, token_description: &str) -> Self {
+    pub fn with_name_and_description(
+        token_name: impl Display,
+        token_description: impl Display,
+    ) -> Self {
         Self {
             token_name: token_name.to_string(),
             token_description: token_description.to_string(),

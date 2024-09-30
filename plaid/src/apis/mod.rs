@@ -116,8 +116,14 @@ impl Api {
         };
 
         let npm = match config.npm {
-            Some(npm) => Some(Npm::new(npm)),
-            _ => None
+            Some(npm) => match Npm::new(npm) {
+                Ok(npm) => Some(npm),
+                Err(_) => {
+                    error!("Something went wrong while initializing the npm API: proceeding without. This should be investigated!");
+                    None
+                }
+            },
+            _ => None,
         };
 
         let okta = match config.okta {
