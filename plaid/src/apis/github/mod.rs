@@ -2,6 +2,7 @@ mod environments;
 mod graphql;
 mod pats;
 mod repos;
+mod secrets;
 mod teams;
 mod validators;
 

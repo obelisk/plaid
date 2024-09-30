@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 
 use serde::Serialize;
-use serde_json::Value;
-
-use alkali::asymmetric::seal;
 
 use crate::apis::{github::GitHubError, ApiError};
 
@@ -16,10 +13,22 @@ struct DeploymentBranchPolicy {
 }
 
 #[derive(Serialize)]
+struct Reviewer {
+    #[serde(rename = "type")]
+    type_: String,
+    id: u64,
+}
+
+/// See https://docs.github.com/en/rest/deployments/environments?apiVersion=2022-11-28#create-or-update-an-environment for details
+#[derive(Serialize)]
 struct CreateEnvironmentPayload {
+    /// The amount of time (in minutes) to delay a job after the job is initially triggered
     wait_timer: u16,
+    /// Whether or not a user who created the job is prevented from approving their own job
     prevent_self_review: bool,
-    reviewers: Vec<String>, // This is not true (items are not strings) but we will leave it empty, so we don't care
+    /// The people or teams that may review jobs that reference the environment
+    reviewers: Vec<Reviewer>,
+    /// The type of deployment branch policy for this environment
     deployment_branch_policy: DeploymentBranchPolicy,
 }
 
@@ -30,12 +39,6 @@ struct CreateDeploymentBranchPolicyPayload {
     type_: String,
 }
 
-#[derive(Serialize)]
-struct UploadEnvironmentSecretPayload {
-    encrypted_value: String,
-    key_id: String,
-}
-
 impl Github {
     /// Create a new GitHub deployment environment for a given repository
     /// See https://docs.github.com/en/rest/deployments/environments?apiVersion=2022-11-28#create-or-update-an-environment for more detail
@@ -44,24 +47,20 @@ impl Github {
         params: &str,
         module: &str,
     ) -> Result<u32, ApiError> {
-        const ENVIRONMENT_NAME: &str = "publish";
-
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
         let repo =
             self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let branch =
-            self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
+        let env_name =
+            self.validate_environment_name(request.get("env_name").ok_or(ApiError::BadRequest)?)?;
 
         info!(
-            "Creating and configuring 'publish' environment in repo [{repo}] owned by [{owner}] on behalf of [{module}]"
+            "Creating and configuring environment [{env_name}] in repo [{owner}/{repo}] on behalf of [{module}]"
         );
 
-        // 1. Create the environment
-
-        let address = format!("/repos/{owner}/{repo}/environments/{ENVIRONMENT_NAME}");
+        let address = format!("/repos/{owner}/{repo}/environments/{env_name}");
 
         let body = CreateEnvironmentPayload {
             wait_timer: 0,
@@ -79,7 +78,7 @@ impl Github {
         {
             Ok((status, _)) => {
                 if status == 200 {
-                    Ok(())
+                    Ok(0)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
@@ -87,14 +86,33 @@ impl Github {
                 }
             }
             Err(e) => Err(e),
-        }?;
+        }
+    }
 
-        // 2. Create custom deployment protection rule to allow deployments only from the given branch
-        // See https://docs.github.com/en/rest/deployments/branch-policies?apiVersion=2022-11-28#create-a-deployment-branch-policy for more details
+    /// Configure a deployment branch protection rule for a GitHub deployment environment
+    /// See https://docs.github.com/en/rest/deployments/branch-policies?apiVersion=2022-11-28#create-a-deployment-branch-policy for more details
+    pub async fn create_deployment_branch_protection_rule(
+        &self,
+        params: &str,
+        module: &str,
+    ) -> Result<u32, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let address = format!(
-            "/repos/{owner}/{repo}/environments/{ENVIRONMENT_NAME}/deployment-branch-policies"
+        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
+        let repo =
+            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let env_name =
+            self.validate_environment_name(request.get("env_name").ok_or(ApiError::BadRequest)?)?;
+        let branch: &str =
+            self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
+
+        info!(
+            "Creating deployment branch protection rule for branch [{branch}] and environment [{env_name}] in repo [{owner}/{repo}] on behalf of [{module}]"
         );
+
+        let address =
+            format!("/repos/{owner}/{repo}/environments/{env_name}/deployment-branch-policies");
 
         let body = CreateDeploymentBranchPolicyPayload {
             name: branch.to_string(),
@@ -107,99 +125,6 @@ impl Github {
         {
             Ok((status, _)) => {
                 if status == 200 {
-                    Ok(0)
-                } else {
-                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
-                        status,
-                    )))
-                }
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Configure a secret in a GitHub deployment environment
-    pub async fn configure_environment_secret(
-        &self,
-        params: &str,
-        module: &str,
-    ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
-            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
-
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let environment_name = request.get("env_name").ok_or(ApiError::BadRequest)?;
-        let secret_name = request.get("secret_name").ok_or(ApiError::BadRequest)?;
-        let secret = request.get("secret").ok_or(ApiError::BadRequest)?;
-
-        info!("Configuring secret with name [{secret_name}] on environment [{environment_name}] for repository [{owner}/{repo}] on behalf of [{module}]");
-
-        // 1. Get pub key for the environment
-        let address =
-            format!("/repos/{owner}/{repo}/environments/{environment_name}/secrets/public-key");
-        let (status, body) = self.make_generic_get_request(address, module).await?;
-        if status != 200 {
-            return Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
-                status,
-            )));
-        };
-        let res = serde_json::from_str::<Value>(&body?).map_err(|_| {
-            ApiError::GitHubError(GitHubError::InvalidInput(
-                "Could not deserialize environment's public key".to_string(),
-            ))
-        })?;
-        let env_pub_key = res
-            .get("key")
-            .ok_or(ApiError::GitHubError(GitHubError::InvalidInput(
-                "Invalid response while fetching environment's public key".to_string(),
-            )))?
-            .to_string()
-            .replace("\"", "");
-        let env_key_id = res
-            .get("key_id")
-            .ok_or(ApiError::GitHubError(GitHubError::InvalidInput(
-                "Invalid response while fetching environment's public key".to_string(),
-            )))?
-            .to_string()
-            .replace("\"", "");
-
-        // 2. Encrypt the secret under the environment's pub key
-        let mut ciphertext = vec![0u8; secret.as_bytes().len() + seal::OVERHEAD_LENGTH];
-        seal::encrypt(
-            secret.as_bytes(),
-            base64::decode(env_pub_key)
-                .unwrap()
-                .as_slice()
-                .try_into()
-                .unwrap(),
-            &mut ciphertext,
-        )
-        .map_err(|_| {
-            ApiError::GitHubError(GitHubError::InvalidInput(
-                "Could not encrypt secret under environment's public key".to_string(),
-            ))
-        })?;
-        let ciphertext = base64::encode(ciphertext);
-
-        // 3. Upload the encrypted secret via the REST API
-        let address =
-            format!("/repos/{owner}/{repo}/environments/{environment_name}/secrets/{secret_name}");
-
-        let body = UploadEnvironmentSecretPayload {
-            encrypted_value: ciphertext,
-            key_id: env_key_id,
-        };
-
-        match self
-            .make_generic_put_request(address, Some(&body), module)
-            .await
-        {
-            Ok((status, _)) => {
-                // we are OK with creating or updating
-                if status == 201 || status == 204 {
-                    info!("Secret successfully uploaded");
                     Ok(0)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
