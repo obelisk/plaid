@@ -1,6 +1,8 @@
+mod environments;
 mod graphql;
 mod pats;
 mod repos;
+mod secrets;
 mod teams;
 mod validators;
 
@@ -143,7 +145,7 @@ impl Github {
         body: T,
         module: &str,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
-        info!("Making a get request to {uri} on behalf of {module}");
+        info!("Making a post request to {uri} on behalf of {module}");
 
         let request = self.client._post(uri, Some(&body)).await;
 

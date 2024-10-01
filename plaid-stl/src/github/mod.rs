@@ -317,7 +317,11 @@ pub fn fetch_commit(user: &str, repo: &str, commit: &str) -> Result<String, Plai
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
-pub fn list_files(organization: &str, repository_name: &str, pull_request: &str) -> Result<String, PlaidFunctionError> {
+pub fn list_files(
+    organization: &str,
+    repository_name: &str,
+    pull_request: &str,
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, list_files);
     }
@@ -330,7 +334,11 @@ pub fn list_files(organization: &str, repository_name: &str, pull_request: &str)
         pull_request: &'a str,
     }
 
-    let request = Request { organization, repository_name, pull_request };
+    let request = Request {
+        organization,
+        repository_name,
+        pull_request,
+    };
 
     let request = serde_json::to_string(&request).unwrap();
 
@@ -357,7 +365,12 @@ pub fn list_files(organization: &str, repository_name: &str, pull_request: &str)
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
-pub fn fetch_file(organization: &str, repository_name: &str, file_path: &str, reference: &str) -> Result<String, PlaidFunctionError> {
+pub fn fetch_file(
+    organization: &str,
+    repository_name: &str,
+    file_path: &str,
+    reference: &str,
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, fetch_file);
     }
@@ -371,7 +384,12 @@ pub fn fetch_file(organization: &str, repository_name: &str, file_path: &str, re
         reference: &'a str,
     }
 
-    let request = Request { organization, repository_name, file_path, reference };
+    let request = Request {
+        organization,
+        repository_name,
+        file_path,
+        reference,
+    };
 
     let request = serde_json::to_string(&request).unwrap();
 
@@ -618,8 +636,7 @@ pub fn get_repository_collaborators(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
-/// Get all collaborators on a repository. Returns a vector of strings, where each string is a JSON-encoded
-/// page of results, as returned by the GitHub API.
+/// Get all collaborators on a repository.
 /// ## Arguments
 ///
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
@@ -669,7 +686,10 @@ pub fn get_all_repository_collaborators(
         if this_page == "[]" {
             break;
         }
-        collaborators.extend(serde_json::from_str::<Vec<RepositoryCollaborator>>(&this_page).map_err(|_| PlaidFunctionError::InternalApiError)?);
+        collaborators.extend(
+            serde_json::from_str::<Vec<RepositoryCollaborator>>(&this_page)
+                .map_err(|_| PlaidFunctionError::InternalApiError)?,
+        );
     }
 
     Ok(collaborators)
@@ -720,4 +740,115 @@ pub fn update_branch_protection_rule(
     Ok(())
 }
 
+/// Create a GitHub deployment environment for a given repository.
+///
+/// Arguments:
+/// * `owner` - The owner of the repository
+/// * `repo` - The name of the repository
+/// * `env_name` - The name of the environment to be created
+pub fn create_environment_for_repo(
+    owner: &str,
+    repo: &str,
+    env_name: &str,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, create_environment_for_repo);
+    }
 
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+    params.insert("env_name", env_name.to_string());
+
+    let request =
+        serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    let res = unsafe {
+        github_create_environment_for_repo(request.as_bytes().as_ptr(), request.as_bytes().len())
+    };
+
+    match res {
+        0 => Ok(()),
+        x => Err(x.into()),
+    }
+}
+
+/// Create a deployment branch protection rule for a GitHub environment.
+///
+/// Arguments:
+/// * `owner` - The owner of the repository
+/// * `repo` - The name of the repository
+/// * `env_name` - The name of the environment to be created
+/// * `branch` - The branch from which a deployment can be triggered. This will be set in the deployment protection rules
+pub fn create_deployment_branch_protection_rule(
+    owner: &str,
+    repo: &str,
+    env_name: &str,
+    branch: &str,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, create_deployment_branch_protection_rule);
+    }
+
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+    params.insert("env_name", env_name.to_string());
+    params.insert("branch", branch.to_string());
+
+    let request =
+        serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    let res = unsafe {
+        github_create_deployment_branch_protection_rule(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+        )
+    };
+
+    match res {
+        0 => Ok(()),
+        x => Err(x.into()),
+    }
+}
+
+/// Configure an environment secret for a GitHub deployment environment. If a secret with the same name is already present, it will be overwritten.
+///
+/// Arguments:
+/// * `owner` - The owner of the repository
+/// * `repo` - The name of the repository
+/// * `env_name` - The name of the GitHub environment on which to set the secret. If not set, then a repository-level secret is created
+/// * `secret_name` - The name of the secret to set
+/// * `secret` - The plaintext secret to be set
+pub fn configure_secret(
+    owner: &str,
+    repo: &str,
+    env_name: Option<&str>,
+    secret_name: &str,
+    secret: &str,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, configure_secret);
+    }
+
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+    if let Some(env_name) = env_name {
+        params.insert("env_name", env_name.to_string());
+    }
+    params.insert("secret_name", secret_name.to_string());
+    params.insert("secret", secret.to_string());
+
+    let request =
+        serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    let res = unsafe {
+        github_configure_secret(request.as_bytes().as_ptr(), request.as_bytes().len())
+    };
+
+    match res {
+        0 => Ok(()),
+        x => Err(x.into()),
+    }
+}

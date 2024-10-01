@@ -229,6 +229,9 @@ impl_new_function!(github, remove_user_from_repo);
 impl_new_function!(github, add_user_to_team);
 impl_new_function!(github, remove_user_from_team);
 impl_new_function!(github, update_branch_protection_rule);
+impl_new_function!(github, create_environment_for_repo);
+impl_new_function!(github, configure_secret);
+impl_new_function!(github, create_deployment_branch_protection_rule);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query);
@@ -439,6 +442,16 @@ pub fn to_api_function(
         "github_update_branch_protection_rule" => {
             Function::new_typed_with_env(&mut store, &env, github_update_branch_protection_rule)
         }
+        "github_create_environment_for_repo" => {
+            Function::new_typed_with_env(&mut store, &env, github_create_environment_for_repo)
+        }
+        "github_configure_secret" => {
+            Function::new_typed_with_env(&mut store, &env, github_configure_secret)
+        }
+        "github_create_deployment_branch_protection_rule" => {
+            Function::new_typed_with_env(&mut store, &env, github_create_deployment_branch_protection_rule)
+        }
+
         // Slack Calls
         "slack_post_to_named_webhook" => {
             Function::new_typed_with_env(&mut store, &env, slack_post_to_named_webhook)

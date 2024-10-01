@@ -39,9 +39,9 @@ okta = 200
 [loading.memory_page_count.module_overrides]
 "example_rule.wasm" = 50
 
-[apis."okta"]
-token = ""
-domain = ""
+# [apis."okta"]
+# token = ""
+# domain = ""
 
 [apis."general"]
 [apis."general".network.web_requests]

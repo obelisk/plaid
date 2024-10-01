@@ -64,6 +64,9 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     // https://docs.github.com/en/get-started/using-git/dealing-with-special-characters-in-branch-and-tag-names#naming-branches-and-tags
     define_regex_validator!(validators, "branch_name", r"^[a-zA-Z][a-zA-Z0-9./_-]*$");
 
+    define_regex_validator!(validators, "environment_name", r"^[a-zA-Z][a-zA-Z0-9./_-]*$");
+    define_regex_validator!(validators, "secret_name", r"^[A-Z][A-Z0-9_]*$");
+
     validators
 }
 
@@ -74,3 +77,5 @@ create_regex_validator_func!(team_slug);
 create_regex_validator_func!(commit_hash);
 create_regex_validator_func!(pint);
 create_regex_validator_func!(branch_name);
+create_regex_validator_func!(environment_name);
+create_regex_validator_func!(secret_name);
