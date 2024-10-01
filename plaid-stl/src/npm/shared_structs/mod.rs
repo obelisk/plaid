@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt::Display;
 
 /// Permission that is granted to a team over an npm package
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum NpmPackagePermission {
     READ,
     WRITE,
@@ -162,12 +162,12 @@ impl GranularTokenSpecs {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[allow(dead_code)]
 pub struct NpmToken {
-    token: String,
-    token_name: Option<String>,
+    pub token: String,
+    pub token_name: Option<String>,
     pub token_type: Option<String>,
     // Deserialize the date field from the ISO 8601 format
     #[serde(default, deserialize_with = "deserialize_option_timestamp")]
-    expires: Option<DateTime<Utc>>,
+    pub expires: Option<DateTime<Utc>>,
 }
 
 // Custom deserializer for an optional DateTime<Utc>

@@ -1,4 +1,3 @@
-use regex::Regex;
 use reqwest::cookie::CookieStore;
 use serde::Serialize;
 use serde_json::Value;
@@ -50,6 +49,24 @@ struct GenerateGranularTokenPayload<'a> {
     token_description: &'a str,
     #[serde(rename = "tokenName")]
     token_name: &'a str,
+}
+
+#[derive(Serialize)]
+struct InviteUserToOrganizationPayload<'a> {
+    csrftoken: &'a str,
+    team: &'a str,
+    user: HashMap<&'a str, &'a str>,
+}
+
+#[derive(Serialize)]
+struct AddUserToTeamPayload<'a> {
+    csrftoken: &'a str,
+    user: &'a str,
+}
+
+#[derive(Serialize)]
+struct RemoveUserPayload<'a> {
+    csrftoken: &'a str,
 }
 
 impl Npm {
@@ -338,20 +355,12 @@ impl Npm {
             .send()
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?;
-        // Safe unwrap: hardcoded data.
-        // TODO best to precompile regex? This is likely an infrequent operation.
-        let dsr_manifest_hash = Regex::new(r#"dsrManifestHash\"\s+?value=\"([a-z0-9]{64})\""#)
-            .unwrap()
-            .captures(
-                &response
-                    .text()
-                    .await
-                    .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?,
-            )
-            .ok_or(ApiError::NpmError(NpmError::FailedToDeletePackage))?
-            .get(1) // get the content of the capturing group, which contains the token we need
-            .ok_or(ApiError::NpmError(NpmError::FailedToDeletePackage))?
-            .as_str()
+        let response_text = response
+            .text()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?;
+        let dsr_manifest_hash = self
+            .validate_and_extract_dsr_manifest_hash(&response_text)?
             .to_string();
 
         // Step 2. Perform the actual package deletion with a POST request to /delete
@@ -395,7 +404,12 @@ impl Npm {
         let csrf_token = self
             .get_csrftoken_from_cookies()
             .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
-        let body = format!(r#"{{"csrftoken": "{}", "user": "{}"}}"#, &csrf_token, user);
+        let body = AddUserToTeamPayload {
+            csrftoken: &csrf_token,
+            user,
+        };
+        let body = serde_json::to_string(&body)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToAddUserToTeam))?;
         self.client
             .post(format!(
                 "{}/settings/{}/teams/team/{}/users",
@@ -421,11 +435,14 @@ impl Npm {
 
         info!("Removing [{user}] from [{team}] on behalf of [{module}]");
 
-        let body = format!(
-            r#"{{"csrftoken": "{}"}}"#,
-            self.get_csrftoken_from_cookies()
-                .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?
-        );
+        let csrf_token = self
+            .get_csrftoken_from_cookies()
+            .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
+        let body = RemoveUserPayload {
+            csrftoken: &csrf_token,
+        };
+        let body = serde_json::to_string(&body)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromTeam))?;
         self.client
             .post(format!(
                 "{}/settings/{}/teams/team/{}/users/{}/delete",
@@ -445,10 +462,6 @@ impl Npm {
         user: &str,
         module: &str,
     ) -> Result<i32, ApiError> {
-        #[derive(Serialize)]
-        struct RemoveUserPayload<'a> {
-            csrftoken: &'a str,
-        }
         let user = self.validate_npm_username(user)?;
         info!("Removing user [{user}] from npm organization on behalf of [{module}]");
 
@@ -489,7 +502,7 @@ impl Npm {
         let params: InviteUserToOrganizationParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let user = self.validate_npm_username(&params.user)?;
-        
+
         // See https://docs.npmjs.com/about-developers-team
         // We use "developers" as default since all organizations have a "developers" team
         let team = params.team.unwrap_or("developers".to_string());
@@ -500,19 +513,15 @@ impl Npm {
             user, team
         );
 
-        let body = format!(
-            r#"{{
-  "csrftoken": "{}",
-  "user": {{
-    "name": "{}"
-    }},
-  "team": "{}"
-    }}"#,
-            self.get_csrftoken_from_cookies()
+        let body = InviteUserToOrganizationPayload {
+            csrftoken: &self
+                .get_csrftoken_from_cookies()
                 .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?,
-            user,
-            team
-        );
+            team,
+            user: [("name", user)].into(),
+        };
+        let body = serde_json::to_string(&body)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
 
         self.client
             .post(format!(
@@ -548,7 +557,7 @@ impl Npm {
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
 
         // Get total number of users that we will need to retrieve
-        let total_users: u16 = serde_json::from_value(
+        let total_users: u64 = serde_json::from_value(
             response
                 .get("list")
                 .ok_or(ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
@@ -598,7 +607,7 @@ impl Npm {
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
 
         // Get total number of users that we will need to retrieve
-        let total_users: u16 = serde_json::from_value(
+        let total_users: u64 = serde_json::from_value(
             response
                 .get("memberCounts")
                 .ok_or(ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
@@ -657,7 +666,7 @@ impl Npm {
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))?;
 
         // Get total number of packages that we will need to retrieve
-        let total_packages: u16 = serde_json::from_value(
+        let total_packages: u64 = serde_json::from_value(
             response
                 .get("list")
                 .ok_or(ApiError::NpmError(NpmError::FailedToRetrievePackages))?
@@ -679,7 +688,7 @@ impl Npm {
             )
             .await?
             .iter()
-            .filter(|v| v.permission.to_string() == params.permission.to_string())
+            .filter(|v| v.permission == params.permission)
             .cloned()
             .collect::<Vec<NpmPackageWithPermission>>();
 
@@ -692,7 +701,7 @@ impl Npm {
     async fn get_paginated_data_from_npm_website<T: Paginable>(
         &self,
         url: &str,
-        target_num_items: u16,
+        target_num_items: u64,
     ) -> Result<Vec<T>, ApiError> {
         // Get the first page, which contains the first items (max 10)
         let response = self

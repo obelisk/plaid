@@ -68,6 +68,12 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     // probably more strict than necessary
     define_regex_validator!(validators, "npm_token_name", r"^[a-z0-9._-]+$");
 
+    define_regex_validator!(
+        validators,
+        "dsr_manifest_hash",
+        r#"dsrManifestHash\"\s+?value=\"([a-z0-9]{64})\""#
+    );
+
     validators
 }
 
@@ -80,8 +86,30 @@ create_regex_validator_func!(npm_at_org_name);
 create_regex_validator_func!(npm_scoped_package);
 create_regex_validator_func!(npm_token_name);
 
-// Special validator for GranularTokenSpecs
 impl Npm {
+    /// Look for a valid `dsrManifestHash` in an HTML page and extract it
+    pub fn validate_and_extract_dsr_manifest_hash<'a>(
+        &self,
+        value_to_validate: &'a str,
+    ) -> Result<&'a str, ApiError> {
+        self.validators
+            .get("dsr_manifest_hash")
+            .ok_or(ApiError::NpmError(NpmError::WrongConfig(
+                "Validator not found. This should be impossible".to_string(),
+            )))?
+            .captures(&value_to_validate)
+            .ok_or(ApiError::NpmError(NpmError::InvalidInput(
+                value_to_validate.to_string(),
+            )))?
+            .get(1) // get the content of the capturing group, which contains the token we need
+            .ok_or(ApiError::NpmError(NpmError::InvalidInput(
+                value_to_validate.to_string(),
+            )))
+            .map(|v| v.as_str())
+            .map_err(|_| ApiError::NpmError(NpmError::InvalidInput(value_to_validate.to_string())))
+    }
+
+    /// Special validator for GranularTokenSpecs
     pub fn validate_granular_token_specs<'a>(
         &self,
         value_to_validate: &'a GranularTokenSpecs,
