@@ -63,6 +63,7 @@ impl From<PlaidFunctionError> for i32 {
 pub mod aws;
 pub mod github;
 pub mod network;
+pub mod npm;
 pub mod okta;
 pub mod pagerduty;
 pub mod plaid;
