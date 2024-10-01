@@ -66,6 +66,7 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
 
     define_regex_validator!(validators, "environment_name", r"^[a-zA-Z][a-zA-Z0-9./_-]*$");
     define_regex_validator!(validators, "secret_name", r"^[A-Z][A-Z0-9_]*$");
+    define_regex_validator!(validators, "filename", r"^[a-zA-Z0-9\.]{1,32}$");
 
     validators
 }
@@ -79,3 +80,4 @@ create_regex_validator_func!(pint);
 create_regex_validator_func!(branch_name);
 create_regex_validator_func!(environment_name);
 create_regex_validator_func!(secret_name);
+create_regex_validator_func!(filename);

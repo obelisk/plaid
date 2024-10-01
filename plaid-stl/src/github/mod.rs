@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
-use crate::PlaidFunctionError;
+use crate::{plaid::print_debug_string, PlaidFunctionError};
 
 pub enum ReviewPatAction {
     Approve,
@@ -27,6 +27,101 @@ pub struct RepositoryCollaborator {
     pub type_: String,
     pub role_name: String,
     pub permissions: Permission,
+}
+
+// Structs used for deserializing GH's responses when searching for code
+
+#[derive(Debug, Deserialize)]
+pub struct FileSearchResult {
+    pub total_count: u64,
+    pub incomplete_results: bool,
+    pub items: Vec<FileSearchResultItem>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FileSearchResultItem {
+    pub path: String,
+    pub html_url: String,
+    pub url: String,
+    pub repository: GithubRepository,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GithubRepository {
+    pub name: String,
+    pub full_name: String,
+    pub private: bool,
+    pub description: Option<String>,
+    pub owner: GithubRepositoryOwner,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GithubRepositoryOwner {
+    pub login: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GithubFileContent {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub content: String,
+    pub encoding: String,
+}
+
+// END OF Structs used for deserializing GH's response when searching for code
+
+impl FileSearchResultItem {
+    /// Retrieve the content of the search result
+    pub fn retrieve_raw_content(&self) -> Result<String, PlaidFunctionError> {
+        let reference_regex = regex::Regex::new(r"^.*?ref=([a-f0-9]{40})$").unwrap(); // TODO improve
+        let reference = reference_regex
+            .captures(&self.url)
+            .ok_or(PlaidFunctionError::InternalApiError)?
+            .get(1)
+            .ok_or(PlaidFunctionError::InternalApiError)?
+            .as_str();
+        let content = fetch_file(
+            &self.repository.owner.login,
+            &self.repository.name,
+            &self.path,
+            reference,
+        )
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+        let content = serde_json::from_str::<GithubFileContent>(&content)
+            .map_err(|e| {
+                print_debug_string(&format!("ERROR1 {e}"));
+                panic!()
+            })
+            .map_err(|_| PlaidFunctionError::InternalApiError)?;
+        if content.type_ != "file" || content.encoding != "base64" {
+            return Err(PlaidFunctionError::InternalApiError); // TODO not the right error
+        }
+        // base64 decode and return the corresponding string
+        Ok(String::from_utf8(
+            base64::decode(content.content.replace("\n", ""))
+                .map_err(|_| PlaidFunctionError::InternalApiError)?,
+        )
+        .map_err(|_| PlaidFunctionError::InternalApiError)?)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+/// Specifies criteria according to which results returned
+/// by the API should be included or discarded.
+pub struct FileSearchSelectionCriteria {
+    /// Keep only results from these repositories (mutually exclusive with `discard_from_repos`)
+    pub only_from_repos: Option<Vec<String>>,
+    /// Discard files from these repositories (mutually exclusive with `only_from_repos`)
+    pub discard_from_repos: Option<Vec<String>>,
+    /// Discard files where these strings appear in the file's path
+    pub discard_substrings: Option<Vec<String>>,
+    /// Discard files if some folder along their path is hidden (.folder)
+    pub discard_results_in_dot_folders: bool,
+    /// Discard files that belong to private repositories
+    pub discard_results_in_private_repos: bool,
+    /// Discard specific files identified as repository/path
+    /// (e.g., myrepo/folderA/folderB/file.txt)
+    pub discard_specific_files: Option<Vec<String>>,
 }
 
 // TODO: Do not use this function, it is deprecated and will be removed soon
@@ -843,12 +938,152 @@ pub fn configure_secret(
     let request =
         serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
 
-    let res = unsafe {
-        github_configure_secret(request.as_bytes().as_ptr(), request.as_bytes().len())
-    };
+    let res =
+        unsafe { github_configure_secret(request.as_bytes().as_ptr(), request.as_bytes().len()) };
 
     match res {
         0 => Ok(()),
         x => Err(x.into()),
+    }
+}
+
+/// Search for files with given filename in a GitHub organization's code.
+/// If additional selection criteria are given, these are used to decide whether
+/// results are selected or discarded.
+///
+/// **Arguments:**
+/// - `filename`: The name of the files to search, e.g., "README.md"
+/// - `org`: The name of the GitHub organization
+/// - `selection_criteria`: An optional `FileSearchSelectionCriteria` object with additional criteria
+pub fn search_file_in_org_code(
+    filename: impl Display,
+    org: impl Display,
+    selection_criteria: Option<&FileSearchSelectionCriteria>,
+) -> Result<Vec<FileSearchResultItem>, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, search_file_in_org_code);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("filename", filename.to_string());
+    params.insert("org", org.to_string());
+
+    let mut search_results = Vec::<FileSearchResultItem>::new();
+    let mut page = 0;
+
+    const RETURN_BUFFER_SIZE: usize = 1 * 1024 * 1024; // 1 MiB
+
+    loop {
+        page += 1;
+        params.insert("page", page.to_string());
+        // use a larger page size to make less requests and avoid hitting the rate limit
+        params.insert("per_page", "100".to_owned());
+
+        let request = serde_json::to_string(&params).unwrap(); // safe unwrap
+
+        let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+        let res = unsafe {
+            github_search_file_in_org_code(
+                request.as_bytes().as_ptr(),
+                request.as_bytes().len(),
+                return_buffer.as_mut_ptr(),
+                RETURN_BUFFER_SIZE,
+            )
+        };
+
+        if res < 0 {
+            return Err(res.into());
+        }
+
+        return_buffer.truncate(res as usize);
+        // This should be safe because unless the Plaid runtime is expressly trying
+        // to mess with us, this came from a String in the API module.
+        let this_page = String::from_utf8(return_buffer).unwrap();
+
+        let file_search_result = serde_json::from_str::<FileSearchResult>(&this_page)
+            .map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+        if file_search_result.items.is_empty() {
+            break; // we are past the last page
+        }
+
+        search_results.extend(file_search_result.items);
+    }
+
+    // Now that all the search results have been collected, apply the selection criteria
+
+    if let Some(selection_criteria) = selection_criteria {
+        if selection_criteria.only_from_repos.is_some()
+            && selection_criteria.discard_from_repos.is_some()
+        {
+            // Error: only one of these two can be set
+            return Err(PlaidFunctionError::InternalApiError); // TODO not the right error type
+        }
+
+        let mut filtered_results = Vec::<FileSearchResultItem>::new();
+        let regex_dot_folder = regex::Regex::new(r"\/\.").unwrap(); // TODO improve
+
+        // Go through all the results and try to discard them by applying the criteria.
+        // If the result makes it to the end, then add it to the filtered results.
+        for result in search_results {
+            // Discard files in . folders
+            if selection_criteria.discard_results_in_dot_folders {
+                if regex_dot_folder.is_match(&result.html_url) {
+                    continue;
+                }
+            }
+            // Select / discard files based on the repo name
+            if let Some(discard_repos) = &selection_criteria.discard_from_repos {
+                if discard_repos
+                    .iter()
+                    .find(|v| **v == result.repository.name)
+                    .is_some()
+                {
+                    continue;
+                }
+            }
+            if let Some(keep_repos) = &selection_criteria.only_from_repos {
+                if keep_repos
+                    .iter()
+                    .find(|v| **v == result.repository.name)
+                    .is_none()
+                {
+                    continue;
+                }
+            }
+            // Discard files based on the repo's visibility
+            if selection_criteria.discard_results_in_private_repos && result.repository.private {
+                continue;
+            }
+            // Discard files based on a substring in the path
+            if let Some(sub_paths) = &selection_criteria.discard_substrings {
+                let mut discarded = false;
+                for subp in sub_paths {
+                    if result.html_url.contains(subp) {
+                        discarded = true;
+                        break; // inner loop
+                    }
+                }
+                if discarded {
+                    continue;
+                }
+            }
+            // Discard files based on explicit list
+            if let Some(discard_explicit) = &selection_criteria.discard_specific_files {
+                // build the string we will search for
+                let search = format!("{}/{}", result.repository.name, result.path);
+
+                if discard_explicit.iter().find(|v| **v == search).is_some() {
+                    continue;
+                }
+            }
+
+            // If we are here, we have not discarded the result
+            filtered_results.push(result);
+        }
+        Ok(filtered_results)
+    } else {
+        // no exclusion criteria have been passed
+        Ok(search_results)
     }
 }
