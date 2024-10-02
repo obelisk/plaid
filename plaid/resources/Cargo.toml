@@ -1,6 +1,6 @@
 [package]
 name = "plaid"
-version = "0.12.1"
+version = "0.13.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -11,11 +11,14 @@ quorum = ["quorum-agent"]
 aws = ["aws-sdk-kms", "aws-config"]
 
 [dependencies]
-clap = { version = "4", default-features = false, features = ["std"] }
+alkali = "0.3.0"
 async-trait = "0.1.56"
 base64 = "0.13"
+clap = { version = "4", default-features = false, features = ["std"] }
 crossbeam-channel = "0.5"
 env_logger = "0.8"
+flate2 = "1.0"
+hex = "0.4.3"
 http = "1"
 jwt-simple = "0.12.10"
 log = "0.4"
@@ -29,13 +32,17 @@ ring = "0.17"
 reqwest = { version = "0.11", default-features = false, features = [
     "rustls-tls",
     "json",
+    "cookies",
 ] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 sled = "0.34.7"
+tar = "0.4.41"
 time = "0.3"
 tokio = { version = "1", features = ["full"] }
 toml = "0.5"
+totp-rs = "5.6.0"
+url = "2.5.2"
 warp = { version = "0.3", features = ["tls"] }
 wasmer = { version = "4", default-features = false, features = ["cranelift"] }
 wasmer-middlewares = "4"
