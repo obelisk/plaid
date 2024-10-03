@@ -115,29 +115,31 @@ pub fn remove_user_from_organization(user: impl Display) -> Result<(), PlaidFunc
     Ok(())
 }
 
-/// Create a granular npm token for a package. The token can be configured through the token_specs parameter.
+/// Create a granular npm token for a list of packages. The token can be configured through the token_specs parameter.
 ///
-/// If you are not sure about the token configuration, use `create_granular_token_for_package_simple` which only
+/// If you are not sure about the token configuration, use `create_granular_token_for_packages_simple` which only
 /// requires specifying a name and a description.
-pub fn create_granular_token_for_package(
-    package_name: impl Display,
+pub fn create_granular_token_for_packages(
+    package_names: impl IntoIterator<Item = impl Display>,
     token_specs: GranularTokenSpecs,
 ) -> Result<String, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(npm, create_granular_token_for_package);
+        new_host_function_with_error_buffer!(npm, create_granular_token_for_packages);
     }
 
     const RETURN_BUFFER_SIZE: usize = 8 * 1024; // 8 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let params = serde_json::to_string(&CreateGranularTokenForPackageParams {
-        package: package_name.to_string(),
+    let package_names = package_names.into_iter().map(|v| v.to_string()).collect();
+
+    let params = serde_json::to_string(&CreateGranularTokenForPackagesParams {
+        packages: package_names,
         specs: token_specs,
     })
     .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
 
     let res = unsafe {
-        npm_create_granular_token_for_package(
+        npm_create_granular_token_for_packages(
             params.as_bytes().as_ptr(),
             params.as_bytes().len(),
             return_buffer.as_mut_ptr(),
@@ -155,15 +157,15 @@ pub fn create_granular_token_for_package(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
-/// Create a granular npm token for a package, specifying only the token name and a suitable description.
+/// Create a granular npm token for a list of packages, specifying only the token name and a suitable description.
 /// Other token configurations default to sensible values.
-pub fn create_granular_token_for_package_simple(
-    package_name: impl Display,
+pub fn create_granular_token_for_packages_simple(
+    package_names: impl IntoIterator<Item = impl Display>,
     token_name: impl Display,
     token_description: impl Display,
 ) -> Result<String, PlaidFunctionError> {
     let token_specs = GranularTokenSpecs::with_name_and_description(token_name, token_description);
-    create_granular_token_for_package(package_name, token_specs)
+    create_granular_token_for_packages(package_names, token_specs)
 }
 
 /// Retrieve a list of all granular tokens configured for the service account
@@ -249,6 +251,7 @@ pub fn remove_user_from_team(
 pub fn publish_empty_stub(
     package_name: impl Display,
     access_level: Option<PkgAccessLevel>,
+    github_repo: impl Display,
 ) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(npm, publish_empty_stub);
@@ -259,6 +262,7 @@ pub fn publish_empty_stub(
     let params = serde_json::to_string(&PublishEmptyStubParams {
         package_name: package_name.to_string(),
         access_level,
+        repo_name: github_repo.to_string(),
     })
     .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
 

@@ -255,7 +255,7 @@ impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key);
 // Npm Functions
 impl_new_function!(npm, publish_empty_stub);
 impl_new_function!(npm, set_team_permission_on_package);
-impl_new_function_with_error_buffer!(npm, create_granular_token_for_package);
+impl_new_function_with_error_buffer!(npm, create_granular_token_for_packages);
 impl_new_function_with_error_buffer!(npm, list_granular_tokens);
 impl_new_function!(npm, delete_package);
 impl_new_function!(npm, add_user_to_team);
@@ -350,8 +350,8 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, npm_set_team_permission_on_package)
         }
 
-        "npm_create_granular_token_for_package" => {
-            Function::new_typed_with_env(&mut store, &env, npm_create_granular_token_for_package)
+        "npm_create_granular_token_for_packages" => {
+            Function::new_typed_with_env(&mut store, &env, npm_create_granular_token_for_packages)
         }
 
         "npm_list_granular_tokens" => {

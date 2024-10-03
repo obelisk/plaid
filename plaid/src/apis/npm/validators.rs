@@ -74,6 +74,8 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
         r#"dsrManifestHash\"\s+?value=\"([a-z0-9]{64})\""#
     );
 
+    define_regex_validator!(validators, "repository_name", r"^[\w\-\./]+$");
+
     validators
 }
 
@@ -85,6 +87,7 @@ create_regex_validator_func!(npm_org_name);
 create_regex_validator_func!(npm_at_org_name);
 create_regex_validator_func!(npm_scoped_package);
 create_regex_validator_func!(npm_token_name);
+create_regex_validator_func!(repository_name);
 
 impl Npm {
     /// Look for a valid `dsrManifestHash` in an HTML page and extract it
