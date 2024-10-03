@@ -80,6 +80,7 @@ impl Npm {
         let params: PublishEmptyStubParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let package_name = self.validate_npm_package_name(&params.package_name)?;
+        let gh_repo = self.validate_repository_name(&params.repo_name)?;
 
         info!(
             "Publishing new empty npm package [{}] on behalf of [{module}]",
@@ -87,7 +88,7 @@ impl Npm {
         );
 
         let (package_json, tarball_data) =
-            create_package_tarball(&self.config.npm_scope, &package_name)?;
+            create_package_tarball(&self.config.npm_scope, &package_name, gh_repo)?;
         let data_length = tarball_data.len();
         let sha1_digest = hashes::sha1_hex(&tarball_data);
         let sha512_digest = hashes::sha512_base64(&tarball_data);
@@ -170,7 +171,11 @@ impl Npm {
 /// * **tarball** is a bytes vector that encodes a .tar.gz archive that contains the package.json file
 ///
 /// The archive is ready to be uploaded to the NPM registry.
-fn create_package_tarball(pkg_scope: &str, pkg_name: &str) -> Result<(String, Vec<u8>), ApiError> {
+fn create_package_tarball(
+    pkg_scope: &str,
+    pkg_name: &str,
+    github_repo: &str,
+) -> Result<(String, Vec<u8>), ApiError> {
     let package_json = format!(
         r#"{{
             "name": "@{}/{}",
@@ -178,10 +183,10 @@ fn create_package_tarball(pkg_scope: &str, pkg_name: &str) -> Result<(String, Ve
             "main": "",
             "author": "",
             "license": "ISC",
-            "repository": "git://github.com/smartcontractkit/{}.git",
+            "repository": "git://github.com/{}.git",
             "description": ""
             }}"#,
-        pkg_scope, pkg_name, pkg_name
+        pkg_scope, pkg_name, github_repo
     );
 
     let mut header = Header::new_gnu();

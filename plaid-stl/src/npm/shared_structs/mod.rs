@@ -194,8 +194,8 @@ pub struct SetTeamPermissionOnPackageParams {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct CreateGranularTokenForPackageParams {
-    pub package: String,
+pub struct CreateGranularTokenForPackagesParams {
+    pub packages: Vec<String>,
     pub specs: GranularTokenSpecs,
 }
 
@@ -232,6 +232,7 @@ impl Display for PkgAccessLevel {
 pub struct PublishEmptyStubParams {
     pub package_name: String,
     pub access_level: PkgAccessLevel,
+    pub repo_name: String,
 }
 
 #[derive(Serialize, Deserialize)]

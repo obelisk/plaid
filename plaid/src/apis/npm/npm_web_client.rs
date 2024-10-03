@@ -8,7 +8,7 @@ use url::Url;
 use crate::apis::ApiError;
 
 use plaid_stl::npm::shared_structs::{
-    AddRemoveUserToFromTeamParams, CreateGranularTokenForPackageParams,
+    AddRemoveUserToFromTeamParams, CreateGranularTokenForPackagesParams,
     InviteUserToOrganizationParams, ListPackagesWithTeamPermissionParams, NpmPackagePermission,
     NpmToken, NpmUser, NpmUserRole, SetTeamPermissionOnPackageParams,
 };
@@ -208,11 +208,11 @@ impl Npm {
 
     /// Create a granular token for a package, with given name and description.
     ///
-    /// The token has the following features:
+    /// By default, the token has the following features:
     /// * read/write permission
     /// * expires after 365 days
-    /// * scoped to the given package
-    pub async fn create_granular_token_for_package(
+    /// * scoped to the given packages
+    pub async fn create_granular_token_for_packages(
         &self,
         params: &str,
         module: &str,
@@ -220,17 +220,24 @@ impl Npm {
         self.login()
             .await
             .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
-        let params: CreateGranularTokenForPackageParams =
+        let params: CreateGranularTokenForPackagesParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
-        let package = self.validate_npm_package_name(&params.package)?;
+        let packages = params
+            .packages
+            .iter()
+            .map(|v| self.validate_npm_package_name(v).map(|v| v.to_string()))
+            .collect::<Result<Vec<String>, ApiError>>()?;
         let specs = self.validate_granular_token_specs(&params.specs)?;
 
         info!(
-            "Creating npm granular token for package [{}] on behalf of [{module}]",
-            package
+            "Creating npm granular token for packages [{:?}] on behalf of [{module}]",
+            packages
         );
 
-        let scoped_package = format!("@{}/{}", self.config.npm_scope, package);
+        let scoped_packages: Vec<String> = packages
+            .iter()
+            .map(|v| format!("@{}/{}", self.config.npm_scope, v))
+            .collect();
         // Prepare the request body
         let csrf_token = self
             .get_csrftoken_from_cookies()
@@ -254,11 +261,7 @@ impl Npm {
                 .clone()
                 .map_or("Read and write".to_string(), |v| v.to_string()),
             selected_orgs: specs.selected_orgs.clone().unwrap_or(vec![]),
-            selected_packages: params
-                .specs
-                .selected_packages
-                .clone()
-                .unwrap_or(vec![scoped_package]),
+            selected_packages: scoped_packages,
             selected_packages_and_scopes: &params
                 .specs
                 .selected_packages_and_scopes
