@@ -152,7 +152,7 @@ impl PlaidModule {
         })?;
         module.set_name(&filename);
 
-        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]");
+        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]. Parallel Execution Enabled: [{parallel_execution_enabled}]");
         for import in module.imports() {
             info!("\tImport: {}", import.name());
         }
@@ -236,7 +236,7 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
         let parallel_execution_enabled = config
             .single_threaded_rules
             .as_ref()
-            .map_or(true, |rules| rules.contains(&filename));
+            .map_or(true, |rules| !rules.contains(&filename));
 
         // Configure and compile module
         let Ok(mut plaid_module) = PlaidModule::configure_and_compile(
