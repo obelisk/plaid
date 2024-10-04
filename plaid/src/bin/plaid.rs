@@ -72,11 +72,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // requests for handling some configured get requests.
     let executor = Executor::new(
         log_receiver,
+        log_sender.clone(),
         modules.get_channels(),
         api,
         storage,
         config.execution_threads,
-        els.clone(),
+        els.clone()
     );
 
     let executor = Arc::new(executor);

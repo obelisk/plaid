@@ -7,7 +7,7 @@ use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
 use crate::storage::Storage;
 
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, Sender};
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedF
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use lru::LruCache;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 
@@ -297,10 +297,12 @@ fn update_persistent_response(
 
 fn execution_loop(
     receiver: Receiver<Message>,
+    sender: Sender<Message>,
     modules: HashMap<String, Vec<Arc<PlaidModule>>>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
     els: Logger,
+    single_threaded_rules_in_flight: Arc<RwLock<HashSet<String>>>,
 ) -> Result<(), ExecutorError> {
     // Wait on our receiver for logs to come in
     while let Ok(message) = receiver.recv() {
@@ -316,8 +318,58 @@ fn execution_loop(
             Some(module) => module,
         };
 
+        // If ANY of the modules that operate on this log type cannot be executed in parallel, we need to check
+        // the rules in flight list to see if a rule is already being executed.
+        if execution_modules
+            .iter()
+            .any(|module| !module.parallel_execution_enabled)
+        {
+            let strif = match single_threaded_rules_in_flight.read() {
+                Ok(strif) => strif,
+                Err(e) => {
+                    // .read() will return an error if the lock is poisoned (which should never happen). If this occurs,
+                    // we'll clear the poison and send the message back into the execution queue
+
+                    error!("Failed to acquire read lock. Error: {e}");
+                    single_threaded_rules_in_flight.clear_poison();
+
+                    if let Err(e) = sender.send(message.clone()) {
+                        error!("Failed to send message back into execution queue. Error: {e}");
+                    }
+                    continue;
+                }
+            };
+
+            // If this rule is currently being processed, send the message back into the execution queue
+            // This allows us to guarantee that the rule will only be executed on 1 thread at any given time
+            if execution_modules
+                .iter()
+                .any(|module| strif.contains(&module.name))
+            {
+                if let Err(e) = sender.send(message.clone()) {
+                    error!("Failed to send message back into execution queue. Error: {e}");
+                }
+
+                continue;
+            }
+        }
+
         // For every module that operates on that log type
         for plaid_module in execution_modules {
+            if !plaid_module.parallel_execution_enabled {
+                match single_threaded_rules_in_flight.write() {
+                    Ok(mut strif) => {
+                        strif.insert(plaid_module.name.clone());
+                    }
+                    // Poisons should never happen because: An RwLock is poisoned whenever a writer panics while holding an exclusive lock.
+                    // We hold the write lock in two locations, both with proper error handling to ensure that it will never panic.
+                    Err(e) => {
+                        error!("Failed to acquire write lock. Error: {e}");
+                        continue;
+                    }
+                }
+            };
+
             // TODO @obelisk: This will quietly swallow locking errors on the persistent response
             // This will eventually be caught if something tries to update the response but I don't
             // know if that's good enough.
@@ -369,6 +421,18 @@ fn execution_loop(
                 Err(e) => Some(determine_error(e, computation_limit, &instance, &mut store)),
             };
 
+            // The rule has finished executing. Remove it from the list of currently running rules
+            if !plaid_module.parallel_execution_enabled {
+                match single_threaded_rules_in_flight.write() {
+                    Ok(mut strif) => {
+                        strif.insert(plaid_module.name.clone());
+                    }
+                    Err(e) => {
+                        error!("Failed to acquire write lock. Error: {e}");
+                    }
+                }
+            }
+
             // If there was an error then log that it happened to the els
             if let Some(error) = error {
                 els.log_module_error(
@@ -406,6 +470,7 @@ fn determine_error(
 impl Executor {
     pub fn new(
         receiver: Receiver<Message>,
+        sender: Sender<Message>,
         modules: HashMap<String, Vec<Arc<PlaidModule>>>,
         api: Arc<Api>,
         storage: Option<Arc<Storage>>,
@@ -413,15 +478,18 @@ impl Executor {
         els: Logger,
     ) -> Self {
         let mut _handles = vec![];
+        let single_threaded_rules_in_flight = Arc::new(RwLock::new(HashSet::new()));
         for i in 0..execution_threads {
             info!("Starting Execution Thread {i}");
             let receiver = receiver.clone();
+            let sender = sender.clone();
             let api = api.clone();
             let storage = storage.clone();
             let modules = modules.clone();
             let els = els.clone();
+            let strif = single_threaded_rules_in_flight.clone();
             _handles.push(thread::spawn(move || {
-                execution_loop(receiver, modules, api, storage, els)
+                execution_loop(receiver, sender, modules, api, storage, els, strif)
             }));
         }
 
