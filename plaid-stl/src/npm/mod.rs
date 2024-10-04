@@ -375,3 +375,44 @@ pub fn list_packages_with_team_permission(
         .collect();
     Ok(v)
 }
+
+impl NpmToken {
+    /// Return a list of packages that this token can publish
+    pub fn get_publish_scope(&self) -> Result<Vec<String>, PlaidFunctionError> {
+        extern "C" {
+            new_host_function_with_error_buffer!(npm, get_token_publish_scope);
+        }
+
+        const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+        let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+        let params = serde_json::to_string(&GetTokenPublishScopeParams {
+            token_id: self
+                .id
+                .as_ref()
+                .ok_or(PlaidFunctionError::ErrorCouldNotSerialize)?
+                .to_string(),
+        })
+        .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+        let res = unsafe {
+            npm_get_token_publish_scope(
+                params.as_bytes().as_ptr(),
+                params.as_bytes().len(),
+                return_buffer.as_mut_ptr(),
+                RETURN_BUFFER_SIZE,
+            )
+        };
+
+        if res < 0 {
+            return Err(res.into());
+        }
+
+        return_buffer.truncate(res as usize);
+        // This should be safe because unless the Plaid runtime is expressly trying
+        // to mess with us, this came from a String in the API module.
+        let res = String::from_utf8(return_buffer).unwrap();
+
+        serde_json::from_str::<Vec<String>>(&res).map_err(|_| PlaidFunctionError::InternalApiError)
+    }
+}

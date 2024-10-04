@@ -160,8 +160,10 @@ impl GranularTokenSpecs {
 
 /// An npm token configured on the npm website for the current user
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[allow(dead_code)]
 pub struct NpmToken {
+    /// ID assigned by npm to the token.
+    /// Note: only granular tokens have this.
+    pub id: Option<String>,
     pub token: String,
     pub token_name: Option<String>,
     pub token_type: Option<String>,
@@ -239,4 +241,9 @@ pub struct PublishEmptyStubParams {
 pub struct ListPackagesWithTeamPermissionParams {
     pub team: String,
     pub permission: NpmPackagePermission,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetTokenPublishScopeParams {
+    pub token_id: String,
 }

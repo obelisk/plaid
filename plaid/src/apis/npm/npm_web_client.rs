@@ -1,5 +1,5 @@
 use reqwest::cookie::CookieStore;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use totp_rs::{Algorithm, Secret, TOTP};
@@ -9,8 +9,10 @@ use crate::apis::ApiError;
 
 use plaid_stl::npm::shared_structs::{
     AddRemoveUserToFromTeamParams, CreateGranularTokenForPackagesParams,
-    InviteUserToOrganizationParams, ListPackagesWithTeamPermissionParams, NpmPackagePermission,
-    NpmToken, NpmUser, NpmUserRole, SetTeamPermissionOnPackageParams,
+    GetTokenPublishScopeParams, GranularTokenPackagesAndScopesPermission,
+    GranularTokenSelectedPackagesAndScopes, InviteUserToOrganizationParams,
+    ListPackagesWithTeamPermissionParams, NpmPackagePermission, NpmToken, NpmUser, NpmUserRole,
+    SetTeamPermissionOnPackageParams,
 };
 
 use super::{Npm, NpmError};
@@ -67,6 +69,21 @@ struct AddUserToTeamPayload<'a> {
 #[derive(Serialize)]
 struct RemoveUserPayload<'a> {
     csrftoken: &'a str,
+}
+
+#[derive(Deserialize)]
+struct GranularTokenDetails {
+    #[serde(rename = "packagesAndScopesPermission")]
+    packages_and_scopes_permission: String,
+    #[serde(rename = "selectedPackagesAndScopes")]
+    selected_packages_and_scopes: String,
+    #[serde(rename = "selectedPackages")]
+    selected_packages: Vec<String>,
+    expired: bool,
+    #[serde(rename = "selectedScopes")]
+    selected_scopes: Vec<String>,
+    #[serde(rename = "selectedOrgs")]
+    selected_orgs: Vec<String>,
 }
 
 impl Npm {
@@ -760,6 +777,69 @@ impl Npm {
             // There are more items
             page_num += 1;
         }
+    }
+
+    /// Return a JSON-encoded list of packages that a granular token can publish
+    pub async fn get_token_publish_scope(
+        &self,
+        params: &str,
+        module: &str,
+    ) -> Result<String, ApiError> {
+        let params: GetTokenPublishScopeParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let token_id = self.validate_token_id(&params.token_id)?;
+
+        info!("Retrieving publish scope for token [{token_id}] on behalf of [{module}]");
+
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let response = self
+            .client
+            .get(format!(
+                "{}/settings/{}/tokens/granular-access-tokens/{}",
+                NPMJS_COM_URL, self.config.username, token_id
+            ))
+            .header("X-Spiferack", "1") // to get JSON instead of HTML
+            .send()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenPublishScope))?;
+
+        // Information on the token is returned in an object under "tokenDetails"
+        let token_details = serde_json::from_value::<GranularTokenDetails>(
+            response
+                .json::<Value>()
+                .await
+                .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenPublishScope))?
+                .get("tokenDetails")
+                .ok_or(ApiError::NpmError(NpmError::FailedToGetTokenPublishScope))?
+                .clone(),
+        )
+        .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenPublishScope))?;
+
+        // Check a few things about the token before returning its publish scope
+
+        if token_details.expired
+            || token_details.packages_and_scopes_permission
+                != GranularTokenPackagesAndScopesPermission::ReadAndWrite.to_string()
+        {
+            // The token cannot publish
+            return Ok("[]".to_string());
+        }
+        if token_details.selected_packages_and_scopes
+            != GranularTokenSelectedPackagesAndScopes::PackagesAndScopesSome.to_string()
+        {
+            // This should not happen
+            return Err(ApiError::NpmError(NpmError::FailedToGetTokenPublishScope));
+        }
+        if !token_details.selected_scopes.is_empty() || !token_details.selected_orgs.is_empty() {
+            // This token has a list of scopes or organizations. Currently, we support only tokens
+            // without scopes and organizations, that simply have a list of selected packages
+            return Err(ApiError::NpmError(NpmError::FailedToGetTokenPublishScope));
+        }
+
+        serde_json::to_string(&token_details.selected_packages)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenPublishScope))
     }
 }
 

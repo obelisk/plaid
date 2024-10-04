@@ -122,4 +122,5 @@ pub enum NpmError {
     FailedToGetCsrfTokenFromCookies,
     FailedToRetrievePaginatedData,
     FailedToRetrievePackages,
+    FailedToGetTokenPublishScope,
 }
