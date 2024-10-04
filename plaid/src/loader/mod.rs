@@ -30,6 +30,10 @@ pub struct LimitAmount {
 pub struct Configuration {
     /// Where to load modules from
     pub module_dir: String,
+    /// A list of rules that **cannot** be executed in parallel. We assume that rules can be executed
+    /// in parallel unless otherwise noted. Rules that cannot execute in parallel wait until the
+    /// executor is finished processing a rule before beginning their own execution.
+    pub single_threaded_rules: Option<Vec<String>>,
     /// What the log type of a module should be if it's not the first part of the filename
     pub log_type_overrides: HashMap<String, String>,
     /// How much computation a module is allowed to do
@@ -98,6 +102,7 @@ pub struct PlaidModule {
     pub cache: Option<Arc<RwLock<LruCache<String, String>>>>,
     /// See the PersistentResponse type.
     pub persistent_response: Option<PersistentResponse>,
+    pub parallel_execution_enabled: bool,
 }
 
 impl PlaidModule {
@@ -121,6 +126,7 @@ impl PlaidModule {
         memory_page_count: &LimitAmount,
         module_bytes: Vec<u8>,
         log_type: &str,
+        parallel_execution_enabled: bool,
     ) -> Result<Self, Errors> {
         // Get the computation limit for the module
         let computation_limit =
@@ -160,6 +166,7 @@ impl PlaidModule {
             secrets: None,
             cache: None,
             persistent_response: None,
+            parallel_execution_enabled,
         })
     }
 }
@@ -225,6 +232,12 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             type_[0].to_string()
         };
 
+        // Check if this rule can be executed in parallel
+        let parallel_execution_enabled = config
+            .single_threaded_rules
+            .as_ref()
+            .map_or(true, |rules| rules.contains(&filename));
+
         // Configure and compile module
         let Ok(mut plaid_module) = PlaidModule::configure_and_compile(
             &filename,
@@ -232,6 +245,7 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             &config.memory_page_count,
             module_bytes,
             &type_,
+            parallel_execution_enabled,
         ) else {
             continue;
         };
