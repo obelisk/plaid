@@ -31,7 +31,7 @@ pub struct LimitAmount {
 pub struct Configuration {
     /// Where to load modules from
     pub module_dir: String,
-    /// A list of rules that **cannot** be executed in parallel. We assume that rules can be executed
+    /// A list of case-insensitive rule names that **cannot** be executed in parallel. We assume that rules can be executed
     /// in parallel unless otherwise noted. Rules that cannot execute in parallel wait until the
     /// executor is finished processing a rule before beginning their own execution.
     pub single_threaded_rules: Option<Vec<String>>,
@@ -253,7 +253,10 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
 
         // Check if this rule can be executed in parallel
         let concurrency_safe = config.single_threaded_rules.as_ref().map_or(None, |rules| {
-            if rules.contains(&filename) {
+            if rules
+                .iter()
+                .any(|rule| rule.eq_ignore_ascii_case(&filename))
+            {
                 Some((Mutex::new(()), AtomicBool::new(false)))
             } else {
                 None
