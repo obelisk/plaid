@@ -426,6 +426,11 @@ fn execution_loop(
 
             // Update the persistent response
             update_persistent_response(&plaid_module, &env, &mut store)?;
+
+            // Mark the rule as complete
+            if let Some((_, is_locked)) = &plaid_module.concurrency_unsafe {
+                is_locked.store(false, Ordering::SeqCst);
+            }
         }
     }
     Err(ExecutorError::IncomingLogError)
