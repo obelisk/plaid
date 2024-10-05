@@ -15,7 +15,8 @@ use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedF
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use lru::LruCache;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 
@@ -302,7 +303,6 @@ fn execution_loop(
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
     els: Logger,
-    single_threaded_rules_in_flight: Arc<RwLock<HashSet<String>>>,
 ) -> Result<(), ExecutorError> {
     // Wait on our receiver for logs to come in
     while let Ok(message) = receiver.recv() {
@@ -320,51 +320,42 @@ fn execution_loop(
 
         // If ANY of the modules that operate on this log type cannot be executed in parallel, we need to check
         // the rules in flight list to see if a rule is already being executed.
-        if execution_modules
-            .iter()
-            .any(|module| !module.parallel_execution_enabled)
-        {
-            let strif = match single_threaded_rules_in_flight.read() {
-                Ok(strif) => strif,
-                Err(e) => {
-                    // .read() will return an error if the lock is poisoned (which should never happen). If this occurs,
-                    // we'll clear the poison and send the message back into the execution queue
-
-                    error!("Failed to acquire read lock. Error: {e}");
-                    single_threaded_rules_in_flight.clear_poison();
-
-                    if let Err(e) = sender.send(message.clone()) {
-                        error!("Failed to send message back into execution queue. Error: {e}");
-                    }
-                    continue;
-                }
-            };
-
+        if execution_modules.iter().any(|module| module.is_locked()) {
             // If this rule is currently being processed, send the message back into the execution queue
             // This allows us to guarantee that the rule will only be executed on 1 thread at any given time
-            if execution_modules
-                .iter()
-                .any(|module| strif.contains(&module.name))
-            {
-                if let Err(e) = sender.send(message.clone()) {
-                    error!("Failed to send message back into execution queue. Error: {e}");
-                }
 
-                continue;
+            info!(
+                "Message of type [{}] is currently being processed by another rule. Requeueing the message for later execution.",
+                message.type_
+            );
+
+            if let Err(e) = sender.send(message.clone()) {
+                error!(
+                    "Failed to requeue message of type [{}]. It is permanently lost. Error: {e}",
+                    message.type_
+                );
             }
-        }
+
+            continue;
+        };
 
         // For every module that operates on that log type
         for plaid_module in execution_modules {
-            if !plaid_module.parallel_execution_enabled {
-                match single_threaded_rules_in_flight.write() {
-                    Ok(mut strif) => {
-                        strif.insert(plaid_module.name.clone());
-                    }
-                    // Poisons should never happen because: An RwLock is poisoned whenever a writer panics while holding an exclusive lock.
-                    // We hold the write lock in two locations, both with proper error handling to ensure that it will never panic.
+            // Mark this rule as currently being processed by locking the mutex
+            // This lock will be dropped at the end of the iteration so we don't
+            // need to handle unlocking it
+            if let Some((rule_in_use, is_locked)) = &plaid_module.concurrency_unsafe {
+                match rule_in_use.lock() {
+                    Ok(_) => is_locked.store(true, Ordering::SeqCst),
                     Err(e) => {
-                        error!("Failed to acquire write lock. Error: {e}");
+                        error!(
+                            "Failed to acquire lock on [{}] due to poisoning. This log will be discarded. Error: {e}.",
+                            plaid_module.name
+                        );
+
+                        debug!("Clearing poison from the lock on [{}]", plaid_module.name);
+                        rule_in_use.clear_poison();
+
                         continue;
                     }
                 }
@@ -421,18 +412,6 @@ fn execution_loop(
                 Err(e) => Some(determine_error(e, computation_limit, &instance, &mut store)),
             };
 
-            // The rule has finished executing. Remove it from the list of currently running rules
-            if !plaid_module.parallel_execution_enabled {
-                match single_threaded_rules_in_flight.write() {
-                    Ok(mut strif) => {
-                        strif.insert(plaid_module.name.clone());
-                    }
-                    Err(e) => {
-                        error!("Failed to acquire write lock. Error: {e}");
-                    }
-                }
-            }
-
             // If there was an error then log that it happened to the els
             if let Some(error) = error {
                 els.log_module_error(
@@ -478,7 +457,6 @@ impl Executor {
         els: Logger,
     ) -> Self {
         let mut _handles = vec![];
-        let single_threaded_rules_in_flight = Arc::new(RwLock::new(HashSet::new()));
         for i in 0..execution_threads {
             info!("Starting Execution Thread {i}");
             let receiver = receiver.clone();
@@ -487,9 +465,8 @@ impl Executor {
             let storage = storage.clone();
             let modules = modules.clone();
             let els = els.clone();
-            let strif = single_threaded_rules_in_flight.clone();
             _handles.push(thread::spawn(move || {
-                execution_loop(receiver, sender, modules, api, storage, els, strif)
+                execution_loop(receiver, sender, modules, api, storage, els)
             }));
         }
 

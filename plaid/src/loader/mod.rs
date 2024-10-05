@@ -9,7 +9,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::{self};
 use std::num::NonZeroUsize;
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use utils::{
     cost_function, get_module_computation_limit, get_module_page_count, read_and_configure_secrets,
     read_and_parse_modules,
@@ -102,7 +103,17 @@ pub struct PlaidModule {
     pub cache: Option<Arc<RwLock<LruCache<String, String>>>>,
     /// See the PersistentResponse type.
     pub persistent_response: Option<PersistentResponse>,
-    pub parallel_execution_enabled: bool,
+    /// Indicates whether the module is safe for concurrent execution.
+    ///
+    /// - If `None`, the module can be executed concurrently without any restrictions.
+    /// - If `Some`, the module is marked as unsafe for concurrent execution, and the `Mutex<()>`
+    ///   is used to ensure mutual exclusion, preventing multiple threads from executing it simultaneously.
+    ///
+    /// The `AtomicBool` serves as a lightweight flag to track whether the `Mutex` is currently locked,
+    /// allowing the system to check the lock status without actually acquiring the lock. This enables
+    /// us to determine if the module is in use before attempting execution, avoiding unnecessary locking
+    /// when preparing tasks.
+    pub concurrency_unsafe: Option<(Mutex<()>, AtomicBool)>,
 }
 
 impl PlaidModule {
@@ -111,6 +122,14 @@ impl PlaidModule {
             .as_ref()
             .map(|x| x.get_data().ok().flatten())
             .flatten()
+    }
+
+    /// Method to check if the module is currently locked
+    pub fn is_locked(&self) -> bool {
+        if let Some((_, lock_status)) = &self.concurrency_unsafe {
+            return lock_status.load(Ordering::SeqCst);
+        }
+        false
     }
 
     /// Configure and compiles a Plaid module with specified computation limits and memory page count.
@@ -126,7 +145,7 @@ impl PlaidModule {
         memory_page_count: &LimitAmount,
         module_bytes: Vec<u8>,
         log_type: &str,
-        parallel_execution_enabled: bool,
+        concurrency_unsafe: Option<(Mutex<()>, AtomicBool)>,
     ) -> Result<Self, Errors> {
         // Get the computation limit for the module
         let computation_limit =
@@ -152,7 +171,7 @@ impl PlaidModule {
         })?;
         module.set_name(&filename);
 
-        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]. Parallel Execution Enabled: [{parallel_execution_enabled}]");
+        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]. Parallel Execution Enabled: [{}]", concurrency_unsafe.is_some());
         for import in module.imports() {
             info!("\tImport: {}", import.name());
         }
@@ -166,7 +185,7 @@ impl PlaidModule {
             secrets: None,
             cache: None,
             persistent_response: None,
-            parallel_execution_enabled,
+            concurrency_unsafe,
         })
     }
 }
@@ -233,10 +252,13 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
         };
 
         // Check if this rule can be executed in parallel
-        let parallel_execution_enabled = config
-            .single_threaded_rules
-            .as_ref()
-            .map_or(true, |rules| !rules.contains(&filename));
+        let concurrency_safe = config.single_threaded_rules.as_ref().map_or(None, |rules| {
+            if rules.contains(&filename) {
+                Some((Mutex::new(()), AtomicBool::new(false)))
+            } else {
+                None
+            }
+        });
 
         // Configure and compile module
         let Ok(mut plaid_module) = PlaidModule::configure_and_compile(
@@ -245,7 +267,7 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             &config.memory_page_count,
             module_bytes,
             &type_,
-            parallel_execution_enabled,
+            concurrency_safe,
         ) else {
             continue;
         };
