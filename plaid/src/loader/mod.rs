@@ -171,7 +171,7 @@ impl PlaidModule {
         })?;
         module.set_name(&filename);
 
-        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]. Parallel Execution Enabled: [{}]", concurrency_unsafe.is_some());
+        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]. Concurrency Safe: [{}]", concurrency_unsafe.is_none());
         for import in module.imports() {
             info!("\tImport: {}", import.name());
         }
