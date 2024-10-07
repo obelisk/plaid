@@ -16,7 +16,6 @@ use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use lru::LruCache;
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 
@@ -344,21 +343,22 @@ fn execution_loop(
             // Mark this rule as currently being processed by locking the mutex
             // This lock will be dropped at the end of the iteration so we don't
             // need to handle unlocking it
-            if let Some((rule_in_use, is_locked)) = &plaid_module.concurrency_unsafe {
-                match rule_in_use.lock() {
-                    Ok(_) => is_locked.store(true, Ordering::SeqCst),
-                    Err(e) => {
+            let _lock = match plaid_module.concurrency_unsafe {
+                Some(ref mutex) => match mutex.lock() {
+                    Ok(guard) => Some(guard),
+                    Err(poisoned) => {
                         error!(
-                            "Failed to acquire lock on [{}] due to poisoning. This log will be discarded. Error: {e}.",
-                            plaid_module.name
-                        );
+                                "Failed to acquire lock on [{}] due to poisoning. This log will be discarded. Error: {}.",
+                                plaid_module.name, poisoned
+                            );
 
                         debug!("Clearing poison from the lock on [{}]", plaid_module.name);
-                        rule_in_use.clear_poison();
+                        mutex.clear_poison();
 
                         continue;
                     }
-                }
+                },
+                None => None,
             };
 
             // TODO @obelisk: This will quietly swallow locking errors on the persistent response
@@ -411,11 +411,6 @@ fn execution_loop(
                 }
                 Err(e) => Some(determine_error(e, computation_limit, &instance, &mut store)),
             };
-
-            // Mark the rule as complete
-            if let Some((_, is_locked)) = &plaid_module.concurrency_unsafe {
-                is_locked.store(false, Ordering::SeqCst);
-            }
 
             // If there was an error then log that it happened to the els
             if let Some(error) = error {

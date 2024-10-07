@@ -9,7 +9,6 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::{self};
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use utils::{
     cost_function, get_module_computation_limit, get_module_page_count, read_and_configure_secrets,
@@ -108,12 +107,7 @@ pub struct PlaidModule {
     /// - If `None`, the module can be executed concurrently without any restrictions.
     /// - If `Some`, the module is marked as unsafe for concurrent execution, and the `Mutex<()>`
     ///   is used to ensure mutual exclusion, preventing multiple threads from executing it simultaneously.
-    ///
-    /// The `AtomicBool` serves as a lightweight flag to track whether the `Mutex` is currently locked,
-    /// allowing the system to check the lock status without actually acquiring the lock. This enables
-    /// us to determine if the module is in use before attempting execution, avoiding unnecessary locking
-    /// when preparing tasks.
-    pub concurrency_unsafe: Option<(Mutex<()>, AtomicBool)>,
+    pub concurrency_unsafe: Option<Mutex<()>>,
 }
 
 impl PlaidModule {
@@ -126,8 +120,9 @@ impl PlaidModule {
 
     /// Method to check if the module is currently locked
     pub fn is_locked(&self) -> bool {
-        if let Some((_, lock_status)) = &self.concurrency_unsafe {
-            return lock_status.load(Ordering::SeqCst);
+        if let Some(mutex) = &self.concurrency_unsafe {
+            // Return true if try_lock fails (meaning the mutex is locked), otherwise false
+            return mutex.try_lock().is_err();
         }
         false
     }
@@ -145,7 +140,7 @@ impl PlaidModule {
         memory_page_count: &LimitAmount,
         module_bytes: Vec<u8>,
         log_type: &str,
-        concurrency_unsafe: Option<(Mutex<()>, AtomicBool)>,
+        concurrency_unsafe: Option<Mutex<()>>,
     ) -> Result<Self, Errors> {
         // Get the computation limit for the module
         let computation_limit =
@@ -257,7 +252,7 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
                 .iter()
                 .any(|rule| rule.eq_ignore_ascii_case(&filename))
             {
-                Some((Mutex::new(()), AtomicBool::new(false)))
+                Some(Mutex::new(()))
             } else {
                 None
             }
