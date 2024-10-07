@@ -319,7 +319,7 @@ fn execution_loop(
         };
 
         // If ANY of the modules that operate on this log type cannot be executed in parallel, we need to check
-        // the rules in flight list to see if a rule is already being executed.
+        // to see if any of them are currently being executed
         if execution_modules.iter().any(|module| module.is_locked()) {
             // If this rule is currently being processed, send the message back into the execution queue
             // This allows us to guarantee that the rule will only be executed on 1 thread at any given time
