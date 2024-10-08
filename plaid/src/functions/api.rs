@@ -265,7 +265,7 @@ impl_new_function!(npm, invite_user_to_organization);
 impl_new_function_with_error_buffer!(npm, get_org_user_list);
 impl_new_function_with_error_buffer!(npm, get_org_users_without_2fa);
 impl_new_function_with_error_buffer!(npm, list_packages_with_team_permission);
-impl_new_function_with_error_buffer!(npm, get_token_publish_scope);
+impl_new_function_with_error_buffer!(npm, get_token_details);
 
 // Okta Functions
 impl_new_function!(okta, remove_user_from_group);
@@ -391,8 +391,8 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, npm_list_packages_with_team_permission)
         }
 
-        "npm_get_token_publish_scope" => {
-            Function::new_typed_with_env(&mut store, &env, npm_get_token_publish_scope)
+        "npm_get_token_details" => {
+            Function::new_typed_with_env(&mut store, &env, npm_get_token_details)
         }
         
         // Okta Calls

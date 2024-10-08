@@ -244,6 +244,21 @@ pub struct ListPackagesWithTeamPermissionParams {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct GetTokenPublishScopeParams {
+pub struct GetTokenDetailsParams {
     pub token_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GranularTokenDetails {
+    #[serde(rename = "packagesAndScopesPermission")]
+    pub packages_and_scopes_permission: String,
+    #[serde(rename = "selectedPackagesAndScopes")]
+    pub selected_packages_and_scopes: String,
+    #[serde(rename = "selectedPackages")]
+    pub selected_packages: Vec<String>,
+    expired: bool,
+    #[serde(rename = "selectedScopes")]
+    pub selected_scopes: Vec<String>,
+    #[serde(rename = "selectedOrgs")]
+    pub selected_orgs: Vec<String>,
 }
