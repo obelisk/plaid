@@ -484,4 +484,13 @@ impl NpmToken {
         serde_json::from_str::<GranularTokenDetails>(&res)
             .map_err(|_| PlaidFunctionError::InternalApiError)
     }
+
+    /// Renew this token, keeping the same publish scope
+    pub fn renew(&self) -> Result<String, PlaidFunctionError> {
+        renew_granular_token(
+            self.token_name
+                .as_ref()
+                .ok_or(PlaidFunctionError::InternalApiError)?,
+        )
+    }
 }
