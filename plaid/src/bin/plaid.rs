@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         api,
         storage,
         config.execution_threads,
-        els.clone(),
+        els.clone()
     );
 
     let executor = Arc::new(executor);

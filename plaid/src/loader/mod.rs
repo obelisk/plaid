@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::{self};
 use std::num::NonZeroUsize;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use utils::{
     cost_function, get_module_computation_limit, get_module_page_count, read_and_configure_secrets,
     read_and_parse_modules,
@@ -30,6 +30,10 @@ pub struct LimitAmount {
 pub struct Configuration {
     /// Where to load modules from
     pub module_dir: String,
+    /// A list of case-insensitive rule names that **cannot** be executed in parallel. We assume that rules can be executed
+    /// in parallel unless otherwise noted. Rules that cannot execute in parallel wait until the
+    /// executor is finished processing a rule before beginning their own execution.
+    pub single_threaded_rules: Option<Vec<String>>,
     /// What the log type of a module should be if it's not the first part of the filename
     pub log_type_overrides: HashMap<String, String>,
     /// How much computation a module is allowed to do
@@ -98,6 +102,12 @@ pub struct PlaidModule {
     pub cache: Option<Arc<RwLock<LruCache<String, String>>>>,
     /// See the PersistentResponse type.
     pub persistent_response: Option<PersistentResponse>,
+    /// Indicates whether the module is safe for concurrent execution.
+    ///
+    /// - If `None`, the module can be executed concurrently without any restrictions.
+    /// - If `Some`, the module is marked as unsafe for concurrent execution, and the `Mutex<()>`
+    ///   is used to ensure mutual exclusion, preventing multiple threads from executing it simultaneously.
+    pub concurrency_unsafe: Option<Mutex<()>>,
 }
 
 impl PlaidModule {
@@ -121,6 +131,7 @@ impl PlaidModule {
         memory_page_count: &LimitAmount,
         module_bytes: Vec<u8>,
         log_type: &str,
+        concurrency_unsafe: Option<Mutex<()>>,
     ) -> Result<Self, Errors> {
         // Get the computation limit for the module
         let computation_limit =
@@ -146,7 +157,7 @@ impl PlaidModule {
         })?;
         module.set_name(&filename);
 
-        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]");
+        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]. Concurrency Safe: [{}]", concurrency_unsafe.is_none());
         for import in module.imports() {
             info!("\tImport: {}", import.name());
         }
@@ -160,6 +171,7 @@ impl PlaidModule {
             secrets: None,
             cache: None,
             persistent_response: None,
+            concurrency_unsafe,
         })
     }
 }
@@ -225,6 +237,18 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             type_[0].to_string()
         };
 
+        // Check if this rule can be executed in parallel
+        let concurrency_safe = config.single_threaded_rules.as_ref().map_or(None, |rules| {
+            if rules
+                .iter()
+                .any(|rule| rule.eq_ignore_ascii_case(&filename))
+            {
+                Some(Mutex::new(()))
+            } else {
+                None
+            }
+        });
+
         // Configure and compile module
         let Ok(mut plaid_module) = PlaidModule::configure_and_compile(
             &filename,
@@ -232,6 +256,7 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             &config.memory_page_count,
             module_bytes,
             &type_,
+            concurrency_safe,
         ) else {
             continue;
         };
