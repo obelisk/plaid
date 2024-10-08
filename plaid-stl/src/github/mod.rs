@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{plaid::print_debug_string, PlaidFunctionError};
+use crate::PlaidFunctionError;
 
 pub enum ReviewPatAction {
     Approve,
@@ -88,10 +88,6 @@ impl FileSearchResultItem {
         )
         .map_err(|_| PlaidFunctionError::InternalApiError)?;
         let content = serde_json::from_str::<GithubFileContent>(&content)
-            .map_err(|e| {
-                print_debug_string(&format!("ERROR1 {e}"));
-                panic!()
-            })
             .map_err(|_| PlaidFunctionError::InternalApiError)?;
         if content.type_ != "file" || content.encoding != "base64" {
             return Err(PlaidFunctionError::InternalApiError); // TODO not the right error
