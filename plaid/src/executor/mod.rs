@@ -7,7 +7,7 @@ use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
 use crate::storage::Storage;
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Receiver;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Serialize};
@@ -297,7 +297,6 @@ fn update_persistent_response(
 
 fn execution_loop(
     receiver: Receiver<Message>,
-    sender: Sender<Message>,
     modules: HashMap<String, Vec<Arc<PlaidModule>>>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
@@ -315,27 +314,6 @@ fn execution_loop(
                 continue;
             }
             Some(module) => module,
-        };
-
-        // If ANY of the modules that operate on this log type cannot be executed in parallel, we need to check
-        // to see if any of them are currently being executed
-        if execution_modules.iter().any(|module| module.is_locked()) {
-            // If this rule is currently being processed, send the message back into the execution queue
-            // This allows us to guarantee that the rule will only be executed on 1 thread at any given time
-
-            info!(
-                "Message of type [{}] is currently being processed by another rule. Requeueing the message for later execution.",
-                message.type_
-            );
-
-            if let Err(e) = sender.send(message.clone()) {
-                error!(
-                    "Failed to requeue message of type [{}]. It is permanently lost. Error: {e}",
-                    message.type_
-                );
-            }
-
-            continue;
         };
 
         // For every module that operates on that log type
@@ -449,7 +427,6 @@ fn determine_error(
 impl Executor {
     pub fn new(
         receiver: Receiver<Message>,
-        sender: Sender<Message>,
         modules: HashMap<String, Vec<Arc<PlaidModule>>>,
         api: Arc<Api>,
         storage: Option<Arc<Storage>>,
@@ -460,13 +437,12 @@ impl Executor {
         for i in 0..execution_threads {
             info!("Starting Execution Thread {i}");
             let receiver = receiver.clone();
-            let sender = sender.clone();
             let api = api.clone();
             let storage = storage.clone();
             let modules = modules.clone();
             let els = els.clone();
             _handles.push(thread::spawn(move || {
-                execution_loop(receiver, sender, modules, api, storage, els)
+                execution_loop(receiver, modules, api, storage, els)
             }));
         }
 

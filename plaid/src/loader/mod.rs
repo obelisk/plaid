@@ -118,15 +118,6 @@ impl PlaidModule {
             .flatten()
     }
 
-    /// Method to check if the module is currently locked
-    pub fn is_locked(&self) -> bool {
-        if let Some(mutex) = &self.concurrency_unsafe {
-            // Return true if try_lock fails (meaning the mutex is locked), otherwise false
-            return mutex.try_lock().is_err();
-        }
-        false
-    }
-
     /// Configure and compiles a Plaid module with specified computation limits and memory page count.
     ///
     /// This function sets up the computation metering, configures the module tunables, and

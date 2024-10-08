@@ -72,7 +72,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // requests for handling some configured get requests.
     let executor = Executor::new(
         log_receiver,
-        log_sender.clone(),
         modules.get_channels(),
         api,
         storage,
