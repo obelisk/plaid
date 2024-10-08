@@ -954,6 +954,7 @@ pub fn configure_secret(
 pub fn search_file_in_org_code(
     filename: impl Display,
     org: impl Display,
+    repo: Option<impl Display>,
     selection_criteria: Option<&FileSearchSelectionCriteria>,
 ) -> Result<Vec<FileSearchResultItem>, PlaidFunctionError> {
     extern "C" {
@@ -962,6 +963,9 @@ pub fn search_file_in_org_code(
     let mut params: HashMap<&str, String> = HashMap::new();
     params.insert("filename", filename.to_string());
     params.insert("org", org.to_string());
+    if let Some(repo) = repo {
+        params.insert("repo", repo.to_string());
+    }
 
     let mut search_results = Vec::<FileSearchResultItem>::new();
     let mut page = 0;

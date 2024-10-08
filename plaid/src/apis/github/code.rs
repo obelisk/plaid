@@ -17,6 +17,11 @@ impl Github {
         let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
         let filename =
             self.validate_filename(request.get("filename").ok_or(ApiError::BadRequest)?)?;
+        // See if we were told to look only in a particular repository
+        let repo = match request.get("repo") {
+            Some(r) => Some(self.validate_repository_name(r)?),
+            None => None,
+        };
         let per_page: u8 = request
             .get("per_page")
             .unwrap_or(&"30")
@@ -33,12 +38,22 @@ impl Github {
             return Err(ApiError::BadRequest);
         }
 
-        info!(
-            "Finding all files called [{filename}] in organization [{org}] on behalf of [{module}]"
-        );
+        match repo {
+            Some(r) => info!(
+                "Finding all files called [{filename}] in repository [{org}/{r}] on behalf of [{module}]"
+            ),
+            None => info!(
+                "Finding all files called [{filename}] in organization [{org}] on behalf of [{module}]"
+            )
+        }
 
         // Build the search query
-        let query = urlencoding::encode(&format!("{} in:path org:{}", filename, org)).to_string();
+        let query = match repo {
+            Some(r) => {
+                urlencoding::encode(&format!("{} in:path repo:{}/{}", filename, org, r)).to_string()
+            }
+            None => urlencoding::encode(&format!("{} in:path org:{}", filename, org)).to_string(),
+        };
 
         // !!! NOTE - This endpoint has a custom rate limitation !!!
         // https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#rate-limit
