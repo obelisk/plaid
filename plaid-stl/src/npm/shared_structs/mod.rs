@@ -250,6 +250,8 @@ pub struct GetTokenDetailsParams {
 
 #[derive(Serialize, Deserialize)]
 pub struct GranularTokenDetails {
+    #[serde(rename = "tokenDescription")]
+    pub token_description: String,
     #[serde(rename = "packagesAndScopesPermission")]
     pub packages_and_scopes_permission: String,
     #[serde(rename = "selectedPackagesAndScopes")]
