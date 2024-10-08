@@ -109,6 +109,7 @@ pub enum NpmError {
     LoginFlowError,
     WrongClientStatus,
     TokenGenerationError,
+    TokenDeletionError,
     WrongConfig(String),
     FailedToListGranularTokens,
     FailedToDeletePackage,

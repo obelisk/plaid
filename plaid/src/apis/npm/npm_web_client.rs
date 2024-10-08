@@ -65,6 +65,12 @@ struct RemoveUserPayload<'a> {
     csrftoken: &'a str,
 }
 
+#[derive(Serialize)]
+struct DeleteTokenPayload<'a> {
+    csrftoken: &'a str,
+    tokens: &'a str,
+}
+
 impl Npm {
     /// Retrieve the CSRF token from the client's cookie jar
     fn get_csrftoken_from_cookies(&self) -> Result<String, NpmError> {
@@ -287,6 +293,38 @@ impl Npm {
             .get("newToken")
             .map(|v| Ok(v.to_string()))
             .ok_or(ApiError::NpmError(NpmError::TokenGenerationError))?
+    }
+
+    /// Delete a granular token from the npm website
+    pub async fn delete_granular_token(&self, params: &str, module: &str) -> Result<i32, ApiError> {
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let params: DeleteTokenParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let token_id = self.validate_token_id(&params.token_id)?;
+
+        info!("Deleting npm granular token with ID [{token_id}] on behalf of [{module}]");
+
+        // Prepare the request body
+        let csrf_token = self
+            .get_csrftoken_from_cookies()
+            .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
+        let payload = DeleteTokenPayload {
+            csrftoken: &csrf_token,
+            tokens: token_id,
+        };
+        self.client
+            .post(format!(
+                "{}/settings/{}/tokens/delete",
+                NPMJS_COM_URL, self.config.username
+            ))
+            .json(&payload)
+            .header("X-Spiferack", "1") // to get JSON instead of HTML
+            .send()
+            .await
+            .map(|_| Ok(0))
+            .map_err(|_| ApiError::NpmError(NpmError::TokenDeletionError))?
     }
 
     /// Retrieve a list of granular tokens for the account whose credentials have been configured for this client.

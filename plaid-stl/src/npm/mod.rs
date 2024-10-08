@@ -168,6 +168,74 @@ pub fn create_granular_token_for_packages_simple(
     create_granular_token_for_packages(package_names, token_specs)
 }
 
+/// Delete a granular token with given ID from the npm website
+pub fn delete_granular_token(token_id: impl Display) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(npm, delete_granular_token);
+    }
+
+    let params = serde_json::to_string(&DeleteTokenParams {
+        token_id: token_id.to_string(),
+    })
+    .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    let res =
+        unsafe { npm_delete_granular_token(params.as_bytes().as_ptr(), params.as_bytes().len()) };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+    Ok(())
+}
+
+/// Renew an npm granular token with given token name (which is a unique identifier for npm tokens).
+///
+/// ! Important note ! - This creates a new token with the same publish scope as the old one and _overwrites_
+/// the token on the npm website. From the original token, only the "selected packages" are kept and
+/// transferred to the new token. This means scopes, organizations, etc., are currently not supported
+/// and are lost in case of a renewal.
+pub fn renew_granular_token(token_name: impl Display) -> Result<String, PlaidFunctionError> {
+    // 1. Pull info for existing token
+    let token_details = list_granular_tokens()?
+        .iter()
+        .find(|t| match &t.token_name {
+            None => false,
+            Some(n) => *n == token_name.to_string(),
+        })
+        .ok_or(PlaidFunctionError::InternalApiError)?
+        .get_details()?;
+
+    // 2. Delete existing token
+    delete_granular_token(
+        token_details
+            .token_id
+            .ok_or(PlaidFunctionError::InternalApiError)?,
+    )?;
+
+    // 3. Create new token with same info as previous token
+    let publish_scope: Vec<String> = token_details
+        .selected_packages
+        .iter()
+        // remove scope "@xxxxxx/" because the API does not want it
+        // (it will be added automatically later)
+        .map(|v| match v.find('/') {
+            None => v.to_string(),
+            Some(i) => v.split_at(i + 1).1.to_string(),
+        })
+        .collect();
+    let new_token = create_granular_token_for_packages_simple(
+        publish_scope,
+        token_details
+            .token_name
+            .ok_or(PlaidFunctionError::InternalApiError)?,
+        token_details
+            .token_description
+            .unwrap_or("Missing description".to_string()),
+    )?;
+
+    Ok(new_token)
+}
+
 /// Retrieve a list of all granular tokens configured for the service account
 pub fn list_granular_tokens() -> Result<Vec<NpmToken>, PlaidFunctionError> {
     extern "C" {

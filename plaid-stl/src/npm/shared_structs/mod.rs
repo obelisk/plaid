@@ -202,6 +202,11 @@ pub struct CreateGranularTokenForPackagesParams {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct DeleteTokenParams {
+    pub token_id: String
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct AddRemoveUserToFromTeamParams {
     pub user: String,
     pub team: String,
@@ -250,8 +255,12 @@ pub struct GetTokenDetailsParams {
 
 #[derive(Serialize, Deserialize)]
 pub struct GranularTokenDetails {
+    #[serde(rename = "tokenName")]
+    pub token_name: Option<String>,
+    #[serde(rename = "tokenID")]
+    pub token_id: Option<String>,
     #[serde(rename = "tokenDescription")]
-    pub token_description: String,
+    pub token_description: Option<String>,
     #[serde(rename = "packagesAndScopesPermission")]
     pub packages_and_scopes_permission: String,
     #[serde(rename = "selectedPackagesAndScopes")]
