@@ -153,7 +153,7 @@ impl Github {
         let file_path = request.get("file_path").ok_or(ApiError::BadRequest)?;
         let reference = self.validate_commit_hash(request.get("reference").ok_or(ApiError::BadRequest)?)?;
 
-        info!("Fetching contents of file in reporitory [{organization}/{repository_name}] at {file_path} and reference {reference}");
+        info!("Fetching contents of file in repository [{organization}/{repository_name}] at {file_path} and reference {reference}");
         let address = format!("/repos/{organization}/{repository_name}/contents/{file_path}?ref={reference}");
 
         match self.make_generic_get_request(address, module).await {

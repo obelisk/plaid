@@ -2792,6 +2792,7 @@ dependencies = [
  "toml",
  "totp-rs",
  "url",
+ "urlencoding",
  "warp",
  "wasmer",
  "wasmer-middlewares",
@@ -2801,8 +2802,10 @@ dependencies = [
 name = "plaid_stl"
 version = "0.13.2"
 dependencies = [
+ "base64 0.13.1",
  "chrono",
  "paste",
+ "regex",
  "serde",
  "serde_json",
 ]

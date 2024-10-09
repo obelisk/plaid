@@ -1,3 +1,4 @@
+mod code;
 mod environments;
 mod graphql;
 mod pats;
