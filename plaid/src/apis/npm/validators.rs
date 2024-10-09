@@ -75,6 +75,9 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     );
 
     define_regex_validator!(validators, "repository_name", r"^[\w\-\./]+$");
+    
+    // The token ID is actually a UUID
+    define_regex_validator!(validators, "token_id", r"^[a-f0-9-]{36}$");
 
     validators
 }
@@ -88,6 +91,7 @@ create_regex_validator_func!(npm_at_org_name);
 create_regex_validator_func!(npm_scoped_package);
 create_regex_validator_func!(npm_token_name);
 create_regex_validator_func!(repository_name);
+create_regex_validator_func!(token_id);
 
 impl Npm {
     /// Look for a valid `dsrManifestHash` in an HTML page and extract it

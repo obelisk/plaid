@@ -109,6 +109,7 @@ pub enum NpmError {
     LoginFlowError,
     WrongClientStatus,
     TokenGenerationError,
+    TokenDeletionError,
     WrongConfig(String),
     FailedToListGranularTokens,
     FailedToDeletePackage,
@@ -122,4 +123,5 @@ pub enum NpmError {
     FailedToGetCsrfTokenFromCookies,
     FailedToRetrievePaginatedData,
     FailedToRetrievePackages,
+    FailedToGetTokenDetails,
 }
