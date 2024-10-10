@@ -20,7 +20,7 @@ impl Github {
         let address = format!("/orgs/{org}/teams/{team_slug}/memberships/{user}");
 
         match self
-            .make_generic_delete_request(address, None, module)
+            .make_generic_delete_request::<&str>(address, None, module)
             .await
         {
             Ok((status, _)) => {
