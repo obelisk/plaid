@@ -232,6 +232,8 @@ impl_new_function!(github, update_branch_protection_rule);
 impl_new_function!(github, create_environment_for_repo);
 impl_new_function!(github, configure_secret);
 impl_new_function!(github, create_deployment_branch_protection_rule);
+impl_new_function!(github, add_users_to_org_copilot);
+impl_new_function!(github, remove_users_from_org_copilot);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query);
@@ -240,6 +242,7 @@ impl_new_function_with_error_buffer!(github, list_files);
 impl_new_function_with_error_buffer!(github, fetch_file);
 impl_new_function_with_error_buffer!(github, get_branch_protection_rules);
 impl_new_function_with_error_buffer!(github, get_repository_collaborators);
+impl_new_function_with_error_buffer!(github, list_seats_in_org_copilot);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org);
@@ -450,6 +453,15 @@ pub fn to_api_function(
         }
         "github_create_deployment_branch_protection_rule" => {
             Function::new_typed_with_env(&mut store, &env, github_create_deployment_branch_protection_rule)
+        }
+        "github_add_users_to_org_copilot" => {
+            Function::new_typed_with_env(&mut store, &env, github_add_users_to_org_copilot)
+        }
+        "github_remove_users_to_org_copilot" => {
+            Function::new_typed_with_env(&mut store, &env, github_remove_users_from_org_copilot)
+        }
+        "github_list_seats_in_org_copilot" => {
+            Function::new_typed_with_env(&mut store, &env, github_list_seats_in_org_copilot)
         }
 
         // Slack Calls

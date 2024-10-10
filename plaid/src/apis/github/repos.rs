@@ -23,7 +23,7 @@ impl Github {
         info!("Removing user [{user}] from [{repo}] on behalf of {module}");
 
         match self
-            .make_generic_delete_request(address, None, module)
+            .make_generic_delete_request::<&str>(address, None, module)
             .await
         {
             Ok((status, _)) => {
