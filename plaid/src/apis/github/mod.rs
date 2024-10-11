@@ -1,3 +1,4 @@
+mod code;
 mod copilot;
 mod environments;
 mod graphql;

@@ -318,6 +318,27 @@ fn execution_loop(
 
         // For every module that operates on that log type
         for plaid_module in execution_modules {
+            // Mark this rule as currently being processed by locking the mutex
+            // This lock will be dropped at the end of the iteration so we don't
+            // need to handle unlocking it
+            let _lock = match plaid_module.concurrency_unsafe {
+                Some(ref mutex) => match mutex.lock() {
+                    Ok(guard) => Some(guard),
+                    Err(poisoned) => {
+                        error!(
+                                "Failed to acquire lock on [{}] due to poisoning. This log will be discarded. Error: {}.",
+                                plaid_module.name, poisoned
+                            );
+
+                        debug!("Clearing poison from the lock on [{}]", plaid_module.name);
+                        mutex.clear_poison();
+
+                        continue;
+                    }
+                },
+                None => None,
+            };
+
             // TODO @obelisk: This will quietly swallow locking errors on the persistent response
             // This will eventually be caught if something tries to update the response but I don't
             // know if that's good enough.

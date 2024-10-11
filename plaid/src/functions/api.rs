@@ -242,6 +242,7 @@ impl_new_function_with_error_buffer!(github, list_files);
 impl_new_function_with_error_buffer!(github, fetch_file);
 impl_new_function_with_error_buffer!(github, get_branch_protection_rules);
 impl_new_function_with_error_buffer!(github, get_repository_collaborators);
+impl_new_function_with_error_buffer!(github, search_for_file);
 impl_new_function_with_error_buffer!(github, list_seats_in_org_copilot);
 
 // GitHub Functions only available with GitHub App authentication
@@ -259,6 +260,7 @@ impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key);
 impl_new_function!(npm, publish_empty_stub);
 impl_new_function!(npm, set_team_permission_on_package);
 impl_new_function_with_error_buffer!(npm, create_granular_token_for_packages);
+impl_new_function!(npm, delete_granular_token);
 impl_new_function_with_error_buffer!(npm, list_granular_tokens);
 impl_new_function!(npm, delete_package);
 impl_new_function!(npm, add_user_to_team);
@@ -268,6 +270,7 @@ impl_new_function!(npm, invite_user_to_organization);
 impl_new_function_with_error_buffer!(npm, get_org_user_list);
 impl_new_function_with_error_buffer!(npm, get_org_users_without_2fa);
 impl_new_function_with_error_buffer!(npm, list_packages_with_team_permission);
+impl_new_function_with_error_buffer!(npm, get_token_details);
 
 // Okta Functions
 impl_new_function!(okta, remove_user_from_group);
@@ -357,6 +360,10 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, npm_create_granular_token_for_packages)
         }
 
+        "npm_delete_granular_token" => {
+            Function::new_typed_with_env(&mut store, &env, npm_delete_granular_token)
+        }
+
         "npm_list_granular_tokens" => {
             Function::new_typed_with_env(&mut store, &env, npm_list_granular_tokens)
         }
@@ -391,6 +398,10 @@ pub fn to_api_function(
 
         "npm_list_packages_with_team_permission" => {
             Function::new_typed_with_env(&mut store, &env, npm_list_packages_with_team_permission)
+        }
+
+        "npm_get_token_details" => {
+            Function::new_typed_with_env(&mut store, &env, npm_get_token_details)
         }
         
         // Okta Calls
@@ -453,6 +464,9 @@ pub fn to_api_function(
         }
         "github_create_deployment_branch_protection_rule" => {
             Function::new_typed_with_env(&mut store, &env, github_create_deployment_branch_protection_rule)
+        }
+        "github_search_for_file" => {
+            Function::new_typed_with_env(&mut store, &env, github_search_for_file)
         }
         "github_add_users_to_org_copilot" => {
             Function::new_typed_with_env(&mut store, &env, github_add_users_to_org_copilot)

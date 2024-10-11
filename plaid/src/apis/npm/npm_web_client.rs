@@ -7,11 +7,7 @@ use url::Url;
 
 use crate::apis::ApiError;
 
-use plaid_stl::npm::shared_structs::{
-    AddRemoveUserToFromTeamParams, CreateGranularTokenForPackagesParams,
-    InviteUserToOrganizationParams, ListPackagesWithTeamPermissionParams, NpmPackagePermission,
-    NpmToken, NpmUser, NpmUserRole, SetTeamPermissionOnPackageParams,
-};
+use plaid_stl::npm::shared_structs::*;
 
 use super::{Npm, NpmError};
 
@@ -67,6 +63,12 @@ struct AddUserToTeamPayload<'a> {
 #[derive(Serialize)]
 struct RemoveUserPayload<'a> {
     csrftoken: &'a str,
+}
+
+#[derive(Serialize)]
+struct DeleteTokenPayload<'a> {
+    csrftoken: &'a str,
+    tokens: &'a str,
 }
 
 impl Npm {
@@ -291,6 +293,38 @@ impl Npm {
             .get("newToken")
             .map(|v| Ok(v.to_string()))
             .ok_or(ApiError::NpmError(NpmError::TokenGenerationError))?
+    }
+
+    /// Delete a granular token from the npm website
+    pub async fn delete_granular_token(&self, params: &str, module: &str) -> Result<i32, ApiError> {
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let params: DeleteTokenParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let token_id = self.validate_token_id(&params.token_id)?;
+
+        info!("Deleting npm granular token with ID [{token_id}] on behalf of [{module}]");
+
+        // Prepare the request body
+        let csrf_token = self
+            .get_csrftoken_from_cookies()
+            .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
+        let payload = DeleteTokenPayload {
+            csrftoken: &csrf_token,
+            tokens: token_id,
+        };
+        self.client
+            .post(format!(
+                "{}/settings/{}/tokens/delete",
+                NPMJS_COM_URL, self.config.username
+            ))
+            .json(&payload)
+            .header("X-Spiferack", "1") // to get JSON instead of HTML
+            .send()
+            .await
+            .map(|_| Ok(0))
+            .map_err(|_| ApiError::NpmError(NpmError::TokenDeletionError))?
     }
 
     /// Retrieve a list of granular tokens for the account whose credentials have been configured for this client.
@@ -760,6 +794,44 @@ impl Npm {
             // There are more items
             page_num += 1;
         }
+    }
+
+    /// Return a JSON-encoded struct that contains details about a granular token
+    pub async fn get_token_details(&self, params: &str, module: &str) -> Result<String, ApiError> {
+        let params: GetTokenDetailsParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let token_id = self.validate_token_id(&params.token_id)?;
+
+        info!("Retrieving details for token [{token_id}] on behalf of [{module}]");
+
+        self.login()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        let response = self
+            .client
+            .get(format!(
+                "{}/settings/{}/tokens/granular-access-tokens/{}",
+                NPMJS_COM_URL, self.config.username, token_id
+            ))
+            .header("X-Spiferack", "1") // to get JSON instead of HTML
+            .send()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenDetails))?;
+
+        // Information on the token is returned in an object under "tokenDetails"
+        let token_details = serde_json::from_value::<GranularTokenDetails>(
+            response
+                .json::<Value>()
+                .await
+                .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenDetails))?
+                .get("tokenDetails")
+                .ok_or(ApiError::NpmError(NpmError::FailedToGetTokenDetails))?
+                .clone(),
+        )
+        .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenDetails))?;
+
+        serde_json::to_string(&token_details)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenDetails))
     }
 }
 
