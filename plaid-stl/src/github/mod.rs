@@ -957,7 +957,7 @@ pub fn configure_secret(
 ///
 /// **Arguments:**
 /// - `filename`: The name of the files to search, e.g., "README.md"
-/// - `search_criteria`: An optional `FileSearchSelectionCriteria` object with additional criteria
+/// - `search_criteria`: An optional `CodeSearchCriteria` object with additional search criteria
 pub fn search_for_file(
     filename: impl Display,
     search_criteria: Option<&CodeSearchCriteria>,
@@ -1036,73 +1036,80 @@ pub fn search_for_file(
     }
 
     // Now that all the search results have been collected, apply the module-side selection criteria.
-
-    if let Some(selection_criteria) = search_criteria {
-        let mut filtered_results = Vec::<FileSearchResultItem>::new();
-        let regex_dot_folder = regex::Regex::new(r"\/\.").unwrap(); // TODO improve
-
-        // Go through all the results and try to discard them by applying the criteria.
-        // If the result makes it to the end, then add it to the filtered results.
-        for result in search_results {
-            // Discard files in . folders
-            if selection_criteria.discard_results_in_dot_folders {
-                if regex_dot_folder.is_match(&result.html_url) {
-                    continue;
-                }
-            }
-            // Select / discard files based on the repo name. This _could_ be done in the query, but
-            // there is a limit on how many AND / OR / NOT operators can be used. So we keep it here.
-            if let Some(RepoFilter::NotFromRepos { repos }) = &selection_criteria.repo_filter {
-                if repos
-                    .iter()
-                    .find(|v| **v == result.repository.name)
-                    .is_some()
-                {
-                    continue;
-                }
-            }
-            if let Some(RepoFilter::OnlyFromRepos { repos }) = &selection_criteria.repo_filter {
-                if repos
-                    .iter()
-                    .find(|v| **v == result.repository.name)
-                    .is_none()
-                {
-                    continue;
-                }
-            }
-            // Discard files based on the repo's visibility
-            if selection_criteria.discard_results_in_private_repos && result.repository.private {
-                continue;
-            }
-            // Discard files based on a substring in the path
-            if let Some(sub_paths) = &selection_criteria.discard_substrings {
-                let mut discarded = false;
-                for subp in sub_paths {
-                    if result.html_url.contains(subp) {
-                        discarded = true;
-                        break; // inner loop
-                    }
-                }
-                if discarded {
-                    continue;
-                }
-            }
-            // Discard files based on explicit list
-            if let Some(discard_explicit) = &selection_criteria.discard_specific_files {
-                // build the string we will search for
-                let search = format!("{}/{}", result.repository.full_name, result.path);
-
-                if discard_explicit.iter().find(|v| **v == search).is_some() {
-                    continue;
-                }
-            }
-
-            // If we are here, we have not discarded the result
-            filtered_results.push(result);
-        }
-        Ok(filtered_results)
+    if let Some(search_criteria) = search_criteria {
+        Ok(filter_search_results(search_results, search_criteria))
     } else {
-        // no exclusion criteria have been passed
+        // No criteria have been passed
         Ok(search_results)
     }
+}
+
+/// Filter results returned by GitHub search API by applying a set of search criteria
+pub fn filter_search_results(
+    raw_results: Vec<FileSearchResultItem>,
+    search_criteria: &CodeSearchCriteria,
+) -> Vec<FileSearchResultItem> {
+    let mut filtered_results = Vec::<FileSearchResultItem>::new();
+    let regex_dot_folder = regex::Regex::new(r"\/\.").unwrap(); // Right now, no way around recompiling this regex
+
+    // Go through all the results and try to discard them by applying the criteria.
+    // If the result makes it to the end, then add it to the filtered results.
+    for result in raw_results {
+        // Discard files in . folders
+        if search_criteria.discard_results_in_dot_folders {
+            if regex_dot_folder.is_match(&result.html_url) {
+                continue;
+            }
+        }
+        // Select / discard files based on the repo name. This _could_ be done in the query, but
+        // there is a limit on how many AND / OR / NOT operators can be used. So we keep it here.
+        if let Some(RepoFilter::NotFromRepos { repos }) = &search_criteria.repo_filter {
+            if repos
+                .iter()
+                .find(|v| **v == result.repository.name)
+                .is_some()
+            {
+                continue;
+            }
+        }
+        if let Some(RepoFilter::OnlyFromRepos { repos }) = &search_criteria.repo_filter {
+            if repos
+                .iter()
+                .find(|v| **v == result.repository.name)
+                .is_none()
+            {
+                continue;
+            }
+        }
+        // Discard files based on the repo's visibility
+        if search_criteria.discard_results_in_private_repos && result.repository.private {
+            continue;
+        }
+        // Discard files based on a substring in the path
+        if let Some(sub_paths) = &search_criteria.discard_substrings {
+            let mut discarded = false;
+            for subp in sub_paths {
+                if result.html_url.contains(subp) {
+                    discarded = true;
+                    break; // inner loop
+                }
+            }
+            if discarded {
+                continue;
+            }
+        }
+        // Discard files based on explicit list
+        if let Some(discard_explicit) = &search_criteria.discard_specific_files {
+            // build the string we will search for
+            let search = format!("{}/{}", result.repository.full_name, result.path);
+
+            if discard_explicit.iter().find(|v| **v == search).is_some() {
+                continue;
+            }
+        }
+
+        // If we are here, we have not discarded the result
+        filtered_results.push(result);
+    }
+    filtered_results
 }

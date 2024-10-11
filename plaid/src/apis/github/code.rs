@@ -56,10 +56,10 @@ impl Github {
 
         // Build the search query
         let query = match org {
-            None => format!("{} in:path", filename),
+            None => format!("{filename} in:path"),
             Some(org) => match repo {
-                None => format!("{} in:path org:{}", filename, org),
-                Some(repo) => format!("{} in:path repo:{}/{}", filename, org, repo),
+                None => format!("{filename} in:path org:{org}"),
+                Some(repo) => format!("{filename} in:path repo:{org}/{repo}"),
             },
         };
         let query = urlencoding::encode(&query).to_string();
