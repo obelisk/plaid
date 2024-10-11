@@ -160,8 +160,10 @@ impl GranularTokenSpecs {
 
 /// An npm token configured on the npm website for the current user
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[allow(dead_code)]
 pub struct NpmToken {
+    /// ID assigned by npm to the token.
+    /// Note: only granular tokens have this.
+    pub id: Option<String>,
     pub token: String,
     pub token_name: Option<String>,
     pub token_type: Option<String>,
@@ -197,6 +199,11 @@ pub struct SetTeamPermissionOnPackageParams {
 pub struct CreateGranularTokenForPackagesParams {
     pub packages: Vec<String>,
     pub specs: GranularTokenSpecs,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DeleteTokenParams {
+    pub token_id: String
 }
 
 #[derive(Serialize, Deserialize)]
@@ -239,4 +246,30 @@ pub struct PublishEmptyStubParams {
 pub struct ListPackagesWithTeamPermissionParams {
     pub team: String,
     pub permission: NpmPackagePermission,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetTokenDetailsParams {
+    pub token_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GranularTokenDetails {
+    #[serde(rename = "tokenName")]
+    pub token_name: Option<String>,
+    #[serde(rename = "tokenID")]
+    pub token_id: Option<String>,
+    #[serde(rename = "tokenDescription")]
+    pub token_description: Option<String>,
+    #[serde(rename = "packagesAndScopesPermission")]
+    pub packages_and_scopes_permission: String,
+    #[serde(rename = "selectedPackagesAndScopes")]
+    pub selected_packages_and_scopes: String,
+    #[serde(rename = "selectedPackages")]
+    pub selected_packages: Vec<String>,
+    expired: bool,
+    #[serde(rename = "selectedScopes")]
+    pub selected_scopes: Vec<String>,
+    #[serde(rename = "selectedOrgs")]
+    pub selected_orgs: Vec<String>,
 }
