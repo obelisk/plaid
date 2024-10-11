@@ -101,16 +101,22 @@ impl FileSearchResultItem {
     }
 }
 
+/// Filter to specify whether to keep only results from a list of repositories,
+/// or whether to discard all results that are from a list of repositories.
+#[derive(Serialize, Deserialize)]
+pub enum RepoFilter {
+    OnlyFromRepos { repos: Vec<String> },
+    NotFromRepos { repos: Vec<String> },
+}
+
 #[derive(Serialize, Deserialize)]
 /// Specifies criteria according to which results returned
 /// by the API should be included or discarded.
 pub struct CodeSearchCriteria {
     /// Keep only results from this GH org
     pub only_from_org: Option<String>,
-    /// Keep only results from these repositories (mutually exclusive with `discard_from_repos`)
-    pub only_from_repos: Option<Vec<String>>,
-    /// Discard files from these repositories (mutually exclusive with `only_from_repos`)
-    pub discard_from_repos: Option<Vec<String>>,
+    /// Keep / discard results based on the repository name
+    pub repo_filter: Option<RepoFilter>,
     /// Discard files where these strings appear in the file's path
     pub discard_substrings: Option<Vec<String>>,
     /// Discard files if some folder along their path is hidden (.folder)
@@ -972,16 +978,11 @@ pub fn search_for_file(
     // are processed later here.
 
     if let Some(criteria) = search_criteria {
-        // Check for mutually exclusive criteria
-        if criteria.only_from_repos.is_some() && criteria.discard_from_repos.is_some() {
-            return Err(PlaidFunctionError::ErrorCouldNotSerialize);
-        }
-
         if let Some(org) = &criteria.only_from_org {
             // Search only inside an organization
             params.insert("org", org.clone());
 
-            if let Some(repos) = &criteria.only_from_repos {
+            if let Some(RepoFilter::OnlyFromRepos { repos }) = &criteria.repo_filter {
                 if repos.len() == 1 {
                     // Special case: search only in a repository
                     params.insert("repo", repos[0].clone());
@@ -1051,8 +1052,8 @@ pub fn search_for_file(
             }
             // Select / discard files based on the repo name. This _could_ be done in the query, but
             // there is a limit on how many AND / OR / NOT operators can be used. So we keep it here.
-            if let Some(discard_repos) = &selection_criteria.discard_from_repos {
-                if discard_repos
+            if let Some(RepoFilter::NotFromRepos { repos }) = &selection_criteria.repo_filter {
+                if repos
                     .iter()
                     .find(|v| **v == result.repository.name)
                     .is_some()
@@ -1060,8 +1061,8 @@ pub fn search_for_file(
                     continue;
                 }
             }
-            if let Some(keep_repos) = &selection_criteria.only_from_repos {
-                if keep_repos
+            if let Some(RepoFilter::OnlyFromRepos { repos }) = &selection_criteria.repo_filter {
+                if repos
                     .iter()
                     .find(|v| **v == result.repository.name)
                     .is_none()
