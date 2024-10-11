@@ -44,11 +44,11 @@ impl Github {
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         let organization = self.validate_org(&request.org)?;
-        for username in request.selected_usernames.iter() {
+        for username in &request.selected_usernames {
             self.validate_username(&username)?;
         }
 
-        info!("Adding users {:?} to Copilot subscription for org {organization}", request.selected_usernames);
+        info!("Adding users {:?} to Copilot subscription for org {organization} as module {module}", request.selected_usernames);
 
         let address = format!("/org/{organization}/copilot/billing/selected_users");
 
@@ -83,7 +83,7 @@ impl Github {
             self.validate_username(&username)?;
         }
 
-        info!("Remove users {:?} from Copilot subscription for org {organization}", request.selected_usernames.clone());
+        info!("Remove users {:?} from Copilot subscription for org {organization}", request.selected_usernames);
 
         let address = format!("/org/{organization}/copilot/billing/selected_users");
 
