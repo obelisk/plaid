@@ -241,10 +241,54 @@ pub fn remove_user_from_repo_detailed(repo: &str, user: &str) -> Result<(), Plai
     Ok(())
 }
 
+/// List all seats in org's Copilot subscription
+/// ## Arguments
+///
+/// * `org` - The org owning the subscription
+/// * `per_page` - The number of results per page (max 100)
+/// * `page` - The page number of the results to fetch.
+pub fn list_copilot_subscription_seats(org: &str, per_page: Option<u64>, page: Option<u64>) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, list_copilot_subscription_seats);
+    }
+
+    let mut params: HashMap<&'static str, String> = HashMap::new();
+    params.insert("org", org.to_string());
+    if let Some(per_page) = per_page {
+        params.insert("per_page", per_page.to_string());
+    }
+    if let Some(page) = page {
+        params.insert("page", page.to_string());
+    }
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_list_copilot_subscription_seats(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
 /// Add a user to the org's Copilot subscription
 /// ## Arguments
 ///
-/// * `ogg` - The org owning the subscription
+/// * `org` - The org owning the subscription
 /// * `user` - The user to add to Copilot subscription
 pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), PlaidFunctionError> {
     extern "C" {
@@ -253,12 +297,43 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), Pla
 
     let mut params: HashMap<&'static str, &str> = HashMap::new();
     params.insert("org", org);
-    let selected_users: Vec<&str> = vec![user];
-    params.insert("selected_usernames", &serde_json::to_string(selected_users).unwrap());
+    let selected_users: Vec<String> = vec![user.to_owned()];
+    let selected_users = serde_json::to_string(&selected_users).unwrap();
+    params.insert("selected_usernames", &selected_users);
 
     let params = serde_json::to_string(&params).unwrap();
     let res = unsafe {
         github_add_user_to_copilot_subscription(params.as_bytes().as_ptr(), params.as_bytes().len())
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
+
+/// Remove a user to the org's Copilot subscription
+/// ## Arguments
+///
+/// * `org` - The org owning the subscription
+/// * `user` - The user to remove from Copilot subscription
+pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, remove_user_from_copilot_subscription);
+    }
+
+    let mut params: HashMap<&'static str, &str> = HashMap::new();
+    params.insert("org", org);
+    let selected_users: Vec<String> = vec![user.to_owned()];
+    let selected_users = serde_json::to_string(&selected_users).unwrap();
+    params.insert("selected_usernames", &selected_users);
+
+    let params = serde_json::to_string(&params).unwrap();
+    let res = unsafe {
+        github_remove_user_from_copilot_subscription(params.as_bytes().as_ptr(), params.as_bytes().len())
     };
 
     // There was an error with the Plaid system. Maybe the API is not
