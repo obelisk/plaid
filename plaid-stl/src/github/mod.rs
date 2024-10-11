@@ -952,12 +952,12 @@ pub fn configure_secret(
 /// **Arguments:**
 /// - `filename`: The name of the files to search, e.g., "README.md"
 /// - `search_criteria`: An optional `FileSearchSelectionCriteria` object with additional criteria
-pub fn search_file(
+pub fn search_for_file(
     filename: impl Display,
     search_criteria: Option<&CodeSearchCriteria>,
 ) -> Result<Vec<FileSearchResultItem>, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(github, search_file);
+        new_host_function_with_error_buffer!(github, search_for_file);
     }
 
     let mut params: HashMap<&str, String> = HashMap::new();
@@ -1007,7 +1007,7 @@ pub fn search_file(
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
         let res = unsafe {
-            github_search_file(
+            github_search_for_file(
                 request.as_bytes().as_ptr(),
                 request.as_bytes().len(),
                 return_buffer.as_mut_ptr(),
