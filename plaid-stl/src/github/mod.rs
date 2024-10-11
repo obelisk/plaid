@@ -945,14 +945,13 @@ pub fn configure_secret(
     }
 }
 
-/// Search for files with given filename in a GitHub organization's code.
+/// Search for files with given filename in GitHub.
 /// If additional selection criteria are given, these are used to decide whether
 /// results are selected or discarded.
 ///
 /// **Arguments:**
 /// - `filename`: The name of the files to search, e.g., "README.md"
-/// - `org`: The name of the GitHub organization
-/// - `selection_criteria`: An optional `FileSearchSelectionCriteria` object with additional criteria
+/// - `search_criteria`: An optional `FileSearchSelectionCriteria` object with additional criteria
 pub fn search_file(
     filename: impl Display,
     search_criteria: Option<&CodeSearchCriteria>,
