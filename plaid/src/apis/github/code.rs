@@ -4,27 +4,28 @@ use super::Github;
 use crate::apis::{github::GitHubError, ApiError};
 
 impl Github {
-    /// Search for files with given name across a GH organization and return the result.
+    /// Search for files with given name.
     /// See https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#search-code for more details
-    pub async fn search_file_in_org_code(
-        &self,
-        params: &str,
-        module: &str,
-    ) -> Result<String, ApiError> {
+    pub async fn search_file(&self, params: &str, module: &str) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
         let filename =
             self.validate_filename(request.get("filename").ok_or(ApiError::BadRequest)?)?;
-        // See if we were told to look only in a particular repository
-        let repo = match request.get("repo") {
-            Some(r) => Some(self.validate_repository_name(r)?),
+
+        // See if we were told to search only in a specific organization or repository
+        let org = match request.get("org") {
             None => None,
+            Some(org) => Some(self.validate_org(org)?),
         };
+        let repo = match request.get("repo") {
+            None => None,
+            Some(repo) => Some(self.validate_repository_name(repo)?),
+        };
+
         let per_page: u8 = request
             .get("per_page")
-            .unwrap_or(&"30")
+            .unwrap_or(&"100")
             .parse::<u8>()
             .map_err(|_| ApiError::BadRequest)?;
         let page: u16 = request
@@ -38,22 +39,30 @@ impl Github {
             return Err(ApiError::BadRequest);
         }
 
-        match repo {
-            Some(r) => info!(
-                "Finding all files called [{filename}] in repository [{org}/{r}] on behalf of [{module}]"
-            ),
+        // Log what we are doing
+        match org {
             None => info!(
-                "Finding all files called [{filename}] in organization [{org}] on behalf of [{module}]"
-            )
+                "Finding all files called [{filename}] on behalf of [{module}]"
+            ),
+            Some(org) =>  match repo {
+                    None => info!(
+                        "Finding all files called [{filename}] in organization [{org}] on behalf of [{module}]"
+                    ),
+                    Some(repo) => info!(
+                        "Finding all files called [{filename}] in repository [{org}/{repo}] on behalf of [{module}]"
+                    ),
+                }
         }
 
         // Build the search query
-        let query = match repo {
-            Some(r) => {
-                urlencoding::encode(&format!("{} in:path repo:{}/{}", filename, org, r)).to_string()
-            }
-            None => urlencoding::encode(&format!("{} in:path org:{}", filename, org)).to_string(),
+        let query = match org {
+            None => format!("{} in:path", filename),
+            Some(org) => match repo {
+                None => format!("{} in:path org:{}", filename, org),
+                Some(repo) => format!("{} in:path repo:{}/{}", filename, org, repo),
+            },
         };
+        let query = urlencoding::encode(&query).to_string();
 
         // !!! NOTE - This endpoint has a custom rate limitation !!!
         // https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#rate-limit

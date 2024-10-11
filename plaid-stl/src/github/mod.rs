@@ -104,7 +104,9 @@ impl FileSearchResultItem {
 #[derive(Serialize, Deserialize)]
 /// Specifies criteria according to which results returned
 /// by the API should be included or discarded.
-pub struct FileSearchSelectionCriteria {
+pub struct CodeSearchCriteria {
+    /// Keep only results from this GH org
+    pub only_from_org: Option<String>,
     /// Keep only results from these repositories (mutually exclusive with `discard_from_repos`)
     pub only_from_repos: Option<Vec<String>>,
     /// Discard files from these repositories (mutually exclusive with `only_from_repos`)
@@ -951,39 +953,62 @@ pub fn configure_secret(
 /// - `filename`: The name of the files to search, e.g., "README.md"
 /// - `org`: The name of the GitHub organization
 /// - `selection_criteria`: An optional `FileSearchSelectionCriteria` object with additional criteria
-pub fn search_file_in_org_code(
+pub fn search_file(
     filename: impl Display,
-    org: impl Display,
-    repo: Option<impl Display>,
-    selection_criteria: Option<&FileSearchSelectionCriteria>,
+    search_criteria: Option<&CodeSearchCriteria>,
 ) -> Result<Vec<FileSearchResultItem>, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(github, search_file_in_org_code);
+        new_host_function_with_error_buffer!(github, search_file);
     }
+
     let mut params: HashMap<&str, String> = HashMap::new();
     params.insert("filename", filename.to_string());
-    params.insert("org", org.to_string());
-    if let Some(repo) = repo {
-        params.insert("repo", repo.to_string());
+
+    // If we are given selection criteria, then we divide them between
+    //
+    // * Those that can be baked directly into the GitHub search query, thus making the overall search more
+    // efficient (because less results are returned). These are passed to the API.
+    //
+    // * Those that have to be (or are better) evaluated module-side. These are not passed to the API and
+    // are processed later here.
+
+    if let Some(criteria) = search_criteria {
+        // Check for mutually exclusive criteria
+        if criteria.only_from_repos.is_some() && criteria.discard_from_repos.is_some() {
+            return Err(PlaidFunctionError::ErrorCouldNotSerialize);
+        }
+
+        if let Some(org) = &criteria.only_from_org {
+            // Search only inside an organization
+            params.insert("org", org.clone());
+
+            if let Some(repos) = &criteria.only_from_repos {
+                if repos.len() == 1 {
+                    // Special case: search only in a repository
+                    params.insert("repo", repos[0].clone());
+                }
+            }
+        }
     }
 
     let mut search_results = Vec::<FileSearchResultItem>::new();
     let mut page = 0;
+
+    // Use a larger page size to make less requests and reduce chances of hitting the rate limit
+    params.insert("per_page", "100".to_owned());
 
     const RETURN_BUFFER_SIZE: usize = 1 * 1024 * 1024; // 1 MiB
 
     loop {
         page += 1;
         params.insert("page", page.to_string());
-        // use a larger page size to make less requests and avoid hitting the rate limit
-        params.insert("per_page", "100".to_owned());
 
         let request = serde_json::to_string(&params).unwrap(); // safe unwrap
 
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
         let res = unsafe {
-            github_search_file_in_org_code(
+            github_search_file(
                 request.as_bytes().as_ptr(),
                 request.as_bytes().len(),
                 return_buffer.as_mut_ptr(),
@@ -1010,16 +1035,9 @@ pub fn search_file_in_org_code(
         search_results.extend(file_search_result.items);
     }
 
-    // Now that all the search results have been collected, apply the selection criteria
+    // Now that all the search results have been collected, apply the module-side selection criteria.
 
-    if let Some(selection_criteria) = selection_criteria {
-        if selection_criteria.only_from_repos.is_some()
-            && selection_criteria.discard_from_repos.is_some()
-        {
-            // Error: only one of these two can be set
-            return Err(PlaidFunctionError::InternalApiError); // TODO not the right error type
-        }
-
+    if let Some(selection_criteria) = search_criteria {
         let mut filtered_results = Vec::<FileSearchResultItem>::new();
         let regex_dot_folder = regex::Regex::new(r"\/\.").unwrap(); // TODO improve
 
@@ -1032,7 +1050,8 @@ pub fn search_file_in_org_code(
                     continue;
                 }
             }
-            // Select / discard files based on the repo name
+            // Select / discard files based on the repo name. This _could_ be done in the query, but
+            // there is a limit on how many AND / OR / NOT operators can be used. So we keep it here.
             if let Some(discard_repos) = &selection_criteria.discard_from_repos {
                 if discard_repos
                     .iter()
@@ -1071,7 +1090,7 @@ pub fn search_file_in_org_code(
             // Discard files based on explicit list
             if let Some(discard_explicit) = &selection_criteria.discard_specific_files {
                 // build the string we will search for
-                let search = format!("{}/{}", result.repository.name, result.path);
+                let search = format!("{}/{}", result.repository.full_name, result.path);
 
                 if discard_explicit.iter().find(|v| **v == search).is_some() {
                     continue;

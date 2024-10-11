@@ -240,7 +240,7 @@ impl_new_function_with_error_buffer!(github, list_files);
 impl_new_function_with_error_buffer!(github, fetch_file);
 impl_new_function_with_error_buffer!(github, get_branch_protection_rules);
 impl_new_function_with_error_buffer!(github, get_repository_collaborators);
-impl_new_function_with_error_buffer!(github, search_file_in_org_code);
+impl_new_function_with_error_buffer!(github, search_file);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org);
@@ -462,8 +462,8 @@ pub fn to_api_function(
         "github_create_deployment_branch_protection_rule" => {
             Function::new_typed_with_env(&mut store, &env, github_create_deployment_branch_protection_rule)
         }
-        "github_search_file_in_org_code" => {
-            Function::new_typed_with_env(&mut store, &env, github_search_file_in_org_code)
+        "github_search_file" => {
+            Function::new_typed_with_env(&mut store, &env, github_search_file)
         }
 
         // Slack Calls
