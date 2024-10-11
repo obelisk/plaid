@@ -29,6 +29,105 @@ pub struct RepositoryCollaborator {
     pub permissions: Permission,
 }
 
+// Structs used for deserializing GH's responses when searching for code
+
+#[derive(Debug, Deserialize)]
+pub struct FileSearchResult {
+    pub total_count: u64,
+    pub incomplete_results: bool,
+    pub items: Vec<FileSearchResultItem>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FileSearchResultItem {
+    pub path: String,
+    pub html_url: String,
+    pub url: String,
+    pub repository: GithubRepository,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GithubRepository {
+    pub name: String,
+    pub full_name: String,
+    pub private: bool,
+    pub description: Option<String>,
+    pub owner: GithubRepositoryOwner,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GithubRepositoryOwner {
+    pub login: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GithubFileContent {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub content: String,
+    pub encoding: String,
+}
+
+// END OF Structs used for deserializing GH's response when searching for code
+
+impl FileSearchResultItem {
+    /// Retrieve the content of the search result
+    pub fn retrieve_raw_content(&self) -> Result<String, PlaidFunctionError> {
+        let reference_regex = regex::Regex::new(r"^.*?ref=([a-f0-9]{40})$").unwrap(); // TODO improve
+        let reference = reference_regex
+            .captures(&self.url)
+            .ok_or(PlaidFunctionError::InternalApiError)?
+            .get(1)
+            .ok_or(PlaidFunctionError::InternalApiError)?
+            .as_str();
+        let content = fetch_file(
+            &self.repository.owner.login,
+            &self.repository.name,
+            &self.path,
+            reference,
+        )
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+        let content = serde_json::from_str::<GithubFileContent>(&content)
+            .map_err(|_| PlaidFunctionError::InternalApiError)?;
+        if content.type_ != "file" || content.encoding != "base64" {
+            return Err(PlaidFunctionError::InternalApiError); // TODO not the right error
+        }
+        // base64 decode and return the corresponding string
+        Ok(String::from_utf8(
+            base64::decode(content.content.replace("\n", ""))
+                .map_err(|_| PlaidFunctionError::InternalApiError)?,
+        )
+        .map_err(|_| PlaidFunctionError::InternalApiError)?)
+    }
+}
+
+/// Filter to specify whether to keep only results from a list of repositories,
+/// or whether to discard all results that are from a list of repositories.
+#[derive(Serialize, Deserialize)]
+pub enum RepoFilter {
+    OnlyFromRepos { repos: Vec<String> },
+    NotFromRepos { repos: Vec<String> },
+}
+
+#[derive(Serialize, Deserialize)]
+/// Specifies criteria according to which results returned
+/// by the API should be included or discarded.
+pub struct CodeSearchCriteria {
+    /// Keep only results from this GH org
+    pub only_from_org: Option<String>,
+    /// Keep / discard results based on the repository name
+    pub repo_filter: Option<RepoFilter>,
+    /// Discard files where these strings appear in the file's path
+    pub discard_substrings: Option<Vec<String>>,
+    /// Discard files if some folder along their path is hidden (.folder)
+    pub discard_results_in_dot_folders: bool,
+    /// Discard files that belong to private repositories
+    pub discard_results_in_private_repos: bool,
+    /// Discard specific files identified as repository/path
+    /// (e.g., myrepo/folderA/folderB/file.txt)
+    pub discard_specific_files: Option<Vec<String>>,
+}
+
 // TODO: Do not use this function, it is deprecated and will be removed soon
 pub fn add_user_to_team(team: &str, user: &str, org: &str, role: &str) -> Result<(), i32> {
     add_user_to_team_detailed(team, user, org, role).map_err(|_| -4)
@@ -843,12 +942,174 @@ pub fn configure_secret(
     let request =
         serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
 
-    let res = unsafe {
-        github_configure_secret(request.as_bytes().as_ptr(), request.as_bytes().len())
-    };
+    let res =
+        unsafe { github_configure_secret(request.as_bytes().as_ptr(), request.as_bytes().len()) };
 
     match res {
         0 => Ok(()),
         x => Err(x.into()),
     }
+}
+
+/// Search for files with given filename in GitHub.
+/// If additional selection criteria are given, these are used to decide whether
+/// results are selected or discarded.
+///
+/// **Arguments:**
+/// - `filename`: The name of the files to search, e.g., "README.md"
+/// - `search_criteria`: An optional `CodeSearchCriteria` object with additional search criteria
+pub fn search_for_file(
+    filename: impl Display,
+    search_criteria: Option<&CodeSearchCriteria>,
+) -> Result<Vec<FileSearchResultItem>, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, search_for_file);
+    }
+
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("filename", filename.to_string());
+
+    // If we are given selection criteria, then we divide them between
+    //
+    // * Those that can be baked directly into the GitHub search query, thus making the overall search more
+    // efficient (because less results are returned). These are passed to the API.
+    //
+    // * Those that have to be (or are better) evaluated module-side. These are not passed to the API and
+    // are processed later here.
+
+    if let Some(criteria) = search_criteria {
+        if let Some(org) = &criteria.only_from_org {
+            // Search only inside an organization
+            params.insert("org", org.clone());
+
+            if let Some(RepoFilter::OnlyFromRepos { repos }) = &criteria.repo_filter {
+                if repos.len() == 1 {
+                    // Special case: search only in a repository
+                    params.insert("repo", repos[0].clone());
+                }
+            }
+        }
+    }
+
+    let mut search_results = Vec::<FileSearchResultItem>::new();
+    let mut page = 0;
+
+    // Use a larger page size to make less requests and reduce chances of hitting the rate limit
+    params.insert("per_page", "100".to_owned());
+
+    const RETURN_BUFFER_SIZE: usize = 1 * 1024 * 1024; // 1 MiB
+
+    loop {
+        page += 1;
+        params.insert("page", page.to_string());
+
+        let request = serde_json::to_string(&params).unwrap(); // safe unwrap
+
+        let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+        let res = unsafe {
+            github_search_for_file(
+                request.as_bytes().as_ptr(),
+                request.as_bytes().len(),
+                return_buffer.as_mut_ptr(),
+                RETURN_BUFFER_SIZE,
+            )
+        };
+
+        if res < 0 {
+            return Err(res.into());
+        }
+
+        return_buffer.truncate(res as usize);
+        // This should be safe because unless the Plaid runtime is expressly trying
+        // to mess with us, this came from a String in the API module.
+        let this_page = String::from_utf8(return_buffer).unwrap();
+
+        let file_search_result = serde_json::from_str::<FileSearchResult>(&this_page)
+            .map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+        if file_search_result.items.is_empty() {
+            break; // we are past the last page
+        }
+
+        search_results.extend(file_search_result.items);
+    }
+
+    // Now that all the search results have been collected, apply the module-side selection criteria.
+    if let Some(search_criteria) = search_criteria {
+        Ok(filter_search_results(search_results, search_criteria))
+    } else {
+        // No criteria have been passed
+        Ok(search_results)
+    }
+}
+
+/// Filter results returned by GitHub search API by applying a set of search criteria
+pub fn filter_search_results(
+    raw_results: Vec<FileSearchResultItem>,
+    search_criteria: &CodeSearchCriteria,
+) -> Vec<FileSearchResultItem> {
+    let mut filtered_results = Vec::<FileSearchResultItem>::new();
+    let regex_dot_folder = regex::Regex::new(r"\/\.").unwrap(); // Right now, no way around recompiling this regex
+
+    // Go through all the results and try to discard them by applying the criteria.
+    // If the result makes it to the end, then add it to the filtered results.
+    for result in raw_results {
+        // Discard files in . folders
+        if search_criteria.discard_results_in_dot_folders {
+            if regex_dot_folder.is_match(&result.html_url) {
+                continue;
+            }
+        }
+        // Select / discard files based on the repo name. This _could_ be done in the query, but
+        // there is a limit on how many AND / OR / NOT operators can be used. So we keep it here.
+        if let Some(RepoFilter::NotFromRepos { repos }) = &search_criteria.repo_filter {
+            if repos
+                .iter()
+                .find(|v| **v == result.repository.name)
+                .is_some()
+            {
+                continue;
+            }
+        }
+        if let Some(RepoFilter::OnlyFromRepos { repos }) = &search_criteria.repo_filter {
+            if repos
+                .iter()
+                .find(|v| **v == result.repository.name)
+                .is_none()
+            {
+                continue;
+            }
+        }
+        // Discard files based on the repo's visibility
+        if search_criteria.discard_results_in_private_repos && result.repository.private {
+            continue;
+        }
+        // Discard files based on a substring in the path
+        if let Some(sub_paths) = &search_criteria.discard_substrings {
+            let mut discarded = false;
+            for subp in sub_paths {
+                if result.html_url.contains(subp) {
+                    discarded = true;
+                    break; // inner loop
+                }
+            }
+            if discarded {
+                continue;
+            }
+        }
+        // Discard files based on explicit list
+        if let Some(discard_explicit) = &search_criteria.discard_specific_files {
+            // build the string we will search for
+            let search = format!("{}/{}", result.repository.full_name, result.path);
+
+            if discard_explicit.iter().find(|v| **v == search).is_some() {
+                continue;
+            }
+        }
+
+        // If we are here, we have not discarded the result
+        filtered_results.push(result);
+    }
+    filtered_results
 }
