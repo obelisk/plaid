@@ -29,6 +29,8 @@ pub struct RepositoryCollaborator {
     pub permissions: Permission,
 }
 
+// Structs used for deserializing GH's responses when listing Copilot seats
+
 #[derive(Debug, Deserialize)]
 /// A person assigned to a seat in a Github Org Copilot subscription
 pub struct CopilotAsignee {
@@ -42,8 +44,13 @@ pub struct CopilotAsignee {
 pub struct CopilotSeat {
     pub assignee: CopilotAsignee,
     pub last_activity_at: String,
-    pub role_name: String,
-    pub permissions: Permission,
+    pub plan_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CopilotSeatsResult {
+    pub total_seats: u64,
+    pub seats: Vec<CopilotSeat>,
 }
 
 // Structs used for deserializing GH's responses when searching for code
@@ -264,7 +271,11 @@ pub fn remove_user_from_repo_detailed(repo: &str, user: &str) -> Result<(), Plai
 /// * `org` - The org owning the subscription
 /// * `per_page` - The number of results per page (max 100)
 /// * `page` - The page number of the results to fetch.
-pub fn list_copilot_subscription_seats_by_page(org: &str, per_page: Option<u64>, page: Option<u64>) -> Result<Vec<CopilotSeat>, PlaidFunctionError> {
+pub fn list_copilot_subscription_seats_by_page(
+    org: &str,
+    per_page: Option<u64>,
+    page: Option<u64>,
+) -> Result<Vec<CopilotSeat>, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, list_copilot_subscription_seats_by_page);
     }
@@ -301,10 +312,10 @@ pub fn list_copilot_subscription_seats_by_page(org: &str, per_page: Option<u64>,
     // to mess with us, this came from a String in the API module.
     let res = String::from_utf8(return_buffer).unwrap();
 
-    let seats = serde_json::from_str::<Vec<CopilotSeat>>(&res)
+    let res = serde_json::from_str::<CopilotSeatsResult>(&res)
             .map_err(|_| PlaidFunctionError::InternalApiError)?;
 
-    Ok(seats)
+    Ok(res.seats)
 }
 
 /// List all seats in org's Copilot subscription
@@ -352,10 +363,11 @@ pub fn list_all_copilot_subscription_seats(org: &str) -> Result<Vec<CopilotSeat>
         if this_page == "[]" {
             break;
         }
-        seats.extend(
-            serde_json::from_str::<Vec<CopilotSeat>>(&this_page)
-                .map_err(|_| PlaidFunctionError::InternalApiError)?,
-        );
+
+        let this_page = serde_json::from_str::<CopilotSeatsResult>(&this_page)
+            .map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+        seats.extend(this_page.seats);
     }
 
     Ok(seats)
