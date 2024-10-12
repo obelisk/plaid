@@ -29,6 +29,23 @@ pub struct RepositoryCollaborator {
     pub permissions: Permission,
 }
 
+#[derive(Debug, Deserialize)]
+/// A person assigned to a seat in a Github Org Copilot subscription
+pub struct CopilotAsignee {
+    pub login: String,
+    #[serde(rename = "type")]
+    pub type_: String,
+}
+
+#[derive(Debug, Deserialize)]
+/// A seat in a Github Org Copilot subscription
+pub struct CopilotSeat {
+    pub assignee: CopilotAsignee,
+    pub last_activity_at: String,
+    pub role_name: String,
+    pub permissions: Permission,
+}
+
 // Structs used for deserializing GH's responses when searching for code
 
 #[derive(Debug, Deserialize)]
@@ -241,15 +258,15 @@ pub fn remove_user_from_repo_detailed(repo: &str, user: &str) -> Result<(), Plai
     Ok(())
 }
 
-/// List all seats in org's Copilot subscription
+/// List seats in org's Copilot subscription, paginated
 /// ## Arguments
 ///
 /// * `org` - The org owning the subscription
 /// * `per_page` - The number of results per page (max 100)
 /// * `page` - The page number of the results to fetch.
-pub fn list_copilot_subscription_seats(org: &str, per_page: Option<u64>, page: Option<u64>) -> Result<String, PlaidFunctionError> {
+pub fn list_copilot_subscription_seats_by_page(org: &str, per_page: Option<u64>, page: Option<u64>) -> Result<Vec<CopilotSeat>, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(github, list_copilot_subscription_seats);
+        new_host_function_with_error_buffer!(github, list_copilot_subscription_seats_by_page);
     }
 
     let mut params: HashMap<&'static str, String> = HashMap::new();
@@ -267,7 +284,7 @@ pub fn list_copilot_subscription_seats(org: &str, per_page: Option<u64>, page: O
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let res = unsafe {
-        github_list_copilot_subscription_seats(
+        github_list_copilot_subscription_seats_by_page(
             request.as_bytes().as_ptr(),
             request.as_bytes().len(),
             return_buffer.as_mut_ptr(),
@@ -278,11 +295,70 @@ pub fn list_copilot_subscription_seats(org: &str, per_page: Option<u64>, page: O
     if res < 0 {
         return Err(res.into());
     }
-
     return_buffer.truncate(res as usize);
+
     // This should be safe because unless the Plaid runtime is expressly trying
     // to mess with us, this came from a String in the API module.
-    Ok(String::from_utf8(return_buffer).unwrap())
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    let seats = serde_json::from_str::<Vec<CopilotSeat>>(&res)
+            .map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    Ok(seats)
+}
+
+/// List all seats in org's Copilot subscription
+/// ## Arguments
+///
+/// * `org` - The org owning the subscription
+pub fn list_all_copilot_subscription_seats(org: &str) -> Result<Vec<CopilotSeat>, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, list_all_copilot_subscription_seats);
+    }
+
+    let mut params: HashMap<&'static str, String> = HashMap::new();
+    params.insert("org", org.to_string());
+
+    let mut seats = Vec::<CopilotSeat>::new();
+    let mut page = 0;
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+
+    loop {
+        page += 1;
+        params.insert("page", page.to_string());
+
+        let request = serde_json::to_string(&params).unwrap();
+
+        let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+        let res = unsafe {
+            github_list_all_copilot_subscription_seats(
+                request.as_bytes().as_ptr(),
+                request.as_bytes().len(),
+                return_buffer.as_mut_ptr(),
+                RETURN_BUFFER_SIZE,
+            )
+        };
+
+        if res < 0 {
+            return Err(res.into());
+        }
+
+        return_buffer.truncate(res as usize);
+        // This should be safe because unless the Plaid runtime is expressly trying
+        // to mess with us, this came from a String in the API module.
+        let this_page = String::from_utf8(return_buffer).unwrap();
+        if this_page == "[]" {
+            break;
+        }
+        seats.extend(
+            serde_json::from_str::<Vec<CopilotSeat>>(&this_page)
+                .map_err(|_| PlaidFunctionError::InternalApiError)?,
+        );
+    }
+
+    Ok(seats)
 }
 
 /// Add a user to the org's Copilot subscription
