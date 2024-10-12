@@ -391,7 +391,7 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), Pla
     Ok(())
 }
 
-/// Remove a user to the org's Copilot subscription
+/// Remove a user from the org's Copilot subscription
 /// ## Arguments
 ///
 /// * `org` - The org owning the subscription
