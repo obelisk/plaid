@@ -13,9 +13,9 @@ impl Github {
 
         let organization = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
 
-        info!("List all seats in Copilot subscription for org {organization}");
+        info!("List seats in Copilot subscription for org {organization}");
 
-        let address = format!("/org/{organization}/copilot/billing/seats");
+        let address = format!("/orgs/{organization}/copilot/billing/seats");
 
         match self.make_generic_get_request(address, &module).await {
             Ok((status, Ok(body))) => {
@@ -50,7 +50,7 @@ impl Github {
 
         info!("Adding users {:?} to Copilot subscription for org {organization} as module {module}", request.selected_usernames);
 
-        let address = format!("/org/{organization}/copilot/billing/selected_users");
+        let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
         match self.make_generic_post_request(address, &request, &module).await {
             Ok((status, Ok(_))) => {
@@ -85,7 +85,7 @@ impl Github {
 
         info!("Remove users {:?} from Copilot subscription for org {organization}", request.selected_usernames);
 
-        let address = format!("/org/{organization}/copilot/billing/selected_users");
+        let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
         match self.make_generic_delete_request(address, Some(&request), &module).await {
             Ok((status, Ok(_))) => {
