@@ -41,6 +41,7 @@ impl Github {
     pub async fn add_users_to_org_copilot(&self, params: &str, module: &str) -> Result<u32, ApiError> {
         #[derive(Deserialize, Serialize)]
         struct Request {
+            #[serde(skip_serializing)]
             org: String,
             selected_usernames: Vec<String>,
         }
@@ -76,6 +77,7 @@ impl Github {
     pub async fn remove_users_from_org_copilot(&self, params: &str, module: &str) -> Result<u32, ApiError> {
         #[derive(Deserialize, Serialize)]
         struct Request {
+            #[serde(skip_serializing)]
             org: String,
             selected_usernames: Vec<String>,
         }

@@ -471,7 +471,7 @@ pub fn to_api_function(
         "github_add_users_to_org_copilot" => {
             Function::new_typed_with_env(&mut store, &env, github_add_users_to_org_copilot)
         }
-        "github_remove_users_to_org_copilot" => {
+        "github_remove_users_from_org_copilot" => {
             Function::new_typed_with_env(&mut store, &env, github_remove_users_from_org_copilot)
         }
         "github_list_seats_in_org_copilot" => {

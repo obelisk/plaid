@@ -384,18 +384,21 @@ pub fn list_all_copilot_subscription_seats(org: &str) -> Result<Vec<CopilotSeat>
 /// * `user` - The user to add to Copilot subscription
 pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), PlaidFunctionError> {
     extern "C" {
-        new_host_function!(github, add_user_to_copilot_subscription);
+        new_host_function!(github, add_users_to_org_copilot);
     }
-
-    let mut params: HashMap<&'static str, &str> = HashMap::new();
-    params.insert("org", org);
-    let selected_users: Vec<String> = vec![user.to_owned()];
-    let selected_users = serde_json::to_string(&selected_users).unwrap();
-    params.insert("selected_usernames", &selected_users);
+    #[derive(Serialize)]
+    struct Params<'a> {
+        org: &'a str,
+        selected_usernames: Vec<&'a str>,
+    }
+    let params = Params {
+        org,
+        selected_usernames: vec![user],
+    };
 
     let params = serde_json::to_string(&params).unwrap();
     let res = unsafe {
-        github_add_user_to_copilot_subscription(params.as_bytes().as_ptr(), params.as_bytes().len())
+        github_add_users_to_org_copilot(params.as_bytes().as_ptr(), params.as_bytes().len())
     };
 
     // There was an error with the Plaid system. Maybe the API is not
@@ -414,18 +417,22 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), Pla
 /// * `user` - The user to remove from Copilot subscription
 pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<(), PlaidFunctionError> {
     extern "C" {
-        new_host_function!(github, remove_user_from_copilot_subscription);
+        new_host_function!(github, remove_users_from_org_copilot);
     }
 
-    let mut params: HashMap<&'static str, &str> = HashMap::new();
-    params.insert("org", org);
-    let selected_users: Vec<String> = vec![user.to_owned()];
-    let selected_users = serde_json::to_string(&selected_users).unwrap();
-    params.insert("selected_usernames", &selected_users);
+    #[derive(Serialize)]
+    struct Params<'a> {
+        org: &'a str,
+        selected_usernames: Vec<&'a str>,
+    }
+    let params = Params {
+        org,
+        selected_usernames: vec![user],
+    };
 
     let params = serde_json::to_string(&params).unwrap();
     let res = unsafe {
-        github_remove_user_from_copilot_subscription(params.as_bytes().as_ptr(), params.as_bytes().len())
+        github_remove_users_from_org_copilot(params.as_bytes().as_ptr(), params.as_bytes().len())
     };
 
     // There was an error with the Plaid system. Maybe the API is not
