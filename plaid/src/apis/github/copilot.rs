@@ -12,10 +12,14 @@ impl Github {
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         let organization = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
+        let per_page: u8 = request.get("per_page").unwrap_or(&"50")
+            .parse::<u8>().map_err(|_| ApiError::BadRequest)?;
+        let page: u16 = request.get("page").unwrap_or(&"1")
+            .parse::<u16>().map_err(|_| ApiError::BadRequest)?;
 
         info!("List seats in Copilot subscription for org {organization}");
 
-        let address = format!("/orgs/{organization}/copilot/billing/seats");
+        let address = format!("/orgs/{organization}/copilot/billing/seats?page={page}&per_page={per_page}");
 
         match self.make_generic_get_request(address, &module).await {
             Ok((status, Ok(body))) => {

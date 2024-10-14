@@ -43,7 +43,7 @@ pub struct CopilotAsignee {
 /// A seat in a Github Org Copilot subscription
 pub struct CopilotSeat {
     pub assignee: CopilotAsignee,
-    pub last_activity_at: String,
+    pub last_activity_at: Option<String>,
     pub plan_type: String,
 }
 
@@ -329,6 +329,8 @@ pub fn list_all_copilot_subscription_seats(org: &str) -> Result<Vec<CopilotSeat>
 
     let mut params: HashMap<&'static str, String> = HashMap::new();
     params.insert("org", org.to_string());
+    // 100 is max per page
+    params.insert("per_page", "100".to_string());
 
     let mut seats = Vec::<CopilotSeat>::new();
     let mut page = 0;
@@ -357,15 +359,17 @@ pub fn list_all_copilot_subscription_seats(org: &str) -> Result<Vec<CopilotSeat>
         }
 
         return_buffer.truncate(res as usize);
+
         // This should be safe because unless the Plaid runtime is expressly trying
         // to mess with us, this came from a String in the API module.
         let this_page = String::from_utf8(return_buffer).unwrap();
-        if this_page == "[]" {
-            break;
-        }
 
         let this_page = serde_json::from_str::<CopilotSeatsResult>(&this_page)
             .map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+        if this_page.seats.len() == 0 {
+            break;
+        }
 
         seats.extend(this_page.seats);
     }
