@@ -277,7 +277,7 @@ pub fn list_copilot_subscription_seats_by_page(
     page: Option<u64>,
 ) -> Result<Vec<CopilotSeat>, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(github, list_copilot_subscription_seats_by_page);
+        new_host_function_with_error_buffer!(github, list_seats_in_org_copilot);
     }
 
     let mut params: HashMap<&'static str, String> = HashMap::new();
@@ -295,7 +295,7 @@ pub fn list_copilot_subscription_seats_by_page(
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let res = unsafe {
-        github_list_copilot_subscription_seats_by_page(
+        github_list_seats_in_org_copilot(
             request.as_bytes().as_ptr(),
             request.as_bytes().len(),
             return_buffer.as_mut_ptr(),
@@ -324,7 +324,7 @@ pub fn list_copilot_subscription_seats_by_page(
 /// * `org` - The org owning the subscription
 pub fn list_all_copilot_subscription_seats(org: &str) -> Result<Vec<CopilotSeat>, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(github, list_all_copilot_subscription_seats);
+        new_host_function_with_error_buffer!(github, list_seats_in_org_copilot);
     }
 
     let mut params: HashMap<&'static str, String> = HashMap::new();
@@ -344,7 +344,7 @@ pub fn list_all_copilot_subscription_seats(org: &str) -> Result<Vec<CopilotSeat>
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
         let res = unsafe {
-            github_list_all_copilot_subscription_seats(
+            github_list_seats_in_org_copilot(
                 request.as_bytes().as_ptr(),
                 request.as_bytes().len(),
                 return_buffer.as_mut_ptr(),
