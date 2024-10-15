@@ -33,8 +33,9 @@ pub struct RepositoryCollaborator {
 
 #[derive(Debug, Deserialize)]
 /// A person assigned to a seat in a Github Org Copilot subscription
-pub struct CopilotAsignee {
+pub struct CopilotAssignee {
     pub login: String,
+    // type of assignee, such as "User"
     #[serde(rename = "type")]
     pub type_: String,
 }
@@ -42,7 +43,7 @@ pub struct CopilotAsignee {
 #[derive(Debug, Deserialize)]
 /// A seat in a Github Org Copilot subscription
 pub struct CopilotSeat {
-    pub assignee: CopilotAsignee,
+    pub assignee: CopilotAssignee,
     pub last_activity_at: Option<String>,
     pub plan_type: String,
 }
