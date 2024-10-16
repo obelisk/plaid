@@ -1,7 +1,12 @@
 [workspace]
 resolver = "2"
 
-members = ["plaid", "plaid-stl", "test_modules/persistent_response", "test_modules/time"]
+members = [
+    "plaid",
+    "plaid-stl",
+    "test_modules/persistent_response",
+    "test_modules/time",
+]
 
 [profile.release]
 lto = true
