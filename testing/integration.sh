@@ -4,16 +4,9 @@ set -e
 # Build all of the Plaid workspace
 PLATFORM=$(uname -a)
 
-# Rust on macOS seems to have issues building the wasm32-unknown-unknown target
-# without the target flag
-if [[ $PLATFORM == *"Darwin"* ]]; then
-  cargo build --package plaid --release
-  cargo build --package time --target wasm32-unknown-unknown --release
-  cargo build --package persistent_response --target wasm32-unknown-unknown --release
-else
-  cargo build --all --release
-fi
-
+cargo build --package plaid --release
+cargo build --package time --target wasm32-unknown-unknown --release
+cargo build --package persistent_response --target wasm32-unknown-unknown --release
 
 # Copy all the test modules in for loading
 mkdir -p modules
