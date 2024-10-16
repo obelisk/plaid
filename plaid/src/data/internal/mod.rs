@@ -19,7 +19,7 @@ const LOGBACK_NS: &str = "logback_internal";
 #[derive(Deserialize, Default)]
 pub struct InternalConfig {}
 
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct DelayedMessage {
     delay: u64,
     message: Message,
@@ -30,6 +30,14 @@ impl DelayedMessage {
         Self { delay, message }
     }
 }
+
+impl std::cmp::PartialEq for DelayedMessage {
+    fn eq(&self, other: &Self) -> bool {
+        self.delay == other.delay
+    }
+}
+
+impl std::cmp::Eq for DelayedMessage {}
 
 impl std::cmp::PartialOrd for DelayedMessage {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
