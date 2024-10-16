@@ -20,7 +20,7 @@ mkdir -p modules
 cp -r target/wasm32-unknown-unknown/release/*.wasm modules/
 
 # Run Plaid and wait for it to finish starting
-RUST_LOG=plaid=debug cargo run --bin=plaid -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
+RUST_LOG=plaid=debug cargo run --bin=plaid --release -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
 sleep 10
 
