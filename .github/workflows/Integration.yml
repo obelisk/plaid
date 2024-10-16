@@ -15,4 +15,4 @@ jobs:
 
     steps:
     - name: Run Integration Tests
-      run: ./tests/integration.sh
+      run: ./testing/integration.sh
