@@ -4,9 +4,10 @@ set -e
 # Build all of the Plaid workspace
 PLATFORM=$(uname -a)
 
-cargo build --package plaid --release
-cargo build --package time --target wasm32-unknown-unknown --release
-cargo build --package persistent_response --target wasm32-unknown-unknown --release
+cargo build --all --release
+#cargo build --package plaid --release
+#cargo build --package time --target wasm32-unknown-unknown --release
+#cargo build --package persistent_response --target wasm32-unknown-unknown --release
 
 # Copy all the test modules in for loading
 mkdir -p modules
