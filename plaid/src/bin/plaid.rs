@@ -79,14 +79,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         els.clone()
     );
 
-    let executor = Arc::new(executor);
+    let _executor = Arc::new(executor);
 
     info!("Configured Webhook Servers");
+    let webhook_server_post_log_sender = log_sender.clone();
     let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
         .webhooks
         .into_iter()
         .map(|(server_name, config)| {
-            let log_sender = log_sender.clone();
+            let webhook_server_post_log_sender = webhook_server_post_log_sender.clone();
             let server_address: SocketAddr = config
                 .listen_address
                 .parse()
@@ -123,7 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
 
                         // Webhook exists, buffer log
-                        if let Err(e) = log_sender.try_send(message) {
+                        if let Err(e) = webhook_server_post_log_sender.try_send(message) {
                             match e {
                                 TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
                                 // TODO: Have this actually cause Plaid to exit
@@ -138,16 +139,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // This is a cache for get requests that are configured to be cached
             // Webhook -> (timestamp, response)
             let get_cache: Arc<RwLock<HashMap<String, (u64, String)>>> = Arc::new(RwLock::new(HashMap::new()));
-            
+            let webhook_server_get_log_sender = log_sender.clone();
             let webhook_config = Arc::new(config);
             let get_route = warp::get()
                 .and(path!("webhook" / String))
                 .and(warp::query::<HashMap<String, String>>())
                 .and(with(webhook_config.clone()))
                 .and(with(modules_by_name.clone()))
-                .and(with(executor.clone()))
                 .and(with(get_cache.clone()))
-                .and_then(|webhook: String, query: HashMap<String, String>, webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, executor: Arc<Executor>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>| async move {
+                .and(with(webhook_server_get_log_sender.clone()))
+                .and_then(|webhook: String, query: HashMap<String, String>, webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: crossbeam_channel::Sender<Message>| async move {
                     if let Some(webhook_configuration) = webhook_config.webhooks.get(&webhook) {
                         match &webhook_configuration.get_mode {
                             // Note that CacheMode is elided here as there is no caching for static data
@@ -182,6 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 };
 
                                 info!("Received get request to: {webhook}. Handling with rule [{name}] to generate response");
+                                // I'm making the assumption here that getting the system time will never fail
                                 let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
                                 // Determine if we need to update the cache at the end of this request 
@@ -189,7 +191,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     CachingMode::Timed{validity} => {
                                         let cache = get_cache.read().await;
                                         if let Some(cached_response) = cache.get(&webhook) {
-                                            // I'm making the assumption here that getting the system time will never fail
                                             if cached_response.0 + validity > current_time {
                                                 info!("Returning cached response (valid for {} more seconds) for get request to: {webhook}", cached_response.0 + validity - current_time);
                                                 return Ok(warp::reply::html(cached_response.1.clone()));
@@ -227,6 +228,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                                 let logbacks_allowed = webhook_configuration.logbacks_allowed.clone();
 
+                                let (response_send, response_recv) = tokio::sync::oneshot::channel();
+
                                 // Construct a message to send to the rule
                                 let message = Message {
                                     type_: name.to_string(),
@@ -234,21 +237,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     accessory_data: query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
                                     source,
                                     logbacks_allowed,
+                                    response_sender: Some(response_send),
+                                    module: Some(rule.clone()),
                                 };
-                                // We need to spawn blocking here because the executor is not async
-                                // and it will need to block inside the host API functions to call other async
-                                // functions on a different runtime.
-                                //
-                                // As far as I can tell there is no way around this since WASM host functions
-                                // cannot be async. I am afraid this prevents a denial of service risk because of
-                                // the way this works but I don't see a way around it right now.
-                                let rule = rule.clone();
-                                let response = tokio::task::spawn_blocking(move || {
-                                    executor.immediate_execute(message, rule) 
-                                }).await;
 
-                                match response {
-                                    Ok(Ok(Some(response)))=> {
+                                // Put the message into the standard message queue
+                                if let Err(e) = log_sender.try_send(message) {
+                                    match e {
+                                        TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
+                                        // TODO: Have this actually cause Plaid to exit
+                                        TrySendError::Disconnected(_) => panic!("The execution system is no longer accepting messages. Nothing can continue."),
+                                    }
+                                }
+
+                                match response_recv.await {
+                                    Ok(Some(response))=> {
                                         if update {
                                             info!("Updating cache for get request to: {webhook}");
                                             let mut cache = get_cache.write().await;
@@ -256,16 +259,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                         Ok(warp::reply::html(response))
                                     },
-                                    Ok(Ok(None)) => {
+                                    Ok(None) => {
                                         warn!("Got a get request to {webhook} but the rule [{name}] configured to handle it did not return a response");
                                         Ok(warp::reply::html(String::new()))
                                     }
-                                    Ok(Err(e)) => {
+                                    Err(e) => {
                                         error!("Got a get request to {webhook} but the rule [{name}] configured to handle it threw an error: {e}");
-                                        Ok(warp::reply::html(String::new()))
-                                    }
-                                    _ => {
-                                        error!("Got a get request to {webhook} but errored spawing the blocking task. Perhaps server overloaded?");
                                         Ok(warp::reply::html(String::new()))
                                     }
                                 }
