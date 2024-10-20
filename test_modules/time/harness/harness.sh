@@ -7,7 +7,7 @@ URL="timetest"
 FILE="received_data.$URL.txt"
 
 # Start the webhook
-./target/debug/request_handler > $FILE &
+./target/release/request_handler > $FILE &
 if [ $? -ne 0 ]; then
   echo "Failed to start request handler"
   rm $FILE
