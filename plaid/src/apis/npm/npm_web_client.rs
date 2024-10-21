@@ -251,7 +251,7 @@ impl Npm {
                 .clone()
                 .unwrap_or(vec!["".to_string()]),
             csrftoken: &csrf_token,
-            expiration_days: &specs.expiration_days.unwrap_or(365).to_string(),
+            expiration_days: &specs.expiration_days.unwrap_or(30).to_string(),
             orgs_permission: &params
                 .specs
                 .orgs_permission
