@@ -1,5 +1,6 @@
 use crate::apis::Api;
 
+use crate::benchmark::ModulePerformanceMetadata;
 use crate::functions::{
     create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
 };
@@ -9,6 +10,7 @@ use crate::storage::Storage;
 
 use crossbeam_channel::Receiver;
 use tokio::sync::oneshot::Sender as OneShotSender;
+use crossbeam_channel::{Receiver, Sender};
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Serialize};
@@ -19,6 +21,7 @@ use lru::LruCache;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 /// When a rule is used to generate a response to a GET request, this structure
 /// is what is passed from the executor to the async webhook runtime.
@@ -475,6 +478,7 @@ fn execution_loop(
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
     els: Logger,
+    benchmark_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
     // Wait on our receiver for logs to come in
     while let Ok(message) = receiver.recv() {
@@ -547,6 +551,7 @@ impl Executor {
         storage: Option<Arc<Storage>>,
         execution_threads: u8,
         els: Logger,
+        benchmark_mode: Option<Sender<ModulePerformanceMetadata>>,
     ) -> Self {
         let mut _handles = vec![];
         for i in 0..execution_threads {
@@ -556,8 +561,9 @@ impl Executor {
             let storage = storage.clone();
             let modules = modules.clone();
             let els = els.clone();
+            let benchmark_data_sender = benchmark_mode.clone();
             _handles.push(thread::spawn(move || {
-                execution_loop(receiver, modules, api, storage, els)
+                execution_loop(receiver, modules, api, storage, els, benchmark_data_sender)
             }));
         }
 

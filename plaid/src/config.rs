@@ -6,6 +6,8 @@ use serde::{de, Deserialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+use crate::benchmark::Benchmarking;
+
 use super::apis::Apis;
 use super::data::DataConfig;
 use super::loader::Configuration as LoaderConfiguration;
@@ -114,6 +116,10 @@ pub struct Configuration {
     /// The maximum number of logs in the queue to be processed at once
     #[serde(default = "default_log_queue_size")]
     pub log_queue_size: usize,
+    /// Configuration for how Plaid benchmarks rules. When enabled,
+    /// Plaid outputs a metrics file with performance metadata for all
+    /// rules than have been run at least once.
+    pub benchmark_mode: Option<Benchmarking>,
     /// Configuration for persistent data. This allows modules to store data between
     /// invocations
     pub storage: Option<StorageConfig>,

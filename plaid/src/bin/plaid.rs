@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate log;
 
+use benchmark::ModulePerformanceMetadata;
 use plaid::{config::{CachingMode, GetMode, ResponseMode, WebhookServerConfiguration}, loader::PlaidModule, logging::Logger, *};
 
 use apis::Api;
@@ -8,9 +9,9 @@ use data::Data;
 use executor::*;
 use plaid_stl::messages::LogSource;
 use storage::Storage;
-use tokio::{sync::RwLock, task::JoinSet};
+use tokio::{signal, sync::{broadcast, RwLock}, task::JoinSet};
 
-use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::{atomic::{AtomicBool, Ordering}, Arc}, time::{SystemTime, UNIX_EPOCH}};
 
 use crossbeam_channel::{bounded, TrySendError};
 use warp::{hyper::body::Bytes, path, Filter, http::HeaderMap};
@@ -57,6 +58,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create an Arc so all the handlers have access to our API object
     let api = Arc::new(api);
 
+    // Graceful shutdown handling
+    let (shutdown_tx, _) = broadcast::channel(1);
+    let shutdown_initiated = Arc::new(AtomicBool::new(false));
+
+    // Listen for Ctrl+C or SIGTERM and trigger graceful shutdown
+    let s = shutdown_initiated.clone();
+    let shutdown = shutdown_tx.clone();
+    tokio::spawn(async move {
+        signal::ctrl_c().await.expect("Failed to listen for shutdown signal");
+        info!("Shutdown signal received, shutting down...");
+        s.store(true, Ordering::SeqCst);  
+        let _ = shutdown.send(());
+    });
+
+    let (benchmark_sender, benchmark_handle) = match config.benchmark_mode {
+        Some(benchmark) => {
+            warn!("Plaid is running in benchmark mode - this is not recommended for production deployments. Metadata about rule execution will be logged to a benchmarking channel that aggregates and reports metrics.");
+            let (sender, rx) = crossbeam_channel::unbounded::<ModulePerformanceMetadata>();
+    
+            let handle = tokio::task::spawn(async move {
+                benchmark.benchmark_loop(rx, shutdown_initiated).await;
+            });    
+
+            (Some(sender), Some(handle))
+        },
+        None => (None, None)
+    };
+
     info!("Loading all the modules");
     // Load all the modules that form our Nanoservices and Plaid rules
     let modules = Arc::new(loader::load(config.loading).unwrap());
@@ -75,7 +104,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         api,
         storage,
         config.execution_threads,
-        els.clone()
+        els.clone(),
+        benchmark_sender.clone()
     );
 
     let _executor = Arc::new(executor);
@@ -295,9 +325,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut join_set = JoinSet::from_iter(webhook_servers);
 
-    while let Some(_) = join_set.join_next().await {}
-    //futures::future::join_all(webhook_servers).await;
+    // Listen for a shutdown signal or if any task in join_set finishes
+    let mut shutdown_rx = shutdown_tx.subscribe(); 
+    tokio::select! {
+        _ = join_set.join_next() => {
+            info!("A webserver task finished unexpectedly, triggering shutdown.");
+            // Send a shutdown signal
+            let _ = shutdown_tx.send(());
+        },
+        _ = shutdown_rx.recv() => {
+            info!("Shutdown signal received.");
+        }
+    }
 
+    // Ensure that the benchmarking loop exits before finishing shutdown.
+    // We do this to guarantee that benchmark data gets written to a file.
+    if let Some(handle) = benchmark_handle {
+        let _ = handle.await;
+    }
+
+    // We can also trigger shutdown of the execution loop here and guarantee that no logs get dropped
+    // on shutdown by waiting for the queue to empty.
+
+    info!("Plaid shutdown complete.");
     Ok(())
 }
 
