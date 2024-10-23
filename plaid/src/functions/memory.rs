@@ -5,7 +5,7 @@ use crate::executor::Env;
 use super::FunctionErrors;
 
 /// When a host function is executing we need to be able to access the guest's memory
-/// for read and write operations. This safely gets those from teh environment and
+/// for read and write operations. This safely gets those from the environment and
 /// handles all failure cases.
 pub fn get_memory<'a>(env: &FunctionEnvMut<Env>, store: &'a StoreRef) -> Result<MemoryView<'a>, FunctionErrors> {
     // Fetch the store and memory which make up the needed components
