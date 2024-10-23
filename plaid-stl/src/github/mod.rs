@@ -397,7 +397,7 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<u32, Pl
         selected_usernames: vec![user],
     };
 
-    const RETURN_BUFFER_SIZE: usize = 32; // 32 bytes
+    const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let params = serde_json::to_string(&params).unwrap();
@@ -446,7 +446,7 @@ pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<u3
         selected_usernames: vec![user],
     };
 
-    const RETURN_BUFFER_SIZE: usize = 32; // 32 bytes
+    const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let params = serde_json::to_string(&params).unwrap();
