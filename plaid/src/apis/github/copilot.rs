@@ -38,7 +38,6 @@ impl Github {
 
     // Add users to the Copilot subscription for an organization
     // See https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#add-users-to-the-copilot-subscription-for-an-organization for more details
-    // Returns the number of users successfully added to the subscription if the API call succeeds
     pub async fn add_users_to_org_copilot(&self, params: &str, module: &str) -> Result<String, ApiError> {
         #[derive(Deserialize, Serialize)]
         struct Request {
@@ -58,18 +57,10 @@ impl Github {
 
         let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
-        #[derive(Deserialize, Serialize)]
-        struct Response {
-            seats_created: u32,
-        }
-
         match self.make_generic_post_request(address, &request, &module).await {
             Ok((status, Ok(body))) => {
                 if status == 201 {
-                    let response: Response = serde_json::from_str(&body)
-                        .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
-
-                    Ok(response.seats_created.to_string())
+                    Ok(body)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
@@ -83,7 +74,6 @@ impl Github {
 
     // Remove users from the Copilot subscription for an organization
     // See https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#remove-users-from-the-copilot-subscription-for-an-organization for more details
-    // Returns the number of users successfully removed from the subscription if the API call succeeds
     pub async fn remove_users_from_org_copilot(&self, params: &str, module: &str) -> Result<String, ApiError> {
         #[derive(Deserialize, Serialize)]
         struct Request {
@@ -103,18 +93,10 @@ impl Github {
 
         let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
-        #[derive(Deserialize, Serialize)]
-        struct Response {
-            seats_cancelled: u32,
-        }
-
         match self.make_generic_delete_request(address, Some(&request), &module).await {
             Ok((status, Ok(body))) => {
                 if status == 200 {
-                    let response: Response = serde_json::from_str(&body)
-                        .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
-
-                    Ok(response.seats_cancelled.to_string())
+                    Ok(body)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,

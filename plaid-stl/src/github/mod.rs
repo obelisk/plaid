@@ -383,7 +383,7 @@ pub fn list_all_copilot_subscription_seats(org: &str) -> Result<Vec<CopilotSeat>
 ///
 /// * `org` - The org owning the subscription
 /// * `user` - The user to add to Copilot subscription
-pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<u32, PlaidFunctionError> {
+pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, add_users_to_org_copilot);
     }
@@ -420,12 +420,10 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<u32, Pl
 
     // This should be safe because unless the Plaid runtime is expressly trying
     // to mess with us, this came from a String in the API module.
-    let seats_created = String::from_utf8(return_buffer)
-        .map_err(|_| PlaidFunctionError::InternalApiError)?;
-    let seats_created: u32 = seats_created.parse()
+    let response_body = String::from_utf8(return_buffer)
         .map_err(|_| PlaidFunctionError::InternalApiError)?;
 
-    Ok(seats_created)
+    Ok(response_body)
 }
 
 /// Remove a user from the org's Copilot subscription
@@ -433,7 +431,7 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<u32, Pl
 ///
 /// * `org` - The org owning the subscription
 /// * `user` - The user to remove from Copilot subscription
-pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<u32, PlaidFunctionError> {
+pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, remove_users_from_org_copilot);
     }
@@ -471,12 +469,10 @@ pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<u3
 
     // This should be safe because unless the Plaid runtime is expressly trying
     // to mess with us, this came from a String in the API module.
-    let seats_cancelled = String::from_utf8(return_buffer)
-        .map_err(|_| PlaidFunctionError::InternalApiError)?;
-    let seats_cancelled: u32 = seats_cancelled.parse()
+    let response_body = String::from_utf8(return_buffer)
         .map_err(|_| PlaidFunctionError::InternalApiError)?;
 
-    Ok(seats_cancelled)
+    Ok(response_body)
 }
 
 /// TODO: Do not use this function, it is deprecated and will be removed soon
