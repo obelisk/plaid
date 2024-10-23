@@ -63,6 +63,8 @@ pub struct Env {
     // A special value that can be filled to leave a string response available after
     // the module has execute. Generally this is used for GET mode responses.
     pub response: Option<String>,
+    // Context about error encountered by the module during its execution
+    pub execution_error_context: Option<String>,
 }
 
 pub struct Executor {
@@ -103,7 +105,7 @@ impl std::fmt::Display for ExecutorError {
 
 pub enum ModuleExecutionError {
     ComputationExhausted(u64),
-    ModuleErrorCode(i32),
+    ModuleError(String),
     PersistentResponseNotAllowed,
     PersistentResponseTooLarge {
         max_size: usize,
@@ -125,8 +127,11 @@ impl std::fmt::Display for ModuleExecutionError {
             ModuleExecutionError::ComputationExhausted(limit) => {
                 write!(f, "Computation Exhaused. Limit: [{limit}]")
             }
-            ModuleExecutionError::ModuleErrorCode(error_code) => {
-                write!(f, "Module returned error code. Code: [{error_code}]")
+            ModuleExecutionError::ModuleError(context) => {
+                write!(
+                    f,
+                    "Module encountered an error. Additional context: [{context}]"
+                )
             }
             ModuleExecutionError::UnknownExecutionError(error) => {
                 write!(f, "Unknown execution error. Error: [{error}]")
@@ -187,6 +192,7 @@ fn prepare_for_execution(
         external_logging_system: els.clone(),
         memory: None,
         response,
+        execution_error_context: None,
     };
 
     let env = FunctionEnv::new(&mut store, env);
@@ -369,7 +375,12 @@ fn execution_loop(
             let error = match entrypoint.call(&mut store) {
                 Ok(n) => {
                     if n != 0 {
-                        Some(ModuleExecutionError::ModuleErrorCode(n))
+                        Some(ModuleExecutionError::ModuleError(
+                            env.as_ref(&store)
+                                .execution_error_context
+                                .clone()
+                                .unwrap_or("> empty <".to_string()),
+                        ))
                     } else {
                         // This should always work because when computation is exhausted,
                         // we end up in the RuntimeError block.
@@ -387,7 +398,13 @@ fn execution_loop(
                         None
                     }
                 }
-                Err(e) => Some(determine_error(e, computation_limit, &instance, &mut store)),
+                Err(e) => Some(determine_error(
+                    e,
+                    computation_limit,
+                    &instance,
+                    &mut store,
+                    &env,
+                )),
             };
 
             // If there was an error then log that it happened to the els
@@ -414,6 +431,7 @@ fn determine_error(
     computation_limit: u64,
     instance: &Instance,
     mut store: &mut Store,
+    env: &FunctionEnv<Env>,
 ) -> ModuleExecutionError {
     // First check to see if we've exhausted computation
     if let MeteringPoints::Exhausted = get_remaining_points(&mut store, &instance) {
@@ -421,7 +439,13 @@ fn determine_error(
     }
 
     // If all else fails, it's an unknown error
-    ModuleExecutionError::UnknownExecutionError(format!("{e}"))
+    ModuleExecutionError::UnknownExecutionError(format!(
+        "{e}. Additional context: {}",
+        env.as_ref(&store)
+            .execution_error_context
+            .clone()
+            .unwrap_or("This is probably an OOM error".to_string())
+    ))
 }
 
 impl Executor {
@@ -483,7 +507,12 @@ impl Executor {
             Ok(n) => {
                 if n != 0 {
                     Err(ExecutorError::ModuleExecutionError(
-                        ModuleExecutionError::ModuleErrorCode(n),
+                        ModuleExecutionError::ModuleError(
+                            env.as_ref(&store)
+                                .execution_error_context
+                                .clone()
+                                .unwrap_or("> empty <".to_string()),
+                        ),
                     ))
                 } else {
                     // This should always work because when computation is exhausted,
@@ -510,6 +539,7 @@ impl Executor {
                 computation_limit,
                 &instance,
                 &mut store,
+                &env,
             ))),
         }
     }

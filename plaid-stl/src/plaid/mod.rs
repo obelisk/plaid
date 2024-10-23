@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::PlaidFunctionError;
 
 pub mod cache;
@@ -184,4 +186,15 @@ pub fn get_response() -> Result<String, PlaidFunctionError> {
         Ok(s) => Ok(s),
         Err(_) => Err(PlaidFunctionError::ParametersNotUtf8),
     }
+}
+
+/// Give the runtime more context about an error encountered during execution
+pub fn set_error_context(context: impl Display) {
+    extern "C" {
+        fn set_error_context(data_buffer: *const u8, buffer_size: u32);
+    }
+    let context_bytes = context.to_string().as_bytes().to_vec();
+    unsafe {
+        set_error_context(context_bytes.as_ptr(), context_bytes.len() as u32);
+    };
 }
