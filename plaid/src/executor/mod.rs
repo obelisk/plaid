@@ -1,5 +1,6 @@
 use crate::apis::Api;
 
+use crate::benchmark::ModulePerformanceMetadata;
 use crate::functions::{
     create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
 };
@@ -7,7 +8,7 @@ use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
 use crate::storage::Storage;
 
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, Sender};
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,7 @@ use lru::LruCache;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
@@ -301,6 +303,7 @@ fn execution_loop(
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
     els: Logger,
+    benchmark_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
     // Wait on our receiver for logs to come in
     while let Ok(message) = receiver.recv() {
@@ -318,6 +321,8 @@ fn execution_loop(
 
         // For every module that operates on that log type
         for plaid_module in execution_modules {
+            let begin = Instant::now();
+
             // Mark this rule as currently being processed by locking the mutex
             // This lock will be dropped at the end of the iteration so we don't
             // need to handle unlocking it
@@ -368,6 +373,7 @@ fn execution_loop(
             // Call the entrypoint
             let error = match entrypoint.call(&mut store) {
                 Ok(n) => {
+                    let execution_time = begin.elapsed();
                     if n != 0 {
                         Some(ModuleExecutionError::ModuleErrorCode(n))
                     } else {
@@ -383,6 +389,17 @@ fn execution_loop(
                                 format!("{}_computation_percentage_used", plaid_module.name),
                                 computation_used as i64,
                             )?;
+
+                            // If benchmarking is enabled, log data to the benchmarking system
+                            if let Some(ref sender) = benchmark_mode {
+                                if let Err(e) = sender.send(ModulePerformanceMetadata {
+                                    module: plaid_module.name.clone(),
+                                    execution_time: execution_time.as_micros(),
+                                    computation_used: computation_limit - remaining,
+                                }) {
+                                    error!("Failed to send rule execution metadata to benchmarking system for {}. Error: {e}", plaid_module.name)
+                                }
+                            }
                         }
                         None
                     }
@@ -432,6 +449,7 @@ impl Executor {
         storage: Option<Arc<Storage>>,
         execution_threads: u8,
         els: Logger,
+        benchmark_mode: Option<Sender<ModulePerformanceMetadata>>,
     ) -> Self {
         let mut _handles = vec![];
         for i in 0..execution_threads {
@@ -441,8 +459,9 @@ impl Executor {
             let storage = storage.clone();
             let modules = modules.clone();
             let els = els.clone();
+            let benchmark_data_sender = benchmark_mode.clone();
             _handles.push(thread::spawn(move || {
-                execution_loop(receiver, modules, api, storage, els)
+                execution_loop(receiver, modules, api, storage, els, benchmark_data_sender)
             }));
         }
 

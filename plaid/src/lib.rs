@@ -2,6 +2,7 @@
 extern crate log;
 
 pub mod apis;
+pub mod benchmark;
 pub mod config;
 pub mod data;
 pub mod executor;
