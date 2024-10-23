@@ -111,10 +111,17 @@ macro_rules! entrypoint {
                 Ok(s) => s,
                 Err(_) => return -2,
             };
+            
+            std::panic::set_hook(Box::new(|panic_info| {
+                plaid::set_error_context(panic_info.to_string());
+            }));
 
             match main(log) {
                 Ok(_) => 0,
-                Err(n) => n,
+                Err(e) => {
+                    plaid::set_error_context(e.to_string());
+                    1
+                }
             }
         }
     };
@@ -179,9 +186,16 @@ macro_rules! entrypoint_with_source {
                 Err(_) => return -2,
             };
 
+            std::panic::set_hook(Box::new(|panic_info| {
+                plaid::set_error_context(panic_info.to_string());
+            }));
+
             match main(log, source) {
                 Ok(_) => 0,
-                Err(n) => n,
+                Err(e) => {
+                    plaid::set_error_context(e.to_string());
+                    1
+                }
             }
         }
     };
@@ -247,6 +261,10 @@ macro_rules! entrypoint_with_source_and_response {
                 Err(_) => return -2,
             };
 
+            std::panic::set_hook(Box::new(|panic_info| {
+                plaid::set_error_context(panic_info.to_string());
+            }));
+
             match main(log, source) {
                 Ok(Some(response)) => {
                     let response_bytes = response.as_bytes().to_vec();
@@ -256,7 +274,10 @@ macro_rules! entrypoint_with_source_and_response {
                     0
                 }
                 Ok(None) => 0,
-                Err(n) => n,
+                Err(e) => {
+                    plaid::set_error_context(e.to_string());
+                    1
+                }
             }
         }
     };
