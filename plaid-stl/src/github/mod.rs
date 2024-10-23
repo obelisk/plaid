@@ -383,9 +383,9 @@ pub fn list_all_copilot_subscription_seats(org: &str) -> Result<Vec<CopilotSeat>
 ///
 /// * `org` - The org owning the subscription
 /// * `user` - The user to add to Copilot subscription
-pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), PlaidFunctionError> {
+pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<u32, PlaidFunctionError> {
     extern "C" {
-        new_host_function!(github, add_users_to_org_copilot);
+        new_host_function_with_error_buffer!(github, add_users_to_org_copilot);
     }
     #[derive(Serialize)]
     struct Params<'a> {
@@ -397,9 +397,17 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), Pla
         selected_usernames: vec![user],
     };
 
+    const RETURN_BUFFER_SIZE: usize = 4; // 4 bytes
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
     let params = serde_json::to_string(&params).unwrap();
     let res = unsafe {
-        github_add_users_to_org_copilot(params.as_bytes().as_ptr(), params.as_bytes().len())
+        github_add_users_to_org_copilot(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
     };
 
     // There was an error with the Plaid system. Maybe the API is not
@@ -408,7 +416,13 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), Pla
         return Err(res.into());
     }
 
-    Ok(())
+    // Convert the Vec<u8> to an array [u8; 4]
+    // This should never fail since our own API returns u32
+    let return_buffer: [u8; 4] = return_buffer.try_into()
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+    let seats_created = u32::from_be_bytes(return_buffer);
+
+    Ok(seats_created)
 }
 
 /// Remove a user from the org's Copilot subscription
@@ -416,9 +430,9 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), Pla
 ///
 /// * `org` - The org owning the subscription
 /// * `user` - The user to remove from Copilot subscription
-pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<(), PlaidFunctionError> {
+pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<u32, PlaidFunctionError> {
     extern "C" {
-        new_host_function!(github, remove_users_from_org_copilot);
+        new_host_function_with_error_buffer!(github, remove_users_from_org_copilot);
     }
 
     #[derive(Serialize)]
@@ -431,9 +445,17 @@ pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<()
         selected_usernames: vec![user],
     };
 
+    const RETURN_BUFFER_SIZE: usize = 4; // 4 bytes
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
     let params = serde_json::to_string(&params).unwrap();
     let res = unsafe {
-        github_remove_users_from_org_copilot(params.as_bytes().as_ptr(), params.as_bytes().len())
+        github_remove_users_from_org_copilot(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
     };
 
     // There was an error with the Plaid system. Maybe the API is not
@@ -442,7 +464,16 @@ pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<()
         return Err(res.into());
     }
 
-    Ok(())
+    return_buffer.truncate(res as usize);
+
+    // Convert the Vec<u8> to an array [u8; 4]
+    // This should never fail since our own API returns u32
+    //
+    let return_buffer: [u8; 4] = return_buffer.try_into()
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+    let seats_cancelled = u32::from_be_bytes(return_buffer);
+
+    Ok(seats_cancelled)
 }
 
 /// TODO: Do not use this function, it is deprecated and will be removed soon
