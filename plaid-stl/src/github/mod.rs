@@ -416,6 +416,8 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<u32, Pl
         return Err(res.into());
     }
 
+    return_buffer.truncate(res as usize);
+
     // This should be safe because unless the Plaid runtime is expressly trying
     // to mess with us, this came from a String in the API module.
     let seats_created = String::from_utf8(return_buffer)
