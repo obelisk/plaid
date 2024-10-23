@@ -39,7 +39,7 @@ impl Github {
     // Add users to the Copilot subscription for an organization
     // See https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#add-users-to-the-copilot-subscription-for-an-organization for more details
     // Returns the number of users successfully added to the subscription if the API call succeeds
-    pub async fn add_users_to_org_copilot(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+    pub async fn add_users_to_org_copilot(&self, params: &str, module: &str) -> Result<String, ApiError> {
         #[derive(Deserialize, Serialize)]
         struct Request {
             #[serde(skip_serializing)]
@@ -69,7 +69,7 @@ impl Github {
                     let response: Response = serde_json::from_str(&body)
                         .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
 
-                    Ok(response.seats_created)
+                    Ok(response.seats_created.to_string())
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
@@ -84,7 +84,7 @@ impl Github {
     // Remove users from the Copilot subscription for an organization
     // See https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#remove-users-from-the-copilot-subscription-for-an-organization for more details
     // Returns the number of users successfully removed from the subscription if the API call succeeds
-    pub async fn remove_users_from_org_copilot(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+    pub async fn remove_users_from_org_copilot(&self, params: &str, module: &str) -> Result<String, ApiError> {
         #[derive(Deserialize, Serialize)]
         struct Request {
             #[serde(skip_serializing)]
@@ -114,7 +114,7 @@ impl Github {
                     let response: Response = serde_json::from_str(&body)
                         .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
 
-                    Ok(response.seats_cancelled)
+                    Ok(response.seats_cancelled.to_string())
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,

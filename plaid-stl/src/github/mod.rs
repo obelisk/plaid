@@ -397,7 +397,7 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<u32, Pl
         selected_usernames: vec![user],
     };
 
-    const RETURN_BUFFER_SIZE: usize = 4; // 4 bytes
+    const RETURN_BUFFER_SIZE: usize = 32; // 32 bytes
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let params = serde_json::to_string(&params).unwrap();
@@ -416,11 +416,12 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<u32, Pl
         return Err(res.into());
     }
 
-    // Convert the Vec<u8> to an array [u8; 4]
-    // This should never fail since our own API returns u32
-    let return_buffer: [u8; 4] = return_buffer.try_into()
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let seats_created = String::from_utf8(return_buffer)
         .map_err(|_| PlaidFunctionError::InternalApiError)?;
-    let seats_created = u32::from_be_bytes(return_buffer);
+    let seats_created: u32 = seats_created.parse()
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
 
     Ok(seats_created)
 }
@@ -445,7 +446,7 @@ pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<u3
         selected_usernames: vec![user],
     };
 
-    const RETURN_BUFFER_SIZE: usize = 4; // 4 bytes
+    const RETURN_BUFFER_SIZE: usize = 32; // 32 bytes
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let params = serde_json::to_string(&params).unwrap();
@@ -466,12 +467,12 @@ pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<u3
 
     return_buffer.truncate(res as usize);
 
-    // Convert the Vec<u8> to an array [u8; 4]
-    // This should never fail since our own API returns u32
-    //
-    let return_buffer: [u8; 4] = return_buffer.try_into()
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let seats_cancelled = String::from_utf8(return_buffer)
         .map_err(|_| PlaidFunctionError::InternalApiError)?;
-    let seats_cancelled = u32::from_be_bytes(return_buffer);
+    let seats_cancelled: u32 = seats_cancelled.parse()
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
 
     Ok(seats_cancelled)
 }
