@@ -106,7 +106,7 @@ where
 /// Default value for `hearbeat_interval` in `LoggingConfiguration` in the event
 /// that one is not provided
 fn default_log_heartbeat_interval() -> Duration {
-    Duration::from_secs(3)
+    Duration::from_secs(300)
 }
 
 #[derive(Debug)]
