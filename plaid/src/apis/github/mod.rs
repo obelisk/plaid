@@ -65,6 +65,7 @@ pub enum GitHubError {
     GraphQLRequestError(String),
     ClientError(octocrab::Error),
     InvalidInput(String),
+    BadResponse,
 }
 
 impl Github {

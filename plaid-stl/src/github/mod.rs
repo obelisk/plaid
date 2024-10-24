@@ -54,6 +54,16 @@ pub struct CopilotSeatsResult {
     pub seats: Vec<CopilotSeat>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CopilotAddUsersResponse {
+    pub seats_created: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CopilotRemoveUsersResponse {
+    pub seats_cancelled: u64,
+}
+
 // Structs used for deserializing GH's responses when searching for code
 
 #[derive(Debug, Deserialize)]
@@ -383,9 +393,9 @@ pub fn list_all_copilot_subscription_seats(org: &str) -> Result<Vec<CopilotSeat>
 ///
 /// * `org` - The org owning the subscription
 /// * `user` - The user to add to Copilot subscription
-pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), PlaidFunctionError> {
+pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<CopilotAddUsersResponse, PlaidFunctionError> {
     extern "C" {
-        new_host_function!(github, add_users_to_org_copilot);
+        new_host_function_with_error_buffer!(github, add_users_to_org_copilot);
     }
     #[derive(Serialize)]
     struct Params<'a> {
@@ -397,9 +407,17 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), Pla
         selected_usernames: vec![user],
     };
 
+    const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
     let params = serde_json::to_string(&params).unwrap();
     let res = unsafe {
-        github_add_users_to_org_copilot(params.as_bytes().as_ptr(), params.as_bytes().len())
+        github_add_users_to_org_copilot(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
     };
 
     // There was an error with the Plaid system. Maybe the API is not
@@ -408,7 +426,16 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), Pla
         return Err(res.into());
     }
 
-    Ok(())
+    return_buffer.truncate(res as usize);
+
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response_body = String::from_utf8(return_buffer)
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+    let response_body = serde_json::from_str::<CopilotAddUsersResponse>(&response_body)
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    Ok(response_body)
 }
 
 /// Remove a user from the org's Copilot subscription
@@ -416,9 +443,9 @@ pub fn add_user_to_copilot_subscription(org: &str, user: &str) -> Result<(), Pla
 ///
 /// * `org` - The org owning the subscription
 /// * `user` - The user to remove from Copilot subscription
-pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<(), PlaidFunctionError> {
+pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<CopilotRemoveUsersResponse, PlaidFunctionError> {
     extern "C" {
-        new_host_function!(github, remove_users_from_org_copilot);
+        new_host_function_with_error_buffer!(github, remove_users_from_org_copilot);
     }
 
     #[derive(Serialize)]
@@ -431,9 +458,17 @@ pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<()
         selected_usernames: vec![user],
     };
 
+    const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
     let params = serde_json::to_string(&params).unwrap();
     let res = unsafe {
-        github_remove_users_from_org_copilot(params.as_bytes().as_ptr(), params.as_bytes().len())
+        github_remove_users_from_org_copilot(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
     };
 
     // There was an error with the Plaid system. Maybe the API is not
@@ -442,7 +477,16 @@ pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<()
         return Err(res.into());
     }
 
-    Ok(())
+    return_buffer.truncate(res as usize);
+
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response_body = String::from_utf8(return_buffer)
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+    let response_body = serde_json::from_str::<CopilotRemoveUsersResponse>(&response_body)
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    Ok(response_body)
 }
 
 /// TODO: Do not use this function, it is deprecated and will be removed soon
