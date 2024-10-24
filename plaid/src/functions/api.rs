@@ -10,7 +10,7 @@ macro_rules! impl_new_function {
                 let store = env.as_store_ref();
                 let env_data = env.data();
 
-                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.name.clone(), stringify!([< $api _ $function_name >]).to_string()) {
+                if let Err(e) = env_data.external_logging_system.log_function_call_sync(env_data.name.clone(), stringify!([< $api _ $function_name >]).to_string()) {
                     error!("Logging system is not working!!: {:?}", e);
                     return Err(FunctionErrors::InternalApiError);
                 }
@@ -70,7 +70,7 @@ macro_rules! impl_new_function_with_error_buffer {
                 let store = env.as_store_ref();
                 let env_data = env.data();
 
-                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.name.clone(), stringify!([< $api _ $function_name >]).to_string()) {
+                if let Err(e) = env_data.external_logging_system.log_function_call_sync(env_data.name.clone(), stringify!([< $api _ $function_name >]).to_string()) {
                     error!("Logging system is not working!!: {:?}", e);
                     return Err(FunctionErrors::InternalApiError);
                 }
@@ -158,7 +158,7 @@ macro_rules! impl_new_sub_module_function_with_error_buffer {
                 let env_data = env.data();
 
                 // Log function call by module
-                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.name.clone(), stringify!([< $api _ $sub_module _ $function_name >]).to_string()) {
+                if let Err(e) = env_data.external_logging_system.log_function_call_sync(env_data.name.clone(), stringify!([< $api _ $sub_module _ $function_name >]).to_string()) {
                     error!("Logging system is not working!!: {:?}", e);
                     return Err(FunctionErrors::InternalApiError);
                 }
@@ -346,7 +346,7 @@ pub fn to_api_function(
         }
         "cache_get" => Function::new_typed_with_env(&mut store, &env, super::internal::cache_get),
         "log_back" => Function::new_typed_with_env(&mut store, &env, super::internal::log_back),
-        
+
         // Npm Calls
         "npm_publish_empty_stub" => {
             Function::new_typed_with_env(&mut store, &env, npm_publish_empty_stub)
@@ -368,9 +368,7 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, npm_list_granular_tokens)
         }
 
-        "npm_delete_package" => {
-            Function::new_typed_with_env(&mut store, &env, npm_delete_package)
-        }
+        "npm_delete_package" => Function::new_typed_with_env(&mut store, &env, npm_delete_package),
 
         "npm_add_user_to_team" => {
             Function::new_typed_with_env(&mut store, &env, npm_add_user_to_team)
@@ -403,7 +401,7 @@ pub fn to_api_function(
         "npm_get_token_details" => {
             Function::new_typed_with_env(&mut store, &env, npm_get_token_details)
         }
-        
+
         // Okta Calls
         "okta_remove_user_from_group" => {
             Function::new_typed_with_env(&mut store, &env, okta_remove_user_from_group)
@@ -432,12 +430,8 @@ pub fn to_api_function(
         "github_fetch_commit" => {
             Function::new_typed_with_env(&mut store, &env, github_fetch_commit)
         }
-        "github_list_files" => {
-            Function::new_typed_with_env(&mut store, &env, github_list_files)
-        }
-        "github_fetch_file" => {
-            Function::new_typed_with_env(&mut store, &env, github_fetch_file)
-        }
+        "github_list_files" => Function::new_typed_with_env(&mut store, &env, github_list_files),
+        "github_fetch_file" => Function::new_typed_with_env(&mut store, &env, github_fetch_file),
         "github_list_fpat_requests_for_org" => {
             Function::new_typed_with_env(&mut store, &env, github_list_fpat_requests_for_org)
         }
@@ -462,9 +456,11 @@ pub fn to_api_function(
         "github_configure_secret" => {
             Function::new_typed_with_env(&mut store, &env, github_configure_secret)
         }
-        "github_create_deployment_branch_protection_rule" => {
-            Function::new_typed_with_env(&mut store, &env, github_create_deployment_branch_protection_rule)
-        }
+        "github_create_deployment_branch_protection_rule" => Function::new_typed_with_env(
+            &mut store,
+            &env,
+            github_create_deployment_branch_protection_rule,
+        ),
         "github_search_for_file" => {
             Function::new_typed_with_env(&mut store, &env, github_search_for_file)
         }

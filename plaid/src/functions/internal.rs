@@ -419,7 +419,7 @@ pub fn cache_insert(
         }
         Ok(None) => 0,
         Err(e) => {
-            if let Err(e) = env_data.external_logging_system.log_internal_message(
+            if let Err(e) = env_data.external_logging_system.log_internal_message_sync(
                 crate::logging::Severity::Error,
                 format!("Cache system error in [{}]: {:?}", env_data.name, e),
             ) {
@@ -480,7 +480,7 @@ pub fn cache_get(
         }
         Ok(None) => 0,
         Err(e) => {
-            if let Err(e) = env_data.external_logging_system.log_internal_message(
+            if let Err(e) = env_data.external_logging_system.log_internal_message_sync(
                 crate::logging::Severity::Error,
                 format!("Cache system error in [{}]: {:?}", env_data.name, e),
             ) {

@@ -3,14 +3,12 @@ mod webhook;
 
 mod stdout;
 
-use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender};
-
 use serde::{Deserialize, Serialize};
-use std::{
-    thread::{self, JoinHandle},
-    time::Duration,
+use std::time::Duration;
+use tokio::{
+    sync::mpsc::{Receiver, Sender},
+    task::JoinHandle,
 };
-use tokio::runtime::Runtime;
 
 /// A severity scale to measure how critical a log is when sent
 /// to a logging service.
@@ -80,7 +78,9 @@ pub struct LoggingConfiguration {
     /// If logs aren't received after this many seconds, the system will send an
     /// empty heartbeat log to the logging systems to signal it is still up
     /// and healthy.
-    heartbeat_interval: Option<u64>,
+    #[serde(default = "default_log_heartbeat_interval")]
+    #[serde(deserialize_with = "parse_heartbeat_interval")]
+    heartbeat_interval: Duration,
     /// Configures the stdout logger. This is powered by env_logger and is a
     /// thin wrapper around it, however it lets us log to stdout the same way
     /// we log to other more complex systems.
@@ -92,6 +92,21 @@ pub struct LoggingConfiguration {
     /// so it's easy to operate on Plaid events. It's likely in future the
     /// Splunk logger code will be a specific instantiation of this.
     webhook: Option<webhook::Config>,
+}
+
+/// Custom deserialized for `heartbeat_interval`.
+fn parse_heartbeat_interval<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let interval = u64::deserialize(deserializer)?;
+    Ok(Duration::from_secs(interval))
+}
+
+/// Default value for `hearbeat_interval` in `LoggingConfiguration` in the event
+/// that one is not provided
+fn default_log_heartbeat_interval() -> Duration {
+    Duration::from_secs(3)
 }
 
 #[derive(Debug)]
@@ -120,7 +135,7 @@ impl std::fmt::Display for LoggingError {
 /// To implement a new logger, it must implement the `send_log` function
 /// and return success or failure.
 trait PlaidLogger {
-    fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError>;
+    async fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError>;
 }
 
 #[derive(Clone)]
@@ -129,19 +144,48 @@ pub struct Logger {
 }
 
 impl Logger {
-    pub fn log_ts(&self, measurement: String, value: i64) -> Result<(), LoggingError> {
+    /// Logs a timeseries point asynchronously
+    pub async fn log_ts(&self, measurement: String, value: i64) -> Result<(), LoggingError> {
         self.sender
             .send(Log::TimeseriesPoint { measurement, value })
+            .await
             .map_err(|_| LoggingError::LoggingSystemDead)
     }
 
-    pub fn log_function_call(&self, module: String, function: String) -> Result<(), LoggingError> {
+    /// Logs a timeseries point synchronously
+    /// This function should be called when logging from a synchronous context
+    pub fn log_ts_sync(&self, measurement: String, value: i64) -> Result<(), LoggingError> {
+        self.sender
+            .blocking_send(Log::TimeseriesPoint { measurement, value })
+            .map_err(|_| LoggingError::LoggingSystemDead)
+    }
+
+    /// Logs a module function call asynchronously
+    pub async fn log_function_call(
+        &self,
+        module: String,
+        function: String,
+    ) -> Result<(), LoggingError> {
         self.sender
             .send(Log::HostFunctionCall { module, function })
+            .await
             .map_err(|_| LoggingError::LoggingSystemDead)
     }
 
-    pub fn log_module_error(
+    /// Logs a module function call synchronously
+    /// This function should be called when logging from a synchronous context
+    pub fn log_function_call_sync(
+        &self,
+        module: String,
+        function: String,
+    ) -> Result<(), LoggingError> {
+        self.sender
+            .blocking_send(Log::HostFunctionCall { module, function })
+            .map_err(|_| LoggingError::LoggingSystemDead)
+    }
+
+    /// Logs a module execution error asynchronously.
+    pub async fn log_module_error(
         &self,
         module: String,
         error: String,
@@ -153,22 +197,64 @@ impl Logger {
         };
         self.sender
             .send(Log::ModuleExecutionError { module, error, log })
+            .await
             .map_err(|_| LoggingError::LoggingSystemDead)
     }
 
-    pub fn log_internal_message(
+    /// Logs a module execution error synchronously.
+    /// /// This function should be called when logging from a synchronous context
+    pub fn log_module_error_sync(
+        &self,
+        module: String,
+        error: String,
+        log: Vec<u8>,
+    ) -> Result<(), LoggingError> {
+        let log = match String::from_utf8(log.clone()) {
+            Ok(log) => log,
+            Err(_) => base64::encode(log),
+        };
+        self.sender
+            .blocking_send(Log::ModuleExecutionError { module, error, log })
+            .map_err(|_| LoggingError::LoggingSystemDead)
+    }
+
+    /// Logs a message asyncronously
+    pub async fn log_internal_message(
         &self,
         severity: Severity,
         message: String,
     ) -> Result<(), LoggingError> {
         self.sender
             .send(Log::InternalMessage { severity, message })
+            .await
             .map_err(|_| LoggingError::LoggingSystemDead)
     }
 
-    pub fn log_websocket_dropped(&self, socket_name: String) -> Result<(), LoggingError> {
+    /// Logs a message syncronously
+    /// This function should be called when logging from a synchronous context
+    pub fn log_internal_message_sync(
+        &self,
+        severity: Severity,
+        message: String,
+    ) -> Result<(), LoggingError> {
+        self.sender
+            .blocking_send(Log::InternalMessage { severity, message })
+            .map_err(|_| LoggingError::LoggingSystemDead)
+    }
+
+    /// Logs a websocket dropped event asyncronously
+    pub async fn log_websocket_dropped(&self, socket_name: String) -> Result<(), LoggingError> {
         self.sender
             .send(Log::WebSocketConnectionDropped { socket_name })
+            .await
+            .map_err(|_| LoggingError::LoggingSystemDead)
+    }
+
+    /// Logs a websocket dropped event synchronous.
+    /// This function should be called when logging from a synchronous context
+    pub fn log_websocket_dropped_sync(&self, socket_name: String) -> Result<(), LoggingError> {
+        self.sender
+            .blocking_send(Log::WebSocketConnectionDropped { socket_name })
             .map_err(|_| LoggingError::LoggingSystemDead)
     }
 
@@ -178,12 +264,10 @@ impl Logger {
     /// will send a heartbeat message instead. For stdout, and influx, this is
     /// a noop and will not actually be sent to the backend (or logged to the
     /// screen).
-    fn logging_thread_loop(
+    async fn logging_thread_loop(
         config: LoggingConfiguration,
-        log_receiver: Receiver<Log>,
+        log_receiver: &mut Receiver<Log>,
     ) -> Result<(), LoggingError> {
-        let runtime = Runtime::new().unwrap();
-        let heartbeat_interval = config.heartbeat_interval.unwrap_or(300);
         // Configure the different loggers
         let stdout_logger = match config.stdout {
             Some(config) => {
@@ -199,7 +283,7 @@ impl Logger {
         let splunk_logger = match config.splunk {
             Some(config) => {
                 info!("Configured logger: splunk");
-                Some(splunk::SplunkLogger::new(config, runtime.handle().clone()))
+                Some(splunk::SplunkLogger::new(config))
             }
             None => None,
         };
@@ -207,21 +291,19 @@ impl Logger {
         let webhook_logger = match config.webhook {
             Some(config) => {
                 info!("Configured logger: webhook");
-                Some(webhook::WebhookLogger::new(
-                    config,
-                    runtime.handle().clone(),
-                ))
+                Some(webhook::WebhookLogger::new(config))
             }
             None => None,
         };
 
         // Main logging loop
         loop {
-            let log = match log_receiver.recv_timeout(Duration::from_secs(heartbeat_interval)) {
-                Ok(l) => l,
-                Err(RecvTimeoutError::Timeout) => Log::Heartbeat {},
-                _ => break,
-            };
+            let log =
+                match tokio::time::timeout(config.heartbeat_interval, log_receiver.recv()).await {
+                    Ok(Some(log)) => log,
+                    Ok(None) => break,
+                    Err(_) => Log::Heartbeat {},
+                };
 
             let log = WrappedLog {
                 log,
@@ -229,17 +311,17 @@ impl Logger {
             };
 
             if let Some(logger) = &stdout_logger {
-                logger.send_log(&log).unwrap();
+                logger.send_log(&log);
             }
 
             if let Some(logger) = &splunk_logger {
-                if let Err(_) = logger.send_log(&log) {
+                if let Err(_) = logger.send_log(&log).await {
                     error!("Could not send logs to Splunk");
                 }
             }
 
             if let Some(logger) = &webhook_logger {
-                if let Err(_) = logger.send_log(&log) {
+                if let Err(_) = logger.send_log(&log).await {
                     error!("Could not send logs to webhook");
                 }
             }
@@ -250,8 +332,9 @@ impl Logger {
     }
 
     pub fn start(config: LoggingConfiguration) -> (Self, JoinHandle<Result<(), LoggingError>>) {
-        let (sender, rx) = bounded(4096);
-        let _handle = thread::spawn(move || Self::logging_thread_loop(config, rx));
+        let (sender, mut rx) = tokio::sync::mpsc::channel(4096);
+        let _handle =
+            tokio::task::spawn(async move { Self::logging_thread_loop(config, &mut rx).await });
 
         (Self { sender }, _handle)
     }
