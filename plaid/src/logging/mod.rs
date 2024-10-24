@@ -81,6 +81,12 @@ pub struct LoggingConfiguration {
     #[serde(default = "default_log_heartbeat_interval")]
     #[serde(deserialize_with = "parse_heartbeat_interval")]
     heartbeat_interval: Duration,
+    /// The maximum size of the logging channel. The channel will buffer up to the provided number of messages.
+    /// Once the buffer is full, attempts to send new messages will wait until a message is received from the channel.
+    /// The provided buffer capacity must be at least 1.
+    #[serde(default = "default_log_channel_size")]
+    #[serde(deserialize_with = "parse_channel_size")]
+    log_channel_size: usize,
     /// Configures the stdout logger. This is powered by env_logger and is a
     /// thin wrapper around it, however it lets us log to stdout the same way
     /// we log to other more complex systems.
@@ -107,6 +113,28 @@ where
 /// that one is not provided
 fn default_log_heartbeat_interval() -> Duration {
     Duration::from_secs(300)
+}
+
+/// Custom deserialized for `heartbeat_interval`.
+fn parse_channel_size<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let size = usize::deserialize(deserializer)?;
+
+    if size > 0 {
+        Ok(size)
+    } else {
+        Err(serde::de::Error::custom(
+            "Invalid channel size provided. Minimum size is 1",
+        ))
+    }
+}
+
+/// Default value for `log_channel_size` in `LoggingConfiguration` in the event
+/// that one is not provided
+fn default_log_channel_size() -> usize {
+    4096
 }
 
 #[derive(Debug)]
@@ -332,7 +360,7 @@ impl Logger {
     }
 
     pub fn start(config: LoggingConfiguration) -> (Self, JoinHandle<Result<(), LoggingError>>) {
-        let (sender, mut rx) = tokio::sync::mpsc::channel(4096);
+        let (sender, mut rx) = tokio::sync::mpsc::channel(config.log_channel_size);
         let _handle =
             tokio::task::spawn(async move { Self::logging_thread_loop(config, &mut rx).await });
 
