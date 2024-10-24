@@ -194,7 +194,7 @@ fn prepare_for_execution(
     let exports = match link_functions_to_module(&plaid_module.module, &mut store, env.clone()) {
         Ok(exports) => exports,
         Err(e) => {
-            els.log_module_error(
+            els.log_module_error_sync(
                 plaid_module.name.clone(),
                 format!("Failed to link functions to module: {:?}", e),
                 message.data.clone(),
@@ -216,7 +216,7 @@ fn prepare_for_execution(
     let instance = match Instance::new(&mut store, &plaid_module.module, &imports) {
         Ok(i) => i,
         Err(e) => {
-            els.log_module_error(
+            els.log_module_error_sync(
                 plaid_module.name.clone(),
                 format!("Failed to instantiate module: {e}"),
                 message.data.clone(),
@@ -232,7 +232,7 @@ fn prepare_for_execution(
     data_mut.memory = match instance.exports.get_memory("memory") {
         Ok(memory) => Some(memory.clone()),
         Err(e) => {
-            els.log_module_error(
+            els.log_module_error_sync(
                 plaid_module.name.clone(),
                 format!("Failed to get memory from module: {e}"),
                 message.data.clone(),
@@ -355,7 +355,7 @@ fn execution_loop(
             ) {
                 Ok((store, instance, ep, env)) => (store, instance, ep, env),
                 Err(e) => {
-                    els.log_module_error(
+                    els.log_module_error_sync(
                         plaid_module.name.clone(),
                         format!("Failed to prepare for execution: {e}"),
                         message.data.clone(),
@@ -379,7 +379,7 @@ fn execution_loop(
                             let computation_remaining_percentage =
                                 (remaining as f32 / computation_limit as f32) * 100.;
                             let computation_used = 100. - computation_remaining_percentage;
-                            els.log_ts(
+                            els.log_ts_sync(
                                 format!("{}_computation_percentage_used", plaid_module.name),
                                 computation_used as i64,
                             )?;
@@ -392,7 +392,7 @@ fn execution_loop(
 
             // If there was an error then log that it happened to the els
             if let Some(error) = error {
-                els.log_module_error(
+                els.log_module_error_sync(
                     plaid_module.name.clone(),
                     format!("{error}"),
                     message.data.clone(),
@@ -494,7 +494,7 @@ impl Executor {
                         let computation_remaining_percentage =
                             (remaining as f32 / computation_limit as f32) * 100.;
                         let computation_used = 100. - computation_remaining_percentage;
-                        self.els.log_ts(
+                        self.els.log_ts_sync(
                             format!("{}_immediate_computation_percentage_used", name),
                             computation_used as i64,
                         )?;

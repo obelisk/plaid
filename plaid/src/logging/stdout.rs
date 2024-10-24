@@ -1,4 +1,4 @@
-use super::{Log, LoggingError, PlaidLogger, Severity, WrappedLog};
+use super::{Log, Severity, WrappedLog};
 
 use serde::Deserialize;
 
@@ -13,8 +13,8 @@ impl StdoutLogger {
     }
 }
 
-impl PlaidLogger for StdoutLogger {
-    fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError> {
+impl StdoutLogger {
+    pub fn send_log(&self, log: &WrappedLog) {
         match &log.log {
             Log::InternalMessage { severity, message } => match severity {
                 Severity::Error => error!("{}", message),
@@ -35,6 +35,5 @@ impl PlaidLogger for StdoutLogger {
             }
             Log::Heartbeat { .. } => (),
         }
-        Ok(())
     }
 }
