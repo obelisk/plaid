@@ -291,7 +291,11 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::TokenGenerationError))?
             .get("newToken")
-            .map(|v| Ok(v.to_string()))
+            .map(|v| {
+                Ok(v.as_str()
+                    .ok_or(ApiError::NpmError(NpmError::TokenGenerationError))?
+                    .to_string())
+            })
             .ok_or(ApiError::NpmError(NpmError::TokenGenerationError))?
     }
 
