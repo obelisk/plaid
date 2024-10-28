@@ -125,9 +125,9 @@ pub fn get_time() -> u32 {
     return current_timestamp as u32;
 }
 
-/// Send a log from one module into the logging system to be picked up by another module
+/// Send a log back with a requested budget
 pub fn log_back(
-    mut env: FunctionEnvMut<Env>,
+    env: FunctionEnvMut<Env>,
     type_buf: WasmPtr<u8>,
     type_buf_len: u32,
     log_buf: WasmPtr<u8>,
@@ -135,6 +135,48 @@ pub fn log_back(
     delay: u32,
     // How many logbacks the rule would like this new invocation to be able to trigger
     logbacks_requested: u32,
+) -> u32 {
+    log_back_detailed(
+        env,
+        type_buf,
+        type_buf_len,
+        log_buf,
+        log_buf_len,
+        delay,
+        LogbacksAllowed::Limited(logbacks_requested),
+    )
+}
+
+/// Send a log back with unlimited budget
+pub fn log_back_unlimited(
+    env: FunctionEnvMut<Env>,
+    type_buf: WasmPtr<u8>,
+    type_buf_len: u32,
+    log_buf: WasmPtr<u8>,
+    log_buf_len: u32,
+    delay: u32,
+) -> u32 {
+    log_back_detailed(
+        env,
+        type_buf,
+        type_buf_len,
+        log_buf,
+        log_buf_len,
+        delay,
+        LogbacksAllowed::Unlimited,
+    )
+}
+
+/// Send a log from one module into the logging system to be picked up by another module
+pub fn log_back_detailed(
+    mut env: FunctionEnvMut<Env>,
+    type_buf: WasmPtr<u8>,
+    type_buf_len: u32,
+    log_buf: WasmPtr<u8>,
+    log_buf_len: u32,
+    delay: u32,
+    // How many logbacks the rule would like this new invocation to be able to trigger
+    logbacks_requested: LogbacksAllowed,
 ) -> u32 {
     let name = env.data().name.clone();
     // We need to check that the that the module has the logbacks_allowed "budget"
@@ -149,22 +191,30 @@ pub fn log_back(
             return 1;
         }
         LogbacksAllowed::Limited(x) => {
-            // If more logbacks than the available budget is attempted
-            // to be assigned then the call is not allowed to continue.
-            //
-            // We need to subtract one here because this logback itself costs
-            // one. We also know this is safe because we've already checked that
-            // the budget is not 0 so it will not underflow.
-            if logbacks_requested > (*x - 1) {
-                error!("{name}: Logback budget exceeded. Requested {logbacks_requested}, but only {x} was available.");
-                return 1;
+            // See what the caller was asking for
+            match logbacks_requested {
+                LogbacksAllowed::Limited(asked) => {
+                    // If more logbacks than the available budget is attempted
+                    // to be assigned then the call is not allowed to continue.
+                    //
+                    // We need to subtract one here because this logback itself costs
+                    // one. We also know this is safe because we've already checked that
+                    // the budget is not 0 so it will not underflow.
+                    if asked > (*x - 1) {
+                        error!("{name}: Logback budget exceeded. Requested {asked}, but only {x} was available.");
+                        return 1;
+                    }
+                    // The assigned logbacks are subtracted from the budget after
+                    // we've checked that it is smaller.
+                    *x -= asked;
+                    *x -= 1; // Subtract the one that this logback costs
+                    logbacks_requested
+                }
+                LogbacksAllowed::Unlimited => {
+                    error!("{name} attempted unlimited log back with limited budget. The budget was {x}");
+                    return 1;
+                }
             }
-            // The assigned logbacks are subtracted from the budget after
-            // we've checked that it is smaller.
-            *x -= logbacks_requested;
-            *x -= 1; // Subtract the one that this logback costs
-
-            logbacks_requested
         }
     };
 
@@ -200,13 +250,7 @@ pub fn log_back(
     api.clone().runtime.block_on(async move {
         match api.general.as_ref() {
             Some(general) => {
-                if general.log_back(
-                    &type_,
-                    &log,
-                    &env_data.name,
-                    delay as u64,
-                    LogbacksAllowed::Limited(assigned_budget),
-                ) {
+                if general.log_back(&type_, &log, &env_data.name, delay as u64, assigned_budget) {
                     0
                 } else {
                     1
