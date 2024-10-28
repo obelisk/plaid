@@ -379,7 +379,7 @@ fn execution_loop(
                             env.as_ref(&store)
                                 .execution_error_context
                                 .clone()
-                                .unwrap_or("> empty <".to_string()),
+                                .unwrap_or("None".to_string()),
                         ))
                     } else {
                         // This should always work because when computation is exhausted,
@@ -511,7 +511,7 @@ impl Executor {
                             env.as_ref(&store)
                                 .execution_error_context
                                 .clone()
-                                .unwrap_or("> empty <".to_string()),
+                                .unwrap_or("None".to_string()),
                         ),
                     ))
                 } else {
