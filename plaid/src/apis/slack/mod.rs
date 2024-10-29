@@ -35,6 +35,7 @@ pub enum SlackError {
     UnknownHook(String),
     UnknownBot(String),
     UnexpectedStatusCode(u16),
+    UnexpectedPayload(String),
 }
 
 impl Slack {

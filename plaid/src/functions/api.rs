@@ -288,6 +288,7 @@ impl_new_function_with_error_buffer!(rustica, new_mtls_cert);
 // Slack Functions
 impl_new_function!(slack, views_open);
 impl_new_function!(slack, post_message);
+impl_new_function_with_error_buffer!(slack, get_id_from_email);
 impl_new_function!(slack, post_to_arbitrary_webhook);
 impl_new_function!(slack, post_to_named_webhook);
 
@@ -488,6 +489,7 @@ pub fn to_api_function(
         }
         "slack_post_message" => Function::new_typed_with_env(&mut store, &env, slack_post_message),
         "slack_views_open" => Function::new_typed_with_env(&mut store, &env, slack_views_open),
+        "slack_get_id_from_email" => Function::new_typed_with_env(&mut store, &env, slack_get_id_from_email),
 
         // General Calls
         "general_simple_json_post_request" => {
