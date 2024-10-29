@@ -20,6 +20,17 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 
+/// When a rule is used to generate a response to a GET request, this structure
+/// is what is passed from the executor to the async webhook runtime.
+#[derive(Serialize, Deserialize)]
+pub struct ResponseMessage {
+    /// Currently unused because there is no API to set this and how it should
+    /// treated by the higher level cache is still to be defined.
+    pub code: u16,
+    /// The data the rule intends to return in the serviced GET request.
+    pub body: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Message {
     /// The message channel that this message is going to run on
@@ -37,7 +48,7 @@ pub struct Message {
     /// If a response is should be sent back to the source of the message
     /// This is used in the GET request system to handle responses
     #[serde(skip)]
-    pub response_sender: Option<OneShotSender<Option<String>>>,
+    pub response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
     /// If this is some, the entire channel will not be run, just a specific
     /// module. This is used in the GET system because only one rule can
     /// be run to generate a response.
@@ -286,13 +297,23 @@ fn update_persistent_response(
     plaid_module: &Arc<PlaidModule>,
     env: &FunctionEnv<Env>,
     mut store: &mut Store,
-    response_sender: Option<OneShotSender<Option<String>>>,
+    response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
 ) -> Result<(), ExecutorError> {
     match (
         env.as_mut(&mut store).response.clone(),
         &plaid_module.persistent_response,
     ) {
         (None, _) => {
+            // We need to check if there might be a tokio task serving a GET
+            // that is waiting on this response. If the rule doesn't give one, we
+            // need to ensure we send a None to wake up that task and complete it
+            if let Some(sender) = response_sender {
+                if let Err(_) = sender.send(None) {
+                    error!("[{}] was servicing a request that returned no response and failed to send!", plaid_module.name);
+                } else {
+                    error!("[{}] was servicing a request that returned no response!", plaid_module.name);
+                }
+            }
             // There was no response to save
             return Ok(());
         }
@@ -308,9 +329,11 @@ fn update_persistent_response(
             if response.len() <= pr.max_size {
                 match pr.data.write() {
                     Ok(mut data) => {
-                        *data = Some(response);
+                        *data = Some(response.clone());
                         if let Some(sender) = response_sender {
-                            sender.send(data.clone()).unwrap();
+                            if let Err(_) = sender.send(Some(ResponseMessage{code: 200, body: response})) {
+                                error!("[{}] was servicing a request but sending the response failed!", plaid_module.name);
+                            }
                         }
                         info!("{} updated its persistent response", plaid_module.name);
                         Ok(())

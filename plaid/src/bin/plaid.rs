@@ -254,10 +254,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     Ok(Some(response))=> {
                                         if update {
                                             info!("Updating cache for get request to: {webhook}");
+                                            let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                                             let mut cache = get_cache.write().await;
-                                            cache.insert(webhook.clone(), (current_time, response.clone()));
+                                            cache.insert(webhook.clone(), (current_time, response.body.clone()));
                                         }
-                                        Ok(warp::reply::html(response))
+                                        Ok(warp::reply::html(response.body))
                                     },
                                     Ok(None) => {
                                         warn!("Got a get request to {webhook} but the rule [{name}] configured to handle it did not return a response");
