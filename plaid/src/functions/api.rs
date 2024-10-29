@@ -346,6 +346,7 @@ pub fn to_api_function(
         }
         "cache_get" => Function::new_typed_with_env(&mut store, &env, super::internal::cache_get),
         "log_back" => Function::new_typed_with_env(&mut store, &env, super::internal::log_back),
+        "log_back_unlimited" => Function::new_typed_with_env(&mut store, &env, super::internal::log_back_unlimited),
         
         // Npm Calls
         "npm_publish_empty_stub" => {

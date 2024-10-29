@@ -23,6 +23,35 @@ pub fn log_back(type_: &str, log: &[u8], delay: u32) -> Result<(), i32> {
     log_back_with_budget(type_, log, delay, 0)
 }
 
+/// Send a log to the logback system with unlimited extra budget to trigger
+/// further invocations. Whoever will pick up the message will also have an
+/// unlimited budget for future invocations.
+pub fn log_back_unlimited(type_: &str, log: &[u8], delay: u32) -> Result<(), i32> {
+    extern "C" {
+        /// Send a log to the logback system
+        fn log_back_unlimited(
+            type_: *const u8,
+            type_len: usize,
+            log: *const u8,
+            log_len: usize,
+            delay: u32,
+        ) -> u32;
+    }
+
+    let type_bytes = type_.as_bytes().to_vec();
+    unsafe {
+        log_back_unlimited(
+            type_bytes.as_ptr(),
+            type_bytes.len(),
+            log.as_ptr(),
+            log.len(),
+            delay,
+        );
+    };
+
+    Ok(())
+}
+
 /// Send a log to the logback system with a budget to trigger further
 /// invoations. The requested budget will be substracted from this invocation's
 /// budget and the call will fail if it is exceeded. Calling this function itself
