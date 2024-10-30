@@ -115,6 +115,39 @@ pub fn set_response(
     data.response = Some(message);
 }
 
+/// Implement a way for a module to set a descriptive context for
+/// an error encountered during execution.
+pub fn set_error_context(
+    mut env: FunctionEnvMut<Env>,
+    context_buffer: WasmPtr<u8>,
+    context_buffer_size: u32,
+) {
+    let store = env.as_store_ref();
+    let memory_view = match get_memory(&env, &store) {
+        Ok(memory_view) => memory_view,
+        Err(e) => {
+            error!(
+                "{}: Memory error in fetch_from_module: {:?}",
+                env.data().name,
+                e
+            );
+            return;
+        }
+    };
+
+    let message = match safely_get_string(&memory_view, context_buffer, context_buffer_size) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("{}: Error in set_error_context: {:?}", env.data().name, e);
+            return;
+        }
+    };
+
+    let mut env = env.as_mut();
+    let data = env.data_mut();
+    data.execution_error_context = Some(message);
+}
+
 /// Implement a way for a module to get the current unixtime
 pub fn get_time() -> u32 {
     let current_timestamp = SystemTime::now()

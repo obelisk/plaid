@@ -331,6 +331,9 @@ pub fn to_api_function(
         "set_response" => {
             Function::new_typed_with_env(&mut store, &env, super::internal::set_response)
         }
+        "set_error_context" => {
+            Function::new_typed_with_env(&mut store, &env, super::internal::set_error_context)
+        }
         "print_debug_string" => {
             Function::new_typed_with_env(&mut store, &env, super::internal::print_debug_string)
         }

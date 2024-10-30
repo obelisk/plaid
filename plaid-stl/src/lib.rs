@@ -80,8 +80,40 @@ pub mod datetime;
 //pub use ::plaid::LogSource;
 
 #[macro_export]
+macro_rules! set_panic_hook {
+    () => {
+        use std::sync::{Arc, Mutex};
+        let buffer = Arc::new(Mutex::new([0u8; 512]));
+        let buffer_clone = Arc::clone(&buffer);
+
+        std::panic::set_hook(Box::new(move |panic_info| {
+            let bytes = panic_info
+                .payload()
+                .downcast_ref::<&str>()
+                .unwrap()
+                .as_bytes();
+            let mut buffer_lock = buffer_clone.lock().unwrap();
+
+            unsafe {
+                // Get raw pointers to the data and buffer
+                let dest_ptr = buffer_lock.as_mut_ptr();
+                let src_ptr = bytes.as_ptr();
+
+                // Copy data into the buffer
+                std::ptr::copy_nonoverlapping(src_ptr, dest_ptr, bytes.len());
+            }
+
+            let message = std::str::from_utf8(&*buffer_lock).unwrap_or("[Invalid UTF-8]");
+            plaid::set_error_context(message);
+        }));
+    };
+}
+
+#[macro_export]
 macro_rules! entrypoint {
     () => {
+        use plaid_stl::set_panic_hook;
+
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
             extern "C" {
@@ -113,9 +145,14 @@ macro_rules! entrypoint {
                 Err(_) => return -2,
             };
 
+            set_panic_hook!();
+
             match main(log) {
                 Ok(_) => 0,
-                Err(n) => n,
+                Err(e) => {
+                    plaid::set_error_context(&e.to_string());
+                    1
+                }
             }
         }
     };
@@ -124,6 +161,8 @@ macro_rules! entrypoint {
 #[macro_export]
 macro_rules! entrypoint_with_source {
     () => {
+        use plaid_stl::set_panic_hook;
+
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
             extern "C" {
@@ -180,9 +219,14 @@ macro_rules! entrypoint_with_source {
                 Err(_) => return -2,
             };
 
+            set_panic_hook!();
+
             match main(log, source) {
                 Ok(_) => 0,
-                Err(n) => n,
+                Err(e) => {
+                    plaid::set_error_context(&e.to_string());
+                    1
+                }
             }
         }
     };
@@ -191,6 +235,8 @@ macro_rules! entrypoint_with_source {
 #[macro_export]
 macro_rules! entrypoint_with_source_and_response {
     () => {
+        use plaid_stl::set_panic_hook;
+
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
             extern "C" {
@@ -248,6 +294,8 @@ macro_rules! entrypoint_with_source_and_response {
                 Err(_) => return -2,
             };
 
+            set_panic_hook!();
+
             match main(log, source) {
                 Ok(Some(response)) => {
                     let response_bytes = response.as_bytes().to_vec();
@@ -257,7 +305,10 @@ macro_rules! entrypoint_with_source_and_response {
                     0
                 }
                 Ok(None) => 0,
-                Err(n) => n,
+                Err(e) => {
+                    plaid::set_error_context(&e.to_string());
+                    1
+                }
             }
         }
     };
