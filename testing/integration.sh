@@ -4,6 +4,13 @@ set -e
 # Build all of the Plaid workspace
 PLATFORM=$(uname -a)
 
+# On macOS, we need to install a brew provided version of LLVM
+# so that we can compile WASM binaries.
+if  uname | grep -q Darwin; then
+  echo "macOS detected"
+  PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+fi
+
 cargo build --all --release
 #cargo build --package plaid --release
 #cargo build --package time --target wasm32-unknown-unknown --release

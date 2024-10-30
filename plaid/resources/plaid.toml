@@ -17,6 +17,7 @@ module_dir = "modules"
 lru_cache_size = 200
 [loading.persistent_response_size]
 "persistent_response.wasm" = 1024
+"sshcerts_usage.wasm" = 1024
 
 [loading.secrets]
 [loading.secrets."testing"]
@@ -24,6 +25,7 @@ lru_cache_size = 200
 
 [loading.log_type_overrides]
 "time.wasm" = "time"
+"sshcerts_usage.wasm" = "test_sshcerts"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -153,6 +155,8 @@ secret_key = ""
 
 [webhooks."internal"]
 listen_address = "0.0.0.0:4554"
+
+# Webhooks for tests
 [webhooks."internal".webhooks."timetest"]
 log_type = "time"
 headers = []
@@ -167,6 +171,16 @@ response_mode = "rule:persistent_response.wasm"
 [webhooks."internal".webhooks."persistentresponsetest".get_mode.caching_mode]
 type = "None"
 
+[webhooks."internal".webhooks."testsshcerts"]
+log_type = "test_sshcerts"
+headers = []
+[webhooks."internal".webhooks."testsshcerts".get_mode]
+response_mode = "rule:sshcerts_usage.wasm"
+[webhooks."internal".webhooks."testsshcerts".get_mode.caching_mode]
+type = "None"
+# End webhooks for tests
+
+# Additional webhook examples
 [webhooks."internal".webhooks."FFFFA"]
 log_type = "testing"
 headers = ["x-forwarded-for"]

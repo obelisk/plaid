@@ -1,0 +1,18 @@
+cargo-features = ["per-package-target"]
+
+[package]
+name = "sshcerts_usage"
+description = "Test that sshcerts can be compiled, linked, and run inside the Plaid runtime"
+version = "0.1.0"
+edition = "2021"
+forced-target = "wasm32-unknown-unknown"
+
+[dependencies]
+base64 = "0.22"
+plaid_stl = { path = "../../plaid-stl" }
+sshcerts = {version = "0.13", default-features = false, features = ["wasm_experimental"]}
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+crate-type = ["cdylib"]
