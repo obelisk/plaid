@@ -85,7 +85,7 @@ impl Internal {
                 .map_err(|e| DataError::StorageError(e))?;
 
             for (message, time) in previous_logs {
-                let message: Message = match serde_json::from_slice(&message) {
+                let message: Message = match serde_json::from_str(message.as_str()) {
                     Ok(msg) => msg,
                     Err(e) => {
                         warn!(

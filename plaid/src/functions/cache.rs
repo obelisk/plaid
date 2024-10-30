@@ -6,7 +6,7 @@ use super::{get_memory, safely_get_string, safely_write_data_back};
 
 
 /// Store data in the cache system if one is configured
-pub fn cache_insert(
+pub fn insert(
     env: FunctionEnvMut<Env>,
     key_buf: WasmPtr<u8>,
     key_buf_len: u32,
@@ -81,7 +81,7 @@ pub fn cache_insert(
 }
 
 /// Store data in the cache system if one is configured
-pub fn cache_get(
+pub fn get(
     env: FunctionEnvMut<Env>,
     key_buf: WasmPtr<u8>,
     key_buf_len: u32,

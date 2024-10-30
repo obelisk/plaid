@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::PlaidFunctionError;
 
 pub enum StorageError {
@@ -76,6 +78,44 @@ pub fn get(key: &str) -> Result<Vec<u8>, PlaidFunctionError> {
     if copied_size == buffer_size {
         data_buffer.truncate(copied_size as usize);
         Ok(data_buffer)
+    } else {
+        Err(PlaidFunctionError::ReturnBufferTooSmall)
+    }
+}
+
+/// List all the keys set by this rule in the runtime. An optional
+/// prefix can be provided so that only a subset of keys is returned
+pub fn list_keys(prefix: Option<impl Display>) -> Result<Vec<String>, PlaidFunctionError> {
+    extern "C" {
+        fn storage_list_keys(prefix: *const u8, prefix_len: usize, data: *const u8, data_len: usize) -> i32;
+    }
+
+    let prefix = match prefix {
+        Some(p) => p.to_string(),
+        None => String::new(),
+    };
+
+    let prefix_bytes = prefix.as_bytes().to_vec();
+
+    let buffer_size =
+        unsafe { storage_list_keys(prefix_bytes.as_ptr(), prefix_bytes.len(), vec![].as_mut_ptr(), 0) };
+
+    if buffer_size < 0 {
+        return Err(buffer_size.into());
+    }
+    let mut data_buffer = vec![0; buffer_size as usize];
+    let copied_size = unsafe {
+        storage_list_keys(
+            prefix_bytes.as_ptr(),
+            prefix_bytes.len(),
+            data_buffer.as_mut_ptr(),
+            buffer_size as usize,
+        )
+    };
+
+    if copied_size == buffer_size {
+        data_buffer.truncate(copied_size as usize);
+        serde_json::from_slice(&data_buffer).map_err(|_| PlaidFunctionError::InternalApiError)
     } else {
         Err(PlaidFunctionError::ReturnBufferTooSmall)
     }

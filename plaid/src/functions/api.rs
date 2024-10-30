@@ -323,26 +323,28 @@ pub fn to_api_function(
         // the data base or caching systems. These usually have specific implementations
         // so are broken out into their own module.
         "get_response" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::get_response)
+            Function::new_typed_with_env(&mut store, &env, super::response::get_response)
         }
         "set_response" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::set_response)
+            Function::new_typed_with_env(&mut store, &env, super::response::set_response)
         }
         "print_debug_string" => {
             Function::new_typed_with_env(&mut store, &env, super::internal::print_debug_string)
         }
         "get_time" => Function::new_typed(&mut store, super::internal::get_time),
         "storage_insert" => {
-            Function::new_typed_with_env(&mut store, &env, super::storage::storage_insert)
+            Function::new_typed_with_env(&mut store, &env, super::storage::insert)
         }
         "storage_get" => {
-            Function::new_typed_with_env(&mut store, &env, super::storage::storage_get)
+            Function::new_typed_with_env(&mut store, &env, super::storage::get)
         }
-
+        "storage_list_keys" => {
+            Function::new_typed_with_env(&mut store, &env, super::storage::list_keys)
+        }
         "cache_insert" => {
-            Function::new_typed_with_env(&mut store, &env, super::cache::cache_insert)
+            Function::new_typed_with_env(&mut store, &env, super::cache::insert)
         }
-        "cache_get" => Function::new_typed_with_env(&mut store, &env, super::cache::cache_get),
+        "cache_get" => Function::new_typed_with_env(&mut store, &env, super::cache::get),
         "log_back" => Function::new_typed_with_env(&mut store, &env, super::internal::log_back),
         "log_back_unlimited" => Function::new_typed_with_env(&mut store, &env, super::internal::log_back_unlimited),
         

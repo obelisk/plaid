@@ -75,7 +75,7 @@ impl StorageProvider for Sled {
         Ok(result.map(|v| v.to_vec()))
     }
 
-    async fn list_keys(&self, namespace: &str, prefix: Option<&str>) -> Result<Vec<Vec<u8>>, StorageError> {
+    async fn list_keys(&self, namespace: &str, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         let tree = self
             .db
             .open_tree(namespace.as_bytes())
@@ -88,10 +88,11 @@ impl StorageProvider for Sled {
         };
         // The use of a filter_map here means keys that fail to be pulled will be thrown away.
         // I don't know if this is possible? Maybe if the database is moved out from under us?
-        let keys: Vec<Vec<u8>> = key_iter
+        let keys: Vec<String> = key_iter
             .keys()
             .filter_map(|x| match x {
-                Ok(v) => Some(v.to_vec()),
+                Ok(v) =>
+                    String::from_utf8(v.to_vec()).ok(),
                 Err(e) => {
                     error!("Storage Error Listing Keys: {e}");
                     None
@@ -102,7 +103,7 @@ impl StorageProvider for Sled {
         Ok(keys)
     }
 
-    async fn fetch_all(&self, namespace: &str, prefix: Option<&str>) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StorageError> {
+    async fn fetch_all(&self, namespace: &str, prefix: Option<&str>) -> Result<Vec<(String, Vec<u8>)>, StorageError> {
         let tree = self
             .db
             .open_tree(namespace.as_bytes())
@@ -114,9 +115,9 @@ impl StorageProvider for Sled {
         };
         // The use of a filter_map here means keys that fail to be pulled will be thrown away.
         // I don't know if this is possible? Maybe if the database is moved out from under us?
-        let data: Vec<(Vec<u8>, Vec<u8>)> = key_iter
+        let data: Vec<(String, Vec<u8>)> = key_iter
             .filter_map(|x| match x {
-                Ok((k, v)) => Some((k.to_vec(), v.to_vec())),
+                Ok((k, v)) => String::from_utf8(k.to_vec()).ok().map(|key| (key, v.to_vec())),
                 Err(e) => {
                     error!("Storage Error Listing Keys: {e}");
                     None
