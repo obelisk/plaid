@@ -79,56 +79,30 @@ pub mod messages;
 //pub use ::plaid::LogSource;
 
 #[macro_export]
-macro_rules! setup_non_allocating_panic_mgmt {
-    () => {
-        use std::fmt::Write;
-
-        // A simple stack-allocated buffer with fixed size
-        struct NoAllocBuffer<'a> {
-            buf: &'a mut [u8],
-            pos: usize,
-        }
-
-        impl<'a> NoAllocBuffer<'a> {
-            fn new(buf: &'a mut [u8]) -> Self {
-                NoAllocBuffer { buf, pos: 0 }
-            }
-        }
-
-        impl<'a> std::fmt::Write for NoAllocBuffer<'a> {
-            fn write_str(&mut self, s: &str) -> std::fmt::Result {
-                let bytes = s.as_bytes();
-                let remaining_space = self.buf.len().saturating_sub(self.pos);
-                let to_write = std::cmp::min(remaining_space, bytes.len());
-
-                if to_write > 0 {
-                    self.buf[self.pos..self.pos + to_write].copy_from_slice(&bytes[..to_write]);
-                    self.pos += to_write;
-                }
-
-                if to_write < bytes.len() {
-                    return Err(std::fmt::Error); // Buffer overflow
-                }
-
-                Ok(())
-            }
-        }
-    };
-}
-
-#[macro_export]
 macro_rules! set_panic_hook {
     () => {
-        std::panic::set_hook(Box::new(|panic_info| {
-            // plaid::set_error_context(&panic_info.to_string());
-            let mut buffer = [0u8; 512]; // Stack-allocated buffer
-            let mut writer = NoAllocBuffer::new(&mut buffer);
+        use std::sync::{Arc, Mutex};
+        let buffer = Arc::new(Mutex::new([0u8; 512]));
+        let buffer_clone = Arc::clone(&buffer);
 
-            // Write panic info to the buffer without allocation
-            let _ = write!(writer, "{}", panic_info);
+        std::panic::set_hook(Box::new(move |panic_info| {
+            let bytes = panic_info
+                .payload()
+                .downcast_ref::<&str>()
+                .unwrap()
+                .as_bytes();
+            let mut buffer_lock = buffer_clone.lock().unwrap();
 
-            // Now buffer contains a non-allocating string representation of the panic info
-            let message = std::str::from_utf8(&buffer).unwrap_or("[Invalid UTF-8]");
+            unsafe {
+                // Get raw pointers to the data and buffer
+                let dest_ptr = buffer_lock.as_mut_ptr();
+                let src_ptr = bytes.as_ptr();
+
+                // Copy data into the buffer
+                std::ptr::copy_nonoverlapping(src_ptr, dest_ptr, bytes.len());
+            }
+
+            let message = std::str::from_utf8(&*buffer_lock).unwrap_or("[Invalid UTF-8]");
             plaid::set_error_context(message);
         }));
     };
@@ -137,8 +111,7 @@ macro_rules! set_panic_hook {
 #[macro_export]
 macro_rules! entrypoint {
     () => {
-        use plaid_stl::{setup_non_allocating_panic_mgmt, set_panic_hook};
-        setup_non_allocating_panic_mgmt!();
+        use plaid_stl::set_panic_hook;
 
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
@@ -187,8 +160,7 @@ macro_rules! entrypoint {
 #[macro_export]
 macro_rules! entrypoint_with_source {
     () => {
-        use plaid_stl::{setup_non_allocating_panic_mgmt, set_panic_hook};
-        setup_non_allocating_panic_mgmt!();
+        use plaid_stl::set_panic_hook;
 
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
@@ -262,9 +234,8 @@ macro_rules! entrypoint_with_source {
 #[macro_export]
 macro_rules! entrypoint_with_source_and_response {
     () => {
-        use plaid_stl::{setup_non_allocating_panic_mgmt, set_panic_hook};
-        setup_non_allocating_panic_mgmt!();
-        
+        use plaid_stl::set_panic_hook;
+
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
             extern "C" {
