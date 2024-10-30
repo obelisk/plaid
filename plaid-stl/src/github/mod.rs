@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fmt::Display};
-
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::PlaidFunctionError;
+use crate::{PlaidFunctionError, datetime::deserialize_option_timestamp};
 
 pub enum ReviewPatAction {
     Approve,
@@ -44,8 +44,16 @@ pub struct CopilotAssignee {
 /// A seat in a Github Org Copilot subscription
 pub struct CopilotSeat {
     pub assignee: CopilotAssignee,
-    pub last_activity_at: Option<String>,
     pub plan_type: String,
+    // Deserialize the date field from the ISO 8601 format
+    #[serde(default, deserialize_with = "deserialize_option_timestamp")]
+    pub last_activity_at: Option<DateTime<Utc>>,
+    // Deserialize the date field from the ISO 8601 format
+    #[serde(default, deserialize_with = "deserialize_option_timestamp")]
+    pub created_at: Option<DateTime<Utc>>,
+    // Deserialize the date field from the ISO 8601 format
+    #[serde(default, deserialize_with = "deserialize_option_timestamp")]
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -456,6 +464,57 @@ pub fn remove_user_from_copilot_subscription(org: &str, user: &str) -> Result<Co
     let params = Params {
         org,
         selected_usernames: vec![user],
+    };
+
+    const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&params).unwrap();
+    let res = unsafe {
+        github_remove_users_from_org_copilot(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response_body = String::from_utf8(return_buffer)
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+    let response_body = serde_json::from_str::<CopilotRemoveUsersResponse>(&response_body)
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    Ok(response_body)
+}
+
+/// Remove multiple users from the org's Copilot subscription
+/// ## Arguments
+///
+/// * `org` - The org owning the subscription
+/// * `users` - The list of users to remove from Copilot subscription
+pub fn remove_users_from_copilot_subscription(org: &str, users: Vec<&str>) -> Result<CopilotRemoveUsersResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, remove_users_from_org_copilot);
+    }
+
+    #[derive(Serialize)]
+    struct Params<'a> {
+        org: &'a str,
+        selected_usernames: Vec<&'a str>,
+    }
+    let params = Params {
+        org,
+        selected_usernames: users,
     };
 
     const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB

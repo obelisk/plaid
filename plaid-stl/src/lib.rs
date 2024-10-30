@@ -75,6 +75,7 @@ pub mod web;
 pub mod yubikey;
 
 pub mod messages;
+pub mod datetime;
 
 //pub use ::plaid::LogSource;
 
