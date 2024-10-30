@@ -3701,6 +3701,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "sshcerts"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "752ad8923d32fb5c117b8a9983266e294edc072401133720aa9af3959d63248d"
+dependencies = [
+ "base64 0.13.1",
+ "chrono",
+ "ring 0.17.8",
+ "zeroize",
+]
+
+[[package]]
+name = "sshcerts_usage"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "plaid_stl",
+ "serde",
+ "serde_json",
+ "sshcerts",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4889,6 +4912,20 @@ name = "zeroize"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ced3678a2879b30306d323f4542626697a464a97c0a07c9aebf7ebca65cd4dde"
+dependencies = [
+ "zeroize_derive",
+]
+
+[[package]]
+name = "zeroize_derive"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.79",
+]
 
 [[package]]
 name = "zip"

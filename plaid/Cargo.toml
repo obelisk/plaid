@@ -7,7 +7,6 @@ edition = "2021"
 
 [features]
 default = ["aws"]
-#quorum = ["quorum-agent"]
 aws = ["aws-sdk-kms", "aws-config"]
 
 [dependencies]
@@ -52,11 +51,6 @@ tokio-tungstenite = { version = "0.23.1", features = ["native-tls-vendored"] }
 futures-util = "0.3.30"
 aws-sdk-kms = { version = "1.41.0", optional = true }
 aws-config = { version = "1.5.5", optional = true }
-
-# Uncomment to build with Quorum. This is needed
-# because otherwise cargo will try and find this
-# to build the lockfile.
-#quorum-agent = { path = "../../quorum/quorum-agent", default_features = false, optional = true }
 
 [[example]]
 name = "github-tailer"

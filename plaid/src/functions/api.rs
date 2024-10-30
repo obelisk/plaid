@@ -279,9 +279,6 @@ impl_new_function_with_error_buffer!(okta, get_user_data);
 // PagerDuty Functions
 impl_new_function!(pagerduty, trigger_incident);
 
-// Quorum Functions
-impl_new_function_with_error_buffer!(quorum, proposal_status);
-
 // Rustica Functions
 impl_new_function_with_error_buffer!(rustica, new_mtls_cert);
 
@@ -326,10 +323,10 @@ pub fn to_api_function(
         // the data base or caching systems. These usually have specific implementations
         // so are broken out into their own module.
         "get_response" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::get_response)
+            Function::new_typed_with_env(&mut store, &env, super::response::get_response)
         }
         "set_response" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::set_response)
+            Function::new_typed_with_env(&mut store, &env, super::response::set_response)
         }
         "set_error_context" => {
             Function::new_typed_with_env(&mut store, &env, super::internal::set_error_context)
@@ -339,16 +336,18 @@ pub fn to_api_function(
         }
         "get_time" => Function::new_typed(&mut store, super::internal::get_time),
         "storage_insert" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::storage_insert)
+            Function::new_typed_with_env(&mut store, &env, super::storage::insert)
         }
         "storage_get" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::storage_get)
+            Function::new_typed_with_env(&mut store, &env, super::storage::get)
         }
-
+        "storage_list_keys" => {
+            Function::new_typed_with_env(&mut store, &env, super::storage::list_keys)
+        }
         "cache_insert" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::cache_insert)
+            Function::new_typed_with_env(&mut store, &env, super::cache::insert)
         }
-        "cache_get" => Function::new_typed_with_env(&mut store, &env, super::internal::cache_get),
+        "cache_get" => Function::new_typed_with_env(&mut store, &env, super::cache::get),
         "log_back" => Function::new_typed_with_env(&mut store, &env, super::internal::log_back),
         "log_back_unlimited" => Function::new_typed_with_env(&mut store, &env, super::internal::log_back_unlimited),
         
@@ -516,11 +515,6 @@ pub fn to_api_function(
         // PagerDuty Calls
         "pagerduty_trigger_incident" => {
             Function::new_typed_with_env(&mut store, &env, pagerduty_trigger_incident)
-        }
-
-        // Quorum Calls
-        "quorum_proposal_status" => {
-            Function::new_typed_with_env(&mut store, &env, quorum_proposal_status)
         }
 
         // Rustica Calls
