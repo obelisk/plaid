@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fmt::Display};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize, Deserializer};
+use serde::{Deserialize, Serialize};
 
-use crate::PlaidFunctionError;
+use crate::{PlaidFunctionError, datetime::deserialize_option_timestamp};
 
 pub enum ReviewPatAction {
     Approve,
@@ -54,22 +54,6 @@ pub struct CopilotSeat {
     // Deserialize the date field from the ISO 8601 format
     #[serde(default, deserialize_with = "deserialize_option_timestamp")]
     pub updated_at: Option<DateTime<Utc>>,
-}
-
-// Custom deserializer for an optional DateTime<Utc>
-fn deserialize_option_timestamp<'de, D>(deserializer: D) -> Result<Option<DateTime<Utc>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    // Try to deserialize as a string (ISO 8601 format) or return None if missing
-    let opt = Option::<String>::deserialize(deserializer)?;
-
-    // Parse the timestamp string into a DateTime<Utc>, if it's present
-    Ok(opt.and_then(|s| {
-        DateTime::parse_from_rfc3339(&s)
-            .ok()
-            .map(|dt| dt.with_timezone(&Utc))
-    }))
 }
 
 #[derive(Debug, Deserialize)]
