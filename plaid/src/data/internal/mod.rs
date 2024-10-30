@@ -80,7 +80,7 @@ impl Internal {
 
         if let Some(storage) = &storage {
             let previous_logs = storage
-                .fetch_all(LOGBACK_NS)
+                .fetch_all(LOGBACK_NS, None)
                 .await
                 .map_err(|e| DataError::StorageError(e))?;
 

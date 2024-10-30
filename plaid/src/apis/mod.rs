@@ -5,7 +5,6 @@ pub mod github;
 pub mod npm;
 pub mod okta;
 pub mod pagerduty;
-pub mod quorum;
 pub mod rustica;
 pub mod slack;
 pub mod splunk;
@@ -24,7 +23,6 @@ use github::{Github, GithubConfig};
 use npm::{Npm, NpmConfig};
 use okta::{Okta, OktaConfig};
 use pagerduty::{PagerDuty, PagerDutyConfig};
-use quorum::{Quorum, QuorumConfig};
 use serde::Deserialize;
 use slack::{Slack, SlackConfig};
 use splunk::{Splunk, SplunkConfig};
@@ -45,7 +43,6 @@ pub struct Api {
     pub npm: Option<Npm>,
     pub okta: Option<Okta>,
     pub pagerduty: Option<PagerDuty>,
-    pub quorum: Option<Quorum>,
     pub rustica: Option<Rustica>,
     pub slack: Option<Slack>,
     pub splunk: Option<Splunk>,
@@ -62,7 +59,6 @@ pub struct Apis {
     pub npm: Option<NpmConfig>,
     pub okta: Option<OktaConfig>,
     pub pagerduty: Option<PagerDutyConfig>,
-    pub quorum: Option<QuorumConfig>,
     pub rustica: Option<RusticaConfig>,
     pub slack: Option<SlackConfig>,
     pub splunk: Option<SplunkConfig>,
@@ -85,7 +81,6 @@ pub enum ApiError {
     NpmError(npm::NpmError),
     OktaError(okta::OktaError),
     PagerDutyError(pagerduty::PagerDutyError),
-    QuorumError(quorum::QuorumError),
     RusticaError(rustica::RusticaError),
     SlackError(slack::SlackError),
     SplunkError(splunk::SplunkError),
@@ -136,14 +131,6 @@ impl Api {
             _ => None,
         };
 
-        #[cfg(feature = "quorum")]
-        let quorum = match config.quorum {
-            Some(q) => Some(Quorum::new(q)),
-            _ => None,
-        };
-        #[cfg(not(feature = "quorum"))]
-        let quorum = None;
-
         let rustica = match config.rustica {
             Some(q) => Some(Rustica::new(q)),
             _ => None,
@@ -178,7 +165,6 @@ impl Api {
             npm,
             okta,
             pagerduty,
-            quorum,
             rustica,
             slack,
             splunk,

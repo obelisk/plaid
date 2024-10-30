@@ -38,16 +38,28 @@ impl std::error::Error for StorageError {}
 
 #[async_trait]
 pub trait StorageProvider {
+    /// Insert a new key pair into the storage provider
     async fn insert(
         &self,
         namespace: String,
         key: String,
         value: Vec<u8>,
     ) -> Result<Option<Vec<u8>>, StorageError>;
+    /// Get a value by key from the storage provider. If the key doesn't exist, then it will
+    /// return Ok(None) signifying the storage provider was successfully able to identify
+    /// the key was not set.
     async fn get(&self, namespace: &str, key: &str) -> Result<Option<Vec<u8>>, StorageError>;
+    /// Delete a value by key from the storage provider. If the key exists this will return
+    /// Ok(Some(previous_value)), if not, Ok(None)
     async fn delete(&self, namespace: &str, key: &str) -> Result<Option<Vec<u8>>, StorageError>;
-    async fn list_keys(&self, namespace: &str) -> Result<Vec<Vec<u8>>, StorageError>;
-    async fn fetch_all(&self, namespace: &str) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StorageError>;
+    /// List all keys in the given namespace. An optional prefix can be provided such that only
+    /// specific keys can be returned. This is helpful as it reduces the amount of compute that
+    /// needs to be taken by modules to do basic filtering. More complex filtering (i.e regex)
+    /// is not supported as computation for that has unbounded complexity.
+    async fn list_keys(&self, namespace: &str, prefix: Option<&str>) -> Result<Vec<Vec<u8>>, StorageError>;
+    /// Same as list_keys but will return the keys and values. An optional prefix can be provided
+    /// but this only applies to the key, values have no host provided filtering.
+    async fn fetch_all(&self, namespace: &str, prefix: Option<&str>) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StorageError>;
 }
 
 impl Storage {
@@ -81,14 +93,15 @@ impl Storage {
         self.database.delete(namespace, key).await
     }
 
-    pub async fn list_keys(&self, namespace: &str) -> Result<Vec<Vec<u8>>, StorageError> {
-        self.database.list_keys(namespace).await
+    pub async fn list_keys(&self, namespace: &str, prefix: Option<&str>) -> Result<Vec<Vec<u8>>, StorageError> {
+        self.database.list_keys(namespace, prefix).await
     }
 
     pub async fn fetch_all(
         &self,
         namespace: &str,
+        prefix: Option<&str>,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StorageError> {
-        self.database.fetch_all(namespace).await
+        self.database.fetch_all(namespace, prefix).await
     }
 }
