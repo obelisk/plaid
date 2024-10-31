@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use crate::PlaidFunctionError;
 
 pub mod cache;
