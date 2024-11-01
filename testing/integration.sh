@@ -48,5 +48,6 @@ for module in test_modules/*; do
   fi
 done
 
+echo "Tests complete. Killing Plaid"
 # Kill the Plaid process
 kill $PLAID_PID

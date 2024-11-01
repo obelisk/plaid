@@ -4,7 +4,9 @@
 members = [
     "plaid",
     "plaid-stl",
-    "test_modules/persistent_response", "test_modules/sshcerts_usage",
+    "test_modules/crashtest",
+    "test_modules/persistent_response",
+    "test_modules/sshcerts_usage",
     "test_modules/time",
 ]
 

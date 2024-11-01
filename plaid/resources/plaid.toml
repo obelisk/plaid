@@ -26,6 +26,7 @@ lru_cache_size = 200
 [loading.log_type_overrides]
 "time.wasm" = "time"
 "sshcerts_usage.wasm" = "test_sshcerts"
+"crashtest.wasm" = "crashtest"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -42,6 +43,7 @@ default = 300
 okta = 200
 [loading.memory_page_count.module_overrides]
 "example_rule.wasm" = 50
+"crashtest.wasm" = 150
 
 # [apis."okta"]
 # token = ""
@@ -178,6 +180,10 @@ headers = []
 response_mode = "rule:sshcerts_usage.wasm"
 [webhooks."internal".webhooks."testsshcerts".get_mode.caching_mode]
 type = "None"
+
+[webhooks."internal".webhooks."crashtest"]
+log_type = "crashtest"
+headers = []
 # End webhooks for tests
 
 # Additional webhook examples

@@ -77,34 +77,22 @@ pub mod yubikey;
 pub mod messages;
 pub mod datetime;
 
-//pub use ::plaid::LogSource;
+
 
 #[macro_export]
 macro_rules! set_panic_hook {
     () => {
-        use std::sync::{Arc, Mutex};
-        let buffer = Arc::new(Mutex::new([0u8; 512]));
-        let buffer_clone = Arc::clone(&buffer);
-
         std::panic::set_hook(Box::new(move |panic_info| {
-            let bytes = panic_info
-                .payload()
-                .downcast_ref::<&str>()
-                .unwrap()
-                .as_bytes();
-            let mut buffer_lock = buffer_clone.lock().unwrap();
-
-            unsafe {
-                // Get raw pointers to the data and buffer
-                let dest_ptr = buffer_lock.as_mut_ptr();
-                let src_ptr = bytes.as_ptr();
-
-                // Copy data into the buffer
-                std::ptr::copy_nonoverlapping(src_ptr, dest_ptr, bytes.len());
+            extern "C" {
+                fn set_error_context(data_buffer: *const u8, buffer_size: u32);
             }
-
-            let message = std::str::from_utf8(&*buffer_lock).unwrap_or("[Invalid UTF-8]");
-            plaid::set_error_context(message);
+            if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+                set_error_context(s.as_ptr(), s.len() as u32);
+            } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+                set_error_context(s.as_str().as_ptr(), s.len() as u32);
+            } else {
+                set_error_context("Unknown panic type".as_ptr(), 18);
+            }
         }));
     };
 }
