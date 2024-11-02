@@ -17,6 +17,7 @@ clap = { version = "4", default-features = false, features = ["std"] }
 crossbeam-channel = "0.5"
 env_logger = "0.8"
 flate2 = "1.0"
+fred = {version = "9.3"}
 hex = "0.4.3"
 http = "1"
 jwt-simple = "0.12.10"

@@ -1,12 +1,14 @@
 use async_trait::async_trait;
 
 mod sled;
+mod valkey;
 
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-pub struct Config {
-    pub sled: Option<sled::Config>,
+pub enum Config {
+    Sled(sled::Config),
+    Valkey(valkey::Config),
 }
 
 pub struct Storage {
@@ -64,12 +66,12 @@ pub trait StorageProvider {
 
 impl Storage {
     pub fn new(config: Config) -> Result<Self, StorageError> {
-        let database = match config.sled {
-            Some(sled) => Box::new(sled::Sled::new(sled)?),
-            _ => return Err(StorageError::NoStorageConfigured),
+        let database: Box<dyn StorageProvider + Send + Sync> = match config {
+            Config::Sled(config) => sled::Sled::new(config).map(Box::new)?,
+            Config::Valkey(config) => valkey::Valkey::new(config).map(Box::new)?,
         };
 
-        Ok(Storage { database })
+        Ok(Self {database})
     }
 
     pub async fn insert(
