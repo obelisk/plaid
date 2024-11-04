@@ -69,3 +69,7 @@ path = "src/bin/plaid.rs"
 [[bin]]
 name = "config_check"
 path = "src/bin/config_check.rs"
+
+[[bin]]
+name = "sled_db_dump"
+path = "src/bin/sled_db_dump.rs"
