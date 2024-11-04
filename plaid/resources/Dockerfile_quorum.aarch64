@@ -9,7 +9,7 @@ COPY quorum quorum
 COPY plaid/plaid/resources/Cargo.toml plaid/plaid/Cargo.toml
 
 WORKDIR /build/plaid
-RUN cargo build --bin=plaid --release --features quorum
+RUN cargo build --bin=plaid --release --features quorum,aws,vendor_ssl
 
 
 FROM alpine:3.6 as alpine

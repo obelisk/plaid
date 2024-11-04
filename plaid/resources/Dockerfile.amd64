@@ -5,7 +5,7 @@ RUN mkdir /build
 WORKDIR /build
 COPY . .
 
-RUN cargo build --release
+RUN cargo build --release --no-default-features --features=aws,vendor_ssl
 
 FROM alpine:3.6 as alpine
 RUN apk add -U --no-cache ca-certificates

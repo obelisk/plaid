@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["aws"]
+default = ["aws", "tokio-tungstenite/native-tls"]
+vendor_ssl = ["tokio-tungstenite/native-tls-vendored"]
 #quorum = ["quorum-agent"]
 aws = ["aws-sdk-kms", "aws-config"]
 
@@ -48,7 +49,7 @@ warp = { version = "0.3", features = ["tls"] }
 wasmer = { version = "4", default-features = false, features = ["cranelift"] }
 wasmer-middlewares = "4"
 jsonwebtoken = { version = "9.2" }
-tokio-tungstenite = { version = "0.23.1", features = ["native-tls-vendored"] }
+tokio-tungstenite = { version = "0.23.1" }
 futures-util = "0.3.30"
 aws-sdk-kms = { version = "1.41.0", optional = true }
 aws-config = { version = "1.5.5", optional = true }
