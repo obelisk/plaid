@@ -74,8 +74,8 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
-pub mod messages;
 pub mod datetime;
+pub mod messages;
 
 //pub use ::plaid::LogSource;
 
@@ -104,7 +104,7 @@ macro_rules! set_panic_hook {
             }
 
             let message = std::str::from_utf8(&*buffer_lock).unwrap_or("[Invalid UTF-8]");
-            plaid::set_error_context(message);
+            set_error_context(message);
         }));
     };
 }
@@ -112,7 +112,7 @@ macro_rules! set_panic_hook {
 #[macro_export]
 macro_rules! entrypoint {
     () => {
-        use plaid_stl::set_panic_hook;
+        use plaid_stl::{plaid::set_error_context, set_panic_hook};
 
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
@@ -150,7 +150,7 @@ macro_rules! entrypoint {
             match main(log) {
                 Ok(_) => 0,
                 Err(e) => {
-                    plaid::set_error_context(&e.to_string());
+                    set_error_context(&e.to_string());
                     1
                 }
             }
@@ -161,7 +161,7 @@ macro_rules! entrypoint {
 #[macro_export]
 macro_rules! entrypoint_with_source {
     () => {
-        use plaid_stl::set_panic_hook;
+        use plaid_stl::{plaid::set_error_context, set_panic_hook};
 
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
@@ -224,7 +224,7 @@ macro_rules! entrypoint_with_source {
             match main(log, source) {
                 Ok(_) => 0,
                 Err(e) => {
-                    plaid::set_error_context(&e.to_string());
+                    set_error_context(&e.to_string());
                     1
                 }
             }
@@ -235,7 +235,7 @@ macro_rules! entrypoint_with_source {
 #[macro_export]
 macro_rules! entrypoint_with_source_and_response {
     () => {
-        use plaid_stl::set_panic_hook;
+        use plaid_stl::{plaid::set_error_context, set_panic_hook};
 
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
@@ -306,7 +306,7 @@ macro_rules! entrypoint_with_source_and_response {
                 }
                 Ok(None) => 0,
                 Err(e) => {
-                    plaid::set_error_context(&e.to_string());
+                    set_error_context(&e.to_string());
                     1
                 }
             }
