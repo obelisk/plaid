@@ -78,7 +78,7 @@ pub struct GithubConfig {
 }
 
 impl GithubConfig {
-    /// Create a new instance of a `GitHub` config
+    /// Create a new instance of a `GithubConfig`
     pub fn new(authentication: Authentication, org: String, log_type: LogType) -> Self {
         Self {
             authentication,
@@ -99,7 +99,10 @@ where
     match log_type.as_str() {
         "web" => Ok(LogType::Web),
         "git" => Ok(LogType::Git),
-        _ => Ok(LogType::All),
+        "all" => Ok(LogType::All),
+        _ => Err(serde::de::Error::custom(
+            "Invalid log tpye provided. Expected one of All, Git, Web",
+        )),
     }
 }
 
