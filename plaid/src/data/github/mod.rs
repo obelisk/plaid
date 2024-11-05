@@ -101,7 +101,7 @@ where
         "git" => Ok(LogType::Git),
         "all" => Ok(LogType::All),
         _ => Err(serde::de::Error::custom(
-            "Invalid log tpye provided. Expected one of All, Git, Web",
+            "Invalid log type provided. Expected one of All, Git, Web",
         )),
     }
 }
