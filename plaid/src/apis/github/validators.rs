@@ -57,7 +57,7 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     // This validates a SHA-1 hash which is what all commit hashes are.
     define_regex_validator!(validators, "commit_hash", r"^\b([a-f0-9]{40})\b$");
 
-    // This validates a postive integer
+    // This validates a positive integer
     define_regex_validator!(validators, "pint", r"^\d+$");
 
     // Follows Github's guidelines on branch naming conventions
@@ -67,6 +67,8 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     define_regex_validator!(validators, "environment_name", r"^[a-zA-Z][a-zA-Z0-9./_-]*$");
     define_regex_validator!(validators, "secret_name", r"^[A-Z][A-Z0-9_]*$");
     define_regex_validator!(validators, "filename", r"^[a-zA-Z0-9\.]{1,32}$");
+
+    define_regex_validator!(validators, "event_type", r"^[\w\-_]+$");
 
     validators
 }
@@ -81,3 +83,4 @@ create_regex_validator_func!(branch_name);
 create_regex_validator_func!(environment_name);
 create_regex_validator_func!(secret_name);
 create_regex_validator_func!(filename);
+create_regex_validator_func!(event_type);

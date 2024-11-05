@@ -232,6 +232,7 @@ impl_new_function!(github, update_branch_protection_rule);
 impl_new_function!(github, create_environment_for_repo);
 impl_new_function!(github, configure_secret);
 impl_new_function!(github, create_deployment_branch_protection_rule);
+impl_new_function!(github, trigger_repo_dispatch);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query);
@@ -481,6 +482,9 @@ pub fn to_api_function(
         }
         "github_list_seats_in_org_copilot" => {
             Function::new_typed_with_env(&mut store, &env, github_list_seats_in_org_copilot)
+        }
+        "github_trigger_repo_dispatch" => {
+            Function::new_typed_with_env(&mut store, &env, github_trigger_repo_dispatch)
         }
 
         // Slack Calls
