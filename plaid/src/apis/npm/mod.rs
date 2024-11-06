@@ -124,4 +124,5 @@ pub enum NpmError {
     FailedToRetrievePaginatedData,
     FailedToRetrievePackages,
     FailedToGetTokenDetails,
+    UnexpectedStatusCode(u16)
 }

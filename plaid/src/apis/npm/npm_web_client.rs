@@ -110,6 +110,10 @@ impl Npm {
             .send()
             .await
             .map_err(|_| NpmError::LoginFlowError)?;
+        if response.status().as_u16() != 200 {
+            return Err(NpmError::UnexpectedStatusCode(response.status().as_u16()));
+        }
+
         // Get the CSRF token (which is in a cookie) because we need to send it back later on
         let cs_cookie = match response.cookies().find(|c| c.name() == "cs") {
             None => return Ok(()), // we do not get this cookie if we are _already_ logged in
@@ -117,7 +121,7 @@ impl Npm {
         };
 
         // Login step 1: send the username and password, together with the CSRF token
-        let output = self
+        let response = self
             .client
             .post(format!("{}/login", NPMJS_COM_URL))
             .form(&[
@@ -127,8 +131,10 @@ impl Npm {
             ])
             .send()
             .await
-            .map(|_| ())
-            .map_err(|_| NpmError::LoginFlowError);
+            .map_err(|_| NpmError::LoginFlowError)?;
+        if response.status().as_u16() != 200 {
+            return Err(NpmError::UnexpectedStatusCode(response.status().as_u16()));
+        }
 
         // If we have a configured OTP secret, we proceed with the 2FA flow
         if let Some(ref otp_secret) = self.config.otp_secret {
@@ -146,7 +152,7 @@ impl Npm {
             .map_err(|_| NpmError::LoginFlowError)?;
 
             // Login step 2: send the TOTP code to a well-known URL
-            let output = self
+            let response = self
                 .client
                 .post(format!("{}/login/otp?next=%2F", NPMJS_COM_URL))
                 .form(&[
@@ -157,12 +163,14 @@ impl Npm {
                 ])
                 .send()
                 .await
-                .map(|_| ())
-                .map_err(|_| NpmError::LoginFlowError);
-            return output;
+                .map_err(|_| NpmError::LoginFlowError)?;
+            if response.status().as_u16() != 200 {
+                return Err(NpmError::UnexpectedStatusCode(response.status().as_u16()));
+            }
+            Ok(())
         } else {
             // We do not have an OTP secret, so we are done with the login
-            return output;
+            Ok(())
         }
     }
 
@@ -172,9 +180,7 @@ impl Npm {
         params: &str,
         module: &str,
     ) -> Result<i32, ApiError> {
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let params: SetTeamPermissionOnPackageParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let team = self.validate_npm_team_name(&params.team)?;
@@ -196,7 +202,8 @@ impl Npm {
             permissions: &params.permission.to_string(),
             csrftoken: &csrf_token,
         };
-        self.client
+        let response = self
+            .client
             .post(format!(
                 "{}/settings/{}/teams/team/{}/access",
                 NPMJS_COM_URL, self.config.npm_scope, team
@@ -204,8 +211,13 @@ impl Npm {
             .json(&payload)
             .send()
             .await
-            .map(|_| Ok(0))
-            .map_err(|_| ApiError::NpmError(NpmError::PermissionChangeError))?
+            .map_err(|_| ApiError::NpmError(NpmError::PermissionChangeError))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        Ok(0)
     }
 
     /// Create a granular token for a package, with given name and description.
@@ -219,9 +231,7 @@ impl Npm {
         params: &str,
         module: &str,
     ) -> Result<String, ApiError> {
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let params: CreateGranularTokenForPackagesParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let packages = params
@@ -284,6 +294,11 @@ impl Npm {
             .send()
             .await
             .map_err(|_| ApiError::NpmError(NpmError::TokenGenerationError))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
 
         // The new token is in the JSON response, under the key "newToken"
         response
@@ -301,9 +316,7 @@ impl Npm {
 
     /// Delete a granular token from the npm website
     pub async fn delete_granular_token(&self, params: &str, module: &str) -> Result<i32, ApiError> {
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let params: DeleteTokenParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let token_id = self.validate_token_id(&params.token_id)?;
@@ -318,7 +331,8 @@ impl Npm {
             csrftoken: &csrf_token,
             tokens: token_id,
         };
-        self.client
+        let response = self
+            .client
             .post(format!(
                 "{}/settings/{}/tokens/delete",
                 NPMJS_COM_URL, self.config.username
@@ -327,8 +341,13 @@ impl Npm {
             .header("X-Spiferack", "1") // to get JSON instead of HTML
             .send()
             .await
-            .map(|_| Ok(0))
-            .map_err(|_| ApiError::NpmError(NpmError::TokenDeletionError))?
+            .map_err(|_| ApiError::NpmError(NpmError::TokenDeletionError))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        Ok(0)
     }
 
     /// Retrieve a list of granular tokens for the account whose credentials have been configured for this client.
@@ -336,9 +355,7 @@ impl Npm {
     /// Note: only granular tokens are returned. Other types of tokens (publish, automation, etc.) are filtered out.
     pub async fn list_granular_tokens(&self, _: &str, module: &str) -> Result<String, ApiError> {
         info!("Listing npm granular tokens on behalf of [{module}]");
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let response = self
             .client
             .get(format!(
@@ -349,6 +366,11 @@ impl Npm {
             .send()
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
 
         // Tokens are returned in a JSON structure under "list > objects". We first deserialize to a
         // generic Value, then get "list > objects" and convert to a vector of NpmTokens. Finally, we
@@ -382,9 +404,7 @@ impl Npm {
     pub async fn delete_package(&self, package: &str, module: &str) -> Result<i32, ApiError> {
         let package = self.validate_npm_package_name(package)?;
         info!("Deleting npm package [{package}] on behalf of [{module}]");
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         // Step 1. Make a GET request to /delete in order to retrieve the dsrManifestHash.
         // This will later be sent as form data when actually performing the deletion.
         let response = self
@@ -396,6 +416,11 @@ impl Npm {
             .send()
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
         let response_text = response
             .text()
             .await
@@ -415,7 +440,8 @@ impl Npm {
             ("csrftoken", &csrf_token),
         ]
         .into();
-        self.client
+        let response = self
+            .client
             .post(format!(
                 "{}/package/%40{}%2F{}/delete",
                 NPMJS_COM_URL, self.config.npm_scope, package
@@ -423,15 +449,18 @@ impl Npm {
             .form(&form_data)
             .send()
             .await
-            .map(|_| Ok(0))
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?;
+        if response.status().as_u16() != 302 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        Ok(0)
     }
 
     /// Add a user to an npm team
     pub async fn add_user_to_team(&self, params: &str, module: &str) -> Result<i32, ApiError> {
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let params: AddRemoveUserToFromTeamParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let user = self.validate_npm_username(&params.user)?;
@@ -451,7 +480,8 @@ impl Npm {
         };
         let body = serde_json::to_string(&body)
             .map_err(|_| ApiError::NpmError(NpmError::FailedToAddUserToTeam))?;
-        self.client
+        let response = self
+            .client
             .post(format!(
                 "{}/settings/{}/teams/team/{}/users",
                 NPMJS_COM_URL, self.config.npm_scope, team
@@ -460,15 +490,18 @@ impl Npm {
             .body(body)
             .send()
             .await
-            .map(|_| Ok(0))
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToAddUserToTeam))?
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToAddUserToTeam))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        Ok(0)
     }
 
     /// Remove a user from an npm team
     pub async fn remove_user_from_team(&self, params: &str, module: &str) -> Result<i32, ApiError> {
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let params: AddRemoveUserToFromTeamParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let user = self.validate_npm_username(&params.user)?;
@@ -484,7 +517,8 @@ impl Npm {
         };
         let body = serde_json::to_string(&body)
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromTeam))?;
-        self.client
+        let response = self
+            .client
             .post(format!(
                 "{}/settings/{}/teams/team/{}/users/{}/delete",
                 NPMJS_COM_URL, self.config.npm_scope, team, user
@@ -493,8 +527,13 @@ impl Npm {
             .body(body)
             .send()
             .await
-            .map(|_| Ok(0))
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromTeam))?
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromTeam))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        Ok(0)
     }
 
     /// Remove a user from the npm organization
@@ -506,9 +545,7 @@ impl Npm {
         let user = self.validate_npm_username(user)?;
         info!("Removing user [{user}] from npm organization on behalf of [{module}]");
 
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let csrf_token = self
             .get_csrftoken_from_cookies()
             .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
@@ -516,7 +553,8 @@ impl Npm {
             csrftoken: &csrf_token,
         };
 
-        self.client
+        let response = self
+            .client
             .post(format!(
                 "{}/settings/{}/members/{}/delete",
                 NPMJS_COM_URL, self.config.npm_scope, user
@@ -524,8 +562,13 @@ impl Npm {
             .json(&payload)
             .send()
             .await
-            .map(|_| Ok(0))
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromOrg))?
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromOrg))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        Ok(0)
     }
 
     /// Invite a user to the npm organization.
@@ -537,9 +580,7 @@ impl Npm {
         params: &str,
         module: &str,
     ) -> Result<i32, ApiError> {
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let params: InviteUserToOrganizationParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let user = self.validate_npm_username(&params.user)?;
@@ -564,7 +605,8 @@ impl Npm {
         let body = serde_json::to_string(&body)
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
 
-        self.client
+        let response = self
+            .client
             .post(format!(
                 "{}/settings/{}/invite/create",
                 NPMJS_COM_URL, self.config.npm_scope
@@ -573,16 +615,19 @@ impl Npm {
             .body(body)
             .send()
             .await
-            .map(|_| Ok(0))
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToInviteUserToOrg))?
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToInviteUserToOrg))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        Ok(0)
     }
 
     /// Return all users in the npm organization
     pub async fn get_org_user_list(&self, _: &str, module: &str) -> Result<String, ApiError> {
         info!("Listing all members of npm organization on behalf of [{module}]");
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let response = self
             .client
             .get(format!(
@@ -592,7 +637,13 @@ impl Npm {
             .header("X-Spiferack", "1")
             .send()
             .await
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        let response = response
             .json::<Value>()
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
@@ -629,9 +680,7 @@ impl Npm {
         module: &str,
     ) -> Result<String, ApiError> {
         info!("Listing all members of npm organization without 2FA on behalf of [{module}]");
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let response = self
             .client
             .get(format!(
@@ -642,7 +691,13 @@ impl Npm {
             .header("X-Spiferack", "1")
             .send()
             .await
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        let response = response
             .json::<Value>()
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
@@ -688,11 +743,9 @@ impl Npm {
             team,
             params.permission.to_string()
         );
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
 
-        let response: Value = self
+        let response = self
             .client
             .get(format!(
                 "{}/settings/{}/teams/team/{}/access",
@@ -701,7 +754,13 @@ impl Npm {
             .header("X-Spiferack", "1")
             .send()
             .await
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))?
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        let response: Value = response
             .json()
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))?;
@@ -751,7 +810,13 @@ impl Npm {
             .header("X-Spiferack", "1")
             .send()
             .await
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
+        let response = response
             .json::<Value>()
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
@@ -780,7 +845,13 @@ impl Npm {
                 .query(&[("page", page_num.to_string().as_str()), ("perPage", "10")])
                 .send()
                 .await
-                .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?
+                .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
+            if response.status().as_u16() != 200 {
+                return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                    response.status().as_u16(),
+                )));
+            }
+            let response = response
                 .json::<Value>()
                 .await
                 .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
@@ -808,9 +879,7 @@ impl Npm {
 
         info!("Retrieving details for token [{token_id}] on behalf of [{module}]");
 
-        self.login()
-            .await
-            .map_err(|_| ApiError::NpmError(NpmError::LoginFlowError))?;
+        self.login().await.map_err(|e| ApiError::NpmError(e))?;
         let response = self
             .client
             .get(format!(
@@ -821,6 +890,11 @@ impl Npm {
             .send()
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenDetails))?;
+        if response.status().as_u16() != 200 {
+            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
+                response.status().as_u16(),
+            )));
+        }
 
         // Information on the token is returned in an object under "tokenDetails"
         let token_details = serde_json::from_value::<GranularTokenDetails>(
