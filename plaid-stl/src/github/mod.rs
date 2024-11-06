@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{PlaidFunctionError, datetime::deserialize_option_timestamp};
+use crate::PlaidFunctionError;
 
 pub enum ReviewPatAction {
     Approve,
@@ -46,14 +46,14 @@ pub struct CopilotSeat {
     pub assignee: CopilotAssignee,
     pub plan_type: String,
     // Deserialize the date field from the ISO 8601 format
-    #[serde(default, deserialize_with = "deserialize_option_timestamp")]
+    #[serde(with = "chrono::serde::ts_seconds_option")]
     pub last_activity_at: Option<DateTime<Utc>>,
     // Deserialize the date field from the ISO 8601 format
-    #[serde(default, deserialize_with = "deserialize_option_timestamp")]
-    pub created_at: Option<DateTime<Utc>>,
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub created_at: DateTime<Utc>,
     // Deserialize the date field from the ISO 8601 format
-    #[serde(default, deserialize_with = "deserialize_option_timestamp")]
-    pub updated_at: Option<DateTime<Utc>>,
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize)]
