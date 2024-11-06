@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fmt::Display};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::PlaidFunctionError;
+use crate::{PlaidFunctionError, datetime::deserialize_naivedate_option};
 
 pub enum ReviewPatAction {
     Approve,
@@ -41,17 +41,28 @@ pub struct CopilotAssignee {
 }
 
 #[derive(Debug, Deserialize)]
+/// The team through which the assignee is granted access to GitHub Copilot
+pub struct CopilotAssigningTeam {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
 /// A seat in a Github Org Copilot subscription
 pub struct CopilotSeat {
     pub assignee: CopilotAssignee,
     pub plan_type: String,
-    // Deserialize the date field from the ISO 8601 format
+    pub assigning_team: Option<CopilotAssigningTeam>,
+    // Deserialize the date field from the YYYY-MM-DD format
+    #[serde(default, deserialize_with = "deserialize_naivedate_option")]
+    pub pending_cancellation_date: Option<NaiveDate>,
+    // Deserialize the datetime field from the ISO 8601 format
     #[serde(with = "chrono::serde::ts_seconds_option")]
     pub last_activity_at: Option<DateTime<Utc>>,
-    // Deserialize the date field from the ISO 8601 format
+    // Deserialize the datetime field from the ISO 8601 format
     #[serde(with = "chrono::serde::ts_seconds")]
     pub created_at: DateTime<Utc>,
-    // Deserialize the date field from the ISO 8601 format
+    // Deserialize the datetime field from the ISO 8601 format
     #[serde(with = "chrono::serde::ts_seconds")]
     pub updated_at: DateTime<Utc>,
 }

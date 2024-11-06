@@ -74,6 +74,7 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
+pub mod datetime;
 pub mod messages;
 
 //pub use ::plaid::LogSource;
