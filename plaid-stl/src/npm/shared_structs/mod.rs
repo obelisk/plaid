@@ -169,7 +169,6 @@ pub struct NpmToken {
     pub token_type: Option<String>,
     // Deserialize the date field from the ISO 8601 format
     #[serde(with = "chrono::serde::ts_seconds_option")]
-    pub last_activity_at: Option<DateTime<Utc>>,
     pub expires: Option<DateTime<Utc>>,
 }
 
