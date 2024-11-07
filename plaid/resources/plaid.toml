@@ -149,6 +149,20 @@ secret_key = ""
 # sleep_duration = 100 ## This means the message is sent every 0.1 seconds
 # [data.websocket."websockets"."demo_rpc_call"."headers"]
 
+# [data.github]
+# org = ""
+# log_type = "Web" # Can be one of Web, Git, All
+
+# Authentication using FPAT
+# [data.github.authentication]
+# token = ""
+
+# Authentication using GitHub App Creds
+## [data.github.authentication]
+## app_id = 1234
+## installation_id = 1234
+## private_key = ""
+
 [webhooks."internal"]
 listen_address = "0.0.0.0:4554"
 [webhooks."internal".webhooks."AAAA"]

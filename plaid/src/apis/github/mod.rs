@@ -71,38 +71,8 @@ pub enum GitHubError {
 
 impl Github {
     pub fn new(config: GithubConfig) -> Self {
-        let client_builder = match &config.authentication {
-            Authentication::Token { token } => {
-                info!("Configuring GitHub API with GitHub PAT");
-                Octocrab::builder().personal_token(token.clone())
-            }
-            Authentication::App {
-                app_id,
-                private_key,
-                ..
-            } => {
-                info!("Configuring GitHub API with GitHub App");
-                let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes())
-                    .expect("Failed to create encoding key from private key for GitHub API");
+        let client = build_github_client(&config.authentication);
 
-                Octocrab::builder().app((*app_id).into(), encoding_key)
-            }
-        }
-        .add_header(
-            USER_AGENT,
-            format!("Rust/Plaid{}", env!("CARGO_PKG_VERSION")),
-        );
-
-        let mut client = client_builder
-            .build()
-            .expect("Failed to create GitHub client");
-
-        if let Authentication::App {
-            installation_id, ..
-        } = &config.authentication
-        {
-            client = client.installation((*installation_id).into());
-        }
         // Create all the validators and compile all the regexes. If the module contains
         // any invalid regexes it will panic.
         let validators = validators::create_validators();
@@ -195,7 +165,7 @@ impl Github {
     /// to help facilitate the conversion from a token usage to GitHub app. It also means that
     /// extra parsing can be avoided since we need to re-serialize anyway to pass back to the rules
     /// (at least currently).
-    async fn make_generic_delete_request<T: Serialize> (
+    async fn make_generic_delete_request<T: Serialize>(
         &self,
         uri: String,
         body: Option<&T>,
@@ -216,4 +186,42 @@ impl Github {
             Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
         }
     }
+}
+
+/// Builds an instance of a Github API client
+pub fn build_github_client(authentication: &Authentication) -> Octocrab {
+    let client_builder = match authentication {
+        Authentication::Token { token } => {
+            info!("Configuring GitHub client with GitHub PAT");
+            Octocrab::builder().personal_token(token.clone())
+        }
+        Authentication::App {
+            app_id,
+            private_key,
+            ..
+        } => {
+            info!("Configuring GitHub client with GitHub App");
+            let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes())
+                .expect("Failed to create encoding key from private key for GitHub API");
+
+            Octocrab::builder().app((*app_id).into(), encoding_key)
+        }
+    }
+    .add_header(
+        USER_AGENT,
+        format!("Rust/Plaid{}", env!("CARGO_PKG_VERSION")),
+    );
+
+    let mut client = client_builder
+        .build()
+        .expect("Failed to create GitHub client");
+
+    if let Authentication::App {
+        installation_id, ..
+    } = authentication
+    {
+        client = client.installation((*installation_id).into());
+    }
+
+    client
 }

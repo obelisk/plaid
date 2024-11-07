@@ -1,11 +1,11 @@
 use crossbeam_channel::bounded;
-use plaid_stl::messages::LogbacksAllowed;
+use plaid::apis::github::Authentication;
 use serde::Deserialize;
 
 use plaid::data::github::*;
 
-use std::time::Duration;
 use std::env;
+use std::time::Duration;
 
 #[derive(Deserialize)]
 struct GitHubLog<'a> {
@@ -19,7 +19,11 @@ struct GitHubLog<'a> {
 
 impl std::fmt::Display for GitHubLog<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}\t{}\t{:?}\t{:?}\t{:?}", self.timestamp, self.action, self.actor, self.permission, self.new_repo_permission)
+        write!(
+            f,
+            "{}\t{}\t{:?}\t{:?}\t{:?}",
+            self.timestamp, self.action, self.actor, self.permission, self.new_repo_permission
+        )
     }
 }
 
@@ -32,6 +36,8 @@ fn get_config_from_env() -> Result<GithubConfig, ()> {
         }
     };
 
+    let authentication = Authentication::Token { token };
+
     let org = match env::var("GH_ORG") {
         Ok(x) => x,
         Err(_) => {
@@ -40,15 +46,8 @@ fn get_config_from_env() -> Result<GithubConfig, ()> {
         }
     };
 
-    Ok(GithubConfig {
-        token,
-        org,
-        log_type: format!("web"),
-        logbacks_allowed: LogbacksAllowed::Unlimited,
-    })
-
+    Ok(GithubConfig::new(authentication, org, LogType::Web))
 }
-
 
 #[tokio::main]
 async fn main() {
