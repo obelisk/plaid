@@ -47,8 +47,10 @@ pub struct NpmConfig {
     pub username: String,
     /// Password for the npm account
     pub password: String,
-    /// Secret for the TOTP-based 2FA on the npm account
-    pub otp_secret: Option<String>,
+    /// Secret for the TOTP-based 2FA on the npm account. If the account does not have 2FA, then
+    /// the login cannot be automated. This is because when 2FA is not enabled, npmjs.com sends
+    /// a one-time code to the registered email address, so plaid cannot fetch it.
+    pub otp_secret: String,
     /// Automation (not publish!) token for the npm account. This is a type of token that can
     /// be created through the npm website and allows this user to publish packages without
     /// having to complete the 2FA flow. It is used in the CLI client, for publishing a new package
@@ -64,20 +66,18 @@ impl NpmConfig {
     pub fn new(
         username: String,
         password: String,
-        otp_secret: Option<String>,
+        otp_secret: String,
         automation_token: String,
         npm_scope: String,
         user_agent: String,
     ) -> Result<Self, NpmError> {
         // Check the OTP secret looks OK: it should be 32 alphanumerical characters
-        if let Some(ref otp_secret) = otp_secret {
-            // Safe unwrap: hardcoded regex
-            let otp_regex = Regex::new(r"^[a-zA-Z0-9]{32}$").unwrap();
-            if !otp_regex.is_match(otp_secret) {
-                return Err(NpmError::WrongConfig(
-                    "Wrong format for OTP secret".to_string(),
-                ));
-            }
+        // Safe unwrap: hardcoded regex
+        let otp_regex = Regex::new(r"^[a-zA-Z0-9]{32}$").unwrap();
+        if !otp_regex.is_match(&otp_secret) {
+            return Err(NpmError::WrongConfig(
+                "Wrong format for OTP secret".to_string(),
+            ));
         }
 
         // Check the automation_token looks OK: it should be "npm_" followed by 36 alphanum characters
@@ -124,5 +124,5 @@ pub enum NpmError {
     FailedToRetrievePaginatedData,
     FailedToRetrievePackages,
     FailedToGetTokenDetails,
-    UnexpectedStatusCode(u16)
+    UnexpectedStatusCode(u16),
 }

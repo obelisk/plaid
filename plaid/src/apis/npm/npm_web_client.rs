@@ -136,42 +136,37 @@ impl Npm {
             return Err(NpmError::UnexpectedStatusCode(response.status().as_u16()));
         }
 
-        // If we have a configured OTP secret, we proceed with the 2FA flow
-        if let Some(ref otp_secret) = self.config.otp_secret {
-            let otp_token = TOTP::new(
-                Algorithm::SHA1,
-                6,
-                1,
-                30,
-                Secret::Encoded(otp_secret.to_string())
-                    .to_bytes()
-                    .map_err(|_| NpmError::LoginFlowError)?,
-            )
-            .map_err(|_| NpmError::LoginFlowError)?
-            .generate_current()
-            .map_err(|_| NpmError::LoginFlowError)?;
+        // Login step 2: 2FA flow
+        let otp_token = TOTP::new(
+            Algorithm::SHA1,
+            6,
+            1,
+            30,
+            Secret::Encoded(self.config.otp_secret.clone())
+                .to_bytes()
+                .map_err(|_| NpmError::LoginFlowError)?,
+        )
+        .map_err(|_| NpmError::LoginFlowError)?
+        .generate_current()
+        .map_err(|_| NpmError::LoginFlowError)?;
 
-            // Login step 2: send the TOTP code to a well-known URL
-            let response = self
-                .client
-                .post(format!("{}/login/otp?next=%2F", NPMJS_COM_URL))
-                .form(&[
-                    ("otp", &otp_token),
-                    ("formName", &"totp".to_string()),
-                    ("originalUrl", &"".to_string()),
-                    ("csrftoken", &cs_cookie),
-                ])
-                .send()
-                .await
-                .map_err(|_| NpmError::LoginFlowError)?;
-            if response.status().as_u16() != 200 {
-                return Err(NpmError::UnexpectedStatusCode(response.status().as_u16()));
-            }
-            Ok(())
-        } else {
-            // We do not have an OTP secret, so we are done with the login
-            Ok(())
+        // Send the TOTP code to a well-known URL
+        let response = self
+            .client
+            .post(format!("{}/login/otp?next=%2F", NPMJS_COM_URL))
+            .form(&[
+                ("otp", &otp_token),
+                ("formName", &"totp".to_string()),
+                ("originalUrl", &"".to_string()),
+                ("csrftoken", &cs_cookie),
+            ])
+            .send()
+            .await
+            .map_err(|_| NpmError::LoginFlowError)?;
+        if response.status().as_u16() != 200 {
+            return Err(NpmError::UnexpectedStatusCode(response.status().as_u16()));
         }
+        Ok(())
     }
 
     /// Set a team's permissions over a package
