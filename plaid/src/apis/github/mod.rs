@@ -1,3 +1,4 @@
+mod actions;
 mod code;
 mod copilot;
 mod environments;
