@@ -33,11 +33,11 @@ where
         return Ok(None)
     }
 
-    Ok(
+    Ok(Some(
         DateTime::parse_from_rfc3339(&s)
-            .ok()
-            .map(|dt| dt.with_timezone(&Utc))
-    )
+            .map_err(serde::de::Error::custom)?
+            .with_timezone(&Utc)
+    ))
 }
 
 // Deserialize a possibly empty string in "YYYY-MM-DD" format to an optional NaiveDate
