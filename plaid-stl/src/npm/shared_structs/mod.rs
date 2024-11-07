@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use crate::datetime;
 
 /// Permission that is granted to a team over an npm package
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -168,7 +169,7 @@ pub struct NpmToken {
     pub token_name: Option<String>,
     pub token_type: Option<String>,
     // Deserialize the date field from the ISO 8601 format
-    #[serde(with = "chrono::serde::ts_seconds_option")]
+    #[serde(default, deserialize_with = "datetime::deserialize_option_rfc3339_timestamp")]
     pub expires: Option<DateTime<Utc>>,
 }
 
