@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fmt::Display};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{PlaidFunctionError, datetime::deserialize_option_timestamp};
+use crate::{PlaidFunctionError, datetime};
 
 pub enum ReviewPatAction {
     Approve,
@@ -41,19 +41,30 @@ pub struct CopilotAssignee {
 }
 
 #[derive(Debug, Deserialize)]
+/// The team through which the assignee is granted access to GitHub Copilot
+pub struct CopilotAssigningTeam {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
 /// A seat in a Github Org Copilot subscription
 pub struct CopilotSeat {
     pub assignee: CopilotAssignee,
     pub plan_type: String,
-    // Deserialize the date field from the ISO 8601 format
-    #[serde(default, deserialize_with = "deserialize_option_timestamp")]
+    pub assigning_team: Option<CopilotAssigningTeam>,
+    // Deserialize the date field from the YYYY-MM-DD format
+    #[serde(deserialize_with = "datetime::deserialize_option_naivedate")]
+    pub pending_cancellation_date: Option<NaiveDate>,
+    // Deserialize the datetime field from the ISO 8601 format
+    #[serde(deserialize_with = "datetime::deserialize_option_rfc3339_timestamp")]
     pub last_activity_at: Option<DateTime<Utc>>,
-    // Deserialize the date field from the ISO 8601 format
-    #[serde(default, deserialize_with = "deserialize_option_timestamp")]
-    pub created_at: Option<DateTime<Utc>>,
-    // Deserialize the date field from the ISO 8601 format
-    #[serde(default, deserialize_with = "deserialize_option_timestamp")]
-    pub updated_at: Option<DateTime<Utc>>,
+    // Deserialize the datetime field from the ISO 8601 format
+    #[serde(deserialize_with = "datetime::deserialize_rfc3339_timestamp")]
+    pub created_at: DateTime<Utc>,
+    // Deserialize the datetime field from the ISO 8601 format
+    #[serde(deserialize_with = "datetime::deserialize_rfc3339_timestamp")]
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize)]
