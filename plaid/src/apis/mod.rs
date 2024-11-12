@@ -24,6 +24,7 @@ use github::{Github, GithubConfig};
 use npm::{Npm, NpmConfig};
 use okta::{Okta, OktaConfig};
 use pagerduty::{PagerDuty, PagerDutyConfig};
+use plaid_stl::npm::shared_structs::NpmError;
 use quorum::{Quorum, QuorumConfig};
 use serde::Deserialize;
 use slack::{Slack, SlackConfig};
@@ -82,7 +83,7 @@ pub enum ApiError {
     #[cfg(feature = "aws")]
     KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
     NetworkError(reqwest::Error),
-    NpmError(npm::NpmError),
+    NpmError(NpmError),
     OktaError(okta::OktaError),
     PagerDutyError(pagerduty::PagerDutyError),
     QuorumError(quorum::QuorumError),

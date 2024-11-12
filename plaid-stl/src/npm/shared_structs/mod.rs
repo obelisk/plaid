@@ -2,10 +2,64 @@
 //! These are used for ensuring consistent serialization / deserialization across the
 //! host / guest boundary.
 
+use crate::datetime;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
-use crate::datetime;
+
+/// All the errors that can be encountered by the npm API
+#[derive(Debug, Serialize, Deserialize)]
+pub enum NpmError {
+    InvalidInput(String),
+    RegistryUploadError,
+    FailedToGenerateArchive,
+    PermissionChangeError,
+    GenericError,
+    LoginFlowError,
+    WrongClientStatus,
+    TokenGenerationError(String),
+    TokenDeletionError,
+    WrongConfig(String),
+    FailedToListGranularTokens,
+    FailedToDeletePackage,
+    FailedToAddUserToTeam,
+    FailedToRemoveUserFromTeam,
+    FailedToRemoveUserFromOrg,
+    FailedToInviteUserToOrg,
+    FailedToRetrieveUserList,
+    FailedToRetrieveUsersWithout2FA,
+    FailedToConvertToNpmUser,
+    FailedToGetCsrfTokenFromCookies,
+    FailedToRetrievePaginatedData,
+    FailedToRetrievePackages,
+    FailedToGetTokenDetails,
+    UnexpectedStatusCode(u16),
+    // Contains the value of the Retry-After header, if present
+    ThrottlingError(Option<u32>),
+    UnknownError,
+}
+
+/// Value returned by the runtime to the rule. This allows plaid to communicate
+/// any payloads or errors to the rule, so that this can handle them.
+#[derive(Serialize, Deserialize)]
+pub enum RuntimeReturnValue {
+    Ok(Option<String>),
+    Error(NpmError),
+}
+
+impl RuntimeReturnValue {
+    pub fn serialize_from_str(value: &str) -> String {
+        serde_json::to_string(&Self::Ok(Some(value.to_string()))).unwrap()
+    }
+
+    pub fn serialize_empty_ok() -> String {
+        serde_json::to_string(&Self::Ok(None)).unwrap()
+    }
+
+    pub fn serialize_from_err(e: NpmError) -> String {
+        serde_json::to_string(&Self::Error(e)).unwrap()
+    }
+}
 
 /// Permission that is granted to a team over an npm package
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -169,7 +223,10 @@ pub struct NpmToken {
     pub token_name: Option<String>,
     pub token_type: Option<String>,
     // Deserialize the date field from the ISO 8601 format
-    #[serde(default, deserialize_with = "datetime::deserialize_option_rfc3339_timestamp")]
+    #[serde(
+        default,
+        deserialize_with = "datetime::deserialize_option_rfc3339_timestamp"
+    )]
     pub expires: Option<DateTime<Utc>>,
 }
 
@@ -188,7 +245,7 @@ pub struct CreateGranularTokenForPackagesParams {
 
 #[derive(Serialize, Deserialize)]
 pub struct DeleteTokenParams {
-    pub token_id: String
+    pub token_id: String,
 }
 
 #[derive(Serialize, Deserialize)]

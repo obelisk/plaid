@@ -258,16 +258,16 @@ impl_new_sub_module_function_with_error_buffer!(aws, kms, sign_arbitrary_message
 impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key);
 
 // Npm Functions
-impl_new_function!(npm, publish_empty_stub);
-impl_new_function!(npm, set_team_permission_on_package);
+impl_new_function_with_error_buffer!(npm, publish_empty_stub);
+impl_new_function_with_error_buffer!(npm, set_team_permission_on_package);
 impl_new_function_with_error_buffer!(npm, create_granular_token_for_packages);
-impl_new_function!(npm, delete_granular_token);
+impl_new_function_with_error_buffer!(npm, delete_granular_token);
 impl_new_function_with_error_buffer!(npm, list_granular_tokens);
-impl_new_function!(npm, delete_package);
-impl_new_function!(npm, add_user_to_team);
-impl_new_function!(npm, remove_user_from_team);
-impl_new_function!(npm, remove_user_from_organization);
-impl_new_function!(npm, invite_user_to_organization);
+impl_new_function_with_error_buffer!(npm, delete_package);
+impl_new_function_with_error_buffer!(npm, add_user_to_team);
+impl_new_function_with_error_buffer!(npm, remove_user_from_team);
+impl_new_function_with_error_buffer!(npm, remove_user_from_organization);
+impl_new_function_with_error_buffer!(npm, invite_user_to_organization);
 impl_new_function_with_error_buffer!(npm, get_org_user_list);
 impl_new_function_with_error_buffer!(npm, get_org_users_without_2fa);
 impl_new_function_with_error_buffer!(npm, list_packages_with_team_permission);
