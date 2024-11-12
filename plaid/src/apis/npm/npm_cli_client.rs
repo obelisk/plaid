@@ -3,7 +3,7 @@ use crate::apis::ApiError;
 use super::{hashes, Npm, NpmError};
 
 use flate2::{write::GzEncoder, Compression};
-use plaid_stl::npm::shared_structs::PublishEmptyStubParams;
+use plaid_stl::npm::shared_structs::{PublishEmptyStubParams, RuntimeReturnValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -76,7 +76,7 @@ struct PkgManifest<'a> {
 
 impl Npm {
     /// Upload an empty package stub to the npm registry.
-    pub async fn publish_empty_stub(&self, params: &str, module: &str) -> Result<i32, ApiError> {
+    pub async fn publish_empty_stub(&self, params: &str, module: &str) -> Result<String, ApiError> {
         let params: PublishEmptyStubParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let package_name = self.validate_npm_package_name(&params.package_name)?;
@@ -161,8 +161,8 @@ impl Npm {
             .json(&pkg_metadata)
             .send()
             .await
-            .map(|_| Ok(0))
-            .map_err(|_| ApiError::NpmError(NpmError::RegistryUploadError))?
+            .map_err(|_| ApiError::NpmError(NpmError::RegistryUploadError))?;
+        Ok(RuntimeReturnValue::serialize_empty_ok())
     }
 }
 

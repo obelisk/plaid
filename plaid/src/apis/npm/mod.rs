@@ -6,6 +6,7 @@ pub mod npm_web_client;
 
 use std::{collections::HashMap, sync::Arc};
 
+use plaid_stl::npm::shared_structs::NpmError;
 use regex::Regex;
 use reqwest::{cookie::Jar, Client};
 use serde::{Deserialize, Serialize};
@@ -97,34 +98,4 @@ impl NpmConfig {
             user_agent,
         })
     }
-}
-
-#[derive(Debug)]
-pub enum NpmError {
-    InvalidInput(String),
-    RegistryUploadError,
-    FailedToGenerateArchive,
-    PermissionChangeError,
-    GenericError,
-    LoginFlowError,
-    WrongClientStatus,
-    TokenGenerationError(String),
-    TokenDeletionError,
-    WrongConfig(String),
-    FailedToListGranularTokens,
-    FailedToDeletePackage,
-    FailedToAddUserToTeam,
-    FailedToRemoveUserFromTeam,
-    FailedToRemoveUserFromOrg,
-    FailedToInviteUserToOrg,
-    FailedToRetrieveUserList,
-    FailedToRetrieveUsersWithout2FA,
-    FailedToConvertToNpmUser,
-    FailedToGetCsrfTokenFromCookies,
-    FailedToRetrievePaginatedData,
-    FailedToRetrievePackages,
-    FailedToGetTokenDetails,
-    UnexpectedStatusCode(u16),
-    // Contains the value of the Retry-After header, if present
-    ThrottlingError(Option<u32>),
 }

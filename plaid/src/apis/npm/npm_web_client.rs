@@ -9,7 +9,7 @@ use crate::apis::ApiError;
 
 use plaid_stl::npm::shared_structs::*;
 
-use super::{Npm, NpmError};
+use super::Npm;
 
 const NPMJS_COM_URL: &str = "https://www.npmjs.com";
 
@@ -71,24 +71,34 @@ struct DeleteTokenPayload<'a> {
     tokens: &'a str,
 }
 
-/// Takes a response for which the status code is not the expected one
-/// and tries to figure out what went wrong.
-fn handle_bad_response(response: &Response) -> NpmError {
+/// Takes a response with an unexpected status code and serializes it to
+/// a String that contains all the context that a rule might need to handle
+/// this unexpected response.
+fn handle_bad_response(response: &Response) -> String {
+    let error = bad_response_to_error(response);
+    return RuntimeReturnValue::serialize_from_err(error);
+}
+
+/// Takes a response with an unexpected status code and turns it into
+/// an appropriate NpmError
+fn bad_response_to_error(response: &Response) -> NpmError {
     // If we are being throttled, i.e., if npm returns 429, see if there is a
     // Retry-After header. If so, we pass it back to the calling module, which
     // is then responsible for taking appropriate action.
-    if response.status().as_u16() == 429 {
-        let retry_after = response
-            .headers()
-            .get("Retry-After")
-            .map(|r| r.to_str().ok().map(|v| v.parse::<u32>().ok()))
-            .flatten()
-            .flatten();
-
-        return NpmError::ThrottlingError(retry_after);
+    // If it's another unexpected status code, then just wrap it in an NpmError
+    // and pass it through.
+    match response.status().as_u16() {
+        429 => {
+            let retry_after = response
+                .headers()
+                .get("Retry-After")
+                .map(|r| r.to_str().ok().map(|v| v.parse::<u32>().ok()))
+                .flatten()
+                .flatten();
+            NpmError::ThrottlingError(retry_after)
+        }
+        status => NpmError::UnexpectedStatusCode(status),
     }
-    // Otherwise, we just got an unexpected status code
-    return NpmError::UnexpectedStatusCode(response.status().as_u16());
 }
 
 impl Npm {
@@ -131,7 +141,7 @@ impl Npm {
             .await
             .map_err(|_| NpmError::LoginFlowError)?;
         if response.status().as_u16() != 200 {
-            return Err(handle_bad_response(&response));
+            return Err(bad_response_to_error(&response));
         }
 
         // Get the CSRF token (which is in a cookie) because we need to send it back later on
@@ -153,7 +163,7 @@ impl Npm {
             .await
             .map_err(|_| NpmError::LoginFlowError)?;
         if response.status().as_u16() != 200 {
-            return Err(handle_bad_response(&response));
+            return Err(bad_response_to_error(&response));
         }
 
         // Login step 2: 2FA flow
@@ -184,7 +194,7 @@ impl Npm {
             .await
             .map_err(|_| NpmError::LoginFlowError)?;
         if response.status().as_u16() != 200 {
-            return Err(handle_bad_response(&response));
+            return Err(bad_response_to_error(&response));
         }
         Ok(())
     }
@@ -194,8 +204,10 @@ impl Npm {
         &self,
         params: &str,
         module: &str,
-    ) -> Result<i32, ApiError> {
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+    ) -> Result<String, ApiError> {
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let params: SetTeamPermissionOnPackageParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let team = self.validate_npm_team_name(&params.team)?;
@@ -228,9 +240,9 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::PermissionChangeError))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
-        Ok(0)
+        Ok(RuntimeReturnValue::serialize_empty_ok())
     }
 
     /// Create a granular token for a package, with given name and description.
@@ -244,7 +256,9 @@ impl Npm {
         params: &str,
         module: &str,
     ) -> Result<String, ApiError> {
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let params: CreateGranularTokenForPackagesParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let packages = params
@@ -312,7 +326,7 @@ impl Npm {
                 ))
             })?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
 
         // The new token is in the JSON response, under the key "newToken"
@@ -333,12 +347,18 @@ impl Npm {
                 "error while reading token from npm JSON response".to_string(),
             )))?
             .to_string();
-        Ok(token)
+        Ok(RuntimeReturnValue::serialize_from_str(&token))
     }
 
     /// Delete a granular token from the npm website
-    pub async fn delete_granular_token(&self, params: &str, module: &str) -> Result<i32, ApiError> {
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+    pub async fn delete_granular_token(
+        &self,
+        params: &str,
+        module: &str,
+    ) -> Result<String, ApiError> {
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let params: DeleteTokenParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let token_id = self.validate_token_id(&params.token_id)?;
@@ -365,9 +385,9 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::TokenDeletionError))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
-        Ok(0)
+        Ok(RuntimeReturnValue::serialize_empty_ok())
     }
 
     /// Retrieve a list of granular tokens for the account whose credentials have been configured for this client.
@@ -375,7 +395,9 @@ impl Npm {
     /// Note: only granular tokens are returned. Other types of tokens (publish, automation, etc.) are filtered out.
     pub async fn list_granular_tokens(&self, _: &str, module: &str) -> Result<String, ApiError> {
         info!("Listing npm granular tokens on behalf of [{module}]");
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let response = self
             .client
             .get(format!(
@@ -387,7 +409,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
 
         // Tokens are returned in a JSON structure under "list > objects". We first deserialize to a
@@ -410,8 +432,9 @@ impl Npm {
         .cloned()
         .collect::<Vec<NpmToken>>();
 
-        serde_json::to_string(&granular_tokens)
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))
+        let tokens = serde_json::to_string(&granular_tokens)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?;
+        Ok(RuntimeReturnValue::serialize_from_str(&tokens))
     }
 
     /// Delete a package from the npm registry.
@@ -419,10 +442,12 @@ impl Npm {
     /// Note: The package name should be unscoped. If you are trying to delete
     /// @scope/package_name, then you should pass only "package_name". The scope is
     /// preconfigured in the client and will be added automatically.
-    pub async fn delete_package(&self, package: &str, module: &str) -> Result<i32, ApiError> {
+    pub async fn delete_package(&self, package: &str, module: &str) -> Result<String, ApiError> {
         let package = self.validate_npm_package_name(package)?;
         info!("Deleting npm package [{package}] on behalf of [{module}]");
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         // Step 1. Make a GET request to /delete in order to retrieve the dsrManifestHash.
         // This will later be sent as form data when actually performing the deletion.
         let response = self
@@ -435,7 +460,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
         let response_text = response
             .text()
@@ -471,12 +496,14 @@ impl Npm {
                 response.status().as_u16(),
             )));
         }
-        Ok(0)
+        Ok(RuntimeReturnValue::serialize_empty_ok())
     }
 
     /// Add a user to an npm team
-    pub async fn add_user_to_team(&self, params: &str, module: &str) -> Result<i32, ApiError> {
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+    pub async fn add_user_to_team(&self, params: &str, module: &str) -> Result<String, ApiError> {
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let params: AddRemoveUserToFromTeamParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let user = self.validate_npm_username(&params.user)?;
@@ -508,14 +535,20 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToAddUserToTeam))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
-        Ok(0)
+        Ok(RuntimeReturnValue::serialize_empty_ok())
     }
 
     /// Remove a user from an npm team
-    pub async fn remove_user_from_team(&self, params: &str, module: &str) -> Result<i32, ApiError> {
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+    pub async fn remove_user_from_team(
+        &self,
+        params: &str,
+        module: &str,
+    ) -> Result<String, ApiError> {
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let params: AddRemoveUserToFromTeamParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let user = self.validate_npm_username(&params.user)?;
@@ -543,9 +576,9 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromTeam))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
-        Ok(0)
+        Ok(RuntimeReturnValue::serialize_empty_ok())
     }
 
     /// Remove a user from the npm organization
@@ -553,11 +586,13 @@ impl Npm {
         &self,
         user: &str,
         module: &str,
-    ) -> Result<i32, ApiError> {
+    ) -> Result<String, ApiError> {
         let user = self.validate_npm_username(user)?;
         info!("Removing user [{user}] from npm organization on behalf of [{module}]");
 
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let csrf_token = self
             .get_csrftoken_from_cookies()
             .map_err(|_| ApiError::NpmError(NpmError::WrongClientStatus))?;
@@ -576,9 +611,9 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromOrg))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
-        Ok(0)
+        Ok(RuntimeReturnValue::serialize_empty_ok())
     }
 
     /// Invite a user to the npm organization.
@@ -589,8 +624,10 @@ impl Npm {
         &self,
         params: &str,
         module: &str,
-    ) -> Result<i32, ApiError> {
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+    ) -> Result<String, ApiError> {
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let params: InviteUserToOrganizationParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let user = self.validate_npm_username(&params.user)?;
@@ -627,15 +664,17 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToInviteUserToOrg))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
-        Ok(0)
+        Ok(RuntimeReturnValue::serialize_empty_ok())
     }
 
     /// Return all users in the npm organization
     pub async fn get_org_user_list(&self, _: &str, module: &str) -> Result<String, ApiError> {
         info!("Listing all members of npm organization on behalf of [{module}]");
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let response = self
             .client
             .get(format!(
@@ -647,7 +686,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
         let response = response
             .json::<Value>()
@@ -665,7 +704,7 @@ impl Npm {
         )
         .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
 
-        let users = self
+        let users = match self
             .get_paginated_data_from_npm_website::<NpmUser>(
                 &format!(
                     "{}/settings/{}/members",
@@ -673,10 +712,15 @@ impl Npm {
                 ),
                 total_users,
             )
-            .await?;
+            .await
+        {
+            Ok(users) => users,
+            Err(e) => return Ok(RuntimeReturnValue::serialize_from_err(e)),
+        };
 
-        serde_json::to_string(&users)
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))
+        let users = serde_json::to_string(&users)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
+        Ok(RuntimeReturnValue::serialize_from_str(&users))
     }
 
     /// Retrieve all users in the npm org that do not have 2FA enabled
@@ -686,7 +730,9 @@ impl Npm {
         module: &str,
     ) -> Result<String, ApiError> {
         info!("Listing all members of npm organization without 2FA on behalf of [{module}]");
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let response = self
             .client
             .get(format!(
@@ -699,7 +745,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
         let response = response
             .json::<Value>()
@@ -717,7 +763,7 @@ impl Npm {
         )
         .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
 
-        let users = self
+        let users = match self
             .get_paginated_data_from_npm_website::<NpmUser>(
                 &format!(
                     "{}/settings/{}/members?selectedTab=tfa_disabled",
@@ -725,10 +771,15 @@ impl Npm {
                 ),
                 total_users,
             )
-            .await?;
+            .await
+        {
+            Ok(users) => users,
+            Err(e) => return Ok(RuntimeReturnValue::serialize_from_err(e)),
+        };
 
-        serde_json::to_string(&users)
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))
+        let users = serde_json::to_string(&users)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
+        Ok(RuntimeReturnValue::serialize_from_str(&users))
     }
 
     /// Retrieve a list of packages for which a given team has a given permission
@@ -747,7 +798,9 @@ impl Npm {
             team,
             params.permission.to_string()
         );
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
 
         let response = self
             .client
@@ -760,7 +813,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
         let response: Value = response
             .json()
@@ -780,7 +833,7 @@ impl Npm {
 
         // Get all packages the team can access and keep only those
         // that have the desired permission (specified in the params)
-        let packages = self
+        let packages = match self
             .get_paginated_data_from_npm_website::<NpmPackageWithPermission>(
                 &format!(
                     "{}/settings/{}/teams/team/{}/access",
@@ -788,14 +841,18 @@ impl Npm {
                 ),
                 total_packages,
             )
-            .await?
-            .iter()
-            .filter(|v| v.permission == params.permission)
-            .cloned()
-            .collect::<Vec<NpmPackageWithPermission>>();
-
-        serde_json::to_string(&packages)
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))
+            .await
+        {
+            Ok(packages) => packages
+                .iter()
+                .filter(|v| v.permission == params.permission)
+                .cloned()
+                .collect::<Vec<NpmPackageWithPermission>>(),
+            Err(e) => return Ok(RuntimeReturnValue::serialize_from_err(e)),
+        };
+        let packages = serde_json::to_string(&packages)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))?;
+        Ok(RuntimeReturnValue::serialize_from_str(&packages))
     }
 
     /// Utility function that retrieves paginated data from a certain URL under the npm website.
@@ -804,7 +861,7 @@ impl Npm {
         &self,
         url: &str,
         target_num_items: u64,
-    ) -> Result<Vec<T>, ApiError> {
+    ) -> Result<Vec<T>, NpmError> {
         // Get the first page, which contains the first items (max 10)
         let response = self
             .client
@@ -812,17 +869,17 @@ impl Npm {
             .header("X-Spiferack", "1")
             .send()
             .await
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
+            .map_err(|_| NpmError::FailedToRetrievePaginatedData)?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Err(bad_response_to_error(&response));
         }
         let response = response
             .json::<Value>()
             .await
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
+            .map_err(|_| NpmError::FailedToRetrievePaginatedData)?;
 
         let mut all_items = T::from_paginated_response(&response)
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
+            .map_err(|_| NpmError::FailedToRetrievePaginatedData)?;
 
         if target_num_items <= 10 {
             // We should have already got 10 items from the first page
@@ -831,7 +888,7 @@ impl Npm {
                 return Ok(all_items);
             }
             // We _should_ have got all the items but something went wrong. Not good.
-            return Err(ApiError::NpmError(NpmError::FailedToRetrievePaginatedData));
+            return Err(NpmError::FailedToRetrievePaginatedData);
         }
 
         // If we are here, then there are more than 10 items, so we make more requests
@@ -845,18 +902,18 @@ impl Npm {
                 .query(&[("page", page_num.to_string().as_str()), ("perPage", "10")])
                 .send()
                 .await
-                .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
+                .map_err(|_| NpmError::FailedToRetrievePaginatedData)?;
             if response.status().as_u16() != 200 {
-                return Err(ApiError::NpmError(handle_bad_response(&response)));
+                return Err(bad_response_to_error(&response));
             }
             let response = response
                 .json::<Value>()
                 .await
-                .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
+                .map_err(|_| NpmError::FailedToRetrievePaginatedData)?;
 
             all_items.extend(
                 T::from_paginated_response(&response)
-                    .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?,
+                    .map_err(|_| NpmError::FailedToRetrievePaginatedData)?,
             );
 
             if all_items.len() == target_num_items as usize {
@@ -877,7 +934,9 @@ impl Npm {
 
         info!("Retrieving details for token [{token_id}] on behalf of [{module}]");
 
-        self.login().await.map_err(|e| ApiError::NpmError(e))?;
+        if let Err(e) = self.login().await {
+            return Ok(RuntimeReturnValue::serialize_from_err(e));
+        }
         let response = self
             .client
             .get(format!(
@@ -889,7 +948,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenDetails))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(handle_bad_response(&response)));
+            return Ok(handle_bad_response(&response));
         }
 
         // Information on the token is returned in an object under "tokenDetails"
@@ -904,8 +963,9 @@ impl Npm {
         )
         .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenDetails))?;
 
-        serde_json::to_string(&token_details)
-            .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenDetails))
+        let details = serde_json::to_string(&token_details)
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenDetails))?;
+        Ok(RuntimeReturnValue::serialize_from_str(&details))
     }
 }
 

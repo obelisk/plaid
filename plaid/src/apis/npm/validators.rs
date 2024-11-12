@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use plaid_stl::npm::shared_structs::GranularTokenSpecs;
+use plaid_stl::npm::shared_structs::{GranularTokenSpecs, NpmError};
 
-use super::{Npm, NpmError};
+use super::Npm;
 use crate::apis::ApiError;
 
 macro_rules! define_regex_validator {
