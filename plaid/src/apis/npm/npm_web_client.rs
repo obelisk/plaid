@@ -1,4 +1,4 @@
-use reqwest::cookie::CookieStore;
+use reqwest::{cookie::CookieStore, Response};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -71,6 +71,26 @@ struct DeleteTokenPayload<'a> {
     tokens: &'a str,
 }
 
+/// Takes a response for which the status code is not the expected one
+/// and tries to figure out what went wrong.
+fn handle_bad_response(response: &Response) -> NpmError {
+    // If we are being throttled, i.e., if npm returns 429, see if there is a
+    // Retry-After header. If so, we pass it back to the calling module, which
+    // is then responsible for taking appropriate action.
+    if response.status().as_u16() == 429 {
+        let retry_after = response
+            .headers()
+            .get("Retry-After")
+            .map(|r| r.to_str().ok().map(|v| v.parse::<u32>().ok()))
+            .flatten()
+            .flatten();
+
+        return NpmError::ThrottlingError(retry_after);
+    }
+    // Otherwise, we just got an unexpected status code
+    return NpmError::UnexpectedStatusCode(response.status().as_u16());
+}
+
 impl Npm {
     /// Retrieve the CSRF token from the client's cookie jar
     fn get_csrftoken_from_cookies(&self) -> Result<String, NpmError> {
@@ -111,7 +131,7 @@ impl Npm {
             .await
             .map_err(|_| NpmError::LoginFlowError)?;
         if response.status().as_u16() != 200 {
-            return Err(NpmError::UnexpectedStatusCode(response.status().as_u16()));
+            return Err(handle_bad_response(&response));
         }
 
         // Get the CSRF token (which is in a cookie) because we need to send it back later on
@@ -133,7 +153,7 @@ impl Npm {
             .await
             .map_err(|_| NpmError::LoginFlowError)?;
         if response.status().as_u16() != 200 {
-            return Err(NpmError::UnexpectedStatusCode(response.status().as_u16()));
+            return Err(handle_bad_response(&response));
         }
 
         // Login step 2: 2FA flow
@@ -164,7 +184,7 @@ impl Npm {
             .await
             .map_err(|_| NpmError::LoginFlowError)?;
         if response.status().as_u16() != 200 {
-            return Err(NpmError::UnexpectedStatusCode(response.status().as_u16()));
+            return Err(handle_bad_response(&response));
         }
         Ok(())
     }
@@ -208,9 +228,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::PermissionChangeError))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         Ok(0)
     }
@@ -288,25 +306,34 @@ impl Npm {
             .header("X-Spiferack", "1") // to get JSON instead of HTML
             .send()
             .await
-            .map_err(|_| ApiError::NpmError(NpmError::TokenGenerationError))?;
+            .map_err(|_| {
+                ApiError::NpmError(NpmError::TokenGenerationError(
+                    "error while calling npm".to_string(),
+                ))
+            })?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
 
         // The new token is in the JSON response, under the key "newToken"
-        response
+        let token = response
             .json::<Value>()
             .await
-            .map_err(|_| ApiError::NpmError(NpmError::TokenGenerationError))?
+            .map_err(|_| {
+                ApiError::NpmError(NpmError::TokenGenerationError(
+                    "error while retrieving JSON from npm response".to_string(),
+                ))
+            })?
             .get("newToken")
-            .map(|v| {
-                Ok(v.as_str()
-                    .ok_or(ApiError::NpmError(NpmError::TokenGenerationError))?
-                    .to_string())
-            })
-            .ok_or(ApiError::NpmError(NpmError::TokenGenerationError))?
+            .ok_or(ApiError::NpmError(NpmError::TokenGenerationError(
+                "error while reading token from npm JSON response".to_string(),
+            )))?
+            .as_str()
+            .ok_or(ApiError::NpmError(NpmError::TokenGenerationError(
+                "error while reading token from npm JSON response".to_string(),
+            )))?
+            .to_string();
+        Ok(token)
     }
 
     /// Delete a granular token from the npm website
@@ -338,9 +365,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::TokenDeletionError))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         Ok(0)
     }
@@ -362,9 +387,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
 
         // Tokens are returned in a JSON structure under "list > objects". We first deserialize to a
@@ -412,9 +435,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToDeletePackage))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         let response_text = response
             .text()
@@ -487,9 +508,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToAddUserToTeam))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         Ok(0)
     }
@@ -524,9 +543,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromTeam))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         Ok(0)
     }
@@ -559,9 +576,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRemoveUserFromOrg))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         Ok(0)
     }
@@ -612,9 +627,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToInviteUserToOrg))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         Ok(0)
     }
@@ -634,9 +647,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         let response = response
             .json::<Value>()
@@ -688,9 +699,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrieveUserList))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         let response = response
             .json::<Value>()
@@ -751,9 +760,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePackages))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         let response: Value = response
             .json()
@@ -807,9 +814,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
         let response = response
             .json::<Value>()
@@ -842,9 +847,7 @@ impl Npm {
                 .await
                 .map_err(|_| ApiError::NpmError(NpmError::FailedToRetrievePaginatedData))?;
             if response.status().as_u16() != 200 {
-                return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                    response.status().as_u16(),
-                )));
+                return Err(ApiError::NpmError(handle_bad_response(&response)));
             }
             let response = response
                 .json::<Value>()
@@ -886,9 +889,7 @@ impl Npm {
             .await
             .map_err(|_| ApiError::NpmError(NpmError::FailedToGetTokenDetails))?;
         if response.status().as_u16() != 200 {
-            return Err(ApiError::NpmError(NpmError::UnexpectedStatusCode(
-                response.status().as_u16(),
-            )));
+            return Err(ApiError::NpmError(handle_bad_response(&response)));
         }
 
         // Information on the token is returned in an object under "tokenDetails"

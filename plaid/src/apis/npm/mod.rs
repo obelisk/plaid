@@ -108,7 +108,7 @@ pub enum NpmError {
     GenericError,
     LoginFlowError,
     WrongClientStatus,
-    TokenGenerationError,
+    TokenGenerationError(String),
     TokenDeletionError,
     WrongConfig(String),
     FailedToListGranularTokens,
@@ -125,4 +125,6 @@ pub enum NpmError {
     FailedToRetrievePackages,
     FailedToGetTokenDetails,
     UnexpectedStatusCode(u16),
+    // Contains the value of the Retry-After header, if present
+    ThrottlingError(Option<u32>),
 }
