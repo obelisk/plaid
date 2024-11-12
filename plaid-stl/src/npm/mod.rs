@@ -42,7 +42,6 @@ pub fn get_org_user_list() -> Result<Vec<NpmUser>, NpmError> {
     return_buffer.truncate(res as usize);
     let res = String::from_utf8(return_buffer).unwrap();
     let res = process_runtime_string(&res)?.unwrap();
-    let res = process_runtime_string(&res)?.unwrap();
 
     serde_json::from_str::<Vec<NpmUser>>(&res).map_err(|_| NpmError::UnknownError)
 }
