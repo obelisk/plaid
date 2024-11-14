@@ -104,10 +104,6 @@ fn bad_response_to_error(response: &Response) -> NpmError {
 impl Npm {
     /// Retrieve the CSRF token from the client's cookie jar
     fn get_csrftoken_from_cookies(&self) -> Result<String, NpmError> {
-        let store = self.cookie_jar.lock().unwrap();
-        for c in store.iter_any() {
-            info!("{:?}", c);
-        }
         let cookies: Vec<String> = self
             .cookie_jar
             .as_ref()
@@ -138,6 +134,30 @@ impl Npm {
     /// Execute the web login flow (with username/password + OTP 2FA). As a side effect, this
     /// updates the client's cookie jar, from which we can later extract necessary values.
     async fn login(&self) -> Result<(), NpmError> {
+        // Decide if we should clear the cookies and start from a fresh state.
+        // The strategy is as follows: if more than 2 minutes have passed since the last request,
+        // then we clear the cookies and perform a new login from scratch. This allows us to avoid
+        // repeated logins for actions that belong to the same "flow" and are executed rapidly one
+        // after the other, while making sure that our requests do not fail because some cookies have
+        // become stale. In fact, it is quite hard to understand if the request "worked" or not, since
+        // they all return 200 and, in many cases, parsing the returned HTML would be necessary.
+        {
+            let mut timestamp_last_request = self.timestamp_last_request.lock().unwrap();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs() as u32;
+            if let Some(last_req) = *timestamp_last_request {
+                if now - last_req >= 120 {
+                    self.cookie_jar.lock().unwrap().clear();
+                    *timestamp_last_request = Some(now);
+                }
+            } else {
+                // The timestamp was None, so we set it
+                *timestamp_last_request = Some(now);
+            }
+        }
+
         let response = self
             .client
             .get(format!("{}/login", NPMJS_COM_URL))

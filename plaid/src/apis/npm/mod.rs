@@ -4,7 +4,10 @@ mod validators;
 pub mod npm_cli_client;
 pub mod npm_web_client;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use plaid_stl::npm::shared_structs::NpmError;
 use regex::Regex;
@@ -19,6 +22,7 @@ pub struct Npm {
     client: Client,
     cookie_jar: Arc<CookieStoreMutex>,
     validators: HashMap<&'static str, regex::Regex>,
+    timestamp_last_request: Mutex<Option<u32>>,
 }
 
 impl Npm {
@@ -40,6 +44,7 @@ impl Npm {
             client,
             cookie_jar,
             validators,
+            timestamp_last_request: Mutex::new(None),
         })
     }
 }
