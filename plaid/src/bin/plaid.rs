@@ -7,14 +7,13 @@ use apis::Api;
 use data::Data;
 use executor::*;
 use plaid_stl::messages::LogSource;
-use reqwest::header::HeaderMap;
 use storage::Storage;
 use tokio::{sync::RwLock, task::JoinSet};
 
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
 use crossbeam_channel::{bounded, TrySendError};
-use warp::{hyper::body::Bytes, path, Filter};
+use warp::{hyper::body::Bytes, path, Filter, http::HeaderMap};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
