@@ -29,11 +29,12 @@ plaid_stl = { path = "../plaid-stl" }
 rcgen = { version = "0.10", features = ["x509-parser"] }
 regex = "1"
 ring = "0.17"
-reqwest = { version = "0.11", default-features = false, features = [
+reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "json",
     "cookies",
 ] }
+reqwest_cookie_store = "0.8.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 sled = "0.34.7"

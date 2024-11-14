@@ -8,7 +8,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use plaid_stl::npm::shared_structs::NpmError;
 use regex::Regex;
-use reqwest::{cookie::Jar, Client};
+use reqwest::Client;
+use reqwest_cookie_store::{CookieStore, CookieStoreMutex};
 use serde::{Deserialize, Serialize};
 
 /// Client for interacting with npm that groups a client for CLI operations
@@ -16,15 +17,17 @@ use serde::{Deserialize, Serialize};
 pub struct Npm {
     config: NpmConfig,
     client: Client,
-    cookie_jar: Arc<Jar>,
+    cookie_jar: Arc<CookieStoreMutex>,
     validators: HashMap<&'static str, regex::Regex>,
 }
 
 impl Npm {
     pub fn new(config: NpmConfig) -> Result<Self, NpmError> {
-        let cookie_jar = Arc::new(Jar::default());
+        let cookie_jar = CookieStore::new(None);
+        let cookie_jar = CookieStoreMutex::new(cookie_jar);
+        let cookie_jar = Arc::new(cookie_jar);
         let client = Client::builder()
-            .cookie_provider(cookie_jar.clone())
+            .cookie_provider(Arc::clone(&cookie_jar))
             .build()
             .map_err(|_| NpmError::GenericError)?;
 

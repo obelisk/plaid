@@ -104,6 +104,10 @@ fn bad_response_to_error(response: &Response) -> NpmError {
 impl Npm {
     /// Retrieve the CSRF token from the client's cookie jar
     fn get_csrftoken_from_cookies(&self) -> Result<String, NpmError> {
+        let store = self.cookie_jar.lock().unwrap();
+        for c in store.iter_any() {
+            info!("{:?}", c);
+        }
         let cookies: Vec<String> = self
             .cookie_jar
             .as_ref()
