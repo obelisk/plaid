@@ -20,7 +20,7 @@ pub struct Benchmarking {
 /// Default file path for benchmarking results if none is provided in the config
 fn default_results_file_path() -> String {
     format!(
-        "{}/benchmark_results/metrics.txt",
+        "{}/../benchmark-results/metrics.txt",
         env!("CARGO_MANIFEST_DIR")
     )
 }
@@ -129,6 +129,16 @@ async fn generate_report(
     file_path: &str,
 ) -> Result<(), tokio::io::Error> {
     debug!("Writing benchmarking results file to {file_path}...");
+
+    // Check if benchmark_results directory exists
+    // Extract the directory path from the file path
+    if let Some(dir_path) = std::path::Path::new(file_path).parent() {
+        // Check if the directory exists
+        if !dir_path.exists() {
+            // Create the directory if it doesn't exist
+            tokio::fs::create_dir_all(dir_path).await?;
+        }
+    }
 
     // Open a file in write mode asynchronously. If the file doesn't exist, it will be created.
     let mut file = File::create(file_path).await?;
