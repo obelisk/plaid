@@ -1,13 +1,12 @@
 [package]
 name = "plaid"
-version = "0.13.8"
+version = "0.14.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
 default = ["aws"]
-#quorum = ["quorum-agent"]
 aws = ["aws-sdk-kms", "aws-config"]
 
 [dependencies]
@@ -54,11 +53,6 @@ futures-util = "0.3.30"
 aws-sdk-kms = { version = "1.41.0", optional = true }
 aws-config = { version = "1.5.5", optional = true }
 
-# Uncomment to build with Quorum. This is needed
-# because otherwise cargo will try and find this
-# to build the lockfile.
-#quorum-agent = { path = "../../quorum/quorum-agent", default_features = false, optional = true }
-
 [[example]]
 name = "github-tailer"
 path = "examples/tailers/github.rs"
@@ -70,3 +64,7 @@ path = "src/bin/plaid.rs"
 [[bin]]
 name = "config_check"
 path = "src/bin/config_check.rs"
+
+[[bin]]
+name = "request_handler"
+path = "src/bin/request_handler.rs"

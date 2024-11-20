@@ -19,7 +19,7 @@ const LOGBACK_NS: &str = "logback_internal";
 #[derive(Deserialize, Default)]
 pub struct InternalConfig {}
 
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct DelayedMessage {
     delay: u64,
     message: Message,
@@ -30,6 +30,14 @@ impl DelayedMessage {
         Self { delay, message }
     }
 }
+
+impl std::cmp::PartialEq for DelayedMessage {
+    fn eq(&self, other: &Self) -> bool {
+        self.delay == other.delay
+    }
+}
+
+impl std::cmp::Eq for DelayedMessage {}
 
 impl std::cmp::PartialOrd for DelayedMessage {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
@@ -72,12 +80,12 @@ impl Internal {
 
         if let Some(storage) = &storage {
             let previous_logs = storage
-                .fetch_all(LOGBACK_NS)
+                .fetch_all(LOGBACK_NS, None)
                 .await
                 .map_err(|e| DataError::StorageError(e))?;
 
             for (message, time) in previous_logs {
-                let message: Message = match serde_json::from_slice(&message) {
+                let message: Message = match serde_json::from_str(message.as_str()) {
                     Ok(msg) => msg,
                     Err(e) => {
                         warn!(

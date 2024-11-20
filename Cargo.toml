@@ -1,7 +1,14 @@
 [workspace]
-resolver = "2"
+#resolver = "2"
 
-members = ["plaid", "plaid-stl"]
+members = [
+    "plaid",
+    "plaid-stl",
+    "test_modules/crashtest",
+    "test_modules/persistent_response",
+    "test_modules/sshcerts_usage",
+    "test_modules/time",
+]
 
 [profile.release]
 lto = true

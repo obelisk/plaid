@@ -16,12 +16,17 @@ path = "/tmp/sled"
 module_dir = "modules"
 lru_cache_size = 200
 [loading.persistent_response_size]
+"persistent_response.wasm" = 1024
+"sshcerts_usage.wasm" = 1024
 
 [loading.secrets]
 [loading.secrets."testing"]
 "test_secret" = "{plaid-secret{test-secret}}"
 
 [loading.log_type_overrides]
+"time.wasm" = "time"
+"sshcerts_usage.wasm" = "test_sshcerts"
+"crashtest.wasm" = "crashtest"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -38,6 +43,7 @@ default = 300
 okta = 200
 [loading.memory_page_count.module_overrides]
 "example_rule.wasm" = 50
+"crashtest.wasm" = 150
 
 # [apis."okta"]
 # token = ""
@@ -45,14 +51,14 @@ okta = 200
 
 [apis."general"]
 [apis."general".network.web_requests]
-# [apis."general"."network"."web_requests"."test_request"]
-# verb = "get"
-# uri = "http://localhost:8998/test_full_uri"
-# return_body = true
-# return_code = true
-# allowed_rules = ["testing_test.wasm"]
-# [apis."general"."network"."web_requests"."test_request"."headers"]
-# testheader = "Some data here"
+[apis."general"."network"."web_requests"."test-response"]
+verb = "post"
+uri = "http://localhost:8998/response"
+return_body = true
+return_code = true
+allowed_rules = ["time.wasm"]
+[apis."general"."network"."web_requests"."test-response"."headers"]
+testheader = "Some data here"
 
 # [apis."general"."network"."web_requests"."google_test"]
 # verb = "get"
@@ -165,24 +171,36 @@ secret_key = ""
 
 [webhooks."internal"]
 listen_address = "0.0.0.0:4554"
-[webhooks."internal".webhooks."AAAA"]
-log_type = "testingone"
+
+# Webhooks for tests
+[webhooks."internal".webhooks."timetest"]
+log_type = "time"
 headers = []
 
-[webhooks."internal".webhooks."BBBB"]
-log_type = "testrules"
-headers = ["notarealheader"]
-
-[webhooks."internal".webhooks."FFFF"]
-log_type = "testing"
+[webhooks."internal".webhooks."persistentresponsetest"]
+log_type = "prtest"
 logbacks_allowed = "Unlimited"
 
 headers = ["x-forwarded-for"]
-[webhooks."internal".webhooks."FFFF".get_mode]
-response_mode = "rule:testing_test.wasm"
-[webhooks."internal".webhooks."FFFF".get_mode.caching_mode]
+[webhooks."internal".webhooks."persistentresponsetest".get_mode]
+response_mode = "rule:persistent_response.wasm"
+[webhooks."internal".webhooks."persistentresponsetest".get_mode.caching_mode]
 type = "None"
 
+[webhooks."internal".webhooks."testsshcerts"]
+log_type = "test_sshcerts"
+headers = []
+[webhooks."internal".webhooks."testsshcerts".get_mode]
+response_mode = "rule:sshcerts_usage.wasm"
+[webhooks."internal".webhooks."testsshcerts".get_mode.caching_mode]
+type = "None"
+
+[webhooks."internal".webhooks."crashtest"]
+log_type = "crashtest"
+headers = []
+# End webhooks for tests
+
+# Additional webhook examples
 [webhooks."internal".webhooks."FFFFA"]
 log_type = "testing"
 headers = ["x-forwarded-for"]
