@@ -8,9 +8,8 @@ use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
 use crate::storage::Storage;
 
-use crossbeam_channel::Receiver;
-use tokio::sync::oneshot::Sender as OneShotSender;
 use crossbeam_channel::{Receiver, Sender};
+use tokio::sync::oneshot::Sender as OneShotSender;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Serialize};
@@ -320,7 +319,10 @@ fn update_persistent_response(
                 if let Err(_) = sender.send(None) {
                     error!("[{}] was servicing a request that returned no response and failed to send!", plaid_module.name);
                 } else {
-                    error!("[{}] was servicing a request that returned no response!", plaid_module.name);
+                    error!(
+                        "[{}] was servicing a request that returned no response!",
+                        plaid_module.name
+                    );
                 }
             }
             // There was no response to save
@@ -340,8 +342,14 @@ fn update_persistent_response(
                     Ok(mut data) => {
                         *data = Some(response.clone());
                         if let Some(sender) = response_sender {
-                            if let Err(_) = sender.send(Some(ResponseMessage{code: 200, body: response})) {
-                                error!("[{}] was servicing a request but sending the response failed!", plaid_module.name);
+                            if let Err(_) = sender.send(Some(ResponseMessage {
+                                code: 200,
+                                body: response,
+                            })) {
+                                error!(
+                                    "[{}] was servicing a request but sending the response failed!",
+                                    plaid_module.name
+                                );
                             }
                         }
                         info!("{} updated its persistent response", plaid_module.name);
@@ -372,6 +380,7 @@ fn process_message_with_module(
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
     els: Logger,
+    benchmark_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
     // For every module that operates on that log type
     // Mark this rule as currently being processed by locking the mutex
@@ -418,6 +427,7 @@ fn process_message_with_module(
 
     let computation_limit = module.computation_limit;
     // Call the entrypoint
+    let begin = Instant::now();
     let error = match entrypoint.call(&mut store) {
         Ok(n) => {
             if n != 0 {
@@ -440,11 +450,29 @@ fn process_message_with_module(
                         format!("{}_computation_percentage_used", module.name),
                         computation_used as i64,
                     )?;
+
+                    // If benchmarking is enabled, log data to the benchmarking system
+                    if let Some(ref sender) = benchmark_mode {
+                        if let Err(e) = sender.send(ModulePerformanceMetadata {
+                            module: module.name.clone(),
+                            execution_time: begin.elapsed().as_micros(),
+                            computation_used: computation_limit - remaining,
+                        }) {
+                            error!("Failed to send rule execution metadata to benchmarking system for {}. Error: {e}", module.name)
+                        }
+                    }
                 }
+
                 None
             }
         }
-        Err(e) => Some(determine_error(e, computation_limit, &instance, &mut store, &env)),
+        Err(e) => Some(determine_error(
+            e,
+            computation_limit,
+            &instance,
+            &mut store,
+            &env,
+        )),
     };
 
     // If there was an error then log that it happened to the els
@@ -495,6 +523,7 @@ fn execution_loop(
                     api.clone(),
                     storage.clone(),
                     els.clone(),
+                    benchmark_mode.clone(),
                 )?;
             }
             (None, Some(modules)) => {
@@ -506,6 +535,7 @@ fn execution_loop(
                         api.clone(),
                         storage.clone(),
                         els.clone(),
+                        benchmark_mode.clone(),
                     )?;
                 }
             }
