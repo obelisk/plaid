@@ -2850,6 +2850,7 @@ dependencies = [
  "time 0.3.36",
  "tokio",
  "tokio-tungstenite 0.23.1",
+ "tokio-util",
  "toml",
  "totp-rs",
  "url",

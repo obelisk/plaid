@@ -8,7 +8,8 @@ use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
 use crate::storage::Storage;
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Receiver;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Sender as OneShotSender;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
@@ -453,7 +454,7 @@ fn process_message_with_module(
 
                     // If benchmarking is enabled, log data to the benchmarking system
                     if let Some(ref sender) = benchmark_mode {
-                        if let Err(e) = sender.send(ModulePerformanceMetadata {
+                        if let Err(e) = sender.blocking_send(ModulePerformanceMetadata {
                             module: module.name.clone(),
                             execution_time: begin.elapsed().as_micros(),
                             computation_used: computation_limit - remaining,

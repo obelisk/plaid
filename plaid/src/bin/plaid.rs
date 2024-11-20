@@ -9,9 +9,10 @@ use data::Data;
 use executor::*;
 use plaid_stl::messages::LogSource;
 use storage::Storage;
-use tokio::{signal, sync::{broadcast, RwLock}, task::JoinSet};
+use tokio::{signal, sync::RwLock, task::JoinSet};
+use tokio_util::sync::CancellationToken;
 
-use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::{atomic::{AtomicBool, Ordering}, Arc}, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
 use crossbeam_channel::{bounded, TrySendError};
 use warp::{hyper::body::Bytes, path, Filter, http::HeaderMap};
@@ -59,26 +60,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api = Arc::new(api);
 
     // Graceful shutdown handling
-    let (shutdown_tx, _) = broadcast::channel(1);
-    let shutdown_initiated = Arc::new(AtomicBool::new(false));
-
-    // Listen for Ctrl+C or SIGTERM and trigger graceful shutdown
-    let s = shutdown_initiated.clone();
-    let shutdown = shutdown_tx.clone();
+    let cancellation_token = CancellationToken::new();
+    let ct = cancellation_token.clone();
     tokio::spawn(async move {
         signal::ctrl_c().await.expect("Failed to listen for shutdown signal");
-        info!("Shutdown signal received, shutting down...");
-        s.store(true, Ordering::SeqCst);  
-        let _ = shutdown.send(());
+        info!("Shutdown signal received, sending cancellation notice to all listening tasks.");
+        ct.cancel();
     });
 
     let (benchmark_sender, benchmark_handle) = match config.benchmark_mode {
         Some(benchmark) => {
-            warn!("Plaid is running in benchmark mode - this is not recommended for production deployments. Metadata about rule execution will be logged to a benchmarking channel that aggregates and reports metrics.");
-            let (sender, rx) = crossbeam_channel::unbounded::<ModulePerformanceMetadata>();
+            warn!("Plaid is running in benchmark mode - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a benchmarking channel that aggregates and reports metrics.");
+            let (sender, rx) = tokio::sync::mpsc::channel::<ModulePerformanceMetadata>(4096);
     
+            let token = cancellation_token.clone();
             let handle = tokio::task::spawn(async move {
-                benchmark.benchmark_loop(rx, shutdown_initiated).await;
+                benchmark.start(rx, token).await;
             });    
 
             (Some(sender), Some(handle))
@@ -326,14 +323,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut join_set = JoinSet::from_iter(webhook_servers);
 
     // Listen for a shutdown signal or if any task in join_set finishes
-    let mut shutdown_rx = shutdown_tx.subscribe(); 
     tokio::select! {
         _ = join_set.join_next() => {
             info!("A webserver task finished unexpectedly, triggering shutdown.");
             // Send a shutdown signal
-            let _ = shutdown_tx.send(());
+            cancellation_token.cancel()
         },
-        _ = shutdown_rx.recv() => {
+        _ = cancellation_token.cancelled() => {
             info!("Shutdown signal received.");
         }
     }
@@ -341,6 +337,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ensure that the benchmarking loop exits before finishing shutdown.
     // We do this to guarantee that benchmark data gets written to a file.
     if let Some(handle) = benchmark_handle {
+        info!("Waiting for benchmarking system to shutdown...");
         let _ = handle.await;
     }
 

@@ -1,14 +1,10 @@
+use serde::Deserialize;
 use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-use std::time::Duration;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-
-use crossbeam_channel::Receiver;
-use serde::Deserialize;
+use tokio::sync::mpsc::Receiver;
+use tokio::time::{timeout, Duration};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize)]
 pub struct Benchmarking {
@@ -84,35 +80,12 @@ impl AggregatePerformanceData {
 }
 
 impl Benchmarking {
-    pub async fn benchmark_loop(
+    pub async fn start(
         &self,
         receiver: Receiver<ModulePerformanceMetadata>,
-        shutdown_initiated: Arc<AtomicBool>,
+        cancellation_token: CancellationToken,
     ) {
-        let mut aggregate_performance_metadata = HashMap::new();
-
-        // Benchmarking loop runs until shutdown_initiated is set to true
-        while !shutdown_initiated.load(Ordering::SeqCst) {
-            match receiver.try_recv() {
-                Ok(message) => {
-                    aggregate_performance_metadata
-                        .entry(message.module.clone())
-                        .and_modify(|aggregate: &mut AggregatePerformanceData| {
-                            aggregate.update(&message);
-                        })
-                        .or_insert_with(|| {
-                            AggregatePerformanceData::new(
-                                message.execution_time,
-                                message.computation_used,
-                            )
-                        });
-                }
-                Err(_) => {
-                    // Sleep for a short period to avoid busy looping when no data is received
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }
-        }
+        let aggregate_performance_metadata = benchmark_loop(receiver, cancellation_token).await;
 
         if let Err(e) =
             generate_report(&aggregate_performance_metadata, &self.output_file_path).await
@@ -120,6 +93,39 @@ impl Benchmarking {
             error!("Failed to generate benchmark report. Error: {e}")
         }
     }
+}
+
+async fn benchmark_loop(
+    mut receiver: Receiver<ModulePerformanceMetadata>,
+    cancellation_token: CancellationToken,
+) -> HashMap<String, AggregatePerformanceData> {
+    let mut aggregate_performance_metadata = HashMap::new();
+
+    // Benchmarking loop runs until the server is shutdown
+    while !cancellation_token.is_cancelled() {
+        match timeout(Duration::from_secs(5), receiver.recv()).await {
+            Ok(Some(message)) => {
+                aggregate_performance_metadata
+                    .entry(message.module.clone())
+                    .and_modify(|aggregate: &mut AggregatePerformanceData| {
+                        aggregate.update(&message);
+                    })
+                    .or_insert_with(|| {
+                        AggregatePerformanceData::new(
+                            message.execution_time,
+                            message.computation_used,
+                        )
+                    });
+            }
+            Ok(None) => {
+                error!("Sending end of benchmarking system has disconnected. No further benchmark data will be recorded");
+                break;
+            }
+            _ => continue,
+        }
+    }
+
+    aggregate_performance_metadata
 }
 
 /// Generates a performance report based on the given aggregate performance data

@@ -52,6 +52,7 @@ tokio-tungstenite = { version = "0.23.1", features = ["native-tls-vendored"] }
 futures-util = "0.3.30"
 aws-sdk-kms = { version = "1.41.0", optional = true }
 aws-config = { version = "1.5.5", optional = true }
+tokio-util = "0.7.12"
 
 [[example]]
 name = "github-tailer"
