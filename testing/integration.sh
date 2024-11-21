@@ -7,29 +7,38 @@ PLATFORM=$(uname -a)
 # On macOS, we need to install a brew provided version of LLVM
 # so that we can compile WASM binaries.
 if  uname | grep -q Darwin; then
-  echo "macOS detected"
+  echo "macOS detected so using LLVM from Homebrew for wasm32 compatibility"
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
 
+echo "Building Plaid Runtime"
+cd runtime
 cargo build --all --release
-#cargo build --package plaid --release
-#cargo build --package time --target wasm32-unknown-unknown --release
-#cargo build --package persistent_response --target wasm32-unknown-unknown --release
+cd ..
 
-# Copy all the test modules in for loading
-mkdir -p modules
-cp -r target/wasm32-unknown-unknown/release/*.wasm modules/
+export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
 
-# Run Plaid and wait for it to finish starting
+echo "Building Plaid All Plaid Modules"
+cd modules
+cargo build --all --release
+cd ..
+
+echo "Copying Compiled Test Modules to compiled_modules"
+mkdir -p compiled_modules
+cp -r modules/target/wasm32-unknown-unknown/release/test_*.wasm compiled_modules/
+
+echo "Starting Plaid In The Background and waiting 10 seconds for it to boot"
+cd runtime
 RUST_LOG=plaid=debug cargo run --bin=plaid --release -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
+cd ..
 sleep 10
 
 # Set the variables the test harnesses will need
 export PLAID_LOCATION="localhost:4554"
 
 # Loop through all test modules in the test_modules directory
-for module in test_modules/*; do
+for module in modules/tests/*; do
   # If the module is a directory
   if [ -d "$module" ]; then
     # If the module has a harness.sh file

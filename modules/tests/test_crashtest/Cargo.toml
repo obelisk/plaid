@@ -1,14 +1,11 @@
-cargo-features = ["per-package-target"]
-
 [package]
-name = "crashtest"
+name = "test_crashtest"
 description = "Test rule to verify what happens when a rule crashes"
 version = "0.1.0"
 edition = "2021"
-forced-target = "wasm32-unknown-unknown"
 
 [dependencies]
-plaid_stl = { path = "../../plaid-stl" }
+plaid_stl = { path = "../../../runtime/plaid-stl" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 

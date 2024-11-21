@@ -1,5 +1,14 @@
-/modules
+# macOS
 .DS_Store
+
+# Artefacts
+/compiled_modules
+
+# Private items
+/runtime/plaid/private-resources
+
+# Target folders
+/runtime/target
+/modules/target
 /target
-plaid-stl/target
-/plaid/private-resources
+/plaid-stl/target
