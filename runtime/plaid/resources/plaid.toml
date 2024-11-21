@@ -13,20 +13,21 @@ path = "/tmp/sled"
 # of module names to log types which is useful is a synthetic logtype
 # contains underscores.
 [loading]
-module_dir = "modules"
+module_dir = "../compiled_modules/"
 lru_cache_size = 200
 [loading.persistent_response_size]
-"persistent_response.wasm" = 1024
-"sshcerts_usage.wasm" = 1024
+"test_persistent_response.wasm" = 1024
+"test_sshcerts_usage.wasm" = 1024
 
 [loading.secrets]
 [loading.secrets."testing"]
 "test_secret" = "{plaid-secret{test-secret}}"
 
 [loading.log_type_overrides]
-"time.wasm" = "time"
-"sshcerts_usage.wasm" = "test_sshcerts"
-"crashtest.wasm" = "crashtest"
+"test_time.wasm" = "time"
+"test_sshcerts_usage.wasm" = "test_sshcerts"
+"test_crashtest.wasm" = "crashtest"
+"test_persistent_response.wasm" = "prtest"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -43,7 +44,7 @@ default = 300
 okta = 200
 [loading.memory_page_count.module_overrides]
 "example_rule.wasm" = 50
-"crashtest.wasm" = 150
+"test_crashtest.wasm" = 150
 
 # [apis."okta"]
 # token = ""
@@ -56,7 +57,7 @@ verb = "post"
 uri = "http://localhost:8998/response"
 return_body = true
 return_code = true
-allowed_rules = ["time.wasm"]
+allowed_rules = ["test_time.wasm"]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 
@@ -183,7 +184,7 @@ logbacks_allowed = "Unlimited"
 
 headers = ["x-forwarded-for"]
 [webhooks."internal".webhooks."persistentresponsetest".get_mode]
-response_mode = "rule:persistent_response.wasm"
+response_mode = "rule:test_persistent_response.wasm"
 [webhooks."internal".webhooks."persistentresponsetest".get_mode.caching_mode]
 type = "None"
 
@@ -191,7 +192,7 @@ type = "None"
 log_type = "test_sshcerts"
 headers = []
 [webhooks."internal".webhooks."testsshcerts".get_mode]
-response_mode = "rule:sshcerts_usage.wasm"
+response_mode = "rule:test_sshcerts_usage.wasm"
 [webhooks."internal".webhooks."testsshcerts".get_mode.caching_mode]
 type = "None"
 

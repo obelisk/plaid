@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+
+
+members = [
+    "tests/test_crashtest",
+    "tests/test_persistent_response",
+    "tests/test_sshcerts_usage",
+    "tests/test_time",
+]
+
+[profile.release]
+lto = true
+strip = "symbols"
