@@ -5,7 +5,6 @@ RUN mkdir /build
 WORKDIR /build
 COPY . .
 
-#RUN cargo build -Zbuild-std --release --bin=plaid
 RUN cargo build --release --bin=plaid
 
 FROM alpine:3.6 as alpine
