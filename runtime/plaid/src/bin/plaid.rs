@@ -12,10 +12,17 @@ use storage::Storage;
 use tokio::{signal, sync::RwLock, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
-use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    collections::HashMap,
+    convert::Infallible,
+    net::SocketAddr,
+    pin::Pin,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use crossbeam_channel::{bounded, TrySendError};
-use warp::{hyper::body::Bytes, path, Filter, http::HeaderMap};
+use warp::{http::HeaderMap, hyper::body::Bytes, path, Filter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -47,10 +54,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This sender provides an internal route to sending logs. This is what
     // powers the logback functions.
 
-    let delayed_log_sender = Data::start(config.data, log_sender.clone(), storage.clone(), els.clone())
-        .await
-        .expect("The data system failed to start")
-        .unwrap();
+    let delayed_log_sender = Data::start(
+        config.data,
+        log_sender.clone(),
+        storage.clone(),
+        els.clone(),
+    )
+    .await
+    .expect("The data system failed to start")
+    .unwrap();
 
     info!("Configurating APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
@@ -102,7 +114,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         storage,
         config.execution_threads,
         els.clone(),
+<<<<<<< HEAD
         performance_sender.clone()
+=======
+>>>>>>> 1cfc005 (Format code)
     );
 
     let _executor = Arc::new(executor);
@@ -243,7 +258,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 false
                                             },
                                         }
-                                    }, 
+                                    },
                                 };
 
                                 // If the webhook has a label, use that as the source, otherwise use the webhook address

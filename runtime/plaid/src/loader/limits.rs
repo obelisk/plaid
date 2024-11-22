@@ -7,7 +7,6 @@ use wasmer::{
 
 // This is to be able to set the tunables
 
-
 /// A custom tunables that allows you to set a memory limit.
 ///
 /// After adjusting the memory limits, it delegates all other logic

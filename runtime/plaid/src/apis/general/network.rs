@@ -21,8 +21,8 @@ struct MakeRequestRequest {
     /// Variables to include in the request. Variables take the place of an idenfitifer in the request URI
     variables: HashMap<String, String>,
     /// Dynamic headers to include in the request. These are headers that cannot be statically
-    /// defined in the request configuration. They cannot override a request's statically defined headers 
-    headers: Option<HashMap<String, String>>
+    /// defined in the request configuration. They cannot override a request's statically defined headers
+    headers: Option<HashMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -52,18 +52,24 @@ struct ReturnData {
 impl General {
     /// Make a post to a given address but don't provide any data returned. Only
     /// if the call returned 200
-    /// 
+    ///
     /// This function should be considered an unsafe function because it allows arbitrary calls
     /// outside of normal sandboxing operations. This should only be used if `make_named_request`
     /// cannot be used.
     pub async fn simple_json_post_request(&self, params: &str, _: &str) -> Result<u32, ApiError> {
-        let request: HashMap<String, String> = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let request: HashMap<String, String> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let url = request.get("url").ok_or(ApiError::MissingParameter("url".to_string()))?;
-        let body = request.get("body").ok_or(ApiError::MissingParameter("body".to_string()))?;
+        let url = request
+            .get("url")
+            .ok_or(ApiError::MissingParameter("url".to_string()))?;
+        let body = request
+            .get("body")
+            .ok_or(ApiError::MissingParameter("body".to_string()))?;
         let auth = request.get("auth");
 
-        let request_builder = self.client
+        let request_builder = self
+            .client
             .post(url)
             .header("Content-Type", "application/json; charset=utf-8");
 
@@ -81,7 +87,8 @@ impl General {
 
     pub async fn make_named_request(&self, params: &str, module: &str) -> Result<String, ApiError> {
         // Parse the information needed to make the request
-        let request: MakeRequestRequest = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let request: MakeRequestRequest =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         let request_name = &request.request_name;
 
@@ -95,7 +102,10 @@ impl General {
         };
 
         // The this request is not allowed to be executed by the given rule bail
-        if !request_specification.allowed_rules.contains(&module.to_string()) {
+        if !request_specification
+            .allowed_rules
+            .contains(&module.to_string())
+        {
             error!("{module} tried to use web-request which it's not allowed to: {request_name}");
             return Err(ApiError::BadRequest);
         }
@@ -105,14 +115,17 @@ impl General {
                 let static_headers = request_specification.headers.clone();
                 dynamic_headers.extend(static_headers);
                 dynamic_headers
-            },
-            None => request_specification.headers.clone()
+            }
+            None => request_specification.headers.clone(),
         };
 
         let headers: HeaderMap = match (&headers_to_include_in_request).try_into() {
             Ok(x) => x,
-            Err(e) =>
-                return Err(ApiError::ConfigurationError(format!("{request_name} has the headers misconfigured: {e}"))),
+            Err(e) => {
+                return Err(ApiError::ConfigurationError(format!(
+                    "{request_name} has the headers misconfigured: {e}"
+                )))
+            }
         };
 
         let mut uri = request_specification.uri.clone();
@@ -130,7 +143,8 @@ impl General {
             // Not sure we want to support head
             //"head" => self.client.head(&request_specification.uri),
             _ => return Err(ApiError::BadRequest),
-        }.headers(headers);
+        }
+        .headers(headers);
 
         // A body (even an empty one) must be provided. It can be overriden by
         // the configuration or provided by the rule. But if no body is defined
@@ -161,7 +175,7 @@ impl General {
                     // TODO: This is not really a BadRequest.
                     Err(ApiError::BadRequest)
                 }
-            },
+            }
             Err(e) => Err(ApiError::NetworkError(e)),
         }
     }

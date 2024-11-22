@@ -4,7 +4,6 @@ use crate::{executor::Env, functions::FunctionErrors};
 
 use super::{get_memory, safely_get_string, safely_write_data_back};
 
-
 /// Store data in the cache system if one is configured
 pub fn insert(
     env: FunctionEnvMut<Env>,

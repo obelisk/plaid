@@ -75,7 +75,7 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     );
 
     define_regex_validator!(validators, "repository_name", r"^[\w\-\./]+$");
-    
+
     // The token ID is actually a UUID
     define_regex_validator!(validators, "token_id", r"^[a-f0-9-]{36}$");
 

@@ -22,7 +22,7 @@ fn slack_format(msg: &str) -> String {
     struct SlackText {
         text: String,
     }
-    
+
     let new_message = SlackText {
         text: msg.to_string(),
     };
