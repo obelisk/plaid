@@ -71,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (performance_sender, performance_handle) = match config.performance_monitoring {
         Some(perf) => {
             warn!("Plaid is running with performance monitoring enabled - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a channel that aggregates and reports metrics.");
-            let (sender, rx) = tokio::sync::mpsc::channel::<ModulePerformanceMetadata>(4096);
+            let (sender, rx) = crossbeam_channel::bounded::<ModulePerformanceMetadata>(4096);
     
             let token = cancellation_token.clone();
             let handle = tokio::task::spawn(async move {

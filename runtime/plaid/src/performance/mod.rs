@@ -1,9 +1,9 @@
+use crossbeam_channel::{Receiver, RecvTimeoutError};
 use serde::Deserialize;
 use std::collections::HashMap;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc::Receiver;
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize)]
@@ -94,15 +94,15 @@ impl PerformanceMonitoring {
 }
 
 async fn performance_monitoring_loop(
-    mut receiver: Receiver<ModulePerformanceMetadata>,
+    receiver: Receiver<ModulePerformanceMetadata>,
     cancellation_token: CancellationToken,
 ) -> HashMap<String, AggregatePerformanceData> {
     let mut aggregate_performance_metadata = HashMap::new();
 
     // Performance monitoring loop runs until the server is shutdown
     while !cancellation_token.is_cancelled() {
-        match timeout(Duration::from_secs(5), receiver.recv()).await {
-            Ok(Some(message)) => {
+        match receiver.recv_timeout(Duration::from_secs(5)) {
+            Ok(message) => {
                 aggregate_performance_metadata
                     .entry(message.module.clone())
                     .and_modify(|aggregate: &mut AggregatePerformanceData| {
@@ -115,7 +115,7 @@ async fn performance_monitoring_loop(
                         )
                     });
             }
-            Ok(None) => {
+            Err(RecvTimeoutError::Disconnected) => {
                 error!("Sending end of performance monitoring system has disconnected. No further performance data will be recorded");
                 break;
             }
