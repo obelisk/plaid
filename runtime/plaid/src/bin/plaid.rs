@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate log;
 
-use benchmark::ModulePerformanceMetadata;
+use performance::ModulePerformanceMetadata;
 use plaid::{config::{CachingMode, GetMode, ResponseMode, WebhookServerConfiguration}, loader::PlaidModule, logging::Logger, *};
 
 use apis::Api;
@@ -68,14 +68,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ct.cancel();
     });
 
-    let (benchmark_sender, benchmark_handle) = match config.benchmark_mode {
-        Some(benchmark) => {
-            warn!("Plaid is running in benchmark mode - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a benchmarking channel that aggregates and reports metrics.");
+    let (performance_sender, performance_handle) = match config.performance_monitoring {
+        Some(perf) => {
+            warn!("Plaid is running with performance monitoring enabled - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a channel that aggregates and reports metrics.");
             let (sender, rx) = tokio::sync::mpsc::channel::<ModulePerformanceMetadata>(4096);
     
             let token = cancellation_token.clone();
             let handle = tokio::task::spawn(async move {
-                benchmark.start(rx, token).await;
+                perf.start(rx, token).await;
             });    
 
             (Some(sender), Some(handle))
@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         storage,
         config.execution_threads,
         els.clone(),
-        benchmark_sender.clone()
+        performance_sender.clone()
     );
 
     let _executor = Arc::new(executor);
@@ -334,10 +334,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Ensure that the benchmarking loop exits before finishing shutdown.
-    // We do this to guarantee that benchmark data gets written to a file.
-    if let Some(handle) = benchmark_handle {
-        info!("Waiting for benchmarking system to shutdown...");
+    // Ensure that the performance monitoring loop exits before finishing shutdown.
+    // We do this to guarantee that rule performance data data gets written to a file.
+    if let Some(handle) = performance_handle {
+        info!("Waiting for performance monitoring system to shutdown...");
         let _ = handle.await;
     }
 

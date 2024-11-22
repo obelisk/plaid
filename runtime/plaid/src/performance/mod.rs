@@ -7,18 +7,15 @@ use tokio::time::{timeout, Duration};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize)]
-pub struct Benchmarking {
-    /// The full path to the output file where benchmarking metrics should be written
+pub struct PerformanceMonitoring {
+    /// The full path to the output file where performance metrics should be written
     #[serde(default = "default_results_file_path")]
     output_file_path: String,
 }
 
-/// Default file path for benchmarking results if none is provided in the config
+/// Default file path for performance results if none is provided in the config
 fn default_results_file_path() -> String {
-    format!(
-        "{}/../benchmark-results/metrics.txt",
-        env!("CARGO_MANIFEST_DIR")
-    )
+    "./performance-monitoring/metrics.txt".to_string()
 }
 
 /// Metadata about a rule's execution
@@ -79,29 +76,30 @@ impl AggregatePerformanceData {
     }
 }
 
-impl Benchmarking {
+impl PerformanceMonitoring {
     pub async fn start(
         &self,
         receiver: Receiver<ModulePerformanceMetadata>,
         cancellation_token: CancellationToken,
     ) {
-        let aggregate_performance_metadata = benchmark_loop(receiver, cancellation_token).await;
+        let aggregate_performance_metadata =
+            performance_monitoring_loop(receiver, cancellation_token).await;
 
         if let Err(e) =
             generate_report(&aggregate_performance_metadata, &self.output_file_path).await
         {
-            error!("Failed to generate benchmark report. Error: {e}")
+            error!("Failed to generate performance report. Error: {e}")
         }
     }
 }
 
-async fn benchmark_loop(
+async fn performance_monitoring_loop(
     mut receiver: Receiver<ModulePerformanceMetadata>,
     cancellation_token: CancellationToken,
 ) -> HashMap<String, AggregatePerformanceData> {
     let mut aggregate_performance_metadata = HashMap::new();
 
-    // Benchmarking loop runs until the server is shutdown
+    // Performance monitoring loop runs until the server is shutdown
     while !cancellation_token.is_cancelled() {
         match timeout(Duration::from_secs(5), receiver.recv()).await {
             Ok(Some(message)) => {
@@ -118,7 +116,7 @@ async fn benchmark_loop(
                     });
             }
             Ok(None) => {
-                error!("Sending end of benchmarking system has disconnected. No further benchmark data will be recorded");
+                error!("Sending end of performance monitoring system has disconnected. No further performance data will be recorded");
                 break;
             }
             _ => continue,
@@ -134,10 +132,9 @@ async fn generate_report(
     aggregate_performance_metadata: &HashMap<String, AggregatePerformanceData>,
     file_path: &str,
 ) -> Result<(), tokio::io::Error> {
-    debug!("Writing benchmarking results file to {file_path}...");
+    debug!("Writing performance monitoring data to {file_path}...");
 
-    // Check if benchmark_results directory exists
-    // Extract the directory path from the file path
+    // Check if directory exists
     if let Some(dir_path) = std::path::Path::new(file_path).parent() {
         // Check if the directory exists
         if !dir_path.exists() {

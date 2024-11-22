@@ -1,11 +1,11 @@
 use crate::apis::Api;
 
-use crate::benchmark::ModulePerformanceMetadata;
 use crate::functions::{
     create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
 };
 use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
+use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
 
 use crossbeam_channel::Receiver;
@@ -381,7 +381,7 @@ fn process_message_with_module(
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
     els: Logger,
-    benchmark_mode: Option<Sender<ModulePerformanceMetadata>>,
+    performance_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
     // For every module that operates on that log type
     // Mark this rule as currently being processed by locking the mutex
@@ -452,14 +452,14 @@ fn process_message_with_module(
                         computation_used as i64,
                     )?;
 
-                    // If benchmarking is enabled, log data to the benchmarking system
-                    if let Some(ref sender) = benchmark_mode {
+                    // If performance monitoring is enabled, log data to the monitoring system
+                    if let Some(ref sender) = performance_mode {
                         if let Err(e) = sender.blocking_send(ModulePerformanceMetadata {
                             module: module.name.clone(),
                             execution_time: begin.elapsed().as_micros(),
                             computation_used: computation_limit - remaining,
                         }) {
-                            error!("Failed to send rule execution metadata to benchmarking system for {}. Error: {e}", module.name)
+                            error!("Failed to send rule execution metadata to performance monitoring system for {}. Error: {e}", module.name)
                         }
                     }
                 }
@@ -507,7 +507,7 @@ fn execution_loop(
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
     els: Logger,
-    benchmark_mode: Option<Sender<ModulePerformanceMetadata>>,
+    performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
     // Wait on our receiver for logs to come in
     while let Ok(message) = receiver.recv() {
@@ -524,7 +524,7 @@ fn execution_loop(
                     api.clone(),
                     storage.clone(),
                     els.clone(),
-                    benchmark_mode.clone(),
+                    performance_monitoring_mode.clone(),
                 )?;
             }
             (None, Some(modules)) => {
@@ -536,7 +536,7 @@ fn execution_loop(
                         api.clone(),
                         storage.clone(),
                         els.clone(),
-                        benchmark_mode.clone(),
+                        performance_monitoring_mode.clone(),
                     )?;
                 }
             }
@@ -582,7 +582,7 @@ impl Executor {
         storage: Option<Arc<Storage>>,
         execution_threads: u8,
         els: Logger,
-        benchmark_mode: Option<Sender<ModulePerformanceMetadata>>,
+        performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
     ) -> Self {
         let mut _handles = vec![];
         for i in 0..execution_threads {
@@ -592,9 +592,9 @@ impl Executor {
             let storage = storage.clone();
             let modules = modules.clone();
             let els = els.clone();
-            let benchmark_data_sender = benchmark_mode.clone();
+            let performance_sender = performance_monitoring_mode.clone();
             _handles.push(thread::spawn(move || {
-                execution_loop(receiver, modules, api, storage, els, benchmark_data_sender)
+                execution_loop(receiver, modules, api, storage, els, performance_sender)
             }));
         }
 
