@@ -122,4 +122,4 @@ jobs:
         with:
           reporter: 'github-pr-check'
           workdir: runtime
-          filter_mode: all
+          filter_mode: nofilter
