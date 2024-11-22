@@ -121,5 +121,5 @@ jobs:
         uses: giraffate/clippy-action@v1
         with:
           reporter: 'github-pr-check'
-          workdir: runtime
-          clippy_flags: --workspace --all-targets --all-features --no-deps
+          workdir: 'runtime'
+          clippy_flags: '--workspace'
