@@ -6,6 +6,12 @@ on:
   pull_request:
     branches:  "**"
 
+# If new code is pushed to a PR branch, then cancel in progress workflows for that PR. Ensures that
+# we don't waste CI time, and returns results quicker https://github.com/jonhoo/rust-ci-conf/pull/5
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -88,7 +94,7 @@ jobs:
         with:
           components: rustfmt
       - name: cargo fmt --check
-        run: cargo fmt --check
+        run: cd runtime && cargo fmt --check
 
   clippy:
     runs-on: ubuntu-latest
@@ -115,5 +121,6 @@ jobs:
         uses: giraffate/clippy-action@v1
         with:
           reporter: 'github-pr-check'
+        working-directory: runtime
 
   
