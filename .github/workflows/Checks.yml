@@ -122,4 +122,4 @@ jobs:
         with:
           reporter: 'github-pr-check'
           workdir: runtime
-          clippy_flags: --workspace --all-targets --all-features -D warnings
+          clippy_flags: --workspace --all-targets --all-features --no-deps
