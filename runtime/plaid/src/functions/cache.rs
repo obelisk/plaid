@@ -52,7 +52,7 @@ pub fn insert(
         Ok(Some(previous_value)) => {
             match safely_write_data_back(
                 &memory_view,
-                &previous_value.as_bytes(),
+                previous_value.as_bytes(),
                 data_buffer,
                 data_buffer_len,
             ) {
@@ -116,7 +116,7 @@ pub fn get(
         Ok(Some(value)) => {
             match safely_write_data_back(
                 &memory_view,
-                &value.as_bytes(),
+                value.as_bytes(),
                 data_buffer,
                 data_buffer_len,
             ) {

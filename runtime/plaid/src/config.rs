@@ -177,7 +177,7 @@ where
 {
     let mode = String::deserialize(deserializer)?;
 
-    let mut pieces: Vec<&str> = mode.split(":").collect();
+    let mut pieces: Vec<&str> = mode.split(':').collect();
 
     let data = pieces.pop().ok_or(serde::de::Error::custom(
         "Must provide context for the response_mode. For Facebook/Meta this is the secret, for Rule this is the module name",

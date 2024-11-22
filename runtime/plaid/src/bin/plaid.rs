@@ -2,7 +2,12 @@
 extern crate log;
 
 use performance::ModulePerformanceMetadata;
-use plaid::{config::{CachingMode, GetMode, ResponseMode, WebhookServerConfiguration}, loader::PlaidModule, logging::Logger, *};
+use plaid::{
+    config::{CachingMode, GetMode, ResponseMode, WebhookServerConfiguration},
+    loader::PlaidModule,
+    logging::Logger,
+    *,
+};
 
 use apis::Api;
 use data::Data;
@@ -75,7 +80,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cancellation_token = CancellationToken::new();
     let ct = cancellation_token.clone();
     tokio::spawn(async move {
-        signal::ctrl_c().await.expect("Failed to listen for shutdown signal");
+        signal::ctrl_c()
+            .await
+            .expect("Failed to listen for shutdown signal");
         info!("Shutdown signal received, sending cancellation notice to all listening tasks.");
         ct.cancel();
     });
@@ -84,15 +91,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(perf) => {
             warn!("Plaid is running with performance monitoring enabled - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a channel that aggregates and reports metrics.");
             let (sender, rx) = crossbeam_channel::bounded::<ModulePerformanceMetadata>(4096);
-    
+
             let token = cancellation_token.clone();
             let handle = tokio::task::spawn(async move {
                 perf.start(rx, token).await;
-            });    
+            });
 
             (Some(sender), Some(handle))
-        },
-        None => (None, None)
+        }
+        None => (None, None),
     };
 
     info!("Loading all the modules");
@@ -114,10 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         storage,
         config.execution_threads,
         els.clone(),
-<<<<<<< HEAD
-        performance_sender.clone()
-=======
->>>>>>> 1cfc005 (Format code)
+        performance_sender.clone(),
     );
 
     let _executor = Arc::new(executor);

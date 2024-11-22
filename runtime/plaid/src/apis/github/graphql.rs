@@ -81,7 +81,7 @@ impl Github {
         };
 
         let query = GraphQLQuery {
-            query: query,
+            query,
             variables: request.variables,
         };
 
@@ -106,7 +106,7 @@ impl Github {
         };
 
         let query = AdvancedGraphQLQuery {
-            query: query,
+            query,
             variables: request.variables,
         };
 

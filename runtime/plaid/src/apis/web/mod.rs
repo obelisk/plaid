@@ -53,7 +53,7 @@ impl Web {
         // Get the kid from the request params
         let kid = request
             .get("kid")
-            .map(|x| x.clone())
+            .cloned()
             .ok_or(ApiError::MissingParameter("kid".to_owned()))?;
         // Remove this from request so that only keys for the Claim remains
         request.remove("kid");

@@ -157,9 +157,9 @@ pub enum ModuleExecutionError {
     UnknownExecutionError(String),
 }
 
-impl Into<ExecutorError> for ModuleExecutionError {
-    fn into(self) -> ExecutorError {
-        ExecutorError::ModuleExecutionError(self)
+impl From<ModuleExecutionError> for ExecutorError {
+    fn from(val: ModuleExecutionError) -> Self {
+        ExecutorError::ModuleExecutionError(val)
     }
 }
 
@@ -295,7 +295,7 @@ fn prepare_for_execution(
         .exports
         .get_function("entrypoint")
         .map_err(|_| ExecutorError::NoEntrypoint)?
-        .typed::<(), i32>(&mut store)
+        .typed::<(), i32>(&store)
         .map_err(|_| ExecutorError::InvalidEntrypoint)?;
 
     Ok((store, instance, ep, envr))
@@ -316,7 +316,7 @@ fn update_persistent_response(
             // that is waiting on this response. If the rule doesn't give one, we
             // need to ensure we send a None to wake up that task and complete it
             if let Some(sender) = response_sender {
-                if let Err(_) = sender.send(None) {
+                if sender.send(None).is_err() {
                     error!("[{}] was servicing a request that returned no response and failed to send!", plaid_module.name);
                 } else {
                     error!(
@@ -326,14 +326,14 @@ fn update_persistent_response(
                 }
             }
             // There was no response to save
-            return Ok(());
+            Ok(())
         }
         (Some(_), None) => {
             warn!(
                 "{} tried to set a persistent response but it is not allowed to do so",
                 plaid_module.name
             );
-            return Ok(());
+            Ok(())
         }
         (Some(response), Some(pr)) => {
             // Check to see if the response size is within limits
@@ -342,10 +342,13 @@ fn update_persistent_response(
                     Ok(mut data) => {
                         *data = Some(response.clone());
                         if let Some(sender) = response_sender {
-                            if let Err(_) = sender.send(Some(ResponseMessage {
-                                code: 200,
-                                body: response,
-                            })) {
+                            if sender
+                                .send(Some(ResponseMessage {
+                                    code: 200,
+                                    body: response,
+                                }))
+                                .is_err()
+                            {
                                 error!(
                                     "[{}] was servicing a request but sending the response failed!",
                                     plaid_module.name
@@ -559,7 +562,7 @@ fn determine_error(
     env: &FunctionEnv<Env>,
 ) -> ModuleExecutionError {
     // First check to see if we've exhausted computation
-    if let MeteringPoints::Exhausted = get_remaining_points(&mut store, &instance) {
+    if let MeteringPoints::Exhausted = get_remaining_points(&mut store, instance) {
         return ModuleExecutionError::ComputationExhausted(computation_limit);
     }
 

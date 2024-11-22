@@ -32,7 +32,7 @@ impl Github {
         let address =
             format!("/orgs/{organization}/copilot/billing/seats?page={page}&per_page={per_page}");
 
-        match self.make_generic_get_request(address, &module).await {
+        match self.make_generic_get_request(address, module).await {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -64,7 +64,7 @@ impl Github {
 
         let organization = self.validate_org(&request.org)?;
         for username in &request.selected_usernames {
-            self.validate_username(&username)?;
+            self.validate_username(username)?;
         }
 
         info!(
@@ -75,7 +75,7 @@ impl Github {
         let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
         match self
-            .make_generic_post_request(address, &request, &module)
+            .make_generic_post_request(address, &request, module)
             .await
         {
             Ok((status, Ok(body))) => {
@@ -109,7 +109,7 @@ impl Github {
 
         let organization = self.validate_org(&request.org)?;
         for username in request.selected_usernames.iter() {
-            self.validate_username(&username)?;
+            self.validate_username(username)?;
         }
 
         info!(
@@ -120,7 +120,7 @@ impl Github {
         let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
         match self
-            .make_generic_delete_request(address, Some(&request), &module)
+            .make_generic_delete_request(address, Some(&request), module)
             .await
         {
             Ok((status, Ok(body))) => {

@@ -10,7 +10,7 @@ impl General {
             Ok(()) => Ok(buf),
             Err(_) => {
                 error!("Failed to generate randomness!! This should be impossible.");
-                return Err(ApiError::ImpossibleError);
+                Err(ApiError::ImpossibleError)
             }
         }
     }

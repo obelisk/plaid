@@ -22,7 +22,7 @@ impl Okta {
                 "Authorization",
                 self.get_authorization_header(&super::OktaOperation::RemoveUserFromGroup)
                     .await
-                    .map_err(|e| ApiError::OktaError(e))?,
+                    .map_err(ApiError::OktaError)?,
             )
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");

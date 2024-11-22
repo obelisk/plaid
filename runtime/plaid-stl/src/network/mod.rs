@@ -100,7 +100,7 @@ pub fn make_named_request(
     body: &str,
     variables: HashMap<String, String>,
 ) -> Result<WebRequestResponse, PlaidFunctionError> {
-    return make_named_request_with_buf_size(name, body, variables, None, RETURN_BUFFER_SIZE);
+    make_named_request_with_buf_size(name, body, variables, None, RETURN_BUFFER_SIZE)
 }
 
 /// Enables calling of a named request with dynamic headers. This function should be used
@@ -112,11 +112,5 @@ pub fn make_named_request_with_headers(
     variables: HashMap<String, String>,
     headers: HashMap<String, String>,
 ) -> Result<WebRequestResponse, PlaidFunctionError> {
-    return make_named_request_with_buf_size(
-        name,
-        body,
-        variables,
-        Some(headers),
-        RETURN_BUFFER_SIZE,
-    );
+    make_named_request_with_buf_size(name, body, variables, Some(headers), RETURN_BUFFER_SIZE)
 }

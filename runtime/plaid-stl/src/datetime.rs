@@ -34,7 +34,7 @@ where
     }
 
     Ok(Some(
-        DateTime::parse_from_rfc3339(&s)
+        DateTime::parse_from_rfc3339(s)
             .map_err(serde::de::Error::custom)?
             .with_timezone(&Utc),
     ))
@@ -60,6 +60,6 @@ where
 
     // Parse the "YYYY-MM-DD" string into a NaiveDate
     Ok(Some(
-        NaiveDate::parse_from_str(&s, "%Y-%m-%d").map_err(serde::de::Error::custom)?,
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(serde::de::Error::custom)?,
     ))
 }

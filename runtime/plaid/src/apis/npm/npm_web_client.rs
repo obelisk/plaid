@@ -76,7 +76,7 @@ struct DeleteTokenPayload<'a> {
 /// this unexpected response.
 fn handle_bad_response(response: &Response) -> String {
     let error = bad_response_to_error(response);
-    return RuntimeReturnValue::serialize_from_err(error);
+    RuntimeReturnValue::serialize_from_err(error)
 }
 
 /// Takes a response with an unexpected status code and turns it into
@@ -92,8 +92,7 @@ fn bad_response_to_error(response: &Response) -> NpmError {
             let retry_after = response
                 .headers()
                 .get("Retry-After")
-                .map(|r| r.to_str().ok().map(|v| v.parse::<u32>().ok()))
-                .flatten()
+                .and_then(|r| r.to_str().ok().map(|v| v.parse::<u32>().ok()))
                 .flatten();
             NpmError::ThrottlingError(retry_after)
         }
@@ -111,7 +110,6 @@ impl Npm {
             .ok_or(NpmError::FailedToGetCsrfTokenFromCookies)?
             .to_str()
             .map_err(|_| NpmError::FailedToGetCsrfTokenFromCookies)?
-            .to_string()
             .split("; ")
             .map(|v| v.to_string())
             .collect();
@@ -119,7 +117,7 @@ impl Npm {
         for c in cookies {
             if c.starts_with("cs=") {
                 csrf_token = Some(
-                    c.split("=")
+                    c.split('=')
                         .collect::<Vec<&str>>()
                         .get(1)
                         .ok_or(NpmError::FailedToGetCsrfTokenFromCookies)?
@@ -1016,7 +1014,7 @@ impl Paginable for NpmUser {
                     u.get("user").ok_or(())?.get("name").ok_or(())?.clone(),
                 )
                 .map_err(|_| ())?,
-                role: NpmUserRole::try_from(u.get("role").ok_or(())?.to_string().replace("\"", ""))
+                role: NpmUserRole::try_from(u.get("role").ok_or(())?.to_string().replace('"', ""))
                     .map_err(|_| ())?,
             });
         }
@@ -1049,10 +1047,7 @@ impl Paginable for NpmPackageWithPermission {
                 )
                 .map_err(|_| ())?,
                 permission: NpmPackagePermission::try_from(
-                    p.get("permissions")
-                        .ok_or(())?
-                        .to_string()
-                        .replace("\"", ""),
+                    p.get("permissions").ok_or(())?.to_string().replace('"', ""),
                 )
                 .map_err(|_| ())?,
             });

@@ -104,7 +104,7 @@ impl Npm {
             .ok_or(ApiError::NpmError(NpmError::WrongConfig(
                 "Validator not found. This should be impossible".to_string(),
             )))?
-            .captures(&value_to_validate)
+            .captures(value_to_validate)
             .ok_or(ApiError::NpmError(NpmError::InvalidInput(
                 value_to_validate.to_string(),
             )))?

@@ -111,9 +111,9 @@ impl Okta {
             .with_issuer(client_id)
             .with_audience(format!("https://{}/oauth2/v1/token", self.config.domain))
             .with_subject(client_id);
-        Ok(private_key
+        private_key
             .sign(claims)
-            .map_err(|_| OktaError::JwtSignatureFailure)?)
+            .map_err(|_| OktaError::JwtSignatureFailure)
     }
 
     /// Obtain an access token from Okta, in exchange for a properly constructed JWT.

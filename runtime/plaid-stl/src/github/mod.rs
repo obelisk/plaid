@@ -158,11 +158,11 @@ impl FileSearchResultItem {
             return Err(PlaidFunctionError::InternalApiError); // TODO not the right error
         }
         // base64 decode and return the corresponding string
-        Ok(String::from_utf8(
-            base64::decode(content.content.replace("\n", ""))
+        String::from_utf8(
+            base64::decode(content.content.replace('\n', ""))
                 .map_err(|_| PlaidFunctionError::InternalApiError)?,
         )
-        .map_err(|_| PlaidFunctionError::InternalApiError)?)
+        .map_err(|_| PlaidFunctionError::InternalApiError)
     }
 }
 
@@ -410,7 +410,7 @@ pub fn list_all_copilot_subscription_seats(
         let this_page = serde_json::from_str::<CopilotSeatsResult>(&this_page)
             .map_err(|_| PlaidFunctionError::InternalApiError)?;
 
-        if this_page.seats.len() == 0 {
+        if this_page.seats.is_empty() {
             break;
         }
 
@@ -1387,7 +1387,7 @@ pub fn search_for_file(
     // Use a larger page size to make less requests and reduce chances of hitting the rate limit
     params.insert("per_page", "100".to_owned());
 
-    const RETURN_BUFFER_SIZE: usize = 1 * 1024 * 1024; // 1 MiB
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
     loop {
         page += 1;
@@ -1446,28 +1446,20 @@ pub fn filter_search_results(
     // If the result makes it to the end, then add it to the filtered results.
     for result in raw_results {
         // Discard files in . folders
-        if search_criteria.discard_results_in_dot_folders {
-            if regex_dot_folder.is_match(&result.html_url) {
-                continue;
-            }
+        if search_criteria.discard_results_in_dot_folders
+            && regex_dot_folder.is_match(&result.html_url)
+        {
+            continue;
         }
         // Select / discard files based on the repo name. This _could_ be done in the query, but
         // there is a limit on how many AND / OR / NOT operators can be used. So we keep it here.
         if let Some(RepoFilter::NotFromRepos { repos }) = &search_criteria.repo_filter {
-            if repos
-                .iter()
-                .find(|v| **v == result.repository.name)
-                .is_some()
-            {
+            if repos.iter().any(|v| *v == result.repository.name) {
                 continue;
             }
         }
         if let Some(RepoFilter::OnlyFromRepos { repos }) = &search_criteria.repo_filter {
-            if repos
-                .iter()
-                .find(|v| **v == result.repository.name)
-                .is_none()
-            {
+            if !repos.iter().any(|v| **v == result.repository.name) {
                 continue;
             }
         }
@@ -1493,7 +1485,7 @@ pub fn filter_search_results(
             // build the string we will search for
             let search = format!("{}/{}", result.repository.full_name, result.path);
 
-            if discard_explicit.iter().find(|v| **v == search).is_some() {
+            if discard_explicit.iter().any(|v| **v == search) {
                 continue;
             }
         }

@@ -38,10 +38,7 @@ impl Github {
             client_payload: &request.client_payload,
         };
 
-        match self
-            .make_generic_post_request(address, &body, &module)
-            .await
-        {
+        match self.make_generic_post_request(address, &body, module).await {
             Ok((status, Ok(_))) => {
                 if status == 204 {
                     Ok(0)

@@ -232,7 +232,7 @@ impl Github {
             if current_time - heap_top.timestamp > CANONICALIZATION_TIME {
                 let log = self.canonicalization.pop().unwrap();
                 if let Err(e) = self.logger.send(Message::new(
-                    format!("github"),
+                    "github".to_string(),
                     log.0.serialized_log.into_bytes(),
                     LogSource::Generator(Generator::Github),
                     self.config.logbacks_allowed.clone(),

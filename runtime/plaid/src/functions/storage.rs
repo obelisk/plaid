@@ -81,7 +81,7 @@ pub fn insert(
                 "There was a storage system error when key [{key}] was accessed by [{}]: {e}",
                 env_data.name
             );
-            return FunctionErrors::InternalApiError as i32;
+            FunctionErrors::InternalApiError as i32
         }
     }
 }
@@ -202,7 +202,7 @@ pub fn list_keys(
 
             match safely_write_data_back(
                 &memory_view,
-                &serialized_keys.as_bytes(),
+                serialized_keys.as_bytes(),
                 data_buffer,
                 data_buffer_len,
             ) {
@@ -218,7 +218,7 @@ pub fn list_keys(
         }
         Err(e) => {
             error!("Could not list keys for namespace {}: {e}", &env_data.name);
-            return 0;
+            0
         }
     }
 }

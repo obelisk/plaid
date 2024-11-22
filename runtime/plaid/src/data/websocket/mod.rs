@@ -123,7 +123,9 @@ where
         .collect::<HashMap<String, Uri>>();
 
     if uris.is_empty() {
-        Err(serde::de::Error::custom(&format!("No valid URIs provided")))
+        Err(serde::de::Error::custom(
+            &"No valid URIs provided".to_string(),
+        ))
     } else {
         Ok(uris)
     }
@@ -382,7 +384,7 @@ impl WebSocketClient {
         let log_type = self.configuration.log_type.clone();
         let log_source = LogSource::Generator(Generator::WebSocketExternal(generator_name.clone()));
         let logbacks_allowed = self.configuration.logbacks_allowed.clone();
-        let max_message_size = self.max_message_size.clone();
+        let max_message_size = self.max_message_size;
 
         tokio::spawn(async move {
             while let Some(message) = read.next().await {

@@ -37,10 +37,7 @@ pub fn verify_otp(otp: &str) -> bool {
     // to mess with us, this came from a String in the API module.
     let return_string = String::from_utf8(return_buffer).unwrap();
 
-    match return_string.as_str() {
-        "OK" => true,
-        _ => false,
-    }
+    matches!(return_string.as_str(), "OK")
 }
 
 pub fn verify_otp_detailed(otp: &str) -> Result<OtpStatus, PlaidFunctionError> {
