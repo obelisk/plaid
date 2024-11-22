@@ -3,6 +3,7 @@
 
 # Artefacts
 /compiled_modules
+/runtime/benchmark-results
 
 # Private items
 /runtime/plaid/private-resources

@@ -77,8 +77,6 @@ pub mod yubikey;
 pub mod datetime;
 pub mod messages;
 
-
-
 #[macro_export]
 macro_rules! set_panic_hook {
     () => {
@@ -154,12 +152,11 @@ macro_rules! entrypoint_with_source {
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
             extern "C" {
-                fn fetch_data(data_buffer: *mut u8, buffer_size: u32) -> i32;
-                fn fetch_source(data_buffer: *mut u8, buffer_size: u32) -> i32;
+                fn fetch_data_and_source(data_buffer: *mut u8, buffer_size: u32) -> i32;
             }
 
-            let buffer_size = fetch_data(vec![].as_mut_ptr(), 0);
-            let buffer_size = if buffer_size < 0 {
+            let buffer_size = fetch_data_and_source(vec![].as_mut_ptr(), 0);
+            let buffer_size = if buffer_size < 4 {
                 return buffer_size;
             } else {
                 buffer_size as u32
@@ -167,8 +164,8 @@ macro_rules! entrypoint_with_source {
 
             let mut data_buffer = vec![0; buffer_size as usize];
 
-            let copied_size = fetch_data(data_buffer.as_mut_ptr(), buffer_size);
-            let copied_size = if copied_size < 0 {
+            let copied_size = fetch_data_and_source(data_buffer.as_mut_ptr(), buffer_size);
+            let copied_size = if copied_size < 4 {
                 return copied_size;
             } else {
                 copied_size as u32
@@ -178,31 +175,16 @@ macro_rules! entrypoint_with_source {
                 return -1;
             }
 
-            let log = match String::from_utf8(data_buffer) {
+            let log_length = u32::from_le_bytes(data_buffer[0..4].try_into().unwrap()) as usize;
+
+            let log = &data_buffer[4..4 + log_length];
+            let log = match String::from_utf8(log.to_vec()) {
                 Ok(s) => s,
                 Err(_) => return -2,
             };
 
-            let buffer_size = fetch_source(vec![].as_mut_ptr(), 0);
-            let buffer_size = if buffer_size < 0 {
-                return buffer_size;
-            } else {
-                buffer_size as u32
-            };
-
-            let mut data_buffer = vec![0; buffer_size as usize];
-            let copied_size = fetch_source(data_buffer.as_mut_ptr(), buffer_size);
-            let copied_size = if copied_size < 0 {
-                return copied_size;
-            } else {
-                copied_size as u32
-            };
-
-            if copied_size != buffer_size {
-                return -1;
-            }
-
-            let source = match serde_json::from_slice::<LogSource>(&data_buffer) {
+            let log_source = &data_buffer[4 + log_length..];
+            let source = match serde_json::from_slice::<LogSource>(log_source) {
                 Ok(s) => s,
                 Err(_) => return -2,
             };
@@ -228,13 +210,12 @@ macro_rules! entrypoint_with_source_and_response {
         #[no_mangle]
         pub unsafe extern "C" fn entrypoint() -> i32 {
             extern "C" {
-                fn fetch_data(data_buffer: *mut u8, buffer_size: u32) -> i32;
-                fn fetch_source(data_buffer: *mut u8, buffer_size: u32) -> i32;
+                fn fetch_data_and_source(data_buffer: *mut u8, buffer_size: u32) -> i32;
                 fn set_response(data_buffer: *const u8, buffer_size: u32);
             }
 
-            let buffer_size = fetch_data(vec![].as_mut_ptr(), 0);
-            let buffer_size = if buffer_size < 0 {
+            let buffer_size = fetch_data_and_source(vec![].as_mut_ptr(), 0);
+            let buffer_size = if buffer_size < 4 {
                 return buffer_size;
             } else {
                 buffer_size as u32
@@ -242,8 +223,8 @@ macro_rules! entrypoint_with_source_and_response {
 
             let mut data_buffer = vec![0; buffer_size as usize];
 
-            let copied_size = fetch_data(data_buffer.as_mut_ptr(), buffer_size);
-            let copied_size = if copied_size < 0 {
+            let copied_size = fetch_data_and_source(data_buffer.as_mut_ptr(), buffer_size);
+            let copied_size = if copied_size < 4 {
                 return copied_size;
             } else {
                 copied_size as u32
@@ -253,31 +234,16 @@ macro_rules! entrypoint_with_source_and_response {
                 return -1;
             }
 
-            let log = match String::from_utf8(data_buffer) {
+            let log_length = u32::from_le_bytes(data_buffer[0..4].try_into().unwrap()) as usize;
+
+            let log = &data_buffer[4..4 + log_length];
+            let log = match String::from_utf8(log.to_vec()) {
                 Ok(s) => s,
                 Err(_) => return -2,
             };
 
-            let buffer_size = fetch_source(vec![].as_mut_ptr(), 0);
-            let buffer_size = if buffer_size < 0 {
-                return buffer_size;
-            } else {
-                buffer_size as u32
-            };
-
-            let mut data_buffer = vec![0; buffer_size as usize];
-            let copied_size = fetch_source(data_buffer.as_mut_ptr(), buffer_size);
-            let copied_size = if copied_size < 0 {
-                return copied_size;
-            } else {
-                copied_size as u32
-            };
-
-            if copied_size != buffer_size {
-                return -1;
-            }
-
-            let source = match serde_json::from_slice::<LogSource>(&data_buffer) {
+            let log_source = &data_buffer[4 + log_length..];
+            let source = match serde_json::from_slice::<LogSource>(log_source) {
                 Ok(s) => s,
                 Err(_) => return -2,
             };
