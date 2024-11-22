@@ -117,8 +117,5 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
 
-      - name: Change to runtime directory
-        run: cd runtime
-
       - name: clippy
-        run: cargo clippy
+        run: cd runtime && cargo clippy
