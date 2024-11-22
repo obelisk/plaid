@@ -116,16 +116,14 @@ where
                 Some((name, valid_uri))
             },
             Err(e) => {
-                error!("Invalid URI provided: {}. Error: {}", uri, e);
+                error!("Invalid URI provided: {uri}. Error: {e}");
                 None
             }
         })
         .collect::<HashMap<String, Uri>>();
 
     if uris.is_empty() {
-        Err(serde::de::Error::custom(
-            &"No valid URIs provided".to_string(),
-        ))
+        Err(serde::de::Error::custom("No valid URIs provided"))
     } else {
         Ok(uris)
     }
@@ -442,17 +440,17 @@ impl WebSocketClient {
             Some(write_handle) => {
                 tokio::select! {
                     _ = write_handle => {
-                        error!("Write task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Write task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
                     },
                     _ = read_handle => {
-                        error!("Read task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Read task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
                     },
                 }
             }
             None => {
                 tokio::select! {
                     _ = read_handle => {
-                        error!("Read task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Read task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
                     },
                 }
             }
