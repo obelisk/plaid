@@ -117,5 +117,8 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
 
-      - name: clippy
-        run: cd runtime && cargo clippy
+      - name: cargo clippy
+        uses: giraffate/clippy-action@v1
+        with:
+          reporter: 'github-pr-check'
+          workdir: runtime
