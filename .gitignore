@@ -3,6 +3,7 @@
 
 # Artefacts
 /compiled_modules
+/runtime/performance-monitoring/*
 
 # Private items
 /runtime/plaid/private-resources
