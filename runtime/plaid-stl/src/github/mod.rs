@@ -1476,3 +1476,49 @@ pub fn trigger_repo_dispatch<T>(
 
     Ok(())
 }
+
+/// Check whether a user belongs to an org
+/// ## Arguments
+///
+/// * `user` - The account to check org membership of
+/// * `org` - The org to check if `user` is part of
+pub fn check_org_membership_of_user(
+    user: impl Display,
+    org: impl Display,
+) -> Result<bool, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, check_org_membership_of_user);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("user", user.to_string());
+    params.insert("org", org.to_string());
+
+    const RETURN_BUFFER_SIZE: usize = 32;
+    let request = serde_json::to_string(&params).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_check_org_membership_of_user(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let result = String::from_utf8(return_buffer).unwrap();
+
+    match result.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(PlaidFunctionError::InternalApiError),
+    }
+}
