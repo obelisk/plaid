@@ -119,10 +119,13 @@ impl Github {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let organization = self.validate_org(request.get("organization").ok_or(ApiError::BadRequest)?)?;
-        let repository_name =
-            self.validate_repository_name(request.get("repository_name").ok_or(ApiError::BadRequest)?)?;
-        let pull_request = self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
+        let organization =
+            self.validate_org(request.get("organization").ok_or(ApiError::BadRequest)?)?;
+        let repository_name = self.validate_repository_name(
+            request.get("repository_name").ok_or(ApiError::BadRequest)?,
+        )?;
+        let pull_request =
+            self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
 
         info!("Fetching files for Pull Request Nr {pull_request} from [{organization}/{repository_name}] on behalf of {module}");
         let address = format!("/repos/{organization}/{repository_name}/pulls/{pull_request}/files");
@@ -143,18 +146,22 @@ impl Github {
     }
 
     /// Returns the contents of a file at a specific URI.
+    /// See https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28#get-repository-content for more detail
     pub async fn fetch_file(&self, params: &str, module: &str) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let organization = self.validate_org(request.get("organization").ok_or(ApiError::BadRequest)?)?;
-        let repository_name =
-            self.validate_repository_name(request.get("repository_name").ok_or(ApiError::BadRequest)?)?;
+        let organization =
+            self.validate_org(request.get("organization").ok_or(ApiError::BadRequest)?)?;
+        let repository_name = self.validate_repository_name(
+            request.get("repository_name").ok_or(ApiError::BadRequest)?,
+        )?;
         let file_path = request.get("file_path").ok_or(ApiError::BadRequest)?;
-        let reference = self.validate_commit_hash(request.get("reference").ok_or(ApiError::BadRequest)?)?;
+        let reference = request.get("reference").ok_or(ApiError::BadRequest)?;
 
         info!("Fetching contents of file in repository [{organization}/{repository_name}] at {file_path} and reference {reference}");
-        let address = format!("/repos/{organization}/{repository_name}/contents/{file_path}?ref={reference}");
+        let address =
+            format!("/repos/{organization}/{repository_name}/contents/{file_path}?ref={reference}");
 
         match self.make_generic_get_request(address, module).await {
             Ok((status, Ok(body))) => {
@@ -220,8 +227,16 @@ impl Github {
         let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
         let repo =
             self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let per_page: u8 = request.get("per_page").unwrap_or(&"30").parse::<u8>().map_err(|_| ApiError::BadRequest)?;
-        let page: u16 = request.get("page").unwrap_or(&"1").parse::<u16>().map_err(|_| ApiError::BadRequest)?;
+        let per_page: u8 = request
+            .get("per_page")
+            .unwrap_or(&"30")
+            .parse::<u8>()
+            .map_err(|_| ApiError::BadRequest)?;
+        let page: u16 = request
+            .get("page")
+            .unwrap_or(&"1")
+            .parse::<u16>()
+            .map_err(|_| ApiError::BadRequest)?;
 
         if per_page > 100 {
             // GitHub supports up to 100 results per page
@@ -229,7 +244,8 @@ impl Github {
         }
 
         info!("Fetching collaborators for [{repo}] on behalf of {module}");
-        let address = format!("/repos/{owner}/{repo}/collaborators?per_page={per_page}&page={page}");
+        let address =
+            format!("/repos/{owner}/{repo}/collaborators?per_page={per_page}&page={page}");
 
         match self.make_generic_get_request(address, module).await {
             Ok((status, Ok(body))) => {
