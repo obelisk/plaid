@@ -3,12 +3,12 @@ mod code;
 mod copilot;
 mod environments;
 mod graphql;
+mod members;
 mod pats;
 mod repos;
 mod secrets;
 mod teams;
 mod validators;
-mod org;
 
 use http::header::USER_AGENT;
 use jsonwebtoken::EncodingKey;
