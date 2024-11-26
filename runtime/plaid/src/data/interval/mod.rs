@@ -8,7 +8,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::executor::Message;
+use crate::executor::{LogMessage, Message};
 
 #[derive(Deserialize)]
 /// Defines the list of interval jobs to be processed
@@ -58,11 +58,11 @@ pub struct ScheduledJob {
     /// Time between job executions - used in combination with execution_time to reschedule the job after execution
     interval: u64,
     /// Message to send to executor
-    message: Message,
+    message: LogMessage,
 }
 
 impl ScheduledJob {
-    pub fn new(execution_time: u64, interval: u64, message: Message) -> Self {
+    pub fn new(execution_time: u64, interval: u64, message: LogMessage) -> Self {
         Self {
             execution_time,
             interval,
@@ -136,7 +136,7 @@ impl Interval {
             let message = ScheduledJob::new(
                 job.interval + job_splay + current_time,
                 job.interval,
-                Message::new(
+                LogMessage::new(
                     job.log_type.to_string(),
                     job.data.clone().unwrap_or_default().into(),
                     LogSource::Generator(Generator::Interval(name.clone())),
@@ -173,7 +173,9 @@ impl Interval {
 
             // Send job to executor
             let job = self.job_heap.pop().unwrap();
-            self.sender.send(job.0.message.create_duplicate()).unwrap();
+            self.sender
+                .send(job.0.message.create_duplicate().into())
+                .unwrap();
 
             // Reschedule the job by adding it back to the heap with an updated execution time
             let new_message = ScheduledJob {

@@ -7,13 +7,14 @@ use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
 use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
+use crate::ModulesByName;
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::oneshot::Sender as OneShotSender;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Serialize};
-use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedFunction};
+use wasmer::{FunctionEnv, Imports, Instance, Memory, Module, RuntimeError, Store, TypedFunction};
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use lru::LruCache;
@@ -36,26 +37,26 @@ pub struct ResponseMessage {
 #[derive(Serialize, Deserialize)]
 pub struct LogMessage {
     /// The message channel that this message is going to run on
-    type_: String,
+    pub type_: String,
     /// The data passed to the module
-    data: Vec<u8>,
+    pub data: Vec<u8>,
     /// Any additional data that is provided as context to the module
     /// This is usually either headers, or secrets
-    accessory_data: HashMap<String, Vec<u8>>,
+    pub accessory_data: HashMap<String, Vec<u8>>,
     /// Where the message came from
-    source: LogSource,
+    pub source: LogSource,
     /// If this message is allowed to trigger additional messages to the same
     /// or other message channels
-    logbacks_allowed: LogbacksAllowed,
+    pub logbacks_allowed: LogbacksAllowed,
     /// If a response is should be sent back to the source of the message
     /// This is used in the GET request system to handle responses
     #[serde(skip)]
-    response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
+    pub response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
     /// If this is some, the entire channel will not be run, just a specific
     /// module. This is used in the GET system because only one rule can
     /// be run to generate a response.
     #[serde(skip)]
-    module: Option<Arc<PlaidModule>>,
+    pub module: Option<String>,
 }
 
 impl LogMessage {
@@ -72,15 +73,30 @@ impl LogMessage {
             module: None,
         }
     }
+
+    pub fn new(
+        type_: String,
+        data: Vec<u8>,
+        source: LogSource,
+        logbacks_allowed: LogbacksAllowed,
+    ) -> Self {
+        Self {
+            type_,
+            data,
+            accessory_data: HashMap::new(),
+            source,
+            logbacks_allowed,
+            response_sender: None,
+            module: None,
+        }
+    }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(untagged)]
 pub enum Message {
     Log(LogMessage),
     FetchPersistentResponse {
-        #[serde(skip)]
-        response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
+        module_name: String,
+        response_sender: OneShotSender<Option<ResponseMessage>>,
     },
 }
 
@@ -100,6 +116,16 @@ impl Message {
             response_sender: None,
             module: None,
         })
+    }
+
+    pub fn new_from_log_message(log_message: LogMessage) -> Self {
+        Self::Log(log_message)
+    }
+}
+
+impl Into<Message> for LogMessage {
+    fn into(self) -> Message {
+        Message::Log(self)
     }
 }
 
@@ -519,6 +545,7 @@ fn execution_loop(
     storage: Option<Arc<Storage>>,
     els: Logger,
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
+    modules_by_name: Arc<ModulesByName>,
 ) -> Result<(), ExecutorError> {
     // Wait on our receiver for logs to come in
     while let Ok(message) = receiver.recv() {
@@ -529,11 +556,21 @@ fn execution_loop(
                     // If this message has a response sender, we only
                     // want to run it on that rule, not any defined logging
                     // channel.
-                    (Some(ref module), _) => {
-                        let module = module.clone();
+                    (Some(module_name), _) => {
+                        // Get the module
+                        let module = match modules_by_name.get(module_name) {
+                            Some(module) => module,
+                            None => {
+                                warn!(
+                                    "Got a LogMessage for a module that doesn't exist: {}",
+                                    module_name
+                                );
+                                continue;
+                            }
+                        };
                         process_message_with_module(
                             message,
-                            module,
+                            module.clone(),
                             api.clone(),
                             storage.clone(),
                             els.clone(),
@@ -562,7 +599,39 @@ fn execution_loop(
                     }
                 };
             }
-            Message::FetchPersistentResponse { response_sender } => todo!(),
+            Message::FetchPersistentResponse {
+                module_name,
+                response_sender,
+            } => {
+                let module = match modules_by_name.get(&module_name) {
+                    Some(module) => module,
+                    None => {
+                        warn!(
+                            "Got a LogMessage for a module that doesn't exist: {}",
+                            module_name
+                        );
+                        continue;
+                    }
+                };
+                match module.get_persistent_response_data() {
+                    Some(body) => {
+                        if let Err(_) =
+                            response_sender.send(Some(ResponseMessage { code: 200, body }))
+                        {
+                            error!(
+                                "Failed to send persistent response of {module_name} to a requester"
+                            );
+                        }
+                    }
+                    None => {
+                        if let Err(_) = response_sender.send(None) {
+                            error!(
+                                "Failed to notify requestor there is no persistent response for {module_name}"
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
     Err(ExecutorError::IncomingLogError)
@@ -599,6 +668,7 @@ impl Executor {
         execution_threads: u8,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
+        modules_by_name: Arc<ModulesByName>,
     ) -> Self {
         let mut _handles = vec![];
         for i in 0..execution_threads {
@@ -609,8 +679,17 @@ impl Executor {
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
+            let modules_by_name = modules_by_name.clone();
             _handles.push(thread::spawn(move || {
-                execution_loop(receiver, modules, api, storage, els, performance_sender)
+                execution_loop(
+                    receiver,
+                    modules,
+                    api,
+                    storage,
+                    els,
+                    performance_sender,
+                    modules_by_name,
+                )
             }));
         }
 

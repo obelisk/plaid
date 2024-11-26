@@ -1,4 +1,7 @@
-use crate::{executor::Message, storage::Storage};
+use crate::{
+    executor::{LogMessage, Message},
+    storage::Storage,
+};
 
 use crossbeam_channel::{bounded, Receiver, Sender};
 
@@ -22,11 +25,11 @@ pub struct InternalConfig {}
 #[derive(Serialize, Deserialize)]
 pub struct DelayedMessage {
     delay: u64,
-    message: Message,
+    message: LogMessage,
 }
 
 impl DelayedMessage {
-    pub fn new(delay: u64, message: Message) -> Self {
+    pub fn new(delay: u64, message: LogMessage) -> Self {
         Self { delay, message }
     }
 }
@@ -85,7 +88,7 @@ impl Internal {
                 .map_err(|e| DataError::StorageError(e))?;
 
             for (message, time) in previous_logs {
-                let message: Message = match serde_json::from_str(message.as_str()) {
+                let message: LogMessage = match serde_json::from_str(message.as_str()) {
                     Ok(msg) => msg,
                     Err(e) => {
                         warn!(
@@ -173,7 +176,7 @@ impl Internal {
                     }
                 }
             }
-            self.sender.send(log.0.message).unwrap();
+            self.sender.send(log.0.message.into()).unwrap();
         }
 
         debug!("Heap Size: {}", self.log_heap.len());

@@ -1,3 +1,4 @@
+use core::panic;
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
 use crossbeam_channel::{Sender, TrySendError};
@@ -6,9 +7,9 @@ use serde::Deserialize;
 use serde::de;
 use tokio::sync::RwLock;
 
-use crate::{executor::Message, loader::PlaidModule, ModulesByName};
+use crate::{executor::{LogMessage, Message, ResponseMessage}, loader::PlaidModule, ModulesByName};
 
-use warp::{hyper::body::Bytes, path, Filter, http::HeaderMap};
+use warp::{filters::body, http::HeaderMap, hyper::body::Bytes, path, Filter};
 
 
 /// How should responses to GET requests be cached.
@@ -127,8 +128,7 @@ where
     })
 }
 
-
-pub fn configure_webhooks(config: WebhookServerConfigurations, log_sender: Sender<Message>, modules_by_name: Arc<ModulesByName>) -> Vec<Box<Pin<Box<dyn futures_util::Future<Output = ()> + Send >>>> {
+pub fn configure_webhooks(config: WebhookServerConfigurations, log_sender: Sender<Message>) -> Vec<Box<Pin<Box<dyn futures_util::Future<Output = ()> + Send >>>> {
     let webhook_server_post_log_sender = log_sender.clone();
     let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
         .into_iter()
@@ -158,19 +158,19 @@ pub fn configure_webhooks(config: WebhookServerConfigurations, log_sender: Sende
                         let logbacks_allowed = webhook_configuration.logbacks_allowed.clone();
 
                         // Create the message we're going to send into the execution system.
-                        let mut message = Message::new(webhook_configuration.log_type.to_owned(), data[..].to_vec(), source, logbacks_allowed);
+                        let mut log_message = LogMessage::new(webhook_configuration.log_type.to_owned(), data[..].to_vec(), source, logbacks_allowed);
 
                         for requested_header in webhook_configuration.headers.iter() {
                             // TODO: Investigate if this should be get_all?
                             // Without this we don't support receiving multiple headers with the same name
                             // I don't know if this is an issue or not, practicially, or if there are security implications.
                             if let Some(value) = headers.get(requested_header) {
-                                message.accessory_data.insert(requested_header.to_string(), value.as_bytes().to_vec());
+                                log_message.accessory_data.insert(requested_header.to_string(), value.as_bytes().to_vec());
                             }
                         }
 
                         // Webhook exists, buffer log
-                        if let Err(e) = webhook_server_post_log_sender.try_send(message) {
+                        if let Err(e) = webhook_server_post_log_sender.try_send(log_message.into()) {
                             match e {
                                 TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
                                 // TODO: Have this actually cause Plaid to exit
@@ -191,10 +191,9 @@ pub fn configure_webhooks(config: WebhookServerConfigurations, log_sender: Sende
                 .and(path!("webhook" / String))
                 .and(warp::query::<HashMap<String, String>>())
                 .and(with(webhook_config.clone()))
-                .and(with(modules_by_name.clone()))
                 .and(with(get_cache.clone()))
                 .and(with(webhook_server_get_log_sender.clone()))
-                .and_then(|webhook: String, query: HashMap<String, String>, webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: crossbeam_channel::Sender<Message>| async move {
+                .and_then(|webhook: String, query: HashMap<String, String>, webhook_config: Arc<WebhookServerConfiguration>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: crossbeam_channel::Sender<Message>| async move {
                     if let Some(webhook_configuration) = webhook_config.webhooks.get(&webhook) {
                         match &webhook_configuration.get_mode {
                             // Note that CacheMode is elided here as there is no caching for static data
@@ -219,16 +218,16 @@ pub fn configure_webhooks(config: WebhookServerConfigurations, log_sender: Sende
                             },
                             // For rules, we do need to get the cache mode and dealing with it makes this
                             // kind of reponse significantly more complex.
-                            Some(GetMode{ response_mode: ResponseMode::Rule(name), caching_mode}) => {
+                            Some(GetMode{ response_mode: ResponseMode::Rule(module_name), caching_mode}) => {
                                 // Ensure that the rule configured to generated the GET response actually exists
-                                let rule = if let Some(rule) = modules.get(name) {
-                                    rule
-                                } else {
-                                    warn!("Got a get request to {webhook} but the rule [{name}] configured to handle it does not exist");
-                                    return Ok(warp::reply::html(String::new()));
-                                };
+                                // let rule = if let Some(rule) = modules.get(name) {
+                                //     rule
+                                // } else {
+                                //     warn!("Got a get request to {webhook} but the rule [{name}] configured to handle it does not exist");
+                                //     return Ok(warp::reply::html(String::new()));
+                                // };
 
-                                info!("Received get request to: {webhook}. Handling with rule [{name}] to generate response");
+                                info!("Received get request to: {webhook}. Handling with rule [{module_name}] to generate response");
                                 // I'm making the assumption here that getting the system time will never fail
                                 let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
@@ -246,23 +245,42 @@ pub fn configure_webhooks(config: WebhookServerConfigurations, log_sender: Sende
                                     },
                                     CachingMode::None => false,
                                     CachingMode::UsePersistentResponse { call_on_none } => {
-                                        match rule.get_persistent_response_data() {
-                                            Some(data) => {
-                                                // There is persistent data available for this rule so we can just return it
+                                        let (response_sender, response_recv) = tokio::sync::oneshot::channel();
+                                        let persistent_response_message = Message::FetchPersistentResponse { module_name: module_name.clone(), response_sender };
+                                        
+                                        // Put the message into the standard message queue
+                                        if let Err(e) = log_sender.try_send(persistent_response_message.into()) {
+                                            match e {
+                                                TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
+                                                // TODO: Have this actually cause Plaid to exit
+                                                TrySendError::Disconnected(_) => panic!("The execution system is no longer accepting messages. Nothing can continue."),
+                                            }
+                                        };
+
+                                        match response_recv.await {
+                                            Ok(Some(ResponseMessage { code: 200, body})) => {
                                                 info!("Returning persistent response for get request to: {webhook}");
-                                                return Ok(warp::reply::html(data));
+                                                return Ok(warp::reply::html(body));
                                             },
-                                            // There is no persistent data. So we continue with the normal calling system
-                                            // if call on none is true but do not cache since "caching" is just the persistent data
-                                            None => {
+                                            Ok(Some(ResponseMessage { code, ..})) => {
+                                                warn!("Module {module_name} returned status code [{code}] so we're returning an empty response");
+                                                return Ok(warp::reply::html(String::new()));
+                                            },
+                                            Ok(None) => {
                                                 // We don't want to call on none so even though there is no persistent response
                                                 // we don't run the rule and just return no data
                                                 if !call_on_none {
+                                                    warn!("There was no response from {module_name} so we're returning an empty response and we're not calling the module to get one because call_on_none is false");
                                                     return Ok(warp::reply::html(String::new()));
                                                 }
                                                 false
                                             },
+                                            Err(e) => {
+                                                error!("Got a get request to {webhook} but the rule [{module_name}] configured to handle it threw an error: {e}");
+                                                return Ok(warp::reply::html(String::new()));
+                                            },
                                         }
+
                                     }, 
                                 };
 
@@ -277,18 +295,18 @@ pub fn configure_webhooks(config: WebhookServerConfigurations, log_sender: Sende
                                 let (response_send, response_recv) = tokio::sync::oneshot::channel();
 
                                 // Construct a message to send to the rule
-                                let message = Message {
-                                    type_: name.to_string(),
+                                let message = LogMessage {
+                                    type_: module_name.to_string(),
                                     data: String::new().into_bytes(),
                                     accessory_data: query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
                                     source,
                                     logbacks_allowed,
                                     response_sender: Some(response_send),
-                                    module: Some(rule.clone()),
+                                    module: Some(module_name.clone()),
                                 };
 
                                 // Put the message into the standard message queue
-                                if let Err(e) = log_sender.try_send(message) {
+                                if let Err(e) = log_sender.try_send(message.into()) {
                                     match e {
                                         TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
                                         // TODO: Have this actually cause Plaid to exit
@@ -307,11 +325,14 @@ pub fn configure_webhooks(config: WebhookServerConfigurations, log_sender: Sende
                                         Ok(warp::reply::html(response.body))
                                     },
                                     Ok(None) => {
-                                        warn!("Got a get request to {webhook} but the rule [{name}] configured to handle it did not return a response");
+                                        warn!("Got a get request to {webhook} but the rule [{module_name}] configured to handle it did not return a response");
                                         Ok(warp::reply::html(String::new()))
                                     }
+                                    // TODO @obelisk: This also happens if the module configured to handle this doesn't exist as the executor
+                                    // will fail to find the module and drop the sender. In the future, this might be better if when that happened 
+                                    // the executor send an error enum through the OneShot channel.
                                     Err(e) => {
-                                        error!("Got a get request to {webhook} but the rule [{name}] configured to handle it threw an error: {e}");
+                                        error!("Got a get request to {webhook} but the rule [{module_name}] configured to handle it threw an error: {e}");
                                         Ok(warp::reply::html(String::new()))
                                     }
                                 }

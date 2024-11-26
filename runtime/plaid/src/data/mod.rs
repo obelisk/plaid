@@ -62,7 +62,6 @@ impl DataInternal {
         logger: Sender<Message>,
         storage: Option<Arc<Storage>>,
         els: Logger,
-        modules_by_name: Arc<ModulesByName>,
     ) -> Result<Self, DataError> {
         let github = config
             .github
@@ -94,8 +93,7 @@ impl DataInternal {
             .websocket
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
-        let webhooks =
-            webhook::configure_webhooks(config.webhooks, logger.clone(), modules_by_name);
+        let webhooks = webhook::configure_webhooks(config.webhooks, logger.clone());
 
         Ok(Self {
             github,
@@ -115,11 +113,8 @@ impl Data {
         storage: Option<Arc<Storage>>,
         els: Logger,
         handle: Handle,
-        modules_by_name: Arc<ModulesByName>,
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
-        let di = handle.spawn(async {
-            DataInternal::new(config, sender, storage, els, modules_by_name).await
-        });
+        let di = handle.spawn(async { DataInternal::new(config, sender, storage, els).await });
 
         let di = handle
             .block_on(di)

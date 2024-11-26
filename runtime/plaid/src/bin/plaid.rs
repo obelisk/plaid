@@ -50,13 +50,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         log_sender.clone(),
         storage.clone(),
         els.clone(),
+        runtime.handle().clone(),
     )
     .expect("The data system failed to start")
     .unwrap();
 
     info!("Configurating APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(configuration.apis, log_sender.clone(), delayed_log_sender).await;
+    let api = Api::new(
+        configuration.apis,
+        log_sender.clone(),
+        delayed_log_sender,
+        runtime.handle().clone(),
+    )
+    .unwrap();
 
     // Create an Arc so all the handlers have access to our API object
     let api = Arc::new(api);
@@ -94,6 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         configuration.execution_threads,
         els.clone(),
         performance_sender.clone(),
+        modules_by_name,
     );
 
     let _executor = Arc::new(executor);
@@ -126,17 +134,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Ensure that the performance monitoring loop exits before finishing shutdown.
     // We do this to guarantee that rule performance data data gets written to a file.
-    if let Some(mut perf) = configuration.performance_monitoring {
-        if let Some(handle) = perf.get_handle() {
-            info!("Waiting for performance monitoring system to shutdown...");
-            let metrics = handle
-                .join()
-                .expect("Performance monitoring system failed to shutdown");
-            perf.generate_report(metrics).await?;
-        } else {
-            error!("Performance monitoring system failed to start");
-        }
-    }
+    // if let Some(mut perf) = configuration.performance_monitoring {
+    //     if let Some(handle) = perf.get_handle() {
+    //         info!("Waiting for performance monitoring system to shutdown...");
+    //         let metrics = handle
+    //             .join()
+    //             .expect("Performance monitoring system failed to shutdown");
+    //         perf.generate_report(metrics).await?;
+    //     } else {
+    //         error!("Performance monitoring system failed to start");
+    //     }
+    // }
 
     // We can also trigger shutdown of the execution loop here and guarantee that no logs get dropped
     // on shutdown by waiting for the queue to empty.
