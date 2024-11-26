@@ -34,49 +34,32 @@ pub struct ResponseMessage {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct Message {
+pub struct LogMessage {
     /// The message channel that this message is going to run on
-    pub type_: String,
+    type_: String,
     /// The data passed to the module
-    pub data: Vec<u8>,
+    data: Vec<u8>,
     /// Any additional data that is provided as context to the module
     /// This is usually either headers, or secrets
-    pub accessory_data: HashMap<String, Vec<u8>>,
+    accessory_data: HashMap<String, Vec<u8>>,
     /// Where the message came from
-    pub source: LogSource,
+    source: LogSource,
     /// If this message is allowed to trigger additional messages to the same
     /// or other message channels
-    pub logbacks_allowed: LogbacksAllowed,
+    logbacks_allowed: LogbacksAllowed,
     /// If a response is should be sent back to the source of the message
     /// This is used in the GET request system to handle responses
     #[serde(skip)]
-    pub response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
+    response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
     /// If this is some, the entire channel will not be run, just a specific
     /// module. This is used in the GET system because only one rule can
     /// be run to generate a response.
     #[serde(skip)]
-    pub module: Option<Arc<PlaidModule>>,
+    module: Option<Arc<PlaidModule>>,
 }
 
-impl Message {
-    pub fn new(
-        type_: String,
-        data: Vec<u8>,
-        source: LogSource,
-        logbacks_allowed: LogbacksAllowed,
-    ) -> Self {
-        Self {
-            type_,
-            data,
-            accessory_data: HashMap::new(),
-            source,
-            logbacks_allowed,
-            response_sender: None,
-            module: None,
-        }
-    }
-
-    /// Create a duplicate of the message that does
+impl LogMessage {
+    /// Create a duplicate of the LogMessage that does
     /// not have the response sender.
     pub fn create_duplicate(&self) -> Self {
         Self {
@@ -91,13 +74,42 @@ impl Message {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Message {
+    Log(LogMessage),
+    FetchPersistentResponse {
+        #[serde(skip)]
+        response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
+    },
+}
+
+impl Message {
+    pub fn new(
+        type_: String,
+        data: Vec<u8>,
+        source: LogSource,
+        logbacks_allowed: LogbacksAllowed,
+    ) -> Self {
+        Self::Log(LogMessage {
+            type_,
+            data,
+            accessory_data: HashMap::new(),
+            source,
+            logbacks_allowed,
+            response_sender: None,
+            module: None,
+        })
+    }
+}
+
 pub struct Env {
     // Name of the current module
     pub name: String,
     // Cache if available
     pub cache: Option<Arc<RwLock<LruCache<String, String>>>>,
     // The message that is being processed.
-    pub message: Message,
+    pub message: LogMessage,
     // A handle to the API to make external calls
     pub api: Arc<Api>,
     // A handle to the storage system if one is configured
@@ -203,7 +215,7 @@ impl From<LoggingError> for ExecutorError {
 /// Take a message, a module, and an executor and get an instance back that is ready to run
 /// the provided module.
 fn prepare_for_execution(
-    mut message: Message,
+    mut message: LogMessage,
     plaid_module: Arc<PlaidModule>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
@@ -375,7 +387,7 @@ fn update_persistent_response(
 /// an error. The only time this should return an error is if the runtime itself
 /// encounters a critical, unrecoverable error.
 fn process_message_with_module(
-    message: Message,
+    message: LogMessage,
     module: Arc<PlaidModule>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
@@ -510,43 +522,48 @@ fn execution_loop(
 ) -> Result<(), ExecutorError> {
     // Wait on our receiver for logs to come in
     while let Ok(message) = receiver.recv() {
-        // Check that we know what modules to send this new log to
-        match (&message.module, modules.get(&message.type_)) {
-            // If this message has a response sender, we only
-            // want to run it on that rule, not any defined logging
-            // channel.
-            (Some(ref module), _) => {
-                let module = module.clone();
-                process_message_with_module(
-                    message,
-                    module,
-                    api.clone(),
-                    storage.clone(),
-                    els.clone(),
-                    performance_monitoring_mode.clone(),
-                )?;
+        match message {
+            Message::Log(message) => {
+                // Check that we know what modules to send this new log to
+                match (&message.module, modules.get(&message.type_)) {
+                    // If this message has a response sender, we only
+                    // want to run it on that rule, not any defined logging
+                    // channel.
+                    (Some(ref module), _) => {
+                        let module = module.clone();
+                        process_message_with_module(
+                            message,
+                            module,
+                            api.clone(),
+                            storage.clone(),
+                            els.clone(),
+                            performance_monitoring_mode.clone(),
+                        )?;
+                    }
+                    (None, Some(modules)) => {
+                        // For every module that operates on that log type
+                        for module in modules {
+                            process_message_with_module(
+                                message.create_duplicate(),
+                                module.clone(),
+                                api.clone(),
+                                storage.clone(),
+                                els.clone(),
+                                performance_monitoring_mode.clone(),
+                            )?;
+                        }
+                    }
+                    (None, None) => {
+                        warn!(
+                            "Got logs of a type we have no modules for? Type was: {}",
+                            message.type_
+                        );
+                        continue;
+                    }
+                };
             }
-            (None, Some(modules)) => {
-                // For every module that operates on that log type
-                for module in modules {
-                    process_message_with_module(
-                        message.create_duplicate(),
-                        module.clone(),
-                        api.clone(),
-                        storage.clone(),
-                        els.clone(),
-                        performance_monitoring_mode.clone(),
-                    )?;
-                }
-            }
-            (None, None) => {
-                warn!(
-                    "Got logs of a type we have no modules for? Type was: {}",
-                    message.type_
-                );
-                continue;
-            }
-        };
+            Message::FetchPersistentResponse { response_sender } => todo!(),
+        }
     }
     Err(ExecutorError::IncomingLogError)
 }

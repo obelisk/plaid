@@ -1,16 +1,19 @@
-use crossbeam_channel::{Receiver, RecvTimeoutError};
+use crossbeam_channel::Receiver;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::thread;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use tokio::time::Duration;
-use tokio_util::sync::CancellationToken;
+
+pub type PerformanceMetadata = HashMap<String, AggregatePerformanceData>;
 
 #[derive(Deserialize)]
 pub struct PerformanceMonitoring {
     /// The full path to the output file where performance metrics should be written
     #[serde(default = "default_results_file_path")]
     output_file_path: String,
+    #[serde(skip)]
+    pub _handle: Option<thread::JoinHandle<PerformanceMetadata>>,
 }
 
 /// Default file path for performance results if none is provided in the config
@@ -29,7 +32,7 @@ pub struct ModulePerformanceMetadata {
 }
 
 /// Represents a module's aggregate performance
-struct AggregatePerformanceData {
+pub struct AggregatePerformanceData {
     /// The number of times the module has been executed
     runs: u64,
     /// The total time (in microseconds) the module has spent in the execution loop
@@ -77,31 +80,18 @@ impl AggregatePerformanceData {
 }
 
 impl PerformanceMonitoring {
-    pub async fn start(
-        &self,
-        receiver: Receiver<ModulePerformanceMetadata>,
-        cancellation_token: CancellationToken,
-    ) {
-        let aggregate_performance_metadata =
-            performance_monitoring_loop(receiver, cancellation_token).await;
-
-        if let Err(e) =
-            generate_report(&aggregate_performance_metadata, &self.output_file_path).await
-        {
-            error!("Failed to generate performance report. Error: {e}")
-        }
+    pub fn start(&mut self, receiver: Receiver<ModulePerformanceMetadata>) {
+        self._handle = Some(thread::spawn(move || performance_monitoring_loop(receiver)));
     }
 }
 
-async fn performance_monitoring_loop(
+fn performance_monitoring_loop(
     receiver: Receiver<ModulePerformanceMetadata>,
-    cancellation_token: CancellationToken,
-) -> HashMap<String, AggregatePerformanceData> {
+) -> PerformanceMetadata {
     let mut aggregate_performance_metadata = HashMap::new();
 
-    // Performance monitoring loop runs until the server is shutdown
-    while !cancellation_token.is_cancelled() {
-        match receiver.recv_timeout(Duration::from_secs(5)) {
+    loop {
+        match receiver.recv() {
             Ok(message) => {
                 aggregate_performance_metadata
                     .entry(message.module.clone())
@@ -115,67 +105,75 @@ async fn performance_monitoring_loop(
                         )
                     });
             }
-            Err(RecvTimeoutError::Disconnected) => {
-                error!("Sending end of performance monitoring system has disconnected. No further performance data will be recorded");
+            Err(e) => {
+                error!("Sending end of performance monitoring system has disconnected. No further performance data will be recorded: {e}");
                 break;
             }
-            _ => continue,
         }
     }
-
+    info!("Performance monitoring system has shutdown.");
     aggregate_performance_metadata
 }
 
-/// Generates a performance report based on the given aggregate performance data
-/// and writes the results to the specified file.
-async fn generate_report(
-    aggregate_performance_metadata: &HashMap<String, AggregatePerformanceData>,
-    file_path: &str,
-) -> Result<(), tokio::io::Error> {
-    debug!("Writing performance monitoring data to {file_path}...");
+impl PerformanceMonitoring {
+    pub fn get_handle(&mut self) -> Option<thread::JoinHandle<PerformanceMetadata>> {
+        self._handle.take()
+    }
 
-    // Check if directory exists
-    if let Some(dir_path) = std::path::Path::new(file_path).parent() {
-        // Check if the directory exists
-        if !dir_path.exists() {
-            // Create the directory if it doesn't exist
-            tokio::fs::create_dir_all(dir_path).await?;
+    /// Generates a performance report based on the given aggregate performance data
+    /// and writes the results to the specified file.
+    pub async fn generate_report(
+        &self,
+        aggregate_performance_metadata: PerformanceMetadata,
+    ) -> Result<(), tokio::io::Error> {
+        debug!(
+            "Writing performance monitoring data to {}...",
+            &self.output_file_path
+        );
+
+        // Check if directory exists
+        if let Some(dir_path) = std::path::Path::new(&self.output_file_path).parent() {
+            // Check if the directory exists
+            if !dir_path.exists() {
+                // Create the directory if it doesn't exist
+                tokio::fs::create_dir_all(dir_path).await?;
+            }
         }
-    }
 
-    // Open a file in write mode asynchronously. If the file doesn't exist, it will be created.
-    let mut file = File::create(file_path).await?;
+        // Open a file in write mode asynchronously. If the file doesn't exist, it will be created.
+        let mut file = File::create(&self.output_file_path).await?;
 
-    // Write the report header
-    file.write_all(b"Performance Report:\n").await?;
+        // Write the report header
+        file.write_all(b"Performance Report:\n").await?;
 
-    // Write the data for each module
-    for (module, data) in aggregate_performance_metadata {
-        file.write_all(format!("Module: {}\n", module).as_bytes())
-            .await?;
-        file.write_all(format!("\tRuns: {}\n", data.runs).as_bytes())
-            .await?;
-        file.write_all(
-            format!(
-                "\tAverage Computation Used: {}\n",
-                data.total_computation_used / data.runs
+        // Write the data for each module
+        for (module, data) in aggregate_performance_metadata {
+            file.write_all(format!("Module: {}\n", module).as_bytes())
+                .await?;
+            file.write_all(format!("\tRuns: {}\n", data.runs).as_bytes())
+                .await?;
+            file.write_all(
+                format!(
+                    "\tAverage Computation Used: {}\n",
+                    data.total_computation_used / data.runs
+                )
+                .as_bytes(),
             )
-            .as_bytes(),
-        )
-        .await?;
-        file.write_all(
-            format!(
-                "\tAverage Execution Time (microseconds): {}\n",
-                data.total_execution_time / data.runs as u128
+            .await?;
+            file.write_all(
+                format!(
+                    "\tAverage Execution Time (microseconds): {}\n",
+                    data.total_execution_time / data.runs as u128
+                )
+                .as_bytes(),
             )
-            .as_bytes(),
-        )
-        .await?;
-        file.write_all(b"\n").await?;
+            .await?;
+            file.write_all(b"\n").await?;
+        }
+
+        // Ensure the file is flushed and fully written
+        file.flush().await?;
+
+        Ok(())
     }
-
-    // Ensure the file is flushed and fully written
-    file.flush().await?;
-
-    Ok(())
 }

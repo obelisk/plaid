@@ -2,19 +2,22 @@ pub mod github;
 mod internal;
 mod interval;
 mod okta;
+mod webhook;
 mod websocket;
 
 use crate::{
     executor::Message,
     logging::Logger,
     storage::{Storage, StorageError},
+    ModulesByName,
 };
 
-use std::{sync::Arc, time::Duration};
+use std::{pin::Pin, sync::Arc, time::Duration};
 
 use crossbeam_channel::Sender;
 
 use serde::Deserialize;
+use tokio::{runtime::Handle, task::JoinError};
 
 pub use self::internal::DelayedMessage;
 
@@ -27,6 +30,7 @@ pub struct DataConfig {
     internal: Option<internal::InternalConfig>,
     interval: Option<interval::IntervalConfig>,
     websocket: Option<websocket::WebSocketDataGenerator>,
+    webhooks: webhook::WebhookServerConfigurations,
 }
 
 struct DataInternal {
@@ -40,6 +44,7 @@ struct DataInternal {
     interval: Option<interval::Interval>,
     /// Websocket manages the creation and maintenance of WebSockets that provide data to the executor
     websocket_external: Option<websocket::WebsocketGenerator>,
+    webhooks: Vec<Box<Pin<Box<dyn futures_util::Future<Output = ()> + Send>>>>,
 }
 
 pub struct Data {}
@@ -47,6 +52,8 @@ pub struct Data {}
 #[derive(Debug)]
 pub enum DataError {
     StorageError(StorageError),
+    TokioRuntimeError(JoinError),
+    UnableToConfigureDataSystem,
 }
 
 impl DataInternal {
@@ -55,6 +62,7 @@ impl DataInternal {
         logger: Sender<Message>,
         storage: Option<Arc<Storage>>,
         els: Logger,
+        modules_by_name: Arc<ModulesByName>,
     ) -> Result<Self, DataError> {
         let github = config
             .github
@@ -86,25 +94,36 @@ impl DataInternal {
             .websocket
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
+        let webhooks =
+            webhook::configure_webhooks(config.webhooks, logger.clone(), modules_by_name);
+
         Ok(Self {
             github,
             okta,
             internal: Some(internal?),
             interval,
             websocket_external,
+            webhooks,
         })
     }
 }
 
 impl Data {
-    pub async fn start(
+    pub fn start(
         config: DataConfig,
         sender: Sender<Message>,
         storage: Option<Arc<Storage>>,
         els: Logger,
+        handle: Handle,
+        modules_by_name: Arc<ModulesByName>,
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
-        let di = DataInternal::new(config, sender, storage, els).await?;
-        let handle = tokio::runtime::Handle::current();
+        let di = handle.spawn(async {
+            DataInternal::new(config, sender, storage, els, modules_by_name).await
+        });
+
+        let di = handle
+            .block_on(di)
+            .map_err(|e| DataError::TokioRuntimeError(e))??;
 
         // Start the Github Audit task if there is one
         if let Some(mut gh) = di.github {

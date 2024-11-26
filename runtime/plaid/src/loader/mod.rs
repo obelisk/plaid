@@ -19,6 +19,8 @@ use wasmer::{
 };
 use wasmer_middlewares::Metering;
 
+use crate::ModulesByName;
+
 #[derive(Deserialize)]
 pub struct LimitAmount {
     default: u64,
@@ -181,7 +183,7 @@ impl PlaidModule {
 #[derive(Default)]
 pub struct PlaidModules {
     channels: HashMap<String, Vec<Arc<PlaidModule>>>,
-    modules: HashMap<String, Arc<PlaidModule>>,
+    modules: ModulesByName,
 }
 
 impl PlaidModules {
@@ -195,7 +197,7 @@ impl PlaidModules {
     /// All of the modules are `Arc`s so this should be relatively inexpensive. Generally this
     /// is used for the GET request system so that we can reference which module is to serve a
     /// particular webhook's GET handle.
-    pub fn get_modules(&self) -> HashMap<String, Arc<PlaidModule>> {
+    pub fn get_modules(&self) -> ModulesByName {
         self.modules.clone()
     }
 
