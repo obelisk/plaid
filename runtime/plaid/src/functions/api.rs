@@ -233,6 +233,7 @@ impl_new_function!(github, create_environment_for_repo);
 impl_new_function!(github, configure_secret);
 impl_new_function!(github, create_deployment_branch_protection_rule);
 impl_new_function!(github, trigger_repo_dispatch);
+impl_new_function!(github, check_org_membership_of_user);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query);
@@ -478,6 +479,9 @@ pub fn to_api_function(
         }
         "github_trigger_repo_dispatch" => {
             Function::new_typed_with_env(&mut store, &env, github_trigger_repo_dispatch)
+        }
+        "github_check_org_membership_of_user" => {
+            Function::new_typed_with_env(&mut store, &env, github_check_org_membership_of_user)
         }
 
         // Slack Calls

@@ -3,6 +3,7 @@ mod code;
 mod copilot;
 mod environments;
 mod graphql;
+mod members;
 mod pats;
 mod repos;
 mod secrets;
