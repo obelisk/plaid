@@ -233,6 +233,7 @@ impl_new_function!(github, create_environment_for_repo);
 impl_new_function!(github, configure_secret);
 impl_new_function!(github, create_deployment_branch_protection_rule);
 impl_new_function!(github, trigger_repo_dispatch);
+impl_new_function!(github, check_org_membership_of_user);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query);
@@ -245,7 +246,6 @@ impl_new_function_with_error_buffer!(github, search_for_file);
 impl_new_function_with_error_buffer!(github, list_seats_in_org_copilot);
 impl_new_function_with_error_buffer!(github, add_users_to_org_copilot);
 impl_new_function_with_error_buffer!(github, remove_users_from_org_copilot);
-impl_new_function_with_error_buffer!(github, check_org_membership_of_user);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org);
