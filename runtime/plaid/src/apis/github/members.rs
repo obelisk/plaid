@@ -5,8 +5,6 @@ use super::Github;
 impl Github {
     /// Check if a user belongs to an org
     /// See https://docs.github.com/en/rest/orgs/members?apiVersion=2022-11-28#check-organization-membership-for-a-user
-    /// We return u8 instead of bool here because impl_new_function_with_error_buffer does not
-    /// support bool
     pub async fn check_org_membership_of_user(&self, params: &str, module: &str) -> Result<bool, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
