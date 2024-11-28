@@ -1023,6 +1023,49 @@ pub fn get_branch_protection_rules(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+/// Get protection rules (as in ruleset) for a branch
+/// ## Arguments
+///
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `branch` - The name of the branch. Cannot contain wildcard characters.
+pub fn get_branch_protection_ruleset(
+    owner: impl Display,
+    repo: impl Display,
+    branch: impl Display,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_branch_protection_ruleset);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+    params.insert("branch", branch.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_get_branch_protection_ruleset(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
 /// DEPRECATED - DO NOT USE. Instead, use get_all_repository_collaborators
 /// Get first 30 collaborators on a repository
 /// ## Arguments

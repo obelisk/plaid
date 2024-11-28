@@ -241,6 +241,7 @@ impl_new_function_with_error_buffer!(github, fetch_commit);
 impl_new_function_with_error_buffer!(github, list_files);
 impl_new_function_with_error_buffer!(github, fetch_file);
 impl_new_function_with_error_buffer!(github, get_branch_protection_rules);
+impl_new_function_with_error_buffer!(github, get_branch_protection_ruleset);
 impl_new_function_with_error_buffer!(github, get_repository_collaborators);
 impl_new_function_with_error_buffer!(github, search_for_file);
 impl_new_function_with_error_buffer!(github, list_seats_in_org_copilot);
@@ -447,6 +448,9 @@ pub fn to_api_function(
         }
         "github_get_branch_protection_rules" => {
             Function::new_typed_with_env(&mut store, &env, github_get_branch_protection_rules)
+        }
+        "github_get_branch_protection_ruleset" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_branch_protection_ruleset)
         }
         "github_get_repository_collaborators" => {
             Function::new_typed_with_env(&mut store, &env, github_get_repository_collaborators)
