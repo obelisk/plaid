@@ -205,6 +205,40 @@ impl Github {
         }
     }
 
+    /// Fetches branch protection rules (as in rulesets).
+    /// See https://docs.github.com/en/rest/repos/rules?apiVersion=2022-11-28#get-rules-for-a-branch for more detail
+    pub async fn get_branch_protection_ruleset(
+        &self,
+        params: &str,
+        module: &str,
+    ) -> Result<String, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
+        let repo =
+            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let branch =
+            self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
+
+        info!("Fetching branch protection rules (as in rulesets) for branch [{branch}] in repo [{repo}] on behalf of {module}");
+        let address = format!("/repos/{owner}/{repo}/rules/branches/{branch}");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Get collaborators on a repository, with support for paginated responses.
     /// Optionally supports specifying how many results each page should contain (default=30, max=100) and which page is requested (default=1).
     /// Repeatedly calling this function with different page numbers allows one to get all collaborators on a repository.
