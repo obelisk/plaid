@@ -823,7 +823,7 @@ pub fn fetch_file(
     extern "C" {
         new_host_function_with_error_buffer!(github, fetch_file);
     }
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    const RETURN_BUFFER_SIZE: usize = 10 * 1024 * 1024; // 10 MiB
 
     #[derive(Serialize)]
     struct Request<'a> {

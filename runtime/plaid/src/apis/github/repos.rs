@@ -372,8 +372,13 @@ impl Github {
         info!("Commenting on Pull Request [{pull_request}] in repo [{repository_name}] on behalf of {module}");
         let address = format!("/repos/{organization}/{repository_name}/issues/{pull_request}/comments");
 
+        #[derive(Serialize)]
+        struct Body<'a> {
+            body: &'a str
+        }
+
         match self
-            .make_generic_post_request(address, Some(format!(r#"{{ "body": "{comment}" }}"#).as_str()), module)
+            .make_generic_post_request(address, Body { body: comment }, module)
             .await
         {
             Ok((status, _)) => {
