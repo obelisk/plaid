@@ -9,7 +9,6 @@ use crate::{
     executor::Message,
     logging::Logger,
     storage::{Storage, StorageError},
-    ModulesByName,
 };
 
 use std::{pin::Pin, sync::Arc, time::Duration};
@@ -17,7 +16,7 @@ use std::{pin::Pin, sync::Arc, time::Duration};
 use crossbeam_channel::Sender;
 
 use serde::Deserialize;
-use tokio::{runtime::Handle, task::JoinError};
+use tokio::task::{AbortHandle, JoinError, JoinSet};
 
 pub use self::internal::DelayedMessage;
 
@@ -39,11 +38,12 @@ struct DataInternal {
     // Perhaps in the future there will be a reason to explicitly disallow
     // sending logs from one rule to another but for now we keep it always
     // enabled.
-    internal: Option<internal::Internal>,
+    internal: internal::Internal,
     /// Interval manages tracking and execution of jobs that are executed on a defined interval
     interval: Option<interval::Interval>,
     /// Websocket manages the creation and maintenance of WebSockets that provide data to the executor
     websocket_external: Option<websocket::WebsocketGenerator>,
+    /// The configuration of webhooks attached to the various servers
     webhooks: Vec<Box<Pin<Box<dyn futures_util::Future<Output = ()> + Send>>>>,
 }
 
@@ -98,7 +98,7 @@ impl DataInternal {
         Ok(Self {
             github,
             okta,
-            internal: Some(internal?),
+            internal: internal?,
             interval,
             websocket_external,
             webhooks,
@@ -107,22 +107,24 @@ impl DataInternal {
 }
 
 impl Data {
-    pub fn start(
+    pub async fn start(
         config: DataConfig,
         sender: Sender<Message>,
         storage: Option<Arc<Storage>>,
         els: Logger,
-        handle: Handle,
-    ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
-        let di = handle.spawn(async { DataInternal::new(config, sender, storage, els).await });
+    ) -> Result<(JoinSet<()>, Sender<DelayedMessage>), DataError> {
+        let mut data_internal = DataInternal::new(config, sender, storage, els).await?;
 
-        let di = handle
-            .block_on(di)
-            .map_err(|e| DataError::TokioRuntimeError(e))??;
+        // Collect all the abort handles to shut the tasks down when Plaid shuts down
+        let mut data_generator_join_handles = JoinSet::new();
+
+        for webhook_server in data_internal.webhooks {
+            data_generator_join_handles.spawn(webhook_server);
+        }
 
         // Start the Github Audit task if there is one
-        if let Some(mut gh) = di.github {
-            handle.spawn(async move {
+        if let Some(mut gh) = data_internal.github {
+            data_generator_join_handles.spawn(async move {
                 loop {
                     if let Err(e) = gh.fetch_audit_logs().await {
                         error!("GitHub Data Fetch Error: {}", e)
@@ -134,8 +136,8 @@ impl Data {
         }
 
         // Start the Okta System Logs task if there is one
-        if let Some(mut okta) = di.okta {
-            handle.spawn(async move {
+        if let Some(mut okta) = data_internal.okta {
+            data_generator_join_handles.spawn(async move {
                 loop {
                     if let Err(e) = okta.fetch_system_logs().await {
                         error!("Okta Data Fetch Error: {:?}", e)
@@ -146,15 +148,9 @@ impl Data {
             });
         }
 
-        let internal_sender = if let Some(internal) = &di.internal {
-            Some(internal.get_sender())
-        } else {
-            None
-        };
-
         // Start the interval job processor
-        if let Some(mut interval) = di.interval {
-            handle.spawn(async move {
+        if let Some(mut interval) = data_internal.interval {
+            data_generator_join_handles.spawn(async move {
                 loop {
                     let time_until_next_execution = interval.fetch_interval_jobs().await;
                     tokio::time::sleep(Duration::from_secs(time_until_next_execution)).await;
@@ -162,29 +158,27 @@ impl Data {
             });
         }
 
+        let internal_sender = (&data_internal.internal).get_sender();
         // Start the internal log processor. This doesn't need to be a tokio task,
         // but we make it one incase we need the runtime in the future. Perhaps it
         // will make sense to convert it to a standard thread but I don't see a benefit
         // to that now. As long as we don't block.
-        if let Some(mut internal) = di.internal {
-            handle.spawn(async move {
-                loop {
-                    if let Err(e) = internal.fetch_internal_logs().await {
-                        error!("Internal Data Fetch Error: {:?}", e)
-                    }
-
-                    tokio::time::sleep(Duration::from_secs(10)).await;
+        data_generator_join_handles.spawn(async move {
+            loop {
+                if let Err(e) = data_internal.internal.fetch_internal_logs().await {
+                    error!("Internal Data Fetch Error: {:?}", e)
                 }
-            });
-        }
+                tokio::time::sleep(Duration::from_secs(10)).await;
+            }
+        });
 
-        if let Some(websocket) = di.websocket_external {
-            handle.spawn(async move {
+        if let Some(websocket) = data_internal.websocket_external {
+            data_generator_join_handles.spawn(async move {
                 websocket.start().await;
             });
         }
 
         info!("Started Data Generators");
-        Ok(internal_sender)
+        Ok((data_generator_join_handles, internal_sender))
     }
 }

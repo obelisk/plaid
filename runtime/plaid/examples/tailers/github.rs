@@ -63,8 +63,15 @@ async fn main() {
         gh.fetch_audit_logs().await.unwrap();
 
         while let Ok(log) = logger_rx.recv_timeout(Duration::from_secs(0)) {
-            let log: GitHubLog = serde_json::from_slice(&log.data).unwrap();
-            println!("{}", log);
+            match log {
+                plaid::executor::Message::Log(log_message) => {
+                    let log: GitHubLog = serde_json::from_slice(&log_message.data).unwrap();
+                    println!("{}", log);
+                }
+                plaid::executor::Message::FetchPersistentResponse { .. } => {
+                    continue;
+                }
+            }
         }
         //println!("End of log group");
         tokio::time::sleep(Duration::from_secs(6)).await;

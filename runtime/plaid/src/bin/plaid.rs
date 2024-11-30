@@ -8,18 +8,22 @@ use apis::Api;
 use data::Data;
 use executor::*;
 use storage::Storage;
-use tokio::signal;
+use tokio::{
+    runtime::{self, Runtime},
+    signal,
+};
 
 use std::sync::Arc;
 
 use crossbeam_channel::bounded;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     info!("Plaid is booting up, please standby...");
 
     info!("Reading configuration");
-    let mut configuration = config::configure()?;
+    let configuration = config::configure()?;
     let (log_sender, log_receiver) = bounded(configuration.log_queue_size);
 
     info!("Starting logging subsystem");
@@ -41,45 +45,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     info!("Creating a Tokio runtime to run data fetching and ingestion...");
-    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    //let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
 
     // This sender provides an internal route to sending logs. This is what
     // powers the logback functions.
-    let delayed_log_sender = Data::start(
+    let (mut data_generator_handles, delayed_log_sender) = Data::start(
         configuration.data,
         log_sender.clone(),
         storage.clone(),
         els.clone(),
-        runtime.handle().clone(),
     )
-    .expect("The data system failed to start")
-    .unwrap();
+    .await
+    .expect("The data system failed to start");
 
     info!("Configurating APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(
-        configuration.apis,
-        log_sender.clone(),
-        delayed_log_sender,
-        runtime.handle().clone(),
-    )
-    .unwrap();
+    let api = Api::new(configuration.apis, log_sender.clone(), delayed_log_sender).await;
 
     // Create an Arc so all the handlers have access to our API object
     let api = Arc::new(api);
 
-    let performance_sender = if let Some(ref mut perf) = &mut configuration.performance_monitoring {
-        warn!("Plaid is running with performance monitoring enabled - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a channel that aggregates and reports metrics.");
-        let (sender, rx) = crossbeam_channel::bounded::<ModulePerformanceMetadata>(4096);
+    // let performance_sender = if let Some(ref mut perf) = &mut configuration.performance_monitoring {
+    //     warn!("Plaid is running with performance monitoring enabled - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a channel that aggregates and reports metrics.");
+    //     let (sender, rx) = crossbeam_channel::bounded::<ModulePerformanceMetadata>(4096);
 
-        // Start the performance monitoring system which will handle
-        // starting a thread to receive performance data
-        perf.start(rx);
+    //     // Start the performance monitoring system which will handle
+    //     // starting a thread to receive performance data
+    //     perf.start(rx);
 
-        Some(sender)
-    } else {
-        None
-    };
+    //     Some(sender)
+    // } else {
+    //     None
+    // };
+
+    // TODO @obelisk: Remove when rewrite is done
+    let performance_sender = None;
 
     info!("Loading all the modules");
     // Load all the modules that form our Nanoservices and Plaid rules
@@ -108,17 +108,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting servers, boot up complete");
 
-    // let webhook_servers =
-    //     data::webhook::configure_webhook_servers(config, log_sender, modules_by_name);
-    //let mut join_set = JoinSet::from_iter(webhook_servers);
-
-    // Graceful shutdown handling
-    tokio::spawn(async move {
-        signal::ctrl_c()
-            .await
-            .expect("Failed to listen for shutdown signal");
-        tokio::runtime::Handle::current();
-    });
+    // Run plaid
+    signal::ctrl_c()
+        .await
+        .expect("Failed to listen for shutdown signal");
+    data_generator_handles.abort_all();
 
     // Listen for a shutdown signal or if any task in join_set finishes
     // tokio::select! {

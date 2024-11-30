@@ -7,9 +7,9 @@ use serde::Deserialize;
 use serde::de;
 use tokio::sync::RwLock;
 
-use crate::{executor::{LogMessage, Message, ResponseMessage}, loader::PlaidModule, ModulesByName};
+use crate::executor::{LogMessage, Message, ResponseMessage};
 
-use warp::{filters::body, http::HeaderMap, hyper::body::Bytes, path, Filter};
+use warp::{ http::HeaderMap, hyper::body::Bytes, path, Filter};
 
 
 /// How should responses to GET requests be cached.
@@ -353,8 +353,11 @@ pub fn configure_webhooks(config: WebhookServerConfigurations, log_sender: Sende
             let routes = post_route.or(get_route);
 
             info!("Web Server [{server_name}]: {server_address}");
-            Box::<Pin<Box<(dyn futures_util::Future<Output = ()> + 'static + Send)>>>::new(Box::pin(
-                warp::serve(routes).run(server_address),
+            Box::<Pin<Box<(dyn futures_util::Future<Output = ()> + 'static + Send)>>>::new(Box::pin(async move {
+                debug!("Running web server on {server_address}");
+                warp::serve(routes).run(server_address).await;
+                debug!("Web server has shutdown on {server_address}");
+            }
             ))
         })
         .collect();

@@ -14,7 +14,7 @@ use tokio::sync::oneshot::Sender as OneShotSender;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Serialize};
-use wasmer::{FunctionEnv, Imports, Instance, Memory, Module, RuntimeError, Store, TypedFunction};
+use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedFunction};
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use lru::LruCache;

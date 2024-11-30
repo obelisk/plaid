@@ -1,7 +1,4 @@
-use crate::{
-    data::DelayedMessage,
-    executor::{LogMessage, Message},
-};
+use crate::{data::DelayedMessage, executor::LogMessage};
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 
 use super::General;

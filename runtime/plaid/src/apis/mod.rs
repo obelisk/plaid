@@ -69,7 +69,6 @@ pub struct Apis {
 
 #[derive(Debug)]
 pub enum ApiError {
-    TokioRuntimeError(tokio::task::JoinError),
     BadRequest,
     ImpossibleError,
     ConfigurationError(String),
@@ -91,97 +90,88 @@ pub enum ApiError {
 }
 
 impl Api {
-    pub fn new(
+    pub async fn new(
         config: Apis,
         log_sender: Sender<Message>,
         delayed_log_sender: Sender<DelayedMessage>,
-        handle: Handle,
-    ) -> Result<Self, ApiError> {
+    ) -> Self {
+        #[cfg(feature = "aws")]
+        let aws = match config.aws {
+            Some(aws) => Some(Aws::new(aws).await),
+            _ => None,
+        };
 
-        let api = handle.spawn(async { 
+        let general = match config.general {
+            Some(gc) => Some(General::new(gc, log_sender, delayed_log_sender)),
+            _ => None,
+        };
 
+        let github = match config.github {
+            Some(gh) => Some(Github::new(gh)),
+            _ => None,
+        };
+
+        let npm = match config.npm {
+            Some(npm) => match Npm::new(npm) {
+                Ok(npm) => Some(npm),
+                Err(_) => {
+                    error!("Something went wrong while initializing the npm API: proceeding without. This should be investigated!");
+                    None
+                }
+            },
+            _ => None,
+        };
+
+        let okta = match config.okta {
+            Some(oc) => Some(Okta::new(oc)),
+            _ => None,
+        };
+
+        let pagerduty = match config.pagerduty {
+            Some(pd) => Some(PagerDuty::new(pd)),
+            _ => None,
+        };
+
+        let rustica = match config.rustica {
+            Some(q) => Some(Rustica::new(q)),
+            _ => None,
+        };
+
+        let slack = match config.slack {
+            Some(sc) => Some(Slack::new(sc)),
+            _ => None,
+        };
+
+        let splunk = match config.splunk {
+            Some(sp) => Some(Splunk::new(sp)),
+            _ => None,
+        };
+
+        let yubikey = match config.yubikey {
+            Some(yk) => Some(Yubikey::new(yk)),
+            _ => None,
+        };
+
+        let web = match config.web {
+            Some(web) => Some(Web::new(web)),
+            _ => None,
+        };
+
+        Self {
+            runtime: Runtime::new().unwrap(),
             #[cfg(feature = "aws")]
-            let aws = match config.aws {
-                Some(aws) => Some(Aws::new(aws).await),
-                _ => None,
-            };
-    
-            let general = match config.general {
-                Some(gc) => Some(General::new(gc, log_sender, delayed_log_sender)),
-                _ => None,
-            };
-    
-            let github = match config.github {
-                Some(gh) => Some(Github::new(gh)),
-                _ => None,
-            };
-    
-            let npm = match config.npm {
-                Some(npm) => match Npm::new(npm) {
-                    Ok(npm) => Some(npm),
-                    Err(_) => {
-                        error!("Something went wrong while initializing the npm API: proceeding without. This should be investigated!");
-                        None
-                    }
-                },
-                _ => None,
-            };
-    
-            let okta = match config.okta {
-                Some(oc) => Some(Okta::new(oc)),
-                _ => None,
-            };
-    
-            let pagerduty = match config.pagerduty {
-                Some(pd) => Some(PagerDuty::new(pd)),
-                _ => None,
-            };
-    
-            let rustica = match config.rustica {
-                Some(q) => Some(Rustica::new(q)),
-                _ => None,
-            };
-    
-            let slack = match config.slack {
-                Some(sc) => Some(Slack::new(sc)),
-                _ => None,
-            };
-    
-            let splunk = match config.splunk {
-                Some(sp) => Some(Splunk::new(sp)),
-                _ => None,
-            };
-    
-            let yubikey = match config.yubikey {
-                Some(yk) => Some(Yubikey::new(yk)),
-                _ => None,
-            };
-    
-            let web = match config.web {
-                Some(web) => Some(Web::new(web)),
-                _ => None,
-            };
-    
-            Self {
-                runtime: Runtime::new().unwrap(),
-                #[cfg(feature = "aws")]
-                aws,
-                general,
-                github,
-                npm,
-                okta,
-                pagerduty,
-                rustica,
-                slack,
-                splunk,
-                yubikey,
-                web,
-            }
-         });
-
-        handle
-         .block_on(api)
-         .map_err(|e| ApiError::TokioRuntimeError(e))
+            aws,
+            general,
+            github,
+            npm,
+            okta,
+            pagerduty,
+            rustica,
+            slack,
+            splunk,
+            yubikey,
+            web,
+        }
     }
 }
 
