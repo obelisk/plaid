@@ -160,7 +160,10 @@ impl Github {
 
         // If this call return Ok(_), it means the provided file path contains ".." which we do
         // not want to allow
-        if self.validate_file_path(file_path).is_ok() {
+        if self
+            .validate_contains_parent_directory_component(file_path)
+            .is_ok()
+        {
             return Err(ApiError::BadRequest);
         }
 
