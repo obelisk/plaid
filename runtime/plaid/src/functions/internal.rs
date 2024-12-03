@@ -76,7 +76,7 @@ pub fn get_time() -> u32 {
         .expect("Time went backwards")
         .as_secs();
 
-    return current_timestamp as u32;
+    current_timestamp as u32
 }
 
 /// Send a log back with a requested budget

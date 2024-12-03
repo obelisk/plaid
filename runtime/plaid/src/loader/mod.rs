@@ -114,8 +114,7 @@ impl PlaidModule {
     pub fn get_persistent_response_data(&self) -> Option<String> {
         self.persistent_response
             .as_ref()
-            .map(|x| x.get_data().ok().flatten())
-            .flatten()
+            .and_then(|x| x.get_data().ok().flatten())
     }
 
     /// Configure and compiles a Plaid module with specified computation limits and memory page count.
@@ -135,10 +134,10 @@ impl PlaidModule {
     ) -> Result<Self, Errors> {
         // Get the computation limit for the module
         let computation_limit =
-            get_module_computation_limit(computation_amount, &filename, log_type);
+            get_module_computation_limit(computation_amount, filename, log_type);
 
         // Get the memory limit for the module
-        let page_limit = get_module_page_count(memory_page_count, &filename, log_type);
+        let page_limit = get_module_page_count(memory_page_count, filename, log_type);
 
         let metering = Arc::new(Metering::new(computation_limit, cost_function));
         let mut compiler = Cranelift::default();
@@ -155,7 +154,7 @@ impl PlaidModule {
             error!("Failed to compile module [{filename}]. Error: {e}");
             Errors::ModuleCompilationFailure
         })?;
-        module.set_name(&filename);
+        module.set_name(filename);
 
         info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]. Concurrency Safe: [{}]", concurrency_unsafe.is_none());
         for import in module.imports() {
@@ -238,7 +237,7 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
         };
 
         // Check if this rule can be executed in parallel
-        let concurrency_safe = config.single_threaded_rules.as_ref().map_or(None, |rules| {
+        let concurrency_safe = config.single_threaded_rules.as_ref().and_then(|rules| {
             if rules
                 .iter()
                 .any(|rule| rule.eq_ignore_ascii_case(&filename))
@@ -283,7 +282,7 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
         // Set optional fields on our new module
         plaid_module.cache = cache;
         plaid_module.persistent_response = persistent_response;
-        plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
+        plaid_module.secrets = byte_secrets.get(&type_).cloned();
 
         // Put it in an Arc because we're going to have multiple references to it
         let plaid_module = Arc::new(plaid_module);

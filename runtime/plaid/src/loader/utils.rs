@@ -91,12 +91,12 @@ pub fn read_and_configure_secrets(
     secrets_configuration: &HashMap<String, HashMap<String, String>>,
 ) -> HashMap<String, HashMap<String, Vec<u8>>> {
     secrets_configuration
-        .into_iter()
+        .iter()
         .map(|(key, value)| {
             (
                 key.to_string(),
                 value
-                    .into_iter()
+                    .iter()
                     .map(|(inner_key, inner_value)| {
                         (inner_key.to_string(), inner_value.as_bytes().to_vec())
                     })

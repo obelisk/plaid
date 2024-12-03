@@ -64,14 +64,14 @@ impl Github {
                 "Invalid response while fetching public key from GitHub".to_string(),
             )))?
             .to_string()
-            .replace("\"", "");
+            .replace('"', "");
         let key_id = res
             .get("key_id")
             .ok_or(ApiError::GitHubError(GitHubError::InvalidInput(
                 "Invalid response while fetching public key from GitHub".to_string(),
             )))?
             .to_string()
-            .replace("\"", "");
+            .replace('"', "");
 
         // 2. Encrypt the secret under the pub key
 

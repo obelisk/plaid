@@ -246,7 +246,7 @@ impl Kms {
             .message(Blob::new(request.message))
             .send()
             .await
-            .map_err(|e| ApiError::KmsSignError(e))?;
+            .map_err(ApiError::KmsSignError)?;
 
         let output = SignRequestResponse::from_sign_output(output);
 
@@ -280,7 +280,7 @@ impl Kms {
             .key_id(key_id)
             .send()
             .await
-            .map_err(|e| ApiError::KmsGetPublicKeyError(e))?;
+            .map_err(ApiError::KmsGetPublicKeyError)?;
 
         let output = PublicKey::from_aws_response(output);
 
@@ -292,7 +292,7 @@ impl Kms {
             Some(config) => Ok(config.to_vec()),
             None => {
                 error!("{module} tried to use a KMS key that is not configured: {key_id}",);
-                return Err(ApiError::BadRequest);
+                Err(ApiError::BadRequest)
             }
         }
     }

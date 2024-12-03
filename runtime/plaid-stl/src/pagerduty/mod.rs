@@ -1,4 +1,4 @@
-use serde::{Serialize};
+use serde::Serialize;
 
 use crate::PlaidFunctionError;
 
@@ -22,8 +22,13 @@ impl core::fmt::Display for TriggerIncidentResult {
             TriggerIncidentResult::Success => write!(f, "Successfully triggered"),
             TriggerIncidentResult::BadRequest => write!(f, "Request was not encoded correctly"),
             TriggerIncidentResult::UnknownService => write!(f, "Requested service is unknown"),
-            TriggerIncidentResult::TriggerFailed => write!(f, "PagerDuty returned a failure when trigger attempt was sent"),
-            TriggerIncidentResult::Unknown(x) => write!(f, "Plaid gave an unknown status code from PagerDuty: {x}"),
+            TriggerIncidentResult::TriggerFailed => write!(
+                f,
+                "PagerDuty returned a failure when trigger attempt was sent"
+            ),
+            TriggerIncidentResult::Unknown(x) => {
+                write!(f, "Plaid gave an unknown status code from PagerDuty: {x}")
+            }
         }
     }
 }
@@ -37,8 +42,11 @@ pub fn trigger_incident(service: &str, description: &str) -> Result<(), i32> {
     }
 }
 
-pub fn trigger_incident_detailed(service: &str, description: &str) -> Result<TriggerIncidentResult, PlaidFunctionError> {
-    extern {
+pub fn trigger_incident_detailed(
+    service: &str,
+    description: &str,
+) -> Result<TriggerIncidentResult, PlaidFunctionError> {
+    extern "C" {
         // Trigger a PagerDuty incident for a given service
         new_host_function!(pagerduty, trigger_incident);
     }
@@ -51,17 +59,12 @@ pub fn trigger_incident_detailed(service: &str, description: &str) -> Result<Tri
     // There shouldn't be anyway for this to fail because none of the
     // unserializable types are possible here
     let request = serde_json::to_string(&request).unwrap();
-    let res = unsafe {
-        pagerduty_trigger_incident(
-            request.as_ptr(),
-            request.len(),
-        )
-    };
+    let res = unsafe { pagerduty_trigger_incident(request.as_ptr(), request.len()) };
 
     // There was an error with the Plaid system. Maybe the API is not
     // configured.
     if res < 0 {
-        return Err(res.into())
+        return Err(res.into());
     }
 
     match res {
@@ -70,7 +73,6 @@ pub fn trigger_incident_detailed(service: &str, description: &str) -> Result<Tri
         1 => Ok(TriggerIncidentResult::BadRequest),
         2 => Ok(TriggerIncidentResult::UnknownService),
         3 => Ok(TriggerIncidentResult::TriggerFailed),
-        n => Ok(TriggerIncidentResult::Unknown(n as u32))
-
+        n => Ok(TriggerIncidentResult::Unknown(n as u32)),
     }
 }

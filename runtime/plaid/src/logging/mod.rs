@@ -233,13 +233,13 @@ impl Logger {
             }
 
             if let Some(logger) = &splunk_logger {
-                if let Err(_) = logger.send_log(&log) {
+                if logger.send_log(&log).is_err() {
                     error!("Could not send logs to Splunk");
                 }
             }
 
             if let Some(logger) = &webhook_logger {
-                if let Err(_) = logger.send_log(&log) {
+                if logger.send_log(&log).is_err() {
                     error!("Could not send logs to webhook");
                 }
             }

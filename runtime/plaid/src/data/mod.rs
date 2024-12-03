@@ -132,11 +132,7 @@ impl Data {
             });
         }
 
-        let internal_sender = if let Some(internal) = &di.internal {
-            Some(internal.get_sender())
-        } else {
-            None
-        };
+        let internal_sender = di.internal.as_ref().map(|internal| internal.get_sender());
 
         // Start the interval job processor
         if let Some(mut interval) = di.interval {

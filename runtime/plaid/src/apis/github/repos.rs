@@ -172,8 +172,8 @@ impl Github {
         // Reference can be commit hash OR a branch name.
         // To validate that the provided ref is valid, we must check that it is either a
         // commit hash or branch name using the provided validator functions
-        if self.validate_commit_hash(&reference).is_err()
-            && self.validate_branch_name(&reference).is_err()
+        if self.validate_commit_hash(reference).is_err()
+            && self.validate_branch_name(reference).is_err()
         {
             return Err(ApiError::BadRequest);
         }

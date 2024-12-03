@@ -88,7 +88,7 @@ impl Npm {
         );
 
         let (package_json, tarball_data) =
-            create_package_tarball(&self.config.npm_scope, &package_name, gh_repo)?;
+            create_package_tarball(&self.config.npm_scope, package_name, gh_repo)?;
         let data_length = tarball_data.len();
         let sha1_digest = hashes::sha1_hex(&tarball_data);
         let sha512_digest = hashes::sha512_base64(&tarball_data);
@@ -148,7 +148,7 @@ impl Npm {
             .put(format!(
                 "{}/{}",
                 REGISTRY_URL,
-                &scoped_pkg_name.replace("/", "%2f")
+                &scoped_pkg_name.replace('/', "%2f")
             ))
             .header("Content-Type", "application/json")
             .header(

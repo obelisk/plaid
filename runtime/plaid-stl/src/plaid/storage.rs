@@ -87,7 +87,12 @@ pub fn get(key: &str) -> Result<Vec<u8>, PlaidFunctionError> {
 /// prefix can be provided so that only a subset of keys is returned
 pub fn list_keys(prefix: Option<impl Display>) -> Result<Vec<String>, PlaidFunctionError> {
     extern "C" {
-        fn storage_list_keys(prefix: *const u8, prefix_len: usize, data: *const u8, data_len: usize) -> i32;
+        fn storage_list_keys(
+            prefix: *const u8,
+            prefix_len: usize,
+            data: *const u8,
+            data_len: usize,
+        ) -> i32;
     }
 
     let prefix = match prefix {
@@ -97,8 +102,14 @@ pub fn list_keys(prefix: Option<impl Display>) -> Result<Vec<String>, PlaidFunct
 
     let prefix_bytes = prefix.as_bytes().to_vec();
 
-    let buffer_size =
-        unsafe { storage_list_keys(prefix_bytes.as_ptr(), prefix_bytes.len(), vec![].as_mut_ptr(), 0) };
+    let buffer_size = unsafe {
+        storage_list_keys(
+            prefix_bytes.as_ptr(),
+            prefix_bytes.len(),
+            vec![].as_mut_ptr(),
+            0,
+        )
+    };
 
     if buffer_size < 0 {
         return Err(buffer_size.into());

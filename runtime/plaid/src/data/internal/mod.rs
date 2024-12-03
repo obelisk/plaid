@@ -82,7 +82,7 @@ impl Internal {
             let previous_logs = storage
                 .fetch_all(LOGBACK_NS, None)
                 .await
-                .map_err(|e| DataError::StorageError(e))?;
+                .map_err(DataError::StorageError)?;
 
             for (message, time) in previous_logs {
                 let message: Message = match serde_json::from_str(message.as_str()) {

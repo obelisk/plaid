@@ -116,14 +116,14 @@ where
                 Some((name, valid_uri))
             },
             Err(e) => {
-                error!("Invalid URI provided: {}. Error: {}", uri, e);
+                error!("Invalid URI provided: {uri}. Error: {e}");
                 None
             }
         })
         .collect::<HashMap<String, Uri>>();
 
     if uris.is_empty() {
-        Err(serde::de::Error::custom(&format!("No valid URIs provided")))
+        Err(serde::de::Error::custom("No valid URIs provided"))
     } else {
         Ok(uris)
     }
@@ -382,7 +382,7 @@ impl WebSocketClient {
         let log_type = self.configuration.log_type.clone();
         let log_source = LogSource::Generator(Generator::WebSocketExternal(generator_name.clone()));
         let logbacks_allowed = self.configuration.logbacks_allowed.clone();
-        let max_message_size = self.max_message_size.clone();
+        let max_message_size = self.max_message_size;
 
         tokio::spawn(async move {
             while let Some(message) = read.next().await {
@@ -440,17 +440,17 @@ impl WebSocketClient {
             Some(write_handle) => {
                 tokio::select! {
                     _ = write_handle => {
-                        error!("Write task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Write task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
                     },
                     _ = read_handle => {
-                        error!("Read task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Read task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
                     },
                 }
             }
             None => {
                 tokio::select! {
                     _ = read_handle => {
-                        error!("Read task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Read task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
                     },
                 }
             }

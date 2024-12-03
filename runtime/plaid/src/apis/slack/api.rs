@@ -79,11 +79,11 @@ impl Slack {
                         let response = r.text().await;
                         error!("Slack data returned: {}", response.unwrap_or_default());
 
-                        return Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                        Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                             status.as_u16(),
-                        )));
+                        )))
                     }
-                    Err(e) => return Err(ApiError::NetworkError(e)),
+                    Err(e) => Err(ApiError::NetworkError(e)),
                 }
             }
             Apis::LookupByEmail => {
@@ -110,11 +110,11 @@ impl Slack {
                             return Ok(response.user.id);
                         }
                         error!("Failed to retrieve user's Slack ID");
-                        return Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                        Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                             status.as_u16(),
-                        )));
+                        )))
                     }
-                    Err(e) => return Err(ApiError::NetworkError(e)),
+                    Err(e) => Err(ApiError::NetworkError(e)),
                 }
             }
         }

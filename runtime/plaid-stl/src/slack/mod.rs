@@ -22,7 +22,7 @@ fn slack_format(msg: &str) -> String {
     struct SlackText {
         text: String,
     }
-    
+
     let new_message = SlackText {
         text: msg.to_string(),
     };
@@ -62,7 +62,7 @@ pub fn post_text_to_webhook(name: &str, log: &str) -> Result<(), i32> {
     let res = unsafe { slack_post_to_named_webhook(params.as_ptr(), params.len()) };
 
     if res < 0 {
-        return Err(res.into());
+        return Err(res);
     }
 
     Ok(())
@@ -81,7 +81,7 @@ pub fn post_raw_text_to_webhook(name: &str, log: &str) -> Result<(), i32> {
     let res = unsafe { slack_post_to_named_webhook(params.as_ptr(), params.len()) };
 
     if res < 0 {
-        return Err(res.into());
+        return Err(res);
     }
 
     Ok(())

@@ -86,7 +86,7 @@ impl PagerDuty {
             }
             Err(e) => {
                 debug!("{:?}", e);
-                return Err(ApiError::PagerDutyError(PagerDutyError::NetworkError(e)));
+                Err(ApiError::PagerDutyError(PagerDutyError::NetworkError(e)))
             }
         }
     }

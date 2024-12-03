@@ -104,7 +104,7 @@ impl Github {
         let address = format!("/orgs/{org}/personal-access-token-requests");
 
         match self
-            .make_generic_post_request(address, &request, &module)
+            .make_generic_post_request(address, &request, module)
             .await
         {
             Ok((status, Ok(body))) => {

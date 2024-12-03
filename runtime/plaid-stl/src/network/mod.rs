@@ -58,14 +58,14 @@ pub fn make_named_request_with_buf_size(
         request_name: String,
         body: String,
         variables: HashMap<String, String>,
-        headers: Option<HashMap<String, String>>
+        headers: Option<HashMap<String, String>>,
     }
 
     let request = MakeRequestRequest {
         request_name: name.to_owned(),
         body: body.to_owned(),
         variables,
-        headers
+        headers,
     };
 
     let request = serde_json::to_string(&request).unwrap();
@@ -100,7 +100,7 @@ pub fn make_named_request(
     body: &str,
     variables: HashMap<String, String>,
 ) -> Result<WebRequestResponse, PlaidFunctionError> {
-    return make_named_request_with_buf_size(name, body, variables, None, RETURN_BUFFER_SIZE);
+    make_named_request_with_buf_size(name, body, variables, None, RETURN_BUFFER_SIZE)
 }
 
 /// Enables calling of a named request with dynamic headers. This function should be used
@@ -112,5 +112,5 @@ pub fn make_named_request_with_headers(
     variables: HashMap<String, String>,
     headers: HashMap<String, String>,
 ) -> Result<WebRequestResponse, PlaidFunctionError> {
-    return make_named_request_with_buf_size(name, body, variables, Some(headers), RETURN_BUFFER_SIZE);
+    make_named_request_with_buf_size(name, body, variables, Some(headers), RETURN_BUFFER_SIZE)
 }

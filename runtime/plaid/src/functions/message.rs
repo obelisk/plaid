@@ -169,7 +169,7 @@ pub fn fetch_accessory_data_by_name(
 
     // Check if this accessory data field is present at all
     if let Some(data) = accessory_data.get(&name) {
-        match safely_write_data_back(&memory_view, &data, data_buffer, buffer_size) {
+        match safely_write_data_back(&memory_view, data, data_buffer, buffer_size) {
             Ok(x) => x,
             Err(e) => {
                 error!(

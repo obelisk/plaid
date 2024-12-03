@@ -67,7 +67,7 @@ impl Rustica {
                     environment_name.to_string(),
                 )))?;
 
-        let ca_key = KeyPair::from_pem(&&environment.mtls_key).map_err(|e| {
+        let ca_key = KeyPair::from_pem(&environment.mtls_key).map_err(|e| {
             error!("Rustica Error: {:?}", e);
             ApiError::ConfigurationError(format!(
                 "Rustica environment [{environment_name}] has badly formatted key"
@@ -131,10 +131,10 @@ impl Rustica {
             mtls_key: user_private_key,
         };
 
-        Ok(serde_json::to_string(&server_config).map_err(|_| {
+        serde_json::to_string(&server_config).map_err(|_| {
             ApiError::RusticaError(RusticaError::UnserializableCertificate(
                 user_identity.to_string(),
             ))
-        })?)
+        })
     }
 }

@@ -71,12 +71,14 @@ impl Yubikey {
         signed_data.pop();
 
         // Validate the signature matches what we calculated
-        if let Err(_) = hmac::verify(
+        if hmac::verify(
             &self.key,
             signed_data.as_bytes(),
             &base64::decode(signature)
                 .map_err(|_| ApiError::YubikeyError(YubikeyError::BadData))?,
-        ) {
+        )
+        .is_err()
+        {
             error!("Could not verify the signature from Yubico!");
             return Err(ApiError::YubikeyError(YubikeyError::BadSignature));
         };
@@ -94,7 +96,7 @@ impl Yubikey {
             "REPLAYED_OTP" => Ok("REPLAYED_OTP".to_string()),
             other => {
                 error!("Received {other} error from Yubico");
-                Ok(format!("{other}"))
+                Ok(other.to_string())
             }
         }
     }

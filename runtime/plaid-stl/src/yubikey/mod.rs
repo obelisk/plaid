@@ -9,7 +9,7 @@ pub enum OtpStatus {
 }
 
 pub fn verify_otp(otp: &str) -> bool {
-    extern {
+    extern "C" {
         // Verify an OTP
         new_host_function_with_error_buffer!(yubikey, verify_otp);
     }
@@ -22,14 +22,14 @@ pub fn verify_otp(otp: &str) -> bool {
             otp_bytes.as_ptr(),
             otp_bytes.len(),
             return_buffer.as_mut_ptr(),
-            1024
+            1024,
         )
     };
 
     // There was an error with the Plaid system. Maybe the API is not
     // configured.
     if res < 0 {
-        return false
+        return false;
     }
 
     return_buffer.truncate(res as usize);
@@ -37,14 +37,11 @@ pub fn verify_otp(otp: &str) -> bool {
     // to mess with us, this came from a String in the API module.
     let return_string = String::from_utf8(return_buffer).unwrap();
 
-    match return_string.as_str() {
-        "OK" => true,
-        _ => false,
-    }
+    matches!(return_string.as_str(), "OK")
 }
 
 pub fn verify_otp_detailed(otp: &str) -> Result<OtpStatus, PlaidFunctionError> {
-    extern {
+    extern "C" {
         // Verify an OTP
         new_host_function_with_error_buffer!(yubikey, verify_otp);
     }
@@ -57,14 +54,14 @@ pub fn verify_otp_detailed(otp: &str) -> Result<OtpStatus, PlaidFunctionError> {
             otp_bytes.as_ptr(),
             otp_bytes.len(),
             return_buffer.as_mut_ptr(),
-            1024
+            1024,
         )
     };
 
     // There was an error with the Plaid system. Maybe the API is not
     // configured.
     if res < 0 {
-        return Err(res.into())
+        return Err(res.into());
     }
 
     return_buffer.truncate(res as usize);
