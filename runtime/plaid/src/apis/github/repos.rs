@@ -159,6 +159,15 @@ impl Github {
         let file_path = request.get("file_path").ok_or(ApiError::BadRequest)?;
         let reference = request.get("reference").ok_or(ApiError::BadRequest)?;
 
+        // Reference can be commit hash OR a branch name.
+        // To validate that the provided ref is valid, we must check that it is either a
+        // commit hash or branch name using the provided validator functions
+        if self.validate_commit_hash(&reference).is_err()
+            && self.validate_branch_name(&reference).is_err()
+        {
+            return Err(ApiError::BadRequest);
+        }
+
         info!("Fetching contents of file in repository [{organization}/{repository_name}] at {file_path} and reference {reference}");
         let address =
             format!("/repos/{organization}/{repository_name}/contents/{file_path}?ref={reference}");
