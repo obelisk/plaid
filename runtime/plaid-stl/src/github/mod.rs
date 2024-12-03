@@ -1553,10 +1553,7 @@ pub fn check_org_membership_of_user(
     let request = serde_json::to_string(&params).unwrap();
 
     let res = unsafe {
-        github_check_org_membership_of_user(
-            request.as_bytes().as_ptr(),
-            request.as_bytes().len(),
-        )
+        github_check_org_membership_of_user(request.as_bytes().as_ptr(), request.as_bytes().len())
     };
 
     if res < 0 {

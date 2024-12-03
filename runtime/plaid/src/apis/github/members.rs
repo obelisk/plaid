@@ -1,11 +1,15 @@
-use crate::apis::{ApiError, github::GitHubError};
-use std::collections::HashMap;
 use super::Github;
+use crate::apis::{github::GitHubError, ApiError};
+use std::collections::HashMap;
 
 impl Github {
     /// Check if a user belongs to an org
     /// See https://docs.github.com/en/rest/orgs/members?apiVersion=2022-11-28#check-organization-membership-for-a-user
-    pub async fn check_org_membership_of_user(&self, params: &str, module: &str) -> Result<bool, ApiError> {
+    pub async fn check_org_membership_of_user(
+        &self,
+        params: &str,
+        module: &str,
+    ) -> Result<bool, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
