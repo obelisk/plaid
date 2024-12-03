@@ -75,7 +75,7 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     define_regex_validator!(validators, "event_type", r"^[\w\-_]+$");
 
     // Matches if .. is present in a file path
-    define_regex_validator!(validators, "file_path", r"");
+    define_regex_validator!(validators, "file_path", r"\.\.");
 
     validators
 }
