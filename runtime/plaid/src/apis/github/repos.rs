@@ -157,6 +157,13 @@ impl Github {
             request.get("repository_name").ok_or(ApiError::BadRequest)?,
         )?;
         let file_path = request.get("file_path").ok_or(ApiError::BadRequest)?;
+
+        // If this call return Ok(_), it means the provided file path contains ".." which we do
+        // not want to allow
+        if self.validate_file_path(file_path).is_ok() {
+            return Err(ApiError::BadRequest);
+        }
+
         let reference = request.get("reference").ok_or(ApiError::BadRequest)?;
 
         // Reference can be commit hash OR a branch name.
