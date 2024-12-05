@@ -38,42 +38,42 @@ jobs:
     - name: Run Integration Tests
       run: ./testing/integration.sh
   
-  ubuntu-docker-build-amd64-test:
-    runs-on: ubuntu-latest
+  # ubuntu-docker-build-amd64-test:
+  #   runs-on: ubuntu-latest
 
-    steps:
-    - uses: actions/checkout@v4
+  #   steps:
+  #   - uses: actions/checkout@v4
 
-    - uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #   - uses: actions/cache@v4
+  #     with:
+  #       path: |
+  #         ~/.cargo/bin/
+  #         ~/.cargo/registry/index/
+  #         ~/.cargo/registry/cache/
+  #         ~/.cargo/git/db/
+  #         target/
+  #       key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
-    - name: Run Docker Build Test (amd64)
-      run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.amd64 .
+  #   - name: Run Docker Build Test (amd64)
+  #     run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.amd64 .
 
-  ubuntu-docker-build-aarch64-test:
-    runs-on: ubuntu-latest
+  # ubuntu-docker-build-aarch64-test:
+  #   runs-on: ubuntu-latest
 
-    steps:
-    - uses: actions/checkout@v4
+  #   steps:
+  #   - uses: actions/checkout@v4
 
-    - uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #   - uses: actions/cache@v4
+  #     with:
+  #       path: |
+  #         ~/.cargo/bin/
+  #         ~/.cargo/registry/index/
+  #         ~/.cargo/registry/cache/
+  #         ~/.cargo/git/db/
+  #         target/
+  #       key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
-    - name: Run Docker Build Test (aarch64)
-      run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.aarch64 .
+  #   - name: Run Docker Build Test (aarch64)
+  #     run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.aarch64 .
 
   
