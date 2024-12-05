@@ -8,6 +8,7 @@ members = [
     "tests/test_sshcerts_usage",
     "tests/test_time",
     "tests/test_logback",
+    "tests/test_db",
 ]
 
 [profile.release]
