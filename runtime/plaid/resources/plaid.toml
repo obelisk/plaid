@@ -25,6 +25,7 @@ lru_cache_size = 200
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
 "test_sshcerts_usage.wasm" = 1024
+"test_logback.wasm" = 1024
 
 [loading.secrets]
 [loading.secrets."testing"]
@@ -35,6 +36,7 @@ lru_cache_size = 200
 "test_sshcerts_usage.wasm" = "test_sshcerts"
 "test_crashtest.wasm" = "crashtest"
 "test_persistent_response.wasm" = "prtest"
+"test_logback.wasm" = "test_logback"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -64,7 +66,7 @@ verb = "post"
 uri = "http://localhost:8998/response"
 return_body = true
 return_code = true
-allowed_rules = ["test_time.wasm"]
+allowed_rules = ["test_time.wasm", "test_logback.wasm"]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 
@@ -188,7 +190,6 @@ headers = []
 [webhooks."internal".webhooks."persistentresponsetest"]
 log_type = "prtest"
 logbacks_allowed = "Unlimited"
-
 headers = ["x-forwarded-for"]
 [webhooks."internal".webhooks."persistentresponsetest".get_mode]
 response_mode = "rule:test_persistent_response.wasm"
@@ -206,6 +207,15 @@ type = "None"
 [webhooks."internal".webhooks."crashtest"]
 log_type = "crashtest"
 headers = []
+
+[webhooks."internal".webhooks."testlogback"]
+log_type = "test_logback"
+logbacks_allowed = "Unlimited"
+headers = []
+[webhooks."internal".webhooks."testlogback".get_mode]
+response_mode = "rule:test_logback.wasm"
+[webhooks."internal".webhooks."testlogback".get_mode.caching_mode]
+type = "None"
 # End webhooks for tests
 
 # Additional webhook examples
