@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e
-
 # Define what webhook within Plaid we're going to call
 URL="testlogback"
 FILE="received_data.$URL.txt"
@@ -34,13 +32,10 @@ kill $RH_PID 2>&1 > /dev/null
 # 0
 # 1
 
-FIRST_LINE=$(head -n 1 $FILE)
-LAST_LINE=$(tail -n 1 $FILE)
+echo -e "0\n1" > expected.txt
+diff expected.txt $FILE
+RESULT=$?
 
-rm $FILE
+rm -f $FILE expected.txt
 
-if [[ $FIRST_LINE == "0" && $LAST_LINE == "1" ]]; then
-  exit 0
-else
-  exit 1
-fi
+exit $RESULT

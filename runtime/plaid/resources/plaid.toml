@@ -39,6 +39,8 @@ lru_cache_size = 200
 "test_persistent_response.wasm" = "prtest"
 "test_logback.wasm" = "test_logback"
 "test_db.wasm" = "test_db"
+"test_fileopen.wasm" = "test_fileopen"
+"test_random.wasm" = "test_random"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -68,7 +70,7 @@ verb = "post"
 uri = "http://localhost:8998/response"
 return_body = true
 return_code = true
-allowed_rules = ["test_time.wasm", "test_logback.wasm", "test_db.wasm"]
+allowed_rules = ["test_time.wasm", "test_logback.wasm", "test_db.wasm", "test_fileopen.wasm", "test_random.wasm"]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 
@@ -226,6 +228,14 @@ headers = []
 response_mode = "rule:test_db.wasm"
 [webhooks."internal".webhooks."testdb".get_mode.caching_mode]
 type = "None"
+
+[webhooks."internal".webhooks."testfileopen"]
+log_type = "test_fileopen"
+headers = []
+
+[webhooks."internal".webhooks."testrandom"]
+log_type = "test_random"
+headers = []
 # End webhooks for tests
 
 # Additional webhook examples

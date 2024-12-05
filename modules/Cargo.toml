@@ -9,6 +9,8 @@ members = [
     "tests/test_time",
     "tests/test_logback",
     "tests/test_db",
+    "tests/test_fileopen",
+    "tests/test_random",
 ]
 
 [profile.release]
