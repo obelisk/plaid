@@ -363,14 +363,14 @@ impl Github {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let organization = self.validate_username(request.get("organization").ok_or(ApiError::BadRequest)?)?;
+        let username = self.validate_username(request.get("usename").ok_or(ApiError::BadRequest)?)?;
         let repository_name =
             self.validate_repository_name(request.get("repository_name").ok_or(ApiError::BadRequest)?)?;
         let pull_request = self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
         let comment = request.get("comment").ok_or(ApiError::BadRequest)?;
 
         info!("Commenting on Pull Request [{pull_request}] in repo [{repository_name}] on behalf of {module}");
-        let address = format!("/repos/{organization}/{repository_name}/issues/{pull_request}/comments");
+        let address = format!("/repos/{username}/{repository_name}/issues/{pull_request}/comments");
 
         #[derive(Serialize)]
         struct Body<'a> {

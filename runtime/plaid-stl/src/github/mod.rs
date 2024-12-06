@@ -1576,31 +1576,22 @@ pub fn check_org_membership_of_user(
 }
 
 pub fn comment_on_pull_request(
-    organization: &str,
-    repository_name: &str,
-    pull_request: &str,
-    comment: &str,
+    username: impl Display,
+    repository_name: impl Display,
+    pull_request: impl Display,
+    comment: impl Display,
 ) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(github, comment_on_pull_request);
     }
 
-    #[derive(Serialize)]
-    struct Request<'a> {
-        organization: &'a str,
-        repository_name: &'a str,
-        pull_request: &'a str,
-        comment: &'a str,
-    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("username", username.to_string());
+    params.insert("repostory_name", repository_name.to_string());
+    params.insert("pull_request", pull_request.to_string());
+    params.insert("comment", comment.to_string());
 
-    let request = Request {
-        organization,
-        repository_name,
-        pull_request,
-        comment,
-    };
-
-    let request = serde_json::to_string(&request).unwrap();
+    let request = serde_json::to_string(&params).unwrap();
 
     let res = unsafe {
         github_comment_on_pull_request(
