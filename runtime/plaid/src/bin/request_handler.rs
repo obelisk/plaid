@@ -14,6 +14,45 @@ async fn main() {
             warp::reply::with_status("", warp::http::StatusCode::OK)
         });
 
+    let mnr_route = warp::post()
+        .and(warp::path("testmnr"))
+        .and(warp::body::bytes())
+        .map(|body: warp::hyper::body::Bytes| {
+            let body_str = String::from_utf8(body.to_vec()).unwrap();
+            println!("{body_str} from /testmnr");
+            warp::reply::with_status("", warp::http::StatusCode::OK)
+        });
+
+    let mnr_vars_route = warp::post()
+        .and(warp::path!("testmnr" / "my_variable"))
+        .and(warp::body::bytes())
+        .map(|body: warp::hyper::body::Bytes| {
+            let body_str = String::from_utf8(body.to_vec()).unwrap();
+            println!("{body_str} from /testmnr/my_variable");
+            warp::reply::with_status("", warp::http::StatusCode::OK)
+        });
+
+    let mnr_headers_route = warp::post()
+        .and(warp::path!("testmnr" / "headers"))
+        .and(warp::body::bytes())
+        .and(warp::header::headers_cloned())
+        .map(
+            |body: warp::hyper::body::Bytes, headers: warp::http::HeaderMap| {
+                let body_str = String::from_utf8(body.to_vec()).unwrap();
+                // Get the headers and see if they match expected values. If not, print a NOK which
+                // will eventually show up when comparing this server's output with the expected output.
+                if headers.get("first_header").unwrap().to_str().unwrap() != "first_value" {
+                    println!("NOK");
+                }
+                if headers.get("second_header").unwrap().to_str().unwrap() != "second_value" {
+                    println!("NOK");
+                }
+                println!("{body_str} from /testmnr/headers");
+                warp::reply::with_status("", warp::http::StatusCode::OK)
+            },
+        );
+
     // Start the server on 127.0.0.1:8998
-    warp::serve(post_route).run(([127, 0, 0, 1], 8998)).await;
+    let routes = post_route.or(mnr_vars_route).or(mnr_headers_route).or(mnr_route);
+    warp::serve(routes).run(([127, 0, 0, 1], 8998)).await;
 }

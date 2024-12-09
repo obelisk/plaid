@@ -27,6 +27,7 @@ lru_cache_size = 200
 "test_sshcerts_usage.wasm" = 1024
 "test_logback.wasm" = 1024
 "test_db.wasm" = 1024
+"test_mnr.wasm" = 1024
 
 [loading.secrets]
 [loading.secrets."testing"]
@@ -41,6 +42,7 @@ lru_cache_size = 200
 "test_db.wasm" = "test_db"
 "test_fileopen.wasm" = "test_fileopen"
 "test_random.wasm" = "test_random"
+"test_mnr.wasm" = "test_mnr"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -70,17 +72,42 @@ verb = "post"
 uri = "http://localhost:8998/response"
 return_body = true
 return_code = true
-allowed_rules = ["test_time.wasm", "test_logback.wasm", "test_db.wasm", "test_fileopen.wasm", "test_random.wasm"]
+allowed_rules = ["test_time.wasm", "test_logback.wasm", "test_db.wasm", "test_fileopen.wasm", "test_random.wasm", "test_mnr.wasm"]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 
-# [apis."general"."network"."web_requests"."google_test"]
-# verb = "get"
-# uri = "https://www.google.com/"
-# return_body = true
-# return_code = true
-# allowed_rules = ["testing_test.wasm"]
-# [apis."general"."network"."web_requests"."google_test"."headers"]
+[apis."general"."network"."web_requests"."test-response-mnr"]
+verb = "post"
+uri = "http://localhost:8998/testmnr"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr"."headers"]
+
+[apis."general"."network"."web_requests"."test-response-mnr-headers"]
+verb = "post"
+uri = "http://localhost:8998/testmnr/headers"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr-headers"."headers"]
+first_header = "first_value"
+
+[apis."general"."network"."web_requests"."test-response-mnr-vars"]
+verb = "post"
+uri = "http://localhost:8998/testmnr/{variable}"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr-vars"."headers"]
+
+[apis."general"."network"."web_requests"."google_test"]
+verb = "get"
+uri = "https://www.google.com/"
+return_body = true
+return_code = true
+allowed_rules = ["testing_test.wasm"]
+[apis."general"."network"."web_requests"."google_test"."headers"]
 
 # [apis."general"."network"."web_requests"."list_deploy_keys"]
 # verb = "get"
@@ -236,6 +263,11 @@ headers = []
 [webhooks."internal".webhooks."testrandom"]
 log_type = "test_random"
 headers = []
+
+[webhooks."internal".webhooks."testmnr"]
+log_type = "test_mnr"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples

@@ -1,6 +1,6 @@
 [package]
-name = "test_db"
-description = "Test rule that verifies reading from and writing to the internal Plaid DB works as expected."
+name = "test_mnr"
+description = "Test rule that verifies the Make Named Request functionality works as expected."
 version = "0.1.0"
 edition = "2021"
 
