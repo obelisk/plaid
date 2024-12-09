@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 # Build all of the Plaid workspace
 PLATFORM=$(uname -a)
