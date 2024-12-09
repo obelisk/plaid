@@ -26,12 +26,12 @@ echo "Copying Compiled Test Modules to compiled_modules"
 mkdir -p compiled_modules
 cp -r modules/target/wasm32-unknown-unknown/release/test_*.wasm compiled_modules/
 
-echo "Starting Plaid In The Background and waiting 10 seconds for it to boot"
+echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
 RUST_LOG=plaid=debug cargo run --bin=plaid --release -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
 cd ..
-sleep 10
+sleep 20
 
 # Set the variables the test harnesses will need
 export PLAID_LOCATION="localhost:4554"

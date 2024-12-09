@@ -24,7 +24,7 @@ sleep 20
 
 # Call the webhook
 curl http://$PLAID_LOCATION/webhook/$URL
-sleep 1
+sleep 3
 
 kill $RH_PID 2>&1 > /dev/null
 
