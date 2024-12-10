@@ -32,12 +32,14 @@ jobs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/
+          runtime/target/
+          modules/target/
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Run Integration Tests
       run: ./testing/integration.sh
-  
+
+
   ubuntu-docker-build-amd64-test:
     runs-on: ubuntu-latest
 
@@ -51,11 +53,12 @@ jobs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          runtime/target/
+        key: ${{ runner.os }}-cargo-amd64-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Run Docker Build Test (amd64)
       run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.amd64 .
+
 
   ubuntu-docker-build-aarch64-test:
     runs-on: ubuntu-latest
@@ -70,8 +73,8 @@ jobs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          runtime/target/
+        key: ${{ runner.os }}-cargo-aarch64-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Run Docker Build Test (aarch64)
       run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.aarch64 .
