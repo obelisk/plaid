@@ -28,10 +28,6 @@ sleep 3
 
 kill $RH_PID 2>&1 > /dev/null
 
-# The response from the webhook should be the following two lines:
-# 0
-# 1
-
 echo -e "0\n1" > expected.txt
 diff expected.txt $FILE
 RESULT=$?

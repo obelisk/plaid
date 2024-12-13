@@ -241,7 +241,7 @@ headers = []
 
 [webhooks."internal".webhooks."testlogback"]
 log_type = "test_logback"
-logbacks_allowed = "Unlimited"
+logbacks_allowed = { Limited = 1 }
 headers = []
 [webhooks."internal".webhooks."testlogback".get_mode]
 response_mode = "rule:test_logback.wasm"
