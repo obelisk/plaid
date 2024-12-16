@@ -25,6 +25,9 @@ lru_cache_size = 200
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
 "test_sshcerts_usage.wasm" = 1024
+"test_logback.wasm" = 1024
+"test_db.wasm" = 1024
+"test_mnr.wasm" = 1024
 
 [loading.secrets]
 [loading.secrets."testing"]
@@ -35,6 +38,11 @@ lru_cache_size = 200
 "test_sshcerts_usage.wasm" = "test_sshcerts"
 "test_crashtest.wasm" = "crashtest"
 "test_persistent_response.wasm" = "prtest"
+"test_logback.wasm" = "test_logback"
+"test_db.wasm" = "test_db"
+"test_fileopen.wasm" = "test_fileopen"
+"test_random.wasm" = "test_random"
+"test_mnr.wasm" = "test_mnr"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -64,17 +72,42 @@ verb = "post"
 uri = "http://localhost:8998/response"
 return_body = true
 return_code = true
-allowed_rules = ["test_time.wasm"]
+allowed_rules = ["test_time.wasm", "test_logback.wasm", "test_db.wasm", "test_fileopen.wasm", "test_random.wasm", "test_mnr.wasm"]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 
-# [apis."general"."network"."web_requests"."google_test"]
-# verb = "get"
-# uri = "https://www.google.com/"
-# return_body = true
-# return_code = true
-# allowed_rules = ["testing_test.wasm"]
-# [apis."general"."network"."web_requests"."google_test"."headers"]
+[apis."general"."network"."web_requests"."test-response-mnr"]
+verb = "post"
+uri = "http://localhost:8998/testmnr"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr"."headers"]
+
+[apis."general"."network"."web_requests"."test-response-mnr-headers"]
+verb = "post"
+uri = "http://localhost:8998/testmnr/headers"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr-headers"."headers"]
+first_header = "first_value"
+
+[apis."general"."network"."web_requests"."test-response-mnr-vars"]
+verb = "post"
+uri = "http://localhost:8998/testmnr/{variable}"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr-vars"."headers"]
+
+[apis."general"."network"."web_requests"."google_test"]
+verb = "get"
+uri = "https://www.google.com/"
+return_body = true
+return_code = true
+allowed_rules = ["testing_test.wasm"]
+[apis."general"."network"."web_requests"."google_test"."headers"]
 
 # [apis."general"."network"."web_requests"."list_deploy_keys"]
 # verb = "get"
@@ -188,7 +221,6 @@ headers = []
 [webhooks."internal".webhooks."persistentresponsetest"]
 log_type = "prtest"
 logbacks_allowed = "Unlimited"
-
 headers = ["x-forwarded-for"]
 [webhooks."internal".webhooks."persistentresponsetest".get_mode]
 response_mode = "rule:test_persistent_response.wasm"
@@ -206,6 +238,36 @@ type = "None"
 [webhooks."internal".webhooks."crashtest"]
 log_type = "crashtest"
 headers = []
+
+[webhooks."internal".webhooks."testlogback"]
+log_type = "test_logback"
+logbacks_allowed = { Limited = 1 }
+headers = []
+[webhooks."internal".webhooks."testlogback".get_mode]
+response_mode = "rule:test_logback.wasm"
+[webhooks."internal".webhooks."testlogback".get_mode.caching_mode]
+type = "None"
+
+[webhooks."internal".webhooks."testdb"]
+log_type = "test_db"
+headers = []
+[webhooks."internal".webhooks."testdb".get_mode]
+response_mode = "rule:test_db.wasm"
+[webhooks."internal".webhooks."testdb".get_mode.caching_mode]
+type = "None"
+
+[webhooks."internal".webhooks."testfileopen"]
+log_type = "test_fileopen"
+headers = []
+
+[webhooks."internal".webhooks."testrandom"]
+log_type = "test_random"
+headers = []
+
+[webhooks."internal".webhooks."testmnr"]
+log_type = "test_mnr"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples

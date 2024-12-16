@@ -18,7 +18,7 @@ pub fn print_debug_string(log: &str) {
 
 /// Send a log to the logback system with no extra budget to trigger
 /// further invocations. This is the most limited log_back but will fail
-/// if the module has no more LogbacksAllowed.
+/// in the runtime if the module has no more LogbacksAllowed.
 pub fn log_back(type_: &str, log: &[u8], delay: u32) -> Result<(), i32> {
     log_back_with_budget(type_, log, delay, 0)
 }
@@ -54,9 +54,10 @@ pub fn log_back_unlimited(type_: &str, log: &[u8], delay: u32) -> Result<(), i32
 
 /// Send a log to the logback system with a budget to trigger further
 /// invoations. The requested budget will be substracted from this invocation's
-/// budget and the call will fail if it is exceeded. Calling this function itself
-/// costs 1 budget, with a budget of 1, you must set logbacks_allowed to 0. This
-/// means that those further invocations will not be able to trigger logbacks.
+/// budget and the call will fail in the runtime if it is exceeded. Calling this
+/// function itself costs 1 budget, with a budget of 1, you must set
+/// logbacks_allowed to 0. This means that those further invocations will not
+/// be able to trigger logbacks.
 pub fn log_back_with_budget(
     type_: &str,
     log: &[u8],
