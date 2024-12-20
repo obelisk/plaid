@@ -12,14 +12,14 @@ fi
 
 echo "Building Plaid Runtime"
 cd runtime
-cargo build --all --release
+cargo build --all --release -vv
 cd ..
 
 export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
 
 echo "Building Plaid All Plaid Modules"
 cd modules
-cargo build --all --release
+cargo build --all --release -vv
 cd ..
 
 echo "Copying Compiled Test Modules to compiled_modules"
@@ -28,7 +28,7 @@ cp -r modules/target/wasm32-unknown-unknown/release/test_*.wasm compiled_modules
 
 echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
-RUST_LOG=plaid=debug cargo run --bin=plaid --release -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
+RUST_LOG=plaid=debug cargo run --bin=plaid --release -vv -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
 cd ..
 sleep 20
