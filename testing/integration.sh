@@ -22,8 +22,8 @@ export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
 # cargo build --all --release -vv
 # cd ..
 
-# echo "Copying Compiled Test Modules to compiled_modules"
-# mkdir -p compiled_modules
+echo "Copying Compiled Test Modules to compiled_modules"
+mkdir -p compiled_modules
 # cp -r modules/target/wasm32-unknown-unknown/release/test_*.wasm compiled_modules/
 
 echo "Starting Plaid In The Background and waiting for it to boot"
