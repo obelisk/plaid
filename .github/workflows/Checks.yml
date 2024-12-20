@@ -33,12 +33,12 @@ jobs:
           runtime/target/
         key: ${{ runner.os }}-cargo-runtime-${{ hashFiles('runtime/Cargo.lock') }}
 
-    - name: Modules cache
-      uses: actions/cache@v4
-      with:
-        path: |
-          modules/target/
-        key: ${{ runner.os }}-cargo-modules-${{ hashFiles('modules/Cargo.lock') }}
+    # - name: Modules cache
+    #   uses: actions/cache@v4
+    #   with:
+    #     path: |
+    #       modules/target/
+    #     key: ${{ runner.os }}-cargo-modules-${{ hashFiles('modules/Cargo.lock') }}
 
     - name: Run Integration Tests
       run: ./testing/integration.sh
