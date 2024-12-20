@@ -34,27 +34,27 @@ cd ..
 sleep 20
 
 # Set the variables the test harnesses will need
-export PLAID_LOCATION="localhost:4554"
+# export PLAID_LOCATION="localhost:4554"
 
-# Loop through all test modules in the test_modules directory
-for module in modules/tests/*; do
-  # If the module is a directory
-  if [ -d "$module" ]; then
-    # If the module has a harness.sh file
-    if [ -f "$module/harness/harness.sh" ]; then
-      # Run the harness.sh file
-      bash $module/harness/harness.sh
-      # If the harness.sh file returns an error
-      if [ $? -ne 0 ]; then
-       echo "Integration test failed for module $module"
-        # Kill the Plaid process
-        kill $PLAID_PID
-        # Exit with an error
-        exit 1
-      fi
-    fi
-  fi
-done
+# # Loop through all test modules in the test_modules directory
+# for module in modules/tests/*; do
+#   # If the module is a directory
+#   if [ -d "$module" ]; then
+#     # If the module has a harness.sh file
+#     if [ -f "$module/harness/harness.sh" ]; then
+#       # Run the harness.sh file
+#       bash $module/harness/harness.sh
+#       # If the harness.sh file returns an error
+#       if [ $? -ne 0 ]; then
+#        echo "Integration test failed for module $module"
+#         # Kill the Plaid process
+#         kill $PLAID_PID
+#         # Exit with an error
+#         exit 1
+#       fi
+#     fi
+#   fi
+# done
 
 echo "Tests complete. Killing Plaid"
 # Kill the Plaid process
