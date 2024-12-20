@@ -343,6 +343,7 @@ pub fn to_api_function(
         "get_time" => Function::new_typed(&mut store, super::internal::get_time),
         "storage_insert" => Function::new_typed_with_env(&mut store, &env, super::storage::insert),
         "storage_get" => Function::new_typed_with_env(&mut store, &env, super::storage::get),
+        "storage_delete" => Function::new_typed_with_env(&mut store, &env, super::storage::delete),
         "storage_list_keys" => {
             Function::new_typed_with_env(&mut store, &env, super::storage::list_keys)
         }
