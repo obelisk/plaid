@@ -94,7 +94,7 @@ impl General {
             }
         };
 
-        // The this request is not allowed to be executed by the given rule bail
+        // If this request is not allowed to be executed by the given rule, bail
         if !request_specification.allowed_rules.contains(&module.to_string()) {
             error!("{module} tried to use web-request which it's not allowed to: {request_name}");
             return Err(ApiError::BadRequest);
