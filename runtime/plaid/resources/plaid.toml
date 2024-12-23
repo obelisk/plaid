@@ -26,7 +26,6 @@ lru_cache_size = 200
 "test_persistent_response.wasm" = 1024
 "test_sshcerts_usage.wasm" = 1024
 "test_logback.wasm" = 1024
-"test_db.wasm" = 1024
 "test_mnr.wasm" = 1024
 
 [loading.secrets]
@@ -251,10 +250,6 @@ type = "None"
 [webhooks."internal".webhooks."testdb"]
 log_type = "test_db"
 headers = []
-[webhooks."internal".webhooks."testdb".get_mode]
-response_mode = "rule:test_db.wasm"
-[webhooks."internal".webhooks."testdb".get_mode.caching_mode]
-type = "None"
 
 [webhooks."internal".webhooks."testfileopen"]
 log_type = "test_fileopen"

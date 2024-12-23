@@ -16,13 +16,19 @@ RH_PID=$!
 
 sleep 2
 # Call the webhook
-curl http://$PLAID_LOCATION/webhook/$URL?key=some_key
-curl -d "first_value" http://$PLAID_LOCATION/webhook/$URL
-curl http://$PLAID_LOCATION/webhook/$URL?key=some_key
-curl http://$PLAID_LOCATION/webhook/$URL?key=my_key
-curl -d "second_value" http://$PLAID_LOCATION/webhook/$URL
-curl http://$PLAID_LOCATION/webhook/$URL?key=some_key
-curl http://$PLAID_LOCATION/webhook/$URL?key=my_key
+curl -d "get:some_key" http://$PLAID_LOCATION/webhook/$URL
+curl -d "insert:my_key:first_value" http://$PLAID_LOCATION/webhook/$URL
+curl -d "get:some_key" http://$PLAID_LOCATION/webhook/$URL
+curl -d "get:my_key" http://$PLAID_LOCATION/webhook/$URL
+curl -d "insert:my_key:second_value" http://$PLAID_LOCATION/webhook/$URL
+curl -d "get:some_key" http://$PLAID_LOCATION/webhook/$URL
+curl -d "get:my_key" http://$PLAID_LOCATION/webhook/$URL
+curl -d "delete:my_key" http://$PLAID_LOCATION/webhook/$URL
+curl -d "get:my_key" http://$PLAID_LOCATION/webhook/$URL
+curl -d "delete:another_key" http://$PLAID_LOCATION/webhook/$URL
+curl -d "get:another_key" http://$PLAID_LOCATION/webhook/$URL
+
+sleep 2
 
 kill $RH_PID 2>&1 > /dev/null
 
@@ -32,8 +38,10 @@ kill $RH_PID 2>&1 > /dev/null
 # first_value
 # Empty
 # second_value
+# Empty
+# Empty
 
-echo -e "Empty\nEmpty\nfirst_value\nEmpty\nsecond_value" > expected.txt
+echo -e "Empty\nEmpty\nfirst_value\nEmpty\nsecond_value\nEmpty\nEmpty" > expected.txt
 diff expected.txt $FILE
 RESULT=$?
 
