@@ -35,6 +35,7 @@ use crate::{data::DelayedMessage, executor::Message};
 
 use self::rustica::{Rustica, RusticaConfig};
 
+/// All the APIs that Plaid can use
 pub struct Api {
     pub runtime: Runtime,
     #[cfg(feature = "aws")]
@@ -51,8 +52,9 @@ pub struct Api {
     pub web: Option<Web>,
 }
 
+/// Configurations for all the APIs Plaid can use
 #[derive(Deserialize)]
-pub struct Apis {
+pub struct ApiConfigs {
     #[cfg(feature = "aws")]
     pub aws: Option<AwsConfig>,
     pub general: Option<GeneralConfig>,
@@ -91,7 +93,7 @@ pub enum ApiError {
 
 impl Api {
     pub async fn new(
-        config: Apis,
+        config: ApiConfigs,
         log_sender: Sender<Message>,
         delayed_log_sender: Sender<DelayedMessage>,
     ) -> Self {

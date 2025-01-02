@@ -15,9 +15,10 @@ pub enum WebError {
 
 #[derive(Deserialize)]
 pub struct JwtConfig {
-    // The private key is an ECDSA256 key in PEM format
-    #[serde(deserialize_with = "jwt_deserializer")]
+    /// The ECDSA256 private key in PEM format
+    #[serde(deserialize_with = "jwt_private_key_deserializer")]
     pub private_key: EncodingKey,
+    /// Which rules are allowed to use the key
     pub allowed_rules: Vec<String>,
 }
 
@@ -32,7 +33,8 @@ pub struct Web {
     config: WebConfig,
 }
 
-fn jwt_deserializer<'de, D>(deserializer: D) -> Result<EncodingKey, D::Error>
+/// Deserialize a string to an `EncodingKey` or return an error
+fn jwt_private_key_deserializer<'de, D>(deserializer: D) -> Result<EncodingKey, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -46,6 +48,9 @@ impl Web {
         Self { config }
     }
 
+    /// Create, sign, and encode a new JWT with the contents specified in `params`.
+    /// This fails if `params` contains invalid values or if `module` is not allowed to
+    /// use the key specified in `params`.
     pub async fn issue_jwt(&self, params: &str, module: &str) -> Result<String, ApiError> {
         let mut request: HashMap<&str, serde_json::Value> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;

@@ -12,6 +12,7 @@ pub struct Config {
     web_requests: HashMap<String, Request>,
 }
 
+/// Request to make a web request
 #[derive(Deserialize)]
 struct MakeRequestRequest {
     /// Body of the request
@@ -25,6 +26,8 @@ struct MakeRequestRequest {
     headers: Option<HashMap<String, String>>
 }
 
+/// This struct represents a web request and contains information about what the request is about (e.g., verb and URI),
+/// how it should be processed, and which modules are allowed to make it.
 #[derive(Deserialize)]
 pub struct Request {
     /// HTTP verb
@@ -43,6 +46,7 @@ pub struct Request {
     headers: HashMap<String, String>,
 }
 
+/// Data returned by a request.
 #[derive(Serialize)]
 struct ReturnData {
     code: Option<u16>,
@@ -79,6 +83,7 @@ impl General {
         }
     }
 
+    /// Make a named web request on behalf of a given `module`. The request's details are encoded in `params`.
     pub async fn make_named_request(&self, params: &str, module: &str) -> Result<String, ApiError> {
         // Parse the information needed to make the request
         let request: MakeRequestRequest = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;

@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 impl Github {
-    // List all seats in the Copilot subscription for an organization
-    // See https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#list-all-copilot-seat-assignments-for-an-organization for more details
+    /// List all seats in the Copilot subscription for an organization
+    /// See https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#list-all-copilot-seat-assignments-for-an-organization for more details
     pub async fn list_seats_in_org_copilot(&self, params: &str, module: &str) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -36,8 +36,8 @@ impl Github {
         }
     }
 
-    // Add users to the Copilot subscription for an organization
-    // See https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#add-users-to-the-copilot-subscription-for-an-organization for more details
+    /// Add users to the Copilot subscription for an organization
+    /// See https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#add-users-to-the-copilot-subscription-for-an-organization for more details
     pub async fn add_users_to_org_copilot(&self, params: &str, module: &str) -> Result<String, ApiError> {
         #[derive(Deserialize, Serialize)]
         struct Request {
@@ -72,8 +72,8 @@ impl Github {
         }
     }
 
-    // Remove users from the Copilot subscription for an organization
-    // See https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#remove-users-from-the-copilot-subscription-for-an-organization for more details
+    /// Remove users from the Copilot subscription for an organization
+    /// See https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#remove-users-from-the-copilot-subscription-for-an-organization for more details
     pub async fn remove_users_from_org_copilot(&self, params: &str, module: &str) -> Result<String, ApiError> {
         #[derive(Deserialize, Serialize)]
         struct Request {

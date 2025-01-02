@@ -40,7 +40,6 @@ impl std::fmt::Display for LinkError {
     }
 }
 
-/// Implement a way for a module to get the current unixtime
 pub fn fake_wbindgen_describe(placeholder: i32) {
     warn!("Fake __wbindgen_describe called with placeholder: {placeholder}");
 }
@@ -54,7 +53,6 @@ pub fn fake_wbindgen_externref_table_grow(x: i32) -> i32 {
     return 0;
 }
 
-/// Implement a way for a module to get the current unixtime
 pub fn fake_wbindgen_externref_table_set_null(placeholder: i32) {
     warn!("Fake __wbindgen_externref_table_set_null called with placeholder: {placeholder}");
 }

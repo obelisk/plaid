@@ -33,6 +33,7 @@ pub struct ResponseMessage {
     pub body: String,
 }
 
+/// A message to be processed by one or more modules
 #[derive(Serialize, Deserialize)]
 pub struct Message {
     /// The message channel that this message is going to run on
@@ -91,6 +92,7 @@ impl Message {
     }
 }
 
+/// Environment for executing a module on a message
 pub struct Env {
     // Name of the current module
     pub name: String,
@@ -104,6 +106,7 @@ pub struct Env {
     pub storage: Option<Arc<Storage>>,
     // A sender to the external logging system
     pub external_logging_system: Logger,
+    /// Memory for host-guest communication
     pub memory: Option<Memory>,
     // A special value that can be filled to leave a string response available after
     // the module has execute. Generally this is used for GET mode responses.
@@ -112,10 +115,12 @@ pub struct Env {
     pub execution_error_context: Option<String>,
 }
 
+/// The executor that processes messages
 pub struct Executor {
     _handles: Vec<JoinHandle<Result<(), ExecutorError>>>,
 }
 
+/// Errors encountered by the executor while trying to execute a module
 pub enum ExecutorError {
     ExternalLoggingError(LoggingError),
     IncomingLogError,
@@ -145,6 +150,7 @@ impl std::fmt::Display for ExecutorError {
     }
 }
 
+/// Error encountered during the execution of a module
 pub enum ModuleExecutionError {
     ComputationExhausted(u64),
     ModuleError(String),
@@ -301,6 +307,7 @@ fn prepare_for_execution(
     Ok((store, instance, ep, envr))
 }
 
+/// Update a module's persistent response
 fn update_persistent_response(
     plaid_module: &Arc<PlaidModule>,
     env: &FunctionEnv<Env>,

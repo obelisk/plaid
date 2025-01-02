@@ -25,10 +25,15 @@ pub struct YubikeyConfig {
     api_timeout_seconds: u64,
 }
 
+/// The YubiKey API
 pub struct Yubikey {
+    /// Config for the YubiKey API
     config: YubikeyConfig,
+    /// A client to make requests with
     client: Client,
+    /// A key used for HMAC signing
     key: Key,
+    /// A secure source of random values
     rng: SystemRandom,
 }
 

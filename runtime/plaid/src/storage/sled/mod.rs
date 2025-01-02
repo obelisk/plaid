@@ -1,3 +1,5 @@
+//! This module provides a way for Plaid to use Sled as a DB for persistent storage.
+
 use async_trait::async_trait;
 
 use serde::Deserialize;
@@ -6,11 +8,13 @@ use sled::Db;
 
 use super::{StorageError, StorageProvider};
 
+/// Configuration for a Sled DB
 #[derive(Deserialize)]
 pub struct Config {
     path: String,
 }
 
+/// A wrapper around a Sled DB object
 pub struct Sled {
     db: Db,
 }

@@ -9,17 +9,29 @@ use std::{string::FromUtf8Error, time::Duration};
 
 use super::default_timeout_seconds;
 
+/// Determine how to authenticate to the Okta API
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Authentication {
-    ApiKey { token: String },
+    /// Authenticate to the Okta API via an auth token
+    ApiKey {
+        /// The authentication token
+        token: String
+    },
+    /// Authenticate to the Okta API as an Okta app
     OktaApp {
+        /// Client ID for the Okta app
         client_id: String,
+        /// Private key for the Okta app
         #[serde(deserialize_with = "private_key_deserializer")]
         private_key: RS256KeyPair
     }
 }
 
+/// Custom deserialize for an Okta app's private key.
+/// The underlying string is parsed into a key object; if this is not possible, an error is returned.
+/// This ensures that our configuration is valid, and frees future calls from the burden of checking the key
+/// or the risk of handling an invalid key.
 fn private_key_deserializer<'de, D>(deserializer: D) -> Result<RS256KeyPair, D::Error>
 where
     D: de::Deserializer<'de>,
@@ -28,6 +40,7 @@ where
     Ok(RS256KeyPair::from_pem(&pem_key).map_err(|_| de::Error::custom("Could not deserialize app's private key")))?
 }
 
+/// Configuration for Plaid's Okta API
 #[derive(Deserialize)]
 pub struct OktaConfig {
     /// The Okta domain to run queries against
@@ -40,11 +53,15 @@ pub struct OktaConfig {
     api_timeout_seconds: u64,
 }
 
+/// The Okta API Plaid interacts with
 pub struct Okta {
+    /// Config for the Okta API
     config: OktaConfig,
+    /// Client to make requests with
     client: Client,
 }
 
+/// All the errors that can be encountered while interacting with Okta API
 #[derive(Debug)]
 pub enum OktaError {
     BadData(FromUtf8Error),

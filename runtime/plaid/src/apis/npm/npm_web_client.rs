@@ -16,59 +16,94 @@ const NPMJS_COM_URL: &str = "https://www.npmjs.com";
 #[derive(Serialize)]
 /// Payload sent to npm website to change a team's permissions over a package
 struct PermissionChangePayload<'a> {
+    /// CSRF token to validate the request
     csrftoken: &'a str,
+    /// The package we are changing permissions for
     package: &'a str,
+    /// The permission we are setting
     permissions: &'a str,
 }
 
 #[derive(Serialize)]
 /// Payload sent to npm website to generate a new granular token
 struct GenerateGranularTokenPayload<'a> {
+    /// IPs that can use the token
     #[serde(rename = "allowedIPRanges")]
     allowed_ip_ranges: Vec<String>,
+    /// CSRF token to validate the request
     csrftoken: &'a str,
+    /// After how many days the token will expire
     #[serde(rename = "expirationDays")]
     expiration_days: &'a str,
+    /// Permissions that the token has on the selected npm org
     #[serde(rename = "orgsPermission")]
     orgs_permission: &'a str,
+    /// Permissions that the token has on the selected packages
     #[serde(rename = "packagesAndScopesPermission")]
     packages_and_scopes_permission: &'a str,
+    /// Which organizations the token has permissions on
     #[serde(rename = "selectedOrgs")]
     selected_orgs: Vec<String>,
+    /// Which packages the token has permissions on
     #[serde(rename = "selectedPackages")]
     selected_packages: Vec<String>,
+    /// Which packages and scopes the token has permissions on
     #[serde(rename = "selectedPackagesAndScopes")]
     selected_packages_and_scopes: &'a str,
+    /// Which scopes the token has permissions on
     #[serde(rename = "selectedScopes")]
     selected_scopes: Vec<String>,
+    /// A description for the token
     #[serde(rename = "tokenDescription")]
     token_description: &'a str,
+    /// The token's name. This must be unique.
     #[serde(rename = "tokenName")]
     token_name: &'a str,
 }
 
+/// Payload sent to npm website to invite a user into the configured npm organization
 #[derive(Serialize)]
 struct InviteUserToOrganizationPayload<'a> {
+    /// CSRF token to validate the request
     csrftoken: &'a str,
+    /// The team the user will be added to, upon accepting the invite
     team: &'a str,
+    /// Map that contains "name": <user name>
     user: HashMap<&'a str, &'a str>,
 }
 
+/// Payload sent to npm website to add a user to a given team in the npm org
 #[derive(Serialize)]
 struct AddUserToTeamPayload<'a> {
+    /// CSRF token to validate the request
     csrftoken: &'a str,
+    /// Username
     user: &'a str,
 }
 
+/// Payload sent to npm website to remove a user from a team or from the configured npm org.
 #[derive(Serialize)]
 struct RemoveUserPayload<'a> {
+    /// CSRF token to validate the request
     csrftoken: &'a str,
 }
 
+/// Payload sent to npm website to delete an access token.
 #[derive(Serialize)]
 struct DeleteTokenPayload<'a> {
+    /// CSRF token to validate the request
     csrftoken: &'a str,
+    /// The ID of the token to be deleted (only one)
     tokens: &'a str,
+}
+
+/// Groups an npm package name with a permission (read or write).
+#[derive(Serialize, Clone)]
+struct NpmPackageWithPermission {
+    /// Name of the package
+    package_name: String,
+    /// Permission on the package (read or write)
+    permission: NpmPackagePermission,
 }
 
 /// Takes a response with an unexpected status code and serializes it to
@@ -1062,12 +1097,7 @@ impl Paginable for NpmPackageWithPermission {
     }
 }
 
-#[derive(Serialize, Clone)]
-struct NpmPackageWithPermission {
-    package_name: String,
-    permission: NpmPackagePermission,
-}
-
+/// Trait for objects that can be constructed from a paginated response provided by the npm website.
 trait Paginable {
     fn from_paginated_response(value: &Value) -> Result<Vec<Self>, ()>
     where

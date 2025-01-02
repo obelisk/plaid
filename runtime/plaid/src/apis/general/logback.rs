@@ -7,7 +7,7 @@ impl General {
     /// Send a log from a module back into the logging system into a particular
     /// type. You need to be very careful when allowing modules to use this
     /// because it can be used to trigger other rules with greater access than
-    /// it has.
+    /// the calling module has.
     pub fn log_back(&self, type_: &str, log: &[u8], module: &str, delay: u64, logbacks_allowed: LogbacksAllowed) -> bool {
         let msg = Message::new(
             type_.to_string(),

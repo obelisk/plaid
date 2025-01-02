@@ -3,6 +3,7 @@ use crate::executor::Env;
 
 use wasmer::{AsStoreRef, FunctionEnvMut, WasmPtr};
 
+/// Native WASM function that provides the data and source for a log.
 pub fn fetch_data_and_source(
     env: FunctionEnvMut<Env>,
     data_buffer: WasmPtr<u8>,

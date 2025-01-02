@@ -63,15 +63,15 @@ impl Github {
             .ok_or(ApiError::GitHubError(GitHubError::InvalidInput(
                 "Invalid response while fetching public key from GitHub".to_string(),
             )))?
-            .to_string()
-            .replace("\"", "");
+            .as_str()
+            .ok_or(ApiError::GitHubError(GitHubError::BadResponse))?;
         let key_id = res
             .get("key_id")
             .ok_or(ApiError::GitHubError(GitHubError::InvalidInput(
                 "Invalid response while fetching public key from GitHub".to_string(),
             )))?
-            .to_string()
-            .replace("\"", "");
+            .as_str()
+            .ok_or(ApiError::GitHubError(GitHubError::BadResponse))?;
 
         // 2. Encrypt the secret under the pub key
 
@@ -106,7 +106,7 @@ impl Github {
         };
         let body = UploadEnvironmentSecretPayload {
             encrypted_value: ciphertext,
-            key_id,
+            key_id: key_id.to_string(),
         };
 
         match self

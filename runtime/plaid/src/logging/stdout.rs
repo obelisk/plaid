@@ -1,3 +1,5 @@
+//! This module provides a way for Plaid to log to stdout.
+
 use super::{Log, LoggingError, PlaidLogger, Severity, WrappedLog};
 
 use serde::Deserialize;

@@ -5,6 +5,7 @@ use plaid_stl::npm::shared_structs::{GranularTokenSpecs, NpmError};
 use super::Npm;
 use crate::apis::ApiError;
 
+/// Macro that compiles a regex validator and inserts it into a list of available validators.
 macro_rules! define_regex_validator {
     ($validators:expr,$validator:tt,$regex: tt) => {
         $validators.insert(
@@ -15,6 +16,7 @@ macro_rules! define_regex_validator {
     };
 }
 
+/// Macro that creates a function which uses a given validator to validate an input.
 macro_rules! create_regex_validator_func {
     ($validator:ident) => {
         paste::item! {
@@ -36,6 +38,7 @@ macro_rules! create_regex_validator_func {
     }
 }
 
+/// Initialize all available validators.
 pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     let mut validators = HashMap::new();
 

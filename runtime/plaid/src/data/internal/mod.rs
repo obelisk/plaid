@@ -126,7 +126,7 @@ impl Internal {
 
         // Pull all logs off the channel, set their time, and put them on the heap.
         //
-        // If persistence is available, we will also set them there incase the system
+        // If persistence is available, we will also set them there in case the system
         // reboots
         while let Ok(mut log) = self.receiver.try_recv() {
             log.delay += current_time;

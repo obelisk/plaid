@@ -3,6 +3,7 @@ use crate::apis::{ApiError, okta::OktaError};
 use super::{Okta, OktaOperation};
 
 impl Okta {
+    /// Get user data by querying the Okta API
     pub async fn get_user_data(&self, query: &str, _: &str) -> Result<String, ApiError> {
         let res = self.client.get(format!("https://{}/api/v1/users/{}", &self.config.domain, query))
             .header("Authorization", self.get_authorization_header(&OktaOperation::GetUserInfo).await.map_err(|e| ApiError::OktaError(e))?)
