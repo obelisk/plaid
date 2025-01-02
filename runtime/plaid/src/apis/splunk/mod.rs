@@ -22,7 +22,9 @@ pub struct SplunkConfig {
 }
 
 pub struct Splunk {
+    /// Config for the Splunk API
     config: SplunkConfig,
+    /// A client to make requests with
     client: Client,
 }
 

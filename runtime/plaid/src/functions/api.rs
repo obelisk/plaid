@@ -3,6 +3,24 @@ use crate::executor::Env;
 use crate::functions::{get_memory, safely_get_string};
 use wasmer::{AsStoreRef, Function, FunctionEnv, FunctionEnvMut, Store, WasmPtr};
 
+/// Macro to implement a new host function in a given API. The function does not fill a data buffer with returned values.
+///
+/// This macro generates two functions:
+/// - A private implementation function (`_impl`) that handles the actual logic:
+///   - Accessing and validating memory from the guest
+///   - Checking that the API is configured.
+///   - Running the function + returning the result (as an i32)
+/// - A public wrapper function that calls the implementation function and returns the result as an integer.
+///
+/// # Parameters
+/// - `$api`: The name of the API (e.g., `github`).
+/// - `$function_name`: The name of the function to be implemented.
+///
+/// # Error Handling
+/// The generated implementation function returns `FunctionErrors` in case of failures, which are then
+/// converted to int error codes by the wrapper function. These errors include:
+/// - `FunctionErrors::InternalApiError`: For internal API-related errors.
+/// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
 macro_rules! impl_new_function {
     ($api:ident, $function_name:ident) => {
         paste::item! {
@@ -63,6 +81,25 @@ macro_rules! impl_new_function {
     }
 }
 
+/// Macro to implement a new host function in a given API.
+///
+/// This macro generates two functions:
+/// - A private implementation function (`_impl`) that handles the actual logic:
+///   - Accessing and validating memory from the guest
+///   - Checking that the API is configured.
+///   - Running the function + returning the result and handling errors
+/// - A public wrapper function that calls the implementation function and returns the result as an integer.
+///
+/// # Parameters
+/// - `$api`: The name of the API (e.g., `github`).
+/// - `$function_name`: The name of the function to be implemented.
+///
+/// # Error Handling
+/// The generated implementation function returns `FunctionErrors` in case of failures, which are then
+/// converted to int error codes by the wrapper function. These errors include:
+/// - `FunctionErrors::InternalApiError`: For internal API-related errors.
+/// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
+/// - `FunctionErrors::ReturnBufferTooSmall`: If the provided return buffer is too small to hold the result.
 macro_rules! impl_new_function_with_error_buffer {
     ($api:ident, $function_name:ident) => {
         paste::item! {

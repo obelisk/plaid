@@ -40,6 +40,7 @@ impl Slack {
         Ok(format!("Bearer {token}"))
     }
 
+    /// Make a call to the Slack API. Depending on which API we are calling, a GET or a POST are executed.
     async fn call_slack(&self, params: &str, api: Apis) -> Result<String, ApiError> {
         let request: HashMap<String, String> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;

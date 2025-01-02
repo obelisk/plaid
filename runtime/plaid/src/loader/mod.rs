@@ -19,13 +19,18 @@ use wasmer::{
 };
 use wasmer_middlewares::Metering;
 
+/// Limit imposed on some resource
 #[derive(Deserialize)]
 pub struct LimitAmount {
+    /// The limit's default value
     default: u64,
+    /// Override values based on log type
     log_type: HashMap<String, u64>,
+    /// Override values based on module names
     module_overrides: HashMap<String, u64>,
 }
 
+/// Configuration for loading Plaid modules
 #[derive(Deserialize)]
 pub struct Configuration {
     /// Where to load modules from
@@ -206,6 +211,7 @@ impl PlaidModules {
     }
 }
 
+/// Load all modules, according to Plaid's configuration
 pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
     let module_paths = fs::read_dir(config.module_dir).unwrap();
 

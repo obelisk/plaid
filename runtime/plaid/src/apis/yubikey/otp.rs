@@ -16,6 +16,7 @@ fn hex_encode<T: AsRef<[u8]>>(data: T) -> String {
 }
 
 impl Yubikey {
+    /// Verify an OTP is valid by checking it against the Yubico API
     pub async fn verify_otp(&self, otp: &str, _: &str) -> Result<String, ApiError> {
         // Generate a random nonce to validate the OTP with
         let nonce: [u8; 16] = rand::generate(&self.rng)

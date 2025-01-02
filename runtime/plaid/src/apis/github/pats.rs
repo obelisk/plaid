@@ -7,6 +7,7 @@ use crate::apis::{github::GitHubError, ApiError};
 use super::Github;
 
 impl Github {
+    /// Fetch a list of all FPAT requests for a GitHub organization.
     pub async fn list_fpat_requests_for_org(
         &self,
         params: &str,
@@ -35,6 +36,7 @@ impl Github {
         }
     }
 
+    /// List the repositories a fine-grained personal access token request is requesting access to.
     pub async fn get_repos_for_fpat(&self, params: &str, module: &str) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -64,6 +66,7 @@ impl Github {
         }
     }
 
+    /// Approves or denies multiple pending requests to access organization resources via a fine-grained personal access token.
     pub async fn review_fpat_requests_for_org(
         &self,
         params: &str,

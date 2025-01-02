@@ -94,6 +94,7 @@ pub struct LoggingConfiguration {
     webhook: Option<webhook::Config>,
 }
 
+/// Errors encountered while trying to log something.
 #[derive(Debug)]
 pub enum LoggingError {
     #[allow(dead_code)]

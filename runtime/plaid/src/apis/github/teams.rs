@@ -6,6 +6,7 @@ use super::Github;
 use crate::apis::{github::GitHubError, ApiError};
 
 impl Github {
+    /// Remove a user from a GitHub team.
     pub async fn remove_user_from_team(&self, params: &str, module: &str) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -36,6 +37,7 @@ impl Github {
         }
     }
 
+    /// Add a user to a GitHub team.
     pub async fn add_user_to_team(&self, params: &str, module: &str) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;

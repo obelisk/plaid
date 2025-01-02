@@ -52,12 +52,17 @@ pub struct GithubConfig {
     graphql_queries: HashMap<String, String>,
 }
 
+/// Represents the configured GitHub API
 pub struct Github {
+    /// Configuration for Plaid's GitHub API
     config: GithubConfig,
+    /// Client to make requests with
     client: Octocrab,
+    /// Validators used to check parameters passed by modules
     validators: HashMap<&'static str, regex::Regex>,
 }
 
+/// All the errors that can be encountered while executing GitHub calls
 #[derive(Debug)]
 pub enum GitHubError {
     GraphQLUnserializable,

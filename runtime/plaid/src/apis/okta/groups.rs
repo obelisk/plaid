@@ -5,7 +5,7 @@ use crate::apis::ApiError;
 use super::{Okta, OktaError};
 
 impl Okta {
-
+    /// Remove a user from an Okta group
     pub async fn remove_user_from_group(&self, params: &str, _: &str) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 

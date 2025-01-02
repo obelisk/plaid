@@ -1,3 +1,5 @@
+//! This module provides a way for Plaid to log to an arbitrary webhook.
+
 use super::{LoggingError, PlaidLogger, WrappedLog};
 
 use serde::Deserialize;

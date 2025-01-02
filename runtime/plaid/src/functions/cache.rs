@@ -80,7 +80,7 @@ pub fn insert(
     }
 }
 
-/// Store data in the cache system if one is configured
+/// Get data from the cache system if one is configured
 pub fn get(
     env: FunctionEnvMut<Env>,
     key_buf: WasmPtr<u8>,

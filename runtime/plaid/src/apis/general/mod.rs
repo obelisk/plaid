@@ -16,6 +16,7 @@ use super::default_timeout_seconds;
 
 #[derive(Deserialize)]
 pub struct GeneralConfig {
+    /// Configuration for network requests
     network: network::Config,
     /// The number of seconds until an external API request times out.
     /// If no value is provided, the result of `default_timeout_seconds()` will be used.
@@ -24,10 +25,15 @@ pub struct GeneralConfig {
 }
 
 pub struct General {
+    /// General Plaid configuration
     config: GeneralConfig,
+    /// Client to make requests with
     client: Client,
+    /// Sender object for messages
     log_sender: Sender<Message>,
+    /// Sender object for messages that must be processed with a delay
     delayed_log_sender: Sender<DelayedMessage>,
+    /// Secure random generator
     system_random: SystemRandom,
 }
 

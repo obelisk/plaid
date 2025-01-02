@@ -26,7 +26,9 @@ pub struct SlackConfig {
 }
 
 pub struct Slack {
+    /// Config for the Slack API
     config: SlackConfig,
+    /// A client to make requests with
     client: Client,
 }
 

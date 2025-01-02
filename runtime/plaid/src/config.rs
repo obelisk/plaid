@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::performance::PerformanceMonitoring;
 
-use super::apis::Apis;
+use super::apis::ApiConfigs;
 use super::data::DataConfig;
 use super::loader::Configuration as LoaderConfiguration;
 use super::logging::LoggingConfiguration;
@@ -60,6 +60,7 @@ pub struct GetMode {
     /// this may be applicable to other, newer, modes.
     #[serde(default)]
     pub caching_mode: CachingMode,
+    /// How the webhook should respond to a GET request
     #[serde(deserialize_with = "response_mode_deserializer")]
     pub response_mode: ResponseMode,
 }
@@ -90,6 +91,7 @@ pub struct WebhookConfig {
     pub logbacks_allowed: LogbacksAllowed,
 }
 
+/// Configuration for a webhook server
 #[derive(Deserialize)]
 pub struct WebhookServerConfiguration {
     /// The address and port to listen on for webhooks
@@ -104,7 +106,7 @@ pub struct WebhookServerConfiguration {
 pub struct Configuration {
     /// How APIs are configured. These APIs are accessible to modules
     /// so they can take advantage of Plaid abstractions
-    pub apis: Apis,
+    pub apis: ApiConfigs,
     /// Data generators. These are systems that pull data directly rather
     /// than waiting for data to come in via Webhook
     pub data: DataConfig,
@@ -138,6 +140,7 @@ fn default_log_queue_size() -> usize {
     2048
 }
 
+/// All errors that can be encountered while configuring Plaid
 #[derive(Debug)]
 pub enum ConfigurationError {
     FileError,
@@ -171,6 +174,7 @@ impl std::fmt::Display for ConfigurationError {
 
 impl std::error::Error for ConfigurationError {}
 
+/// Deserialized for a webhook's response mode
 fn response_mode_deserializer<'de, D>(deserializer: D) -> Result<ResponseMode, D::Error>
 where
     D: de::Deserializer<'de>,
@@ -198,6 +202,8 @@ where
         }
     })
 }
+
+/// Configure Plaid with config file and secrets read from arguments (or use default values).
 pub fn configure() -> Result<Configuration, ConfigurationError> {
     let matches = Command::new("Plaid - A sandboxed automation engine")
         .version(env!("CARGO_PKG_VERSION"))

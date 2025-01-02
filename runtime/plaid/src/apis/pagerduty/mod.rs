@@ -19,8 +19,11 @@ pub struct PagerDutyConfig {
     api_timeout_seconds: u64,
 }
 
+/// Object to interact with the PagerDuty API
 pub struct PagerDuty {
+    /// Config for the PagerDuty API
     config: PagerDutyConfig,
+    /// Client to make requests with
     client: Client,
 }
 

@@ -15,13 +15,22 @@ use reqwest::Client;
 use reqwest_cookie_store::{CookieStore, CookieStoreMutex};
 use serde::{Deserialize, Serialize};
 
-/// Client for interacting with npm that groups a client for CLI operations
-/// and one for web operations
+/// Object for interacting with npm
 pub struct Npm {
+    /// Config for the npm API
     config: NpmConfig,
+    /// A client to make requests with
     client: Client,
+    /// Store for cookies, which are used to persist state across invocations
     cookie_jar: Arc<CookieStoreMutex>,
+    /// Validators which are used to check values passed by invoking modules
     validators: HashMap<&'static str, regex::Regex>,
+    /// The timestamp at which the last request was executed. This is used to determine
+    /// if cookies in the cookie jar can be reused or should be considered stale. If cookies
+    /// are stale, then a new log in flow will be executed.
+    /// This mechanism is not perfect but achieves a good balance between random failures due to
+    /// expired sessions and having to perform a fresh log in every single time (possibly, multiple
+    /// times for a given request)
     timestamp_last_request: Mutex<Option<u32>>,
 }
 
@@ -50,7 +59,7 @@ impl Npm {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-/// Credentials and secrets for interacting with npm
+/// Configuration for the npm API
 pub struct NpmConfig {
     /// Username for the npm account
     pub username: String,

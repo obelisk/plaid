@@ -10,6 +10,7 @@ use aws_sdk_kms::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// A request to sign a given message with a KMS key.
 #[derive(Deserialize)]
 struct SignRequestRequest {
     /// To specify a KMS key, use its key ID, key ARN, alias name, or alias ARN.

@@ -4,15 +4,18 @@ mod sled;
 
 use serde::Deserialize;
 
+/// Plaid's storage configuration
 #[derive(Deserialize)]
 pub struct Config {
     pub sled: Option<sled::Config>,
 }
 
+/// The storage that underpins Plaid
 pub struct Storage {
     database: Box<dyn StorageProvider + Send + Sync>,
 }
 
+/// Errors encountered while trying to use Plaid's persistent storage.
 #[derive(Debug)]
 pub enum StorageError {
     NoStorageConfigured,
@@ -36,6 +39,7 @@ impl std::fmt::Display for StorageError {
 
 impl std::error::Error for StorageError {}
 
+/// Defines the basic methods that all storage providers must offer.
 #[async_trait]
 pub trait StorageProvider {
     /// Insert a new key pair into the storage provider
