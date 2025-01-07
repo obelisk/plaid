@@ -25,6 +25,7 @@ pub enum FunctionErrors {
     CacheDisabled = -7,
     CouldNotGetAdequateMemory = -8,
     FailedToWriteGuestMemory = -9,
+    StorageLimitReached = -10,
 }
 
 #[derive(Debug)]

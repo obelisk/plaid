@@ -27,6 +27,11 @@ pub enum LogSource {
     Logback(String),
 }
 
+/// Represents how many logbacks can be triggered by the module that handles a message.
+/// This can be a finite value (u32, with 0 a valid value) or it can be unlimited.
+/// These are the TOML encodings for the two cases:
+/// * "Unlimited"
+/// * { Limited = value }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LogbacksAllowed {
     Unlimited,

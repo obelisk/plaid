@@ -60,6 +60,12 @@ okta = 200
 "example_rule.wasm" = 50
 "test_crashtest.wasm" = 150
 
+[loading.storage_size]
+default = "Unlimited"
+[loading.storage_size.log_type]
+[loading.storage_size.module_overrides]
+"test_db.wasm" = { Limited = 50 }
+
 # [apis."okta"]
 # token = ""
 # domain = ""
