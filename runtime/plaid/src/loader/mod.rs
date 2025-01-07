@@ -11,13 +11,15 @@ use std::fs::{self};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, RwLock};
 use utils::{
-    cost_function, get_module_computation_limit, get_module_page_count, read_and_configure_secrets,
-    read_and_parse_modules,
+    cost_function, get_module_computation_limit, get_module_page_count,
+    get_module_persistent_storage_limit, read_and_configure_secrets, read_and_parse_modules,
 };
 use wasmer::{
     sys::BaseTunables, CompilerConfig, Cranelift, Engine, Module, NativeEngineExt, Pages, Target,
 };
 use wasmer_middlewares::Metering;
+
+use crate::storage::Storage;
 
 /// Limit imposed on some resource
 #[derive(Deserialize)]
@@ -45,6 +47,8 @@ pub struct Configuration {
     pub computation_amount: LimitAmount,
     /// How much memory a module is allowed to use
     pub memory_page_count: LimitAmount,
+    /// How many bytes a module is allowed to store in persistent storage
+    pub storage_size: LimitAmount,
     /// The size of the LRU cache for each module. Not setting it means LRUs are disabled
     pub lru_cache_size: Option<usize>,
     /// The secrets that are available to modules. No actual secrets should be included in this map.
@@ -101,6 +105,10 @@ pub struct PlaidModule {
     pub computation_limit: u64,
     /// The maximum number of memory pages allowed to be mapped for the module
     pub page_limit: u32,
+    /// The number of bytes the module is currently saving in persistent storage
+    pub storage_current: Arc<RwLock<u64>>,
+    /// The maximum number of bytes the module can save in persistent storage
+    pub storage_limit: u64,
     /// Any defined secrets the module is allowed to access
     pub secrets: Option<HashMap<String, Vec<u8>>>,
     /// An LRU cache for the module if the runtime has allowed LRU caches for modules
@@ -130,10 +138,12 @@ impl PlaidModule {
     ///
     /// This function returns a PlaidModule with `secrets`, `cache`, and `persistent_response` set to `None.`
     /// __Ensure that you set these values if needed after calling this function__.
-    fn configure_and_compile(
+    async fn configure_and_compile(
         filename: &str,
         computation_amount: &LimitAmount,
         memory_page_count: &LimitAmount,
+        storage_amount: &LimitAmount,
+        storage: Option<Arc<Storage>>,
         module_bytes: Vec<u8>,
         log_type: &str,
         concurrency_unsafe: Option<Mutex<()>>,
@@ -144,6 +154,10 @@ impl PlaidModule {
 
         // Get the memory limit for the module
         let page_limit = get_module_page_count(memory_page_count, &filename, log_type);
+
+        // Get the persistent storage limit
+        let storage_limit =
+            get_module_persistent_storage_limit(storage_amount, &filename, log_type);
 
         let metering = Arc::new(Metering::new(computation_limit, cost_function));
         let mut compiler = Cranelift::default();
@@ -162,7 +176,14 @@ impl PlaidModule {
         })?;
         module.set_name(&filename);
 
-        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Log Type: [{log_type}]. Concurrency Safe: [{}]", concurrency_unsafe.is_none());
+        // Count bytes already in storage
+        let storage_current_bytes: u64 = match storage {
+            None => 0,
+            Some(s) => s.get_namespace_byte_size(filename).await.unwrap(),
+        };
+        let storage_current = Arc::new(RwLock::new(storage_current_bytes));
+
+        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Storage: [{storage_current_bytes}/{storage_limit} bytes used] Log Type: [{log_type}]. Concurrency Safe: [{}]", concurrency_unsafe.is_none());
         for import in module.imports() {
             info!("\tImport: {}", import.name());
         }
@@ -172,6 +193,8 @@ impl PlaidModule {
             module,
             engine,
             computation_limit,
+            storage_current,
+            storage_limit,
             page_limit,
             secrets: None,
             cache: None,
@@ -212,7 +235,10 @@ impl PlaidModules {
 }
 
 /// Load all modules, according to Plaid's configuration
-pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
+pub async fn load(
+    config: Configuration,
+    storage: Option<Arc<Storage>>,
+) -> Result<PlaidModules, ()> {
     let module_paths = fs::read_dir(config.module_dir).unwrap();
 
     let mut modules = PlaidModules::default();
@@ -260,10 +286,14 @@ pub fn load(config: Configuration) -> Result<PlaidModules, ()> {
             &filename,
             &config.computation_amount,
             &config.memory_page_count,
+            &config.storage_size,
+            storage.clone(),
             module_bytes,
             &type_,
             concurrency_safe,
-        ) else {
+        )
+        .await
+        else {
             continue;
         };
 

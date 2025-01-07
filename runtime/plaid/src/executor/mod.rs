@@ -104,6 +104,10 @@ pub struct Env {
     pub api: Arc<Api>,
     // A handle to the storage system if one is configured
     pub storage: Option<Arc<Storage>>,
+    // Number of bytes the module is currently saving in persistent storage
+    pub storage_current: Arc<RwLock<u64>>,
+    // Max number of bytes the module can save to persistent storage
+    pub storage_limit: u64,
     // A sender to the external logging system
     pub external_logging_system: Logger,
     /// Memory for host-guest communication
@@ -237,6 +241,8 @@ fn prepare_for_execution(
         message: message.create_duplicate(),
         api: api.clone(),
         storage: storage.clone(),
+        storage_current: plaid_module.storage_current.clone(),
+        storage_limit: plaid_module.storage_limit,
         external_logging_system: els.clone(),
         memory: None,
         response,
@@ -305,6 +311,43 @@ fn prepare_for_execution(
         .map_err(|_| ExecutorError::InvalidEntrypoint)?;
 
     Ok((store, instance, ep, envr))
+}
+
+/// Update bytes counter for storage used by a module
+fn update_used_storage(
+    plaid_module: &Arc<PlaidModule>,
+    env: &FunctionEnv<Env>,
+    store: &Store,
+) -> Result<(), ExecutorError> {
+    // Take the new value for used storage from the env
+    let new_used_storage = match env.as_ref(&store).storage_current.read() {
+        Ok(data) => *data,
+        Err(e) => {
+            error!(
+                "Critical error getting a read lock on used storage: {:?}",
+                e
+            );
+            return Err(ExecutorError::MemoryError(
+                "Critical error getting a read lock on used storage".to_string(),
+            ));
+        }
+    };
+    // Write the new value in the long-lived struct that represents the module
+    match plaid_module.storage_current.write() {
+        Ok(mut v) => {
+            *v = new_used_storage;
+            Ok(())
+        }
+        Err(e) => {
+            error!(
+                "Critical error getting a write lock on used storage: {:?}",
+                e
+            );
+            Err(ExecutorError::MemoryError(
+                "Critical error getting a write lock on used storage".to_string(),
+            ))
+        }
+    }
 }
 
 /// Update a module's persistent response
@@ -499,6 +542,16 @@ fn process_message_with_module(
         els.log_module_error(
             module.name.clone(),
             format!("Failed to update persistent response: {e}"),
+            message.data.clone(),
+        )
+        .unwrap();
+    }
+
+    // Update the counter for used storage
+    if let Err(e) = update_used_storage(&module, &env, &mut store) {
+        els.log_module_error(
+            module.name.clone(),
+            format!("Failed to update used storage counter: {e}"),
             message.data.clone(),
         )
         .unwrap();
