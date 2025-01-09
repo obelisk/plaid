@@ -5,8 +5,9 @@ mod utils;
 use errors::Errors;
 use limits::LimitingTunables;
 use lru::LruCache;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::fs::{self};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, RwLock};
@@ -23,13 +24,42 @@ use crate::storage::Storage;
 
 /// Limit imposed on some resource
 #[derive(Deserialize)]
-pub struct LimitAmount {
+pub struct LimitedAmount {
     /// The limit's default value
     default: u64,
     /// Override values based on log type
     log_type: HashMap<String, u64>,
     /// Override values based on module names
     module_overrides: HashMap<String, u64>,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LimitValue {
+    Unlimited,
+    Limited(u64),
+}
+
+impl Display for LimitValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LimitValue::Unlimited => write!(f, "Unlimited"),
+            LimitValue::Limited(v) => {
+                let disp = format!("Limited({v})");
+                f.write_str(&disp)
+            }
+        }
+    }
+}
+
+/// Limit imposed on some resource which also supports Unlimited
+#[derive(Deserialize)]
+pub struct LimitableAmount {
+    /// The limit's default value
+    default: LimitValue,
+    /// Override values based on log type
+    log_type: HashMap<String, LimitValue>,
+    /// Override values based on module names
+    module_overrides: HashMap<String, LimitValue>,
 }
 
 /// Configuration for loading Plaid modules
@@ -44,11 +74,11 @@ pub struct Configuration {
     /// What the log type of a module should be if it's not the first part of the filename
     pub log_type_overrides: HashMap<String, String>,
     /// How much computation a module is allowed to do
-    pub computation_amount: LimitAmount,
+    pub computation_amount: LimitedAmount,
     /// How much memory a module is allowed to use
-    pub memory_page_count: LimitAmount,
+    pub memory_page_count: LimitedAmount,
     /// How many bytes a module is allowed to store in persistent storage
-    pub storage_size: LimitAmount,
+    pub storage_size: LimitableAmount,
     /// The size of the LRU cache for each module. Not setting it means LRUs are disabled
     pub lru_cache_size: Option<usize>,
     /// The secrets that are available to modules. No actual secrets should be included in this map.
@@ -108,7 +138,7 @@ pub struct PlaidModule {
     /// The number of bytes the module is currently saving in persistent storage
     pub storage_current: Arc<RwLock<u64>>,
     /// The maximum number of bytes the module can save in persistent storage
-    pub storage_limit: u64,
+    pub storage_limit: LimitValue,
     /// Any defined secrets the module is allowed to access
     pub secrets: Option<HashMap<String, Vec<u8>>>,
     /// An LRU cache for the module if the runtime has allowed LRU caches for modules
@@ -140,9 +170,9 @@ impl PlaidModule {
     /// __Ensure that you set these values if needed after calling this function__.
     async fn configure_and_compile(
         filename: &str,
-        computation_amount: &LimitAmount,
-        memory_page_count: &LimitAmount,
-        storage_amount: &LimitAmount,
+        computation_amount: &LimitedAmount,
+        memory_page_count: &LimitedAmount,
+        storage_amount: &LimitableAmount,
         storage: Option<Arc<Storage>>,
         module_bytes: Vec<u8>,
         log_type: &str,

@@ -61,10 +61,10 @@ okta = 200
 "test_crashtest.wasm" = 150
 
 [loading.storage_size]
-default = 1_048_576 # 1 Mib
+default = "Unlimited"
 [loading.storage_size.log_type]
 [loading.storage_size.module_overrides]
-"test_db.wasm" = 50
+"test_db.wasm" = { Limited = 50 }
 
 # [apis."okta"]
 # token = ""

@@ -3,7 +3,7 @@ use crate::apis::Api;
 use crate::functions::{
     create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
 };
-use crate::loader::PlaidModule;
+use crate::loader::{LimitValue, PlaidModule};
 use crate::logging::{Logger, LoggingError};
 use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
@@ -107,7 +107,7 @@ pub struct Env {
     // Number of bytes the module is currently saving in persistent storage
     pub storage_current: Arc<RwLock<u64>>,
     // Max number of bytes the module can save to persistent storage
-    pub storage_limit: u64,
+    pub storage_limit: LimitValue,
     // A sender to the external logging system
     pub external_logging_system: Logger,
     /// Memory for host-guest communication
@@ -242,7 +242,7 @@ fn prepare_for_execution(
         api: api.clone(),
         storage: storage.clone(),
         storage_current: plaid_module.storage_current.clone(),
-        storage_limit: plaid_module.storage_limit,
+        storage_limit: plaid_module.storage_limit.clone(),
         external_logging_system: els.clone(),
         memory: None,
         response,

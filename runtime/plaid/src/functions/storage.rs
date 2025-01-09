@@ -1,6 +1,6 @@
 use wasmer::{AsStoreRef, FunctionEnvMut, WasmPtr};
 
-use crate::{executor::Env, functions::FunctionErrors};
+use crate::{executor::Env, functions::FunctionErrors, loader::LimitValue};
 
 use super::{get_memory, safely_get_memory, safely_get_string, safely_write_data_back};
 
@@ -71,7 +71,7 @@ pub fn insert(
         }
     };
 
-    // Check that adding this new data (key + value) would not bring us above the storage limit for the module
+    // Calculate the amount of storage that would be used after successfully inserting.
     // Note: we _substract_ the size of existing data. If we were to insert the new data, the old data would be overwritten.
     let used_storage = match env_data.storage_current.read() {
         Ok(data) => *data,
@@ -79,9 +79,13 @@ pub fn insert(
     };
     let would_be_used_storage =
         used_storage + key_len as u64 + value.len() as u64 - existing_data_size; // no problem with underflowing because the result will never be negative (since used_storage >= existing_data_size)
-    if would_be_used_storage > env_data.storage_limit {
-        error!("{}: Could not insert key/value with key {storage_key} as that would bring us above the configured storage limit. Used: {used_storage}, would be used: {would_be_used_storage}, limit: {}", env_data.name, env_data.storage_limit);
-        return FunctionErrors::StorageLimitReached as i32;
+
+    // If we have limited storage, this insert might fail
+    if let LimitValue::Limited(storage_limit) = env_data.storage_limit {
+        if would_be_used_storage > storage_limit {
+            error!("{}: Could not insert key/value with key {storage_key} as that would bring us above the configured storage limit. Used: {used_storage}, would be used: {would_be_used_storage}, limit: {storage_limit}", env_data.name);
+            return FunctionErrors::StorageLimitReached as i32;
+        }
     }
 
     let result = env_data.api.clone().runtime.block_on(async move {
