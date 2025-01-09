@@ -630,6 +630,7 @@ impl Npm {
                 NPMJS_COM_URL, self.config.npm_scope, team, user
             ))
             .header("Content-Type", "text/plain;charset=UTF-8")
+            .header("X-Spiferack", "1")
             .body(body)
             .send()
             .await
@@ -665,6 +666,7 @@ impl Npm {
                 "{}/settings/{}/members/{}/delete",
                 NPMJS_COM_URL, self.config.npm_scope, user
             ))
+            .header("X-Spiferack", "1")
             .json(&payload)
             .send()
             .await
