@@ -33,6 +33,21 @@ pub struct LimitedAmount {
     module_overrides: HashMap<String, u64>,
 }
 
+/// Represents the value of a limit imposed on some resource.
+/// This can be a finite value (u64, with 0 a valid value) or
+/// it can be unlimited. These are the TOML encodings for the
+/// two cases:
+/// * "Unlimited"
+/// * { Limited = value }
+/// 
+/// E.g.,
+/// ```
+/// [loading.storage_size]
+/// default = "Unlimited"
+/// [loading.storage_size.log_type]
+/// [loading.storage_size.module_overrides]
+/// "test_db.wasm" = { Limited = 50 }
+/// ```
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LimitValue {
     Unlimited,
