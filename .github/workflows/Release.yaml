@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  config_check:
+    uses: ./.github/workflows/ConfigChecker.yaml
+  
+  secrets_manager:
+    uses: ./.github/workflows/SecretsManager.yaml
+  
+  release:
+    name: Release
+    needs: [config_check, secrets_manager]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download config checker
+        uses: actions/download-artifact@v4
+        with:
+          name: config_check
+
+      - name: Download secrets manager
+        uses: actions/download-artifact@v4
+        with:
+          name: secrets_manager
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            config_check
+            secrets_manager
