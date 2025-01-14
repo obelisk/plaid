@@ -126,14 +126,29 @@ async fn json_to_aws(filename: impl Display, instance: impl Display, sm_client: 
     // Upload secrets to SM
     for secret in secrets {
         println!("Uploading {}...", secret.name);
-        sm_client
+        match sm_client
             .create_secret()
-            .name(secret.name)
+            .name(secret.name.clone())
             .kms_key_id("alias/plaid-dev-encrypt-decrypt")
             .secret_string(secret.value)
             .send()
             .await
-            .unwrap();
+        {
+            Ok(_) => {}
+            Err(e) => {
+                let err = e.into_service_error();
+                // If it fails because a secret is already there, just log it but don't fail.
+                // Otherwise it is a real failure.
+                if err.is_resource_exists_exception() {
+                    println!("Secret with name {} already exists in Secrets Manager. Skipping (NOT overwriting) it...", secret.name);
+                } else {
+                    panic!(
+                        "Error while uploading secrets to AWS Secrets Manager: {}",
+                        err
+                    );
+                }
+            }
+        }
     }
 }
 
