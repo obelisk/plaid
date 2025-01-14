@@ -105,6 +105,7 @@ fn parse_args() -> Options {
     }
 }
 
+/// Read a file with Plaid secrets and upload them to AWS Secrets Manager, with appropriate names.
 async fn json_to_aws(filename: impl Display, instance: impl Display, sm_client: &Client) {
     let secret_name_regex = regex::Regex::new(r"^\{plaid-secret\{([a-zA-Z0-9_-]+)\}\}$").unwrap();
 
@@ -136,6 +137,7 @@ async fn json_to_aws(filename: impl Display, instance: impl Display, sm_client: 
     }
 }
 
+/// Fetch secrets from AWS Secrets Manager and assemble them in a file that Plaid can consume
 async fn aws_to_json(filename: impl Display, instance: impl Display, sm_client: &Client) {
     println!("Fetching all secrets whose name starts with plaid-{instance}");
     let mut next_token: Option<String> = Some("".to_string());
