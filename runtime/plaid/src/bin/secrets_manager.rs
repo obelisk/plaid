@@ -5,20 +5,26 @@ use aws_sdk_secretsmanager::{
     types::{Filter, FilterNameStringType},
     Client,
 };
-use clap::{Arg, ArgGroup, Command};
+use clap::{Arg, ArgAction, ArgGroup, Command, Id};
 use serde_json::Value;
 
+/// The operation we are performing. It can be
+/// * Reading secrets from a JSON file and uploading them to Secrets Manager
+/// * Fetching secrets from Secrets Manager and writing them to a JSON file
 enum Operation {
     JsonToAws(String),
     AwsToJson(String),
 }
 
+/// CLI parameters
 struct Options {
     instance: String,
     region: String,
+    kms_key_id: String,
     operation: Operation,
 }
 
+/// A secret used by the Plaid system
 struct PlaidSecret {
     name: String,
     value: String,
@@ -27,9 +33,15 @@ struct PlaidSecret {
 /// Take something that looks like `{plaid-secret{secret-name}}`
 /// and extract `secret-name`. Then prepend it with `plaid-plaid-` or `plaid-ingress-`
 /// depending on which instance we are processing for.
-fn json_name_to_secret_name(r: &regex::Regex, instance: impl Display, s: impl Display) -> String {
+///
+/// Note - This method will panic if the input string is not in the expected format.
+fn json_name_to_secret_name(
+    r: &regex::Regex,
+    instance: impl Display,
+    s: impl AsRef<str>,
+) -> String {
     let inner_name = r
-        .captures(&s.to_string())
+        .captures(s.as_ref())
         .unwrap()
         .get(1)
         .unwrap()
@@ -40,6 +52,8 @@ fn json_name_to_secret_name(r: &regex::Regex, instance: impl Display, s: impl Di
 
 /// Take something that looks like `plaid-plaid-<something>` or `plaid-ingress-<something>`
 /// and turn it into `{plaid-secret{something}}`, which is the format expected in secrets.json
+///
+/// Note - This method will panic if the input string is not in the expected format.
 fn secret_name_to_json_name(instance: impl Display, s: impl Display) -> String {
     let input = s.to_string();
     let stripped = input.strip_prefix(&format!("plaid-{instance}-")).unwrap();
@@ -49,65 +63,107 @@ fn secret_name_to_json_name(instance: impl Display, s: impl Display) -> String {
 /// Parse the CLI arguments
 fn parse_args() -> Options {
     let matches = Command::new("Plaid Secrets Manager")
-        .version("0.1.0")
+        .version("0.14.0")
         .about("A simple tool that helps with managing Plaid secrets")
-        .arg(Arg::new("instance")
-            .long("instance")
-            .help("Specifies the type of instance (plaid or ingress)")
-            .required(true)
-            .value_parser(["plaid", "ingress"])
+        .arg(
+            Arg::new("plaid")
+                .long("plaid")
+                .action(ArgAction::SetTrue)
+                .help("Operate on the plaid instance (i.e., the one not exposed to the internet)"),
         )
-        .arg(Arg::new("region")
-            .long("region")
-            .help("AWS region")
-            .required(false)
+        .arg(
+            Arg::new("ingress")
+                .long("ingress")
+                .action(ArgAction::SetTrue)
+                .help("Operate on the ingress instance (i.e., the one exposed to the internet)"),
+        )
+        .arg(
+            Arg::new("other")
+                .long("other")
+                .value_name("INSTANCE")
+                .help("Operate on another type of instance, to be specified"),
+        )
+        .arg(
+            Arg::new("region")
+                .long("region")
+                .help("AWS region")
+                .required(false)
+                .default_value("us-east-1"),
+        )
+        .arg(
+            Arg::new("kms_key_id")
+                .long("kms_key_id")
+                .help("ID of the KMS key used to encrypt secrets uploaded to Secrets Manager")
+                .required(false)
+                .default_value("alias/plaid-dev-encrypt-decrypt"),
         )
         .arg(
             Arg::new("json_to_aws")
                 .long("json_to_aws")
-                .help("Reads a secrets.json file and uploads secrets to AWS Secrets Manager")
-                .value_name("INPUT_FILE")
+                .help("Reads a secrets file and uploads secrets to AWS Secrets Manager")
+                .value_name("INPUT_FILE"),
         )
         .arg(
             Arg::new("aws_to_json")
                 .long("aws_to_json")
-                .help("Reads secrets from AWS and crafts a secrets.json file ready to be consumed by Plaid")
-                .value_name("OUTPUT_FILE")
+                .help("Reads secrets from AWS and crafts a file ready to be consumed by Plaid")
+                .value_name("OUTPUT_FILE"),
         )
         .group(
-            ArgGroup::new("exclusive")
+            ArgGroup::new("action")
                 .args(["json_to_aws", "aws_to_json"])
                 .multiple(false)
-                .required(true)
+                .required(true),
+        )
+        .group(
+            ArgGroup::new("instance")
+                .args(["plaid", "ingress", "other"])
+                .multiple(false)
+                .required(true),
         )
         .get_matches();
 
-    let instance = matches.get_one::<String>("instance").unwrap().to_string(); // unwrap OK because the param is required
-    let region = matches
-        .get_one::<String>("region")
-        .unwrap_or(&"us-east-1".to_string())
-        .to_string();
-    let operation = match matches.get_one::<String>("json_to_aws") {
-        Some(f) => Operation::JsonToAws(f.to_string()),
-        None => {
-            let filename = matches
-                .get_one::<String>("aws_to_json")
-                .unwrap()
-                .to_string();
+    let region = matches.get_one::<String>("region").unwrap().to_string(); // unwrap OK because it has a default value
+    let kms_key_id = matches.get_one::<String>("kms_key_id").unwrap().to_string(); // unwrap OK because it has a default value
+
+    let operation_id = matches.get_one::<Id>("action").unwrap().as_str();
+    let operation = match operation_id {
+        "json_to_aws" => {
+            let filename = matches.get_one::<String>(operation_id).unwrap().to_string();
+            Operation::JsonToAws(filename)
+        }
+        "aws_to_json" => {
+            let filename = matches.get_one::<String>(operation_id).unwrap().to_string();
             Operation::AwsToJson(filename)
         }
+        _ => unreachable!(), // impossible: only the values above are accepted
+    };
+
+    let instance_id = matches.get_one::<Id>("instance").unwrap().as_str();
+    let instance = match instance_id {
+        "plaid" | "ingress" => instance_id.to_string(),
+        "other" => matches.get_one::<String>(instance_id).unwrap().to_string(),
+        _ => unreachable!(),
     };
 
     Options {
         instance,
         region,
+        kms_key_id,
         operation,
     }
 }
 
 /// Read a file with Plaid secrets and upload them to AWS Secrets Manager, with appropriate names.
-async fn json_to_aws(filename: impl Display, instance: impl Display, sm_client: &Client) {
-    let secret_name_regex = regex::Regex::new(r"^\{plaid-secret\{([a-zA-Z0-9_-]+)\}\}$").unwrap();
+///
+/// Note - This method will panic if the file does not exist or contains invalid/unexpected data.
+async fn json_to_aws(
+    filename: impl Display,
+    instance: impl Display,
+    sm_client: &Client,
+    kms_key_id: impl Display,
+) {
+    let secret_name_regex = regex::Regex::new(r"^\{plaid-secret\{([a-zA-Z0-9_-]+)\}\}$").unwrap(); // unwrap OK: hardcoded input
 
     // Read and parse the file's content
     let contents = std::fs::read_to_string(filename.to_string()).unwrap();
@@ -118,7 +174,7 @@ async fn json_to_aws(filename: impl Display, instance: impl Display, sm_client: 
     let mut secrets = vec![];
     for (key, value) in value {
         secrets.push(PlaidSecret {
-            name: json_name_to_secret_name(&secret_name_regex, instance.to_string().clone(), key),
+            name: json_name_to_secret_name(&secret_name_regex, instance.to_string(), key),
             value: value.as_str().unwrap().to_string(),
         });
     }
@@ -129,7 +185,7 @@ async fn json_to_aws(filename: impl Display, instance: impl Display, sm_client: 
         match sm_client
             .create_secret()
             .name(secret.name.clone())
-            .kms_key_id("alias/plaid-dev-encrypt-decrypt")
+            .kms_key_id(kms_key_id.to_string())
             .secret_string(secret.value)
             .send()
             .await
@@ -152,19 +208,15 @@ async fn json_to_aws(filename: impl Display, instance: impl Display, sm_client: 
     }
 }
 
-/// Fetch secrets from AWS Secrets Manager and assemble them in a file that Plaid can consume
+/// Fetch secrets from AWS Secrets Manager and assemble them in a file that Plaid can consume.
+///
+/// Note - This method will panic if the data retrieved from Secrets Manager is invalid or if the file cannot be written.
 async fn aws_to_json(filename: impl Display, instance: impl Display, sm_client: &Client) {
     println!("Fetching all secrets whose name starts with plaid-{instance}");
-    let mut next_token: Option<String> = Some("".to_string());
-    let mut first_request = true;
     let mut retrieved_secrets = vec![];
+    let mut next_token = None::<String>;
 
-    while next_token.is_some() {
-        // The first request is special: we want next_token to be None
-        if first_request {
-            first_request = false;
-            next_token = None;
-        }
+    loop {
         let res = sm_client
             .list_secrets()
             .filters(
@@ -197,6 +249,11 @@ async fn aws_to_json(filename: impl Display, instance: impl Display, sm_client: 
                 name: s.name.unwrap(),
                 value,
             });
+        }
+
+        // Exit the loop if we have no more pages
+        if next_token.is_none() {
+            break;
         }
     }
 
@@ -231,7 +288,13 @@ async fn main() {
 
     match cli_options.operation {
         Operation::JsonToAws(filename) => {
-            json_to_aws(filename, cli_options.instance, &sm_client).await
+            json_to_aws(
+                filename,
+                cli_options.instance,
+                &sm_client,
+                cli_options.kms_key_id,
+            )
+            .await
         }
         Operation::AwsToJson(filename) => {
             aws_to_json(filename, cli_options.instance, &sm_client).await

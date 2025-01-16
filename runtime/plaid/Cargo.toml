@@ -14,7 +14,7 @@ alkali = "0.3.0"
 async-trait = "0.1.56"
 aws-sdk-secretsmanager = "1.57.0"
 base64 = "0.13"
-clap = { version = "4", features = ["std"] }
+clap = { version = "4", default-features = false, features = ["std", "help", "usage"] }
 crossbeam-channel = "0.5"
 env_logger = "0.8"
 flate2 = "1.0"
