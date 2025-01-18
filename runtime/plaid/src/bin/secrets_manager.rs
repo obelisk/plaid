@@ -22,6 +22,7 @@ struct Options {
     region: String,
     kms_key_id: String,
     operation: Operation,
+    overwrite: bool,
 }
 
 /// A secret used by the Plaid system
@@ -109,6 +110,12 @@ fn parse_args() -> Options {
                 .help("Reads secrets from AWS and crafts a file ready to be consumed by Plaid")
                 .value_name("OUTPUT_FILE"),
         )
+        .arg(
+            Arg::new("overwrite")
+                .long("overwrite")
+                .help("Warning - Overwrite secrets or files with same name")
+                .action(ArgAction::SetTrue),
+        )
         .group(
             ArgGroup::new("action")
                 .args(["json_to_aws", "aws_to_json"])
@@ -125,6 +132,7 @@ fn parse_args() -> Options {
 
     let region = matches.get_one::<String>("region").unwrap().to_string(); // unwrap OK because it has a default value
     let kms_key_id = matches.get_one::<String>("kms_key_id").unwrap().to_string(); // unwrap OK because it has a default value
+    let overwrite = matches.get_one::<bool>("overwrite").unwrap(); // unwrap OK: defaults to false
 
     let operation_id = matches.get_one::<Id>("action").unwrap().as_str();
     let operation = match operation_id {
@@ -151,6 +159,7 @@ fn parse_args() -> Options {
         region,
         kms_key_id,
         operation,
+        overwrite: *overwrite,
     }
 }
 
@@ -162,6 +171,7 @@ async fn json_to_aws(
     instance: impl Display,
     sm_client: &Client,
     kms_key_id: impl Display,
+    overwrite: bool,
 ) {
     let secret_name_regex = regex::Regex::new(r"^\{plaid-secret\{([a-zA-Z0-9_-]+)\}\}$").unwrap(); // unwrap OK: hardcoded input
 
@@ -187,6 +197,7 @@ async fn json_to_aws(
             .name(secret.name.clone())
             .kms_key_id(kms_key_id.to_string())
             .secret_string(secret.value)
+            .force_overwrite_replica_secret(overwrite)
             .send()
             .await
         {
@@ -211,7 +222,20 @@ async fn json_to_aws(
 /// Fetch secrets from AWS Secrets Manager and assemble them in a file that Plaid can consume.
 ///
 /// Note - This method will panic if the data retrieved from Secrets Manager is invalid or if the file cannot be written.
-async fn aws_to_json(filename: impl Display, instance: impl Display, sm_client: &Client) {
+async fn aws_to_json(
+    filename: impl Display,
+    instance: impl Display,
+    sm_client: &Client,
+    overwrite: bool,
+) {
+    // If the file exists and we don't want to overwrite it, then exit early
+    let filename = filename.to_string();
+    let path = std::path::Path::new(&filename);
+    if path.exists() && !overwrite {
+        println!("The file already exists. If you want to overwrite it, rerun with --overwrite");
+        return;
+    }
+
     println!("Fetching all secrets whose name starts with plaid-{instance}");
     let mut retrieved_secrets = vec![];
     let mut next_token = None::<String>;
@@ -271,7 +295,7 @@ async fn aws_to_json(filename: impl Display, instance: impl Display, sm_client: 
 
     // Write to file
     let out_string = serde_json::to_string(&out_value).unwrap();
-    let mut outfile = File::create(&filename.to_string()).unwrap();
+    let mut outfile = File::create(path).unwrap();
     writeln!(outfile, "{out_string}").unwrap();
     println!("Secrets written to {filename}");
 }
@@ -293,11 +317,18 @@ async fn main() {
                 cli_options.instance,
                 &sm_client,
                 cli_options.kms_key_id,
+                cli_options.overwrite,
             )
             .await
         }
         Operation::AwsToJson(filename) => {
-            aws_to_json(filename, cli_options.instance, &sm_client).await
+            aws_to_json(
+                filename,
+                cli_options.instance,
+                &sm_client,
+                cli_options.overwrite,
+            )
+            .await
         }
     }
 }
