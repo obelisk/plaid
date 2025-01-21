@@ -143,9 +143,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         for requested_header in webhook_configuration.headers.iter() {
                             // TODO: Investigate if this should be get_all?
                             // Without this we don't support receiving multiple headers with the same name
-                            // I don't know if this is an issue or not, practicially, or if there are security implications.
+                            // I don't know if this is an issue or not, practically, or if there are security implications.
                             if let Some(value) = headers.get(requested_header) {
-                                message.accessory_data.insert(requested_header.to_string(), value.as_bytes().to_vec());
+                                message.headers.insert(requested_header.to_string(), value.as_bytes().to_vec());
                             }
                         }
 
@@ -260,7 +260,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let message = Message {
                                     type_: name.to_string(),
                                     data: String::new().into_bytes(),
-                                    accessory_data: query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
+                                    headers: HashMap::new(),
+                                    query_params: query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
                                     source,
                                     logbacks_allowed,
                                     response_sender: Some(response_send),

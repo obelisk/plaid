@@ -353,10 +353,25 @@ pub fn to_api_function(
         "fetch_data_and_source" => {
             Function::new_typed_with_env(&mut store, &env, super::message::fetch_data_and_source)
         }
-        "fetch_accessory_data_by_name" => Function::new_typed_with_env(
+        "get_accessory_data" => Function::new_typed_with_env(
             &mut store,
             &env,
-            super::message::fetch_accessory_data_by_name,
+            super::runtime_data::get_accessory_data,
+        ),
+        "get_secrets" => Function::new_typed_with_env(
+            &mut store,
+            &env,
+            super::runtime_data::get_secrets,
+        ),
+        "get_headers" => Function::new_typed_with_env(
+            &mut store,
+            &env,
+            super::message::get_headers,
+        ),
+        "get_query_params" => Function::new_typed_with_env(
+            &mut store,
+            &env,
+            super::message::get_query_params,
         ),
         "fetch_random_bytes" => {
             Function::new_typed_with_env(&mut store, &env, super::internal::fetch_random_bytes)

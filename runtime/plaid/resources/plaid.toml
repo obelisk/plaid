@@ -27,10 +27,27 @@ lru_cache_size = 200
 "test_sshcerts_usage.wasm" = 1024
 "test_logback.wasm" = 1024
 "test_mnr.wasm" = 1024
+"test_get_everything.wasm" = 1024
+
+[loading.universal_accessory_data]
+"key_1" = "value_1"
+"key_2" = "value_2"
+"key_4" = "value_4_ignored"
+
+[loading.accessory_data_log_type_overrides.test_geteverything]
+"key_1" = "value_1_intermediate"
+"key_4" = "value_4"
+
+[loading.accessory_data_file_overrides."test_get_everything.wasm"]
+"key_1" = "value_1_new"
+"key_3" = "value_3"
 
 [loading.secrets]
 [loading.secrets."testing"]
 "test_secret" = "{plaid-secret{test-secret}}"
+
+[loading.secrets."test_geteverything"]
+"my_secret" = "verySecureSecret"
 
 [loading.log_type_overrides]
 "test_time.wasm" = "time"
@@ -42,6 +59,7 @@ lru_cache_size = 200
 "test_fileopen.wasm" = "test_fileopen"
 "test_random.wasm" = "test_random"
 "test_mnr.wasm" = "test_mnr"
+"test_get_everything.wasm" = "test_geteverything"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -77,7 +95,7 @@ verb = "post"
 uri = "http://localhost:8998/response"
 return_body = true
 return_code = true
-allowed_rules = ["test_time.wasm", "test_logback.wasm", "test_db.wasm", "test_fileopen.wasm", "test_random.wasm", "test_mnr.wasm"]
+allowed_rules = ["test_time.wasm", "test_logback.wasm", "test_db.wasm", "test_fileopen.wasm", "test_random.wasm", "test_mnr.wasm", "test_get_everything.wasm"]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 
@@ -268,6 +286,14 @@ headers = []
 [webhooks."internal".webhooks."testmnr"]
 log_type = "test_mnr"
 headers = []
+
+[webhooks."internal".webhooks."testgeteverything"]
+log_type = "test_geteverything"
+headers = ["Authorization", "my_secret"]
+[webhooks."internal".webhooks."testgeteverything".get_mode]
+response_mode = "rule:test_get_everything.wasm"
+[webhooks."internal".webhooks."testgeteverything".get_mode.caching_mode]
+type = "None"
 
 # End webhooks for tests
 
