@@ -39,7 +39,7 @@ pub struct LimitedAmount {
 /// two cases:
 /// * "Unlimited"
 /// * { Limited = value }
-/// 
+///
 /// E.g.,
 /// ```
 /// [loading.storage_size]
@@ -99,7 +99,19 @@ pub struct Configuration {
     /// The secrets that are available to modules. No actual secrets should be included in this map.
     /// Instead, the values here should be names of secrets whose values are present in
     /// the secrets file. This makes it possible for to check in your Plaid config without exposing secrets.
+    /// The mapping is `{log_type -> {secret_name -> secret_value}}`.
     pub secrets: HashMap<String, HashMap<String, String>>,
+    /// Accessory data which is available to all rules (unless overridden by the dedicated override config).
+    /// The mapping is `{key -> value}``
+    pub universal_accessory_data: Option<HashMap<String, String>>,
+    /// Per-log-type accessory data that is added to universal accessory data for the given log type. In case
+    /// of a name clash, this takes precedence.
+    /// The mapping is `{log_type -> {key -> value}}`
+    pub accessory_data_log_type_overrides: HashMap<String, HashMap<String, String>>,
+    /// Per-rule accessory data that is added to universal accessory data and per-log-type accessory data. In
+    /// case of a name clash, this takes precedence over everything else.
+    /// The mapping is `{rule_file_name -> {key -> value}}`
+    pub accessory_data_file_overrides: HashMap<String, HashMap<String, String>>,
     /// See persistent_response_size in PlaidModule for an explanation on how to use this
     pub persistent_response_size: HashMap<String, usize>,
 }
@@ -154,6 +166,8 @@ pub struct PlaidModule {
     pub storage_current: Arc<RwLock<u64>>,
     /// The maximum number of bytes the module can save in persistent storage
     pub storage_limit: LimitValue,
+    /// Any additional data the module is given at loading time
+    pub accessory_data: Option<HashMap<String, Vec<u8>>>,
     /// Any defined secrets the module is allowed to access
     pub secrets: Option<HashMap<String, Vec<u8>>>,
     /// An LRU cache for the module if the runtime has allowed LRU caches for modules
@@ -241,6 +255,7 @@ impl PlaidModule {
             storage_current,
             storage_limit,
             page_limit,
+            accessory_data: None,
             secrets: None,
             cache: None,
             persistent_response: None,
@@ -284,7 +299,7 @@ pub async fn load(
     config: Configuration,
     storage: Option<Arc<Storage>>,
 ) -> Result<PlaidModules, ()> {
-    let module_paths = fs::read_dir(config.module_dir).unwrap();
+    let module_paths = fs::read_dir(config.module_dir.clone()).unwrap();
 
     let mut modules = PlaidModules::default();
 
@@ -365,6 +380,8 @@ pub async fn load(
         plaid_module.cache = cache;
         plaid_module.persistent_response = persistent_response;
         plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
+        plaid_module.accessory_data =
+            module_accessory_data(&config, &plaid_module.name, &type_);
 
         // Put it in an Arc because we're going to have multiple references to it
         let plaid_module = Arc::new(plaid_module);
@@ -381,4 +398,45 @@ pub async fn load(
     }
 
     Ok(modules)
+}
+
+/// Read the loading configuration and some data about the module, and return the optional
+/// accessory data that the module will have access to.
+fn module_accessory_data(
+    config: &Configuration,
+    filename: &str,
+    logtype: &str,
+) -> Option<HashMap<String, Vec<u8>>> {
+    // If we have some universal accessory data, then we set it...
+    let mut accessory_data: Option<HashMap<String, Vec<u8>>> = match config.universal_accessory_data
+    {
+        Some(ref uad) => Some(
+            uad.iter()
+                .map(|v| (v.0.to_string(), v.1.as_bytes().to_vec()))
+                .collect(),
+        ),
+        None => None,
+    };
+
+    // ... then we add entries which are specified in the per-log-type accessory data, overwriting those with the same name.
+    if let Some(logtype_overrides) = config.accessory_data_log_type_overrides.get(logtype) {
+        // If we already had accessory data, start from there. Otherwise, start from an empty map
+        let mut tmp_accessory_data = accessory_data.unwrap_or(HashMap::new());
+        for (key, value) in logtype_overrides {
+            tmp_accessory_data.insert(key.to_string(), value.as_bytes().to_vec());
+        }
+        accessory_data = Some(tmp_accessory_data);
+    }
+
+    // ... then we add entries which are specified in the per-rule accessory data, overwriting those with the same name.
+    if let Some(file_overrides) = config.accessory_data_file_overrides.get(filename) {
+        // If we already had accessory data, start from there. Otherwise, start from an empty map
+        let mut tmp_accessory_data = accessory_data.unwrap_or(HashMap::new());
+        for (key, value) in file_overrides {
+            tmp_accessory_data.insert(key.to_string(), value.as_bytes().to_vec());
+        }
+        accessory_data = Some(tmp_accessory_data);
+    }
+
+    accessory_data
 }

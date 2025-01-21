@@ -100,58 +100,70 @@ pub fn get_time() -> u32 {
     unsafe { get_time() }
 }
 
-pub fn get_accessory_data_by_name(name: &str) -> Result<String, PlaidFunctionError> {
-    extern "C" {
-        fn fetch_accessory_data_by_name(
-            name: *const u8,
-            name_len: usize,
-            data_buffer: *mut u8,
-            buffer_size: u32,
-        ) -> i32;
-    }
+macro_rules! generate_string_getter {
+    ($what:ident) => {
+        paste::item! {
+            #[doc = "Retrieve an item from the `" $what "` which are associated to this request, specifying the item's name"]
+            pub fn [<get_ $what>](name: &str) -> Result<String, PlaidFunctionError> {
+                extern "C" {
+                    fn [<get_ $what>](
+                        name: *const u8,
+                        name_len: usize,
+                        data_buffer: *mut u8,
+                        buffer_size: u32,
+                    ) -> i32;
+                }
 
-    let name_bytes = name.as_bytes().to_vec();
+                let name_bytes = name.as_bytes().to_vec();
 
-    let buffer_size = unsafe {
-        fetch_accessory_data_by_name(
-            name_bytes.as_ptr(),
-            name_bytes.len(),
-            vec![].as_mut_ptr(),
-            0,
-        )
+                let buffer_size = unsafe {
+                    [<get_ $what>](
+                        name_bytes.as_ptr(),
+                        name_bytes.len(),
+                        vec![].as_mut_ptr(),
+                        0,
+                    )
+                };
+
+                let buffer_size = if buffer_size < 0 {
+                    return Err(buffer_size.into());
+                } else {
+                    buffer_size as u32
+                };
+
+                let mut data_buffer = vec![0; buffer_size as usize];
+
+                let copied_size = unsafe {
+                    [<get_ $what>](
+                        name_bytes.as_ptr(),
+                        name_bytes.len(),
+                        data_buffer.as_mut_ptr(),
+                        buffer_size,
+                    )
+                };
+                let copied_size = if copied_size < 0 {
+                    return Err(copied_size.into());
+                } else {
+                    copied_size as u32
+                };
+
+                if copied_size != buffer_size {
+                    return Err(PlaidFunctionError::InternalApiError);
+                }
+
+                match String::from_utf8(data_buffer) {
+                    Ok(s) => Ok(s),
+                    Err(_) => Err(PlaidFunctionError::ParametersNotUtf8),
+                }
+            }
+        }
     };
-
-    let buffer_size = if buffer_size < 0 {
-        return Err(buffer_size.into());
-    } else {
-        buffer_size as u32
-    };
-
-    let mut data_buffer = vec![0; buffer_size as usize];
-
-    let copied_size = unsafe {
-        fetch_accessory_data_by_name(
-            name_bytes.as_ptr(),
-            name_bytes.len(),
-            data_buffer.as_mut_ptr(),
-            buffer_size,
-        )
-    };
-    let copied_size = if copied_size < 0 {
-        return Err(copied_size.into());
-    } else {
-        copied_size as u32
-    };
-
-    if copied_size != buffer_size {
-        return Err(PlaidFunctionError::InternalApiError);
-    }
-
-    match String::from_utf8(data_buffer) {
-        Ok(s) => Ok(s),
-        Err(_) => Err(PlaidFunctionError::ParametersNotUtf8),
-    }
 }
+
+generate_string_getter!(accessory_data);
+generate_string_getter!(secrets);
+generate_string_getter!(headers);
+generate_string_getter!(query_params);
 
 /// Get the persistent response set by a previous invocation
 /// of the module
