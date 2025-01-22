@@ -26,7 +26,10 @@ pub fn insert(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in storage_insert: {:?}", env_data.name, e);
+            error!(
+                "{}: Memory error in storage_insert: {:?}",
+                env_data.module.name, e
+            );
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -34,7 +37,10 @@ pub fn insert(
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in storage_insert: {:?}", env_data.name, e);
+            error!(
+                "{}: Key error in storage_insert: {:?}",
+                env_data.module.name, e
+            );
             return FunctionErrors::ParametersNotUtf8 as i32;
         }
     };
@@ -43,7 +49,10 @@ pub fn insert(
     let value = match safely_get_memory(&memory_view, value_buf, value_buf_len) {
         Ok(d) => d,
         Err(e) => {
-            error!("{}: Value error in storage_insert: {:?}", env_data.name, e);
+            error!(
+                "{}: Value error in storage_insert: {:?}",
+                env_data.module.name, e
+            );
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -51,6 +60,17 @@ pub fn insert(
     let storage_key = key.clone();
     let get_key = key.clone();
     let key_len = storage_key.as_bytes().len();
+
+    // Get a lock on the storage counter for the module that is processing this message.
+    // This ensures no race conditions if multiple instances of the same module are running in parallel.
+    // The guard will go out of scope at the end of this method, thus releasing the lock.
+    let mut storage_current = match env_data.module.storage_current.write() {
+        Ok(g) => g,
+        Err(e) => {
+            error!("Critical error getting a lock on used storage: {:?}", e);
+            return FunctionErrors::InternalApiError as i32;
+        }
+    };
 
     // We check if this insert would overwrite some existing data. If so, we need to take that into account when
     // computing the storage that would be occupied at the end of the insert operation.
@@ -60,7 +80,7 @@ pub fn insert(
         .api
         .clone()
         .runtime
-        .block_on(async move { storage.get(&env_data.name, &get_key).await })
+        .block_on(async move { storage.get(&env_data.module.name, &get_key).await })
     {
         Ok(data) => match data {
             None => 0u64,
@@ -73,42 +93,27 @@ pub fn insert(
 
     // Calculate the amount of storage that would be used after successfully inserting.
     // Note: we _substract_ the size of existing data. If we were to insert the new data, the old data would be overwritten.
-    let used_storage = match env_data.storage_current.read() {
-        Ok(data) => *data,
-        Err(_) => panic!(),
-    };
     let would_be_used_storage =
-        used_storage + key_len as u64 + value.len() as u64 - existing_data_size; // no problem with underflowing because the result will never be negative (since used_storage >= existing_data_size)
+        *storage_current + key_len as u64 + value.len() as u64 - existing_data_size; // no problem with underflowing because the result will never be negative (since used_storage >= existing_data_size)
 
     // If we have limited storage, this insert might fail
-    if let LimitValue::Limited(storage_limit) = env_data.storage_limit {
+    if let LimitValue::Limited(storage_limit) = env_data.module.storage_limit {
         if would_be_used_storage > storage_limit {
-            error!("{}: Could not insert key/value with key {storage_key} as that would bring us above the configured storage limit. Used: {used_storage}, would be used: {would_be_used_storage}, limit: {storage_limit}", env_data.name);
+            error!("{}: Could not insert key/value with key {storage_key} as that would bring us above the configured storage limit.", env_data.module.name);
             return FunctionErrors::StorageLimitReached as i32;
         }
     }
 
     let result = env_data.api.clone().runtime.block_on(async move {
         storage
-            .insert(env_data.name.clone(), storage_key, value)
+            .insert(env_data.module.name.clone(), storage_key, value)
             .await
     });
 
     match result {
         Ok(data) => {
             // The insertion went fine: update counter for used storage
-            match env_data.storage_current.write() {
-                Ok(mut storage) => {
-                    *storage = would_be_used_storage;
-                }
-                Err(e) => {
-                    error!(
-                        "Critical error getting a write lock on used storage: {:?}",
-                        e
-                    );
-                    return FunctionErrors::InternalApiError as i32;
-                }
-            }
+            *storage_current = would_be_used_storage;
             match data {
                 Some(data) => {
                     // If the data is too large to fit in the buffer that was passed to us. Unfortunately this is a somewhat
@@ -121,7 +126,7 @@ pub fn insert(
                         Err(e) => {
                             error!(
                                 "{}: Data write error in storage_insert: {:?}",
-                                env_data.name, e
+                                env_data.module.name, e
                             );
                             e as i32
                         }
@@ -136,7 +141,7 @@ pub fn insert(
         Err(e) => {
             error!(
                 "There was a storage system error when key [{key}] was accessed by [{}]: {e}",
-                env_data.name
+                env_data.module.name
             );
             return FunctionErrors::InternalApiError as i32;
         }
@@ -163,7 +168,10 @@ pub fn get(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in storage_get: {:?}", env_data.name, e);
+            error!(
+                "{}: Memory error in storage_get: {:?}",
+                env_data.module.name, e
+            );
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -171,7 +179,10 @@ pub fn get(
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in storage_get: {:?}", env_data.name, e);
+            error!(
+                "{}: Key error in storage_get: {:?}",
+                env_data.module.name, e
+            );
             return FunctionErrors::ParametersNotUtf8 as i32;
         }
     };
@@ -179,7 +190,7 @@ pub fn get(
         .api
         .clone()
         .runtime
-        .block_on(async move { storage.get(&env_data.name, &key).await });
+        .block_on(async move { storage.get(&env_data.module.name, &key).await });
 
     match result {
         Ok(Some(data)) => {
@@ -188,7 +199,7 @@ pub fn get(
                 Err(e) => {
                     error!(
                         "{}: Data write error in storage_get: {:?}",
-                        env_data.name, e
+                        env_data.module.name, e
                     );
                     e as i32
                 }
@@ -222,7 +233,7 @@ pub fn list_keys(
         Err(e) => {
             error!(
                 "{}: Memory error in storage_list_keys: {:?}",
-                env_data.name, e
+                env_data.module.name, e
             );
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
@@ -233,14 +244,14 @@ pub fn list_keys(
         Err(e) => {
             error!(
                 "{}: Prefix error in storage_list_keys: {:?}",
-                env_data.name, e
+                env_data.module.name, e
             );
             return FunctionErrors::ParametersNotUtf8 as i32;
         }
     };
     let result = env_data.api.clone().runtime.block_on(async move {
         storage
-            .list_keys(&env_data.name, Some(prefix.as_str()))
+            .list_keys(&env_data.module.name, Some(prefix.as_str()))
             .await
     });
 
@@ -251,7 +262,7 @@ pub fn list_keys(
                 Err(e) => {
                     error!(
                         "Could not serialize keys for namespaces {}: {e}",
-                        &env_data.name
+                        &env_data.module.name
                     );
                     return 0;
                 }
@@ -267,14 +278,17 @@ pub fn list_keys(
                 Err(e) => {
                     error!(
                         "{}: Data write error in storage_get: {:?}",
-                        env_data.name, e
+                        env_data.module.name, e
                     );
                     e as i32
                 }
             }
         }
         Err(e) => {
-            error!("Could not list keys for namespace {}: {e}", &env_data.name);
+            error!(
+                "Could not list keys for namespace {}: {e}",
+                &env_data.module.name
+            );
             return 0;
         }
     }
@@ -300,15 +314,32 @@ pub fn delete(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in storage_delete: {:?}", env_data.name, e);
+            error!(
+                "{}: Memory error in storage_delete: {:?}",
+                env_data.module.name, e
+            );
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
+        }
+    };
+
+    // Get a lock on the storage counter for the module that is processing this message.
+    // This ensures no race conditions if multiple instances of the same module are running in parallel.
+    // The guard will go out of scope at the end of this method, thus releasing the lock.
+    let mut storage_current = match env_data.module.storage_current.write() {
+        Ok(g) => g,
+        Err(e) => {
+            error!("Critical error getting a lock on used storage: {:?}", e);
+            return FunctionErrors::InternalApiError as i32;
         }
     };
 
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in storage_delete: {:?}", env_data.name, e);
+            error!(
+                "{}: Key error in storage_delete: {:?}",
+                env_data.module.name, e
+            );
             return FunctionErrors::ParametersNotUtf8 as i32;
         }
     };
@@ -320,13 +351,13 @@ pub fn delete(
             .api
             .clone()
             .runtime
-            .block_on(async move { storage.get(&env_data.name, &key).await }),
+            .block_on(async move { storage.get(&env_data.module.name, &key).await }),
         // This is a call to delete the value, so we do storage.delete
         _ => env_data
             .api
             .clone()
             .runtime
-            .block_on(async move { storage.delete(&env_data.name, &key).await }),
+            .block_on(async move { storage.delete(&env_data.module.name, &key).await }),
     };
 
     match result {
@@ -338,19 +369,8 @@ pub fn delete(
                         0 => {}
                         _ => {
                             // We were deleting something, so we decrease the counter for used storage
-                            match env_data.storage_current.write() {
-                                Ok(mut storage) => {
-                                    // no underflow: the result can never become negative
-                                    *storage = *storage - key_len as u64 - data.len() as u64;
-                                }
-                                Err(e) => {
-                                    error!(
-                                        "Critical error getting a write lock on used storage: {:?}",
-                                        e
-                                    );
-                                    return FunctionErrors::InternalApiError as i32;
-                                }
-                            }
+                            *storage_current =
+                                *storage_current - key_len as u64 - data.len() as u64;
                         }
                     }
                     match safely_write_data_back(&memory_view, &data, data_buffer, data_buffer_len)
@@ -359,7 +379,7 @@ pub fn delete(
                         Err(e) => {
                             error!(
                                 "{}: Data write error in storage_delete: {:?}",
-                                env_data.name, e
+                                env_data.module.name, e
                             );
                             e as i32
                         }

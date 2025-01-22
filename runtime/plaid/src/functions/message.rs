@@ -15,7 +15,7 @@ pub fn fetch_data_and_source(
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return e as i32;
@@ -38,7 +38,7 @@ pub fn fetch_data_and_source(
         Err(e) => {
             error!(
                 "{}: Could not serialize the source: {}. Error: {e}",
-                env.data().name,
+                env.data().module.name,
                 env.data().message.source,
             );
             return -4;
@@ -56,7 +56,7 @@ pub fn fetch_data_and_source(
     match safely_write_data_back(&memory_view, &rule_data, data_buffer, buffer_size) {
         Ok(x) => x,
         Err(e) => {
-            error!("{}: Error in fetch_data: {:?}", env.data().name, e);
+            error!("{}: Error in fetch_data: {:?}", env.data().module.name, e);
             e as i32
         }
     }
@@ -70,7 +70,7 @@ pub fn fetch_data(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_siz
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return e as i32;
@@ -82,7 +82,7 @@ pub fn fetch_data(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_siz
     match safely_write_data_back(&memory_view, data, data_buffer, buffer_size) {
         Ok(x) => x,
         Err(e) => {
-            error!("{}: Error in fetch_data: {:?}", env.data().name, e);
+            error!("{}: Error in fetch_data: {:?}", env.data().module.name, e);
             e as i32
         }
     }
@@ -96,7 +96,7 @@ pub fn fetch_source(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_s
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return e as i32;
@@ -117,7 +117,7 @@ pub fn fetch_source(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_s
     } else {
         error!(
             "{}: Could not serialize the source: {}",
-            env.data().name,
+            env.data().module.name,
             env.data().message.source,
         );
         return -4;
@@ -127,7 +127,7 @@ pub fn fetch_source(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_s
     match safely_write_data_back(&memory_view, source.as_bytes(), data_buffer, buffer_size) {
         Ok(x) => x,
         Err(e) => {
-            error!("{}: Error in fetch_source: {:?}", env.data().name, e);
+            error!("{}: Error in fetch_source: {:?}", env.data().module.name, e);
             e as i32
         }
     }
@@ -147,7 +147,7 @@ pub fn fetch_accessory_data_by_name(
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return e as i32;
@@ -161,7 +161,7 @@ pub fn fetch_accessory_data_by_name(
         Err(e) => {
             error!(
                 "{}: Error in fetch_accessory_data_by_name: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return e as i32;
@@ -175,7 +175,7 @@ pub fn fetch_accessory_data_by_name(
             Err(e) => {
                 error!(
                     "{}: Error in fetch_accessory_data_by_name: {:?}",
-                    env.data().name,
+                    env.data().module.name,
                     e
                 );
                 e as i32
