@@ -353,60 +353,50 @@ pub fn delete(
     };
     let key_len = key.as_bytes().len();
 
-    let deletion_result = match env_data.module.storage_limit {
-        LimitValue::Unlimited => {
-            // The module has unlimited storage, so we don't update any counters and just proceed with the operation
-            match data_buffer_len {
-                // This is a call just to get the size of the buffer, so we do storage.get
-                0 => env_data
+    let deletion_result = match data_buffer_len {
+        // This is a call just to get the size of the buffer, so we do storage.get and don't mess with storage counters
+        0 => env_data
+            .api
+            .clone()
+            .runtime
+            .block_on(async move { storage.get(&env_data.module.name, &key).await }),
+        // This is a call to delete the value, so we will do storage.delete, but first we need to check the storage limit
+        _ => match env_data.module.storage_limit {
+            LimitValue::Unlimited => {
+                // The module has unlimited storage, so we don't update any counters and just proceed with the operation
+                env_data
                     .api
                     .clone()
                     .runtime
-                    .block_on(async move { storage.get(&env_data.module.name, &key).await }),
-                // This is a call to delete the value, so we do storage.delete
-                _ => env_data
-                    .api
-                    .clone()
-                    .runtime
-                    .block_on(async move { storage.delete(&env_data.module.name, &key).await }),
+                    .block_on(async move { storage.delete(&env_data.module.name, &key).await })
             }
-        }
-        LimitValue::Limited(_) => {
-            // The module has limited storage, so we need to update counters (with locks)
+            LimitValue::Limited(_) => {
+                // The module has limited storage, so we need to update counters (with locks)
 
-            // Get a lock on the storage counter for the module that is processing this message.
-            // This ensures no race conditions if multiple instances of the same module are running in parallel.
-            // The guard will go out of scope at the end of this block, thus releasing the lock.  After this block, we won't touch the counter again.
-            let mut storage_current = match env_data.module.storage_current.write() {
-                Ok(g) => g,
-                Err(e) => {
-                    error!("Critical error getting a lock on used storage: {:?}", e);
-                    return FunctionErrors::InternalApiError as i32;
-                }
-            };
-
-            match data_buffer_len {
-                // This is a call just to get the size of the buffer, so we do storage.get
-                0 => env_data
-                    .api
-                    .clone()
-                    .runtime
-                    .block_on(async move { storage.get(&env_data.module.name, &key).await }),
-                // This is a call to delete the value, so we do storage.delete
-                _ => {
-                    let result =
-                        env_data.api.clone().runtime.block_on(async move {
-                            storage.delete(&env_data.module.name, &key).await
-                        });
-                    // If the deletion went well, update counter for used storage.
-                    // If the deletion failed for some reason, we don't update the counter and release the lock: no harm done.
-                    if let Ok(Some(ref data)) = result {
-                        *storage_current = *storage_current - key_len as u64 - data.len() as u64;
+                // Get a lock on the storage counter for the module that is processing this message.
+                // This ensures no race conditions if multiple instances of the same module are running in parallel.
+                // The guard will go out of scope at the end of this block, thus releasing the lock.  After this block, we won't touch the counter again.
+                let mut storage_current = match env_data.module.storage_current.write() {
+                    Ok(g) => g,
+                    Err(e) => {
+                        error!("Critical error getting a lock on used storage: {:?}", e);
+                        return FunctionErrors::InternalApiError as i32;
                     }
-                    result
+                };
+
+                let result = env_data
+                    .api
+                    .clone()
+                    .runtime
+                    .block_on(async move { storage.delete(&env_data.module.name, &key).await });
+                // If the deletion went well, update counter for used storage.
+                // If the deletion failed for some reason, we don't update the counter and release the lock: no harm done.
+                if let Ok(Some(ref data)) = result {
+                    *storage_current = *storage_current - key_len as u64 - data.len() as u64;
                 }
+                result
             }
-        }
+        },
     };
 
     // Process the deletion result and return info to the caller
