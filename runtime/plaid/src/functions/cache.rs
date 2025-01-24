@@ -18,7 +18,7 @@ pub fn insert(
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let cache = if let Some(c) = &env_data.cache {
+    let cache = if let Some(c) = &env_data.module.cache {
         c
     } else {
         return FunctionErrors::CacheDisabled as i32;
@@ -27,7 +27,7 @@ pub fn insert(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in cache_insert: {:?}", env_data.name, e);
+            error!("{}: Memory error in cache_insert: {:?}", env_data.module.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -35,7 +35,7 @@ pub fn insert(
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in cache_insert: {:?}", env_data.name, e);
+            error!("{}: Key error in cache_insert: {:?}", env_data.module.name, e);
             return FunctionErrors::ParametersNotUtf8 as i32;
         }
     };
@@ -44,7 +44,7 @@ pub fn insert(
     let value = match safely_get_string(&memory_view, value_buf, value_buf_len) {
         Ok(d) => d,
         Err(e) => {
-            error!("{}: Value error in cache_insert: {:?}", env_data.name, e);
+            error!("{}: Value error in cache_insert: {:?}", env_data.module.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -61,7 +61,7 @@ pub fn insert(
                 Err(e) => {
                     error!(
                         "{}: Data write error in cache_insert: {:?}",
-                        env_data.name, e
+                        env_data.module.name, e
                     );
                     e as i32
                 }
@@ -71,7 +71,7 @@ pub fn insert(
         Err(e) => {
             if let Err(e) = env_data.external_logging_system.log_internal_message(
                 crate::logging::Severity::Error,
-                format!("Cache system error in [{}]: {:?}", env_data.name, e),
+                format!("Cache system error in [{}]: {:?}", env_data.module.name, e),
             ) {
                 error!("Logging system is not working!!: {:?}", e);
             }
@@ -91,7 +91,7 @@ pub fn get(
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let cache = if let Some(c) = &env_data.cache {
+    let cache = if let Some(c) = &env_data.module.cache {
         c
     } else {
         return FunctionErrors::CacheDisabled as i32;
@@ -100,7 +100,7 @@ pub fn get(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in cache_get: {:?}", env_data.name, e);
+            error!("{}: Memory error in cache_get: {:?}", env_data.module.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -108,7 +108,7 @@ pub fn get(
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Key error in cache_get: {:?}", env_data.name, e);
+            error!("{}: Key error in cache_get: {:?}", env_data.module.name, e);
             return FunctionErrors::ParametersNotUtf8 as i32;
         }
     };
@@ -123,7 +123,7 @@ pub fn get(
             ) {
                 Ok(x) => x,
                 Err(e) => {
-                    error!("{}: Data write error in cache_get: {:?}", env_data.name, e);
+                    error!("{}: Data write error in cache_get: {:?}", env_data.module.name, e);
                     e as i32
                 }
             }
@@ -132,7 +132,7 @@ pub fn get(
         Err(e) => {
             if let Err(e) = env_data.external_logging_system.log_internal_message(
                 crate::logging::Severity::Error,
-                format!("Cache system error in [{}]: {:?}", env_data.name, e),
+                format!("Cache system error in [{}]: {:?}", env_data.module.name, e),
             ) {
                 error!("Logging system is not working!!: {:?}", e);
             }

@@ -60,10 +60,20 @@ pub trait StorageProvider {
     /// specific keys can be returned. This is helpful as it reduces the amount of compute that
     /// needs to be taken by modules to do basic filtering. More complex filtering (i.e regex)
     /// is not supported as computation for that has unbounded complexity.
-    async fn list_keys(&self, namespace: &str, prefix: Option<&str>) -> Result<Vec<String>, StorageError>;
+    async fn list_keys(
+        &self,
+        namespace: &str,
+        prefix: Option<&str>,
+    ) -> Result<Vec<String>, StorageError>;
     /// Same as list_keys but will return the keys and values. An optional prefix can be provided
     /// but this only applies to the key, values have no host provided filtering.
-    async fn fetch_all(&self, namespace: &str, prefix: Option<&str>) -> Result<Vec<(String, Vec<u8>)>, StorageError>;
+    async fn fetch_all(
+        &self,
+        namespace: &str,
+        prefix: Option<&str>,
+    ) -> Result<Vec<(String, Vec<u8>)>, StorageError>;
+    /// Get the number of bytes stored in a namespace. This will include keys and values.
+    async fn get_namespace_byte_size(&self, namespace: &str) -> Result<u64, StorageError>;
 }
 
 impl Storage {
@@ -97,7 +107,11 @@ impl Storage {
         self.database.delete(namespace, key).await
     }
 
-    pub async fn list_keys(&self, namespace: &str, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+    pub async fn list_keys(
+        &self,
+        namespace: &str,
+        prefix: Option<&str>,
+    ) -> Result<Vec<String>, StorageError> {
         self.database.list_keys(namespace, prefix).await
     }
 
@@ -107,5 +121,9 @@ impl Storage {
         prefix: Option<&str>,
     ) -> Result<Vec<(String, Vec<u8>)>, StorageError> {
         self.database.fetch_all(namespace, prefix).await
+    }
+
+    pub async fn get_namespace_byte_size(&self, namespace: &str) -> Result<u64, StorageError> {
+        self.database.get_namespace_byte_size(namespace).await
     }
 }

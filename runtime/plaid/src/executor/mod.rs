@@ -16,9 +16,8 @@ use serde::{Deserialize, Serialize};
 use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedFunction};
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
-use lru::LruCache;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
@@ -94,10 +93,8 @@ impl Message {
 
 /// Environment for executing a module on a message
 pub struct Env {
-    // Name of the current module
-    pub name: String,
-    // Cache if available
-    pub cache: Option<Arc<RwLock<LruCache<String, String>>>>,
+    // A handle to the module which is processing the message
+    pub module: Arc<PlaidModule>,
     // The message that is being processed.
     pub message: Message,
     // A handle to the API to make external calls
@@ -232,8 +229,7 @@ fn prepare_for_execution(
     }
 
     let env = Env {
-        name: plaid_module.name.clone(),
-        cache: plaid_module.cache.clone(),
+        module: plaid_module.clone(),
         message: message.create_duplicate(),
         api: api.clone(),
         storage: storage.clone(),

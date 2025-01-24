@@ -1,5 +1,5 @@
 use super::errors::Errors;
-use super::LimitAmount;
+use super::{LimitedAmount, LimitValue, LimitableAmount};
 
 use std::collections::HashMap;
 use std::fs::DirEntry;
@@ -30,12 +30,12 @@ pub fn read_and_parse_modules(path: &DirEntry) -> Result<(String, Vec<u8>), Erro
     Ok((filename, module_bytes))
 }
 
-/// Get the computation limit for the module by checking the following in order:
+/// Get value for a limit, by checking the following in order:
 /// 1. Module Override
 /// 2. Log Type amount
 /// 3. Default amount
-pub fn get_module_computation_limit(
-    limit_amount: &LimitAmount,
+fn get_limit_with_overrides(
+    limit_amount: &LimitedAmount,
     filename: &str,
     log_type: &str,
 ) -> u64 {
@@ -45,6 +45,36 @@ pub fn get_module_computation_limit(
         *amount
     } else {
         limit_amount.default
+    }
+}
+
+/// Get the computation limit for the module by checking the following in order:
+/// 1. Module Override
+/// 2. Log Type amount
+/// 3. Default amount
+pub fn get_module_computation_limit(
+    limit_amount: &LimitedAmount,
+    filename: &str,
+    log_type: &str,
+) -> u64 {
+    get_limit_with_overrides(limit_amount, filename, log_type)
+}
+
+/// Get the persistent storage limit for the module by checking the following in order:
+/// 1. Module Override
+/// 2. Log Type amount
+/// 3. Default amount
+pub fn get_module_persistent_storage_limit(
+    limit_amount: &LimitableAmount,
+    filename: &str,
+    log_type: &str,
+) -> LimitValue {
+    if let Some(amount) = limit_amount.module_overrides.get(filename) {
+        amount.clone()
+    } else if let Some(amount) = limit_amount.log_type.get(log_type) {
+        amount.clone()
+    } else {
+        limit_amount.default.clone()
     }
 }
 
@@ -67,14 +97,8 @@ pub fn cost_function(operator: &Operator) -> u64 {
 /// 1. Module Override
 /// 2. Log Type amount
 /// 3. Default amount
-pub fn get_module_page_count(limit_amount: &LimitAmount, filename: &str, log_type: &str) -> u32 {
-    let page_count = if let Some(amount) = limit_amount.module_overrides.get(filename) {
-        *amount
-    } else if let Some(amount) = limit_amount.log_type.get(log_type) {
-        *amount
-    } else {
-        limit_amount.default
-    };
+pub fn get_module_page_count(limit_amount: &LimitedAmount, filename: &str, log_type: &str) -> u32 {
+    let page_count = get_limit_with_overrides(limit_amount, filename, log_type);
 
     // Page count is at max 32 bits. Nothing should ever allocate that many pages
     // but we're likely to hit this if someone spams the number key on their keyboard
