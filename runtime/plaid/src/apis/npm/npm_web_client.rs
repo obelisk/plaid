@@ -720,6 +720,7 @@ impl Npm {
                 NPMJS_COM_URL, self.config.npm_scope
             ))
             .header("Content-Type", "text/plain;charset=UTF-8")
+            .header("X-Spiferack", "1")
             .body(body)
             .send()
             .await
