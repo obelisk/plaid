@@ -1,10 +1,11 @@
 use crate::executor::Message;
-use circular_buffer::CircularBuffer;
 use crossbeam_channel::Sender;
+use lru::LruCache;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
+use std::num::NonZeroUsize;
 use std::time::Duration;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -89,11 +90,12 @@ pub struct Okta {
     since: OffsetDateTime,
     /// Sending channel used to send logs into the execution system
     logger: Sender<Message>,
-    /// A circular buffer where we store the UUIDs of Okta logs that we have already seen and sent into the logging system.
+    /// An LRU where we store the UUIDs of Okta logs that we have already seen and sent into the logging system.
     /// This, together with some overlapping queries to the Okta API, helps us ensure that all Okta logs are processed
     /// exactly once.
-    /// This buffer has a limited capacity: when this is reached, the oldest item is removed to make space for a new insertion.
-    seen_logs_uuid: CircularBuffer<512, String>,
+    /// This LRU has a limited capacity: when this is reached, the least-recently-used item is removed to make space for a new insertion.
+    /// Note: we only use the "key" part to keep track of the UUIDs we have seen. The "value" part is not used and always set to 0u32.
+    seen_logs_uuid: LruCache<String, u32>,
 }
 
 impl Okta {
@@ -108,7 +110,7 @@ impl Okta {
             config,
             since: OffsetDateTime::now_utc(),
             logger,
-            seen_logs_uuid: CircularBuffer::new(),
+            seen_logs_uuid: LruCache::new(NonZeroUsize::new(512).unwrap()),
         }
     }
 
@@ -220,12 +222,12 @@ impl Okta {
                 // Check if we have already seen this UUID:
                 // - If we have, skip this log and continue
                 // - If we haven't, add this log's UUID to the data structure and keep processing it
-                if self.seen_logs_uuid.iter().find(|x| *x == uuid).is_some() {
+                if self.seen_logs_uuid.get(uuid).is_some() {
                     // We have already seen this log
                     continue;
                 }
-                // We have not seen this log: add it to the buffer
-                self.seen_logs_uuid.push_back(uuid.to_string());
+                // We have not seen this log: add it to the cache
+                self.seen_logs_uuid.put(uuid.to_string(), 0u32);
 
                 let log_timestamp = match OffsetDateTime::parse(published, &Rfc3339) {
                     Ok(dt) => dt,

@@ -739,12 +739,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "circular-buffer"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dacb91f972298e70fc507a2ffcaf1545807f1a36da586fb846646030adc542f"
-
-[[package]]
 name = "clap"
 version = "4.5.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2722,7 +2716,7 @@ checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
 
 [[package]]
 name = "plaid"
-version = "0.15.1"
+version = "0.15.2"
 dependencies = [
  "alkali",
  "async-trait",
@@ -2730,7 +2724,6 @@ dependencies = [
  "aws-sdk-kms",
  "aws-sdk-secretsmanager",
  "base64 0.13.1",
- "circular-buffer",
  "clap",
  "crossbeam-channel",
  "env_logger",
@@ -2769,7 +2762,7 @@ dependencies = [
 
 [[package]]
 name = "plaid_stl"
-version = "0.15.1"
+version = "0.15.2"
 dependencies = [
  "base64 0.13.1",
  "chrono",
