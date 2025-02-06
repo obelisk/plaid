@@ -739,6 +739,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "circular-buffer"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dacb91f972298e70fc507a2ffcaf1545807f1a36da586fb846646030adc542f"
+
+[[package]]
 name = "clap"
 version = "4.5.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2724,6 +2730,7 @@ dependencies = [
  "aws-sdk-kms",
  "aws-sdk-secretsmanager",
  "base64 0.13.1",
+ "circular-buffer",
  "clap",
  "crossbeam-channel",
  "env_logger",

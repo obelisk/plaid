@@ -1,4 +1,5 @@
 use crate::executor::Message;
+use circular_buffer::CircularBuffer;
 use crossbeam_channel::Sender;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use reqwest::Client;
@@ -8,6 +9,7 @@ use std::time::Duration;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 const OKTA_LOG_PUBLISHED_FIELD_KEY: &str = "published";
+const OKTA_LOG_UUID_FIELD_KEY: &str = "uuid";
 
 #[derive(Deserialize)]
 pub struct OktaConfig {
@@ -87,6 +89,11 @@ pub struct Okta {
     since: OffsetDateTime,
     /// Sending channel used to send logs into the execution system
     logger: Sender<Message>,
+    /// A circular buffer where we store the UUIDs of Okta logs that we have already seen and sent into the logging system.
+    /// This, together with some overlapping queries to the Okta API, helps us ensure that all Okta logs are processed
+    /// exactly once.
+    /// This buffer has a limited capacity: when this is reached, the oldest item is removed to make space for a new insertion.
+    seen_logs_uuid: CircularBuffer<512, String>,
 }
 
 impl Okta {
@@ -101,6 +108,7 @@ impl Okta {
             config,
             since: OffsetDateTime::now_utc(),
             logger,
+            seen_logs_uuid: CircularBuffer::new(),
         }
     }
 
@@ -112,9 +120,20 @@ impl Okta {
         let sleep_duration = Duration::from_millis(self.config.sleep_duration);
 
         loop {
+            // To ensure we are not missing any logs that might have come through in the meantime, we
+            // go 1 minute back in time. This produces overlapping calls, i.e., we will see some logs
+            // multiple times. To avoid processing these logs more than once, we store their UUIDs in
+            // a dedicated data struct. So we pay a performance price in exchange for more log stability.
+            let since = match self.since.checked_sub(time::Duration::minutes(1)) {
+                Some(s) => s,
+                None => {
+                    error!("Something went wrong while computing `since` value");
+                    return Ok(());
+                }
+            };
             // Okta requires the query parameter to be in RFC3339 format. We attempt to format it here.
             // On failure, we return and allow the data orchestrator to restart the loop
-            let since = match self.since.format(&Rfc3339) {
+            let since = match since.format(&Rfc3339) {
                 Ok(since) => since,
                 Err(e) => {
                     error!("Failed to parse datetime to RFC3339 format. Error: {e}");
@@ -168,7 +187,11 @@ impl Okta {
                 return Ok(());
             }
 
-            // Loop over the logs we did get from Okta, attempt to parse their timestamps, and send them into the logging system
+            // Loop over the logs we did get from Okta, attempt to parse their timestamps, check if they are really new, and send them into the logging system
+
+            // Keep track of how many logs we actually send for processing (and do not discard because already-seen)
+            let mut sent_for_processing = 0u32;
+
             for log in &logs {
                 let published = match log
                     .as_object()
@@ -181,6 +204,28 @@ impl Okta {
                         continue;
                     }
                 };
+
+                let uuid = match log
+                    .as_object()
+                    .and_then(|obj| obj.get(OKTA_LOG_UUID_FIELD_KEY))
+                    .and_then(|val| val.as_str())
+                {
+                    Some(uuid) => uuid,
+                    None => {
+                        error!("Missing or invalid 'uuid' field in Okta log: {log:?}",);
+                        continue;
+                    }
+                };
+
+                // Check if we have already seen this UUID:
+                // - If we have, skip this log and continue
+                // - If we haven't, add this log's UUID to the data structure and keep processing it
+                if self.seen_logs_uuid.iter().find(|x| *x == uuid).is_some() {
+                    // We have already seen this log
+                    continue;
+                }
+                // We have not seen this log: add it to the buffer
+                self.seen_logs_uuid.push_back(uuid.to_string());
 
                 let log_timestamp = match OffsetDateTime::parse(published, &Rfc3339) {
                     Ok(dt) => dt,
@@ -223,10 +268,16 @@ impl Okta {
                         self.config.logbacks_allowed.clone(),
                     ))
                     .unwrap();
+                sent_for_processing += 1;
+            }
+            // If there have been no new logs sent for processing, we exit.
+            // Exiting here will result in a 10 second wait between restarts
+            if sent_for_processing == 0 {
+                debug!("No new Okta logs since: {}", self.since);
+                return Ok(());
             }
             info!(
-                "Sent {} Okta logs for processing. Newest time seen is: {most_recent_log_seen}",
-                logs.len(),
+                "Sent {sent_for_processing} Okta logs for processing. Newest time seen is: {most_recent_log_seen}"
             );
 
             // Update the time of our most recent log and wait for the specified period
