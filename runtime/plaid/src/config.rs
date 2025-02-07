@@ -71,9 +71,7 @@ pub struct GetMode {
 pub struct WebhookConfig {
     /// The logging channel that POST bodies will be sent to
     pub log_type: String,
-    /// What headers do you want forwarded to the logging channel as well under
-    /// accessory data. If these headers conflict with set secrets, the secrets
-    /// will be used and the header ignored.
+    /// What headers do you want forwarded to the logging channel
     pub headers: Vec<String>,
     /// See GetMode
     pub get_mode: Option<GetMode>,

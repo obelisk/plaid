@@ -13,7 +13,7 @@ use crate::executor::Message;
 #[derive(Deserialize)]
 /// Defines the list of interval jobs to be processed
 pub struct IntervalConfig {
-    /// A HashMap of job name to job config. The job's name will be included in accessory data as "job_name"
+    /// A HashMap of job name to job config.
     jobs: HashMap<String, IntervalJob>,
     /// Maximum percentage of internal time to shift all jobs for better work distribution    
     #[serde(deserialize_with = "parse_splay")]
