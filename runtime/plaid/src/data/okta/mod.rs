@@ -222,7 +222,7 @@ impl Okta {
                 // Check if we have already seen this UUID:
                 // - If we have, skip this log and continue
                 // - If we haven't, add this log's UUID to the data structure and keep processing it
-                if self.seen_logs_uuid.get(uuid).is_some() {
+                if self.seen_logs_uuid.contains(uuid) {
                     // We have already seen this log
                     continue;
                 }
@@ -275,7 +275,23 @@ impl Okta {
             // If there have been no new logs sent for processing, we exit.
             // Exiting here will result in a 10 second wait between restarts
             if sent_for_processing == 0 {
-                debug!("No new Okta logs since: {}", self.since);
+                debug!(
+                    "No new Okta logs since: {}. We have already seen them all.",
+                    self.since
+                );
+                // Important: we have to move the window forward. Otherwise, on the next call nothing will
+                // change: with the same `since`, we will get the same logs and we will discard them all because
+                // they will all be in the cache. I.e., the system will enter a deadlock.
+                // To prevent this, we move `since` forward by 30 seconds. When we call, we will still go back
+                // 1 minute, effectively shifting the window forward by 30 seconds.
+                // Eventually, we will get some new logs.
+                self.since = match self.since.checked_add(time::Duration::seconds(30)) {
+                    Some(s) => s,
+                    None => {
+                        error!("Error while moving the Okta log window forward");
+                        OffsetDateTime::now_utc() // for lack of anything better
+                    }
+                };
                 return Ok(());
             }
             info!(
