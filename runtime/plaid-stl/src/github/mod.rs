@@ -720,7 +720,7 @@ pub fn fetch_commit(user: &str, repo: &str, commit: &str) -> Result<String, Plai
     extern "C" {
         new_host_function_with_error_buffer!(github, fetch_commit);
     }
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
 
     #[derive(Serialize)]
     struct Request<'a> {
