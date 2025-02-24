@@ -12,8 +12,8 @@ fn main(log: String, _source: LogSource) -> Result<Option<String>, i32> {
     plaid::print_debug_string(&format!("Testing sshcerts With Log: [{log}]"));
 
     // Fetch the signature and data from the web request
-    let signature = String::from_utf8(BASE64_STANDARD.decode(plaid::get_accessory_data_by_name("signature").unwrap()).unwrap()).unwrap();
-    let data = BASE64_STANDARD.decode(plaid::get_accessory_data_by_name("data").unwrap()).unwrap();
+    let signature = String::from_utf8(BASE64_STANDARD.decode(plaid::get_query_params("signature").unwrap()).unwrap()).unwrap();
+    let data = BASE64_STANDARD.decode(plaid::get_query_params("data").unwrap()).unwrap();
 
     // Parse the public key and signature
     let public_key = sshcerts::PublicKey::from_string(SSH_SK_ED25519_PUBKEY).unwrap();

@@ -12,6 +12,7 @@ members = [
     "tests/test_fileopen",
     "tests/test_random",
     "tests/test_mnr",
+    "tests/test_get_everything",
 ]
 
 [profile.release]

@@ -39,9 +39,10 @@ pub struct Message {
     pub type_: String,
     /// The data passed to the module
     pub data: Vec<u8>,
-    /// Any additional data that is provided as context to the module
-    /// This is usually either headers, or secrets
-    pub accessory_data: HashMap<String, Vec<u8>>,
+    /// Any headers the module will have access to, while processing this message
+    pub headers: HashMap<String, Vec<u8>>,
+    /// Any query parameters the module will have access to, while processing this message
+    pub query_params: HashMap<String, Vec<u8>>,
     /// Where the message came from
     pub source: LogSource,
     /// If this message is allowed to trigger additional messages to the same
@@ -68,7 +69,8 @@ impl Message {
         Self {
             type_,
             data,
-            accessory_data: HashMap::new(),
+            headers: HashMap::new(),
+            query_params: HashMap::new(),
             source,
             logbacks_allowed,
             response_sender: None,
@@ -82,7 +84,8 @@ impl Message {
         Self {
             type_: self.type_.clone(),
             data: self.data.clone(),
-            accessory_data: self.accessory_data.clone(),
+            headers: self.headers.clone(),
+            query_params: self.query_params.clone(),
             source: self.source.clone(),
             logbacks_allowed: self.logbacks_allowed.clone(),
             response_sender: None,
@@ -206,7 +209,7 @@ impl From<LoggingError> for ExecutorError {
 /// Take a message, a module, and an executor and get an instance back that is ready to run
 /// the provided module.
 fn prepare_for_execution(
-    mut message: Message,
+    message: Message,
     plaid_module: Arc<PlaidModule>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
@@ -220,13 +223,6 @@ fn prepare_for_execution(
     // Create the store we're going to use to execute the module
     // for this message only.
     let mut store = Store::new(plaid_module.engine.clone());
-
-    // Load the secrets if they exist. This overwrites any thing that is already
-    // in the accessory data meaning secrets always take precedence over possible user
-    // provided data, like headers (the other major use case for accessory data)
-    if let Some(secrets) = &plaid_module.secrets {
-        message.accessory_data.extend(secrets.clone());
-    }
 
     let env = Env {
         module: plaid_module.clone(),
