@@ -8,17 +8,13 @@ use apis::Api;
 use data::Data;
 use executor::*;
 use storage::Storage;
-use tokio::{
-    runtime::{self, Runtime},
-    signal,
-};
+use tokio::signal;
 
 use std::sync::Arc;
 
 use crossbeam_channel::bounded;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     info!("Plaid is booting up, please standby...");
 
@@ -39,13 +35,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if storage.is_some() {
         info!("Storage system configured");
     } else {
-        info!(
+        warn!(
             "No persistent storage system configured; unexecuted log backs will be lost on shutdown"
         );
     }
 
     info!("Creating a Tokio runtime to run data fetching and ingestion...");
-    //let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    let handle = runtime.handle();
 
     // This sender provides an internal route to sending logs. This is what
     // powers the logback functions.
@@ -54,13 +51,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         log_sender.clone(),
         storage.clone(),
         els.clone(),
+        &handle,
     )
-    .await
     .expect("The data system failed to start");
 
     info!("Configurating APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(configuration.apis, log_sender.clone(), delayed_log_sender).await;
+    let api = Api::new(
+        configuration.apis,
+        log_sender.clone(),
+        delayed_log_sender,
+        &handle,
+    );
 
     // Create an Arc so all the handlers have access to our API object
     let api = Arc::new(api);
@@ -109,9 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting servers, boot up complete");
 
     // Run plaid
-    signal::ctrl_c()
-        .await
-        .expect("Failed to listen for shutdown signal");
+    handle.block_on(signal::ctrl_c()).unwrap();
     data_generator_handles.abort_all();
 
     // Listen for a shutdown signal or if any task in join_set finishes

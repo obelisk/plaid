@@ -16,7 +16,10 @@ use std::{pin::Pin, sync::Arc, time::Duration};
 use crossbeam_channel::Sender;
 
 use serde::Deserialize;
-use tokio::task::{AbortHandle, JoinError, JoinSet};
+use tokio::{
+    runtime::Handle,
+    task::{JoinError, JoinSet},
+};
 
 pub use self::internal::DelayedMessage;
 
@@ -107,55 +110,65 @@ impl DataInternal {
 }
 
 impl Data {
-    pub async fn start(
+    pub fn start(
         config: DataConfig,
         sender: Sender<Message>,
         storage: Option<Arc<Storage>>,
         els: Logger,
+        handle: &Handle,
     ) -> Result<(JoinSet<()>, Sender<DelayedMessage>), DataError> {
-        let mut data_internal = DataInternal::new(config, sender, storage, els).await?;
+        let mut data_internal = handle.block_on(DataInternal::new(config, sender, storage, els))?;
 
         // Collect all the abort handles to shut the tasks down when Plaid shuts down
         let mut data_generator_join_handles = JoinSet::new();
 
         for webhook_server in data_internal.webhooks {
-            data_generator_join_handles.spawn(webhook_server);
+            data_generator_join_handles.spawn_on(webhook_server, handle);
         }
 
         // Start the Github Audit task if there is one
         if let Some(mut gh) = data_internal.github {
-            data_generator_join_handles.spawn(async move {
-                loop {
-                    if let Err(e) = gh.fetch_audit_logs().await {
-                        error!("GitHub Data Fetch Error: {}", e)
-                    }
+            data_generator_join_handles.spawn_on(
+                async move {
+                    loop {
+                        if let Err(e) = gh.fetch_audit_logs().await {
+                            error!("GitHub Data Fetch Error: {}", e)
+                        }
 
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                }
-            });
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    }
+                },
+                handle,
+            );
         }
 
         // Start the Okta System Logs task if there is one
         if let Some(mut okta) = data_internal.okta {
-            data_generator_join_handles.spawn(async move {
-                loop {
-                    if let Err(e) = okta.fetch_system_logs().await {
-                        error!("Okta Data Fetch Error: {:?}", e)
-                    }
+            data_generator_join_handles.spawn_on(
+                async move {
+                    loop {
+                        if let Err(e) = okta.fetch_system_logs().await {
+                            error!("Okta Data Fetch Error: {:?}", e)
+                        }
 
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                }
-            });
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    }
+                },
+                handle,
+            );
         }
 
         // Start the interval job processor
         if let Some(mut interval) = data_internal.interval {
-            data_generator_join_handles.spawn(async move {
-                loop {
-                    let time_until_next_execution = interval.fetch_interval_jobs().await;
-                    tokio::time::sleep(Duration::from_secs(time_until_next_execution)).await;
-                }
-            });
+            data_generator_join_handles.spawn_on(
+                async move {
+                    loop {
+                        let time_until_next_execution = interval.fetch_interval_jobs().await;
+                        tokio::time::sleep(Duration::from_secs(time_until_next_execution)).await;
+                    }
+                },
+                handle,
+            );
         }
 
         let internal_sender = (&data_internal.internal).get_sender();
@@ -163,19 +176,25 @@ impl Data {
         // but we make it one incase we need the runtime in the future. Perhaps it
         // will make sense to convert it to a standard thread but I don't see a benefit
         // to that now. As long as we don't block.
-        data_generator_join_handles.spawn(async move {
-            loop {
-                if let Err(e) = data_internal.internal.fetch_internal_logs().await {
-                    error!("Internal Data Fetch Error: {:?}", e)
+        data_generator_join_handles.spawn_on(
+            async move {
+                loop {
+                    if let Err(e) = data_internal.internal.fetch_internal_logs().await {
+                        error!("Internal Data Fetch Error: {:?}", e)
+                    }
+                    tokio::time::sleep(Duration::from_secs(10)).await;
                 }
-                tokio::time::sleep(Duration::from_secs(10)).await;
-            }
-        });
+            },
+            handle,
+        );
 
         if let Some(websocket) = data_internal.websocket_external {
-            data_generator_join_handles.spawn(async move {
-                websocket.start().await;
-            });
+            data_generator_join_handles.spawn_on(
+                async move {
+                    websocket.start().await;
+                },
+                handle,
+            );
         }
 
         info!("Started Data Generators");

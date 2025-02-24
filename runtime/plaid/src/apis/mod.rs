@@ -90,14 +90,15 @@ pub enum ApiError {
 }
 
 impl Api {
-    pub async fn new(
+    pub fn new(
         config: Apis,
         log_sender: Sender<Message>,
         delayed_log_sender: Sender<DelayedMessage>,
+        handle: &Handle,
     ) -> Self {
         #[cfg(feature = "aws")]
         let aws = match config.aws {
-            Some(aws) => Some(Aws::new(aws).await),
+            Some(aws) => Some(handle.block_on(Aws::new(aws))),
             _ => None,
         };
 
