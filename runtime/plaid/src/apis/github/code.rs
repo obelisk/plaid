@@ -1,12 +1,19 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use super::Github;
-use crate::apis::{github::GitHubError, ApiError};
+use crate::{
+    apis::{github::GitHubError, ApiError},
+    loader::PlaidModule,
+};
 
 impl Github {
     /// Search for files with given name.
     /// See https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#search-code for more details
-    pub async fn search_for_file(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn search_for_file(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 

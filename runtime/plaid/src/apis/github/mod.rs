@@ -16,7 +16,9 @@ use octocrab::Octocrab;
 
 use serde::{Deserialize, Serialize};
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
+
+use crate::loader::PlaidModule;
 
 use super::ApiError;
 
@@ -97,7 +99,7 @@ impl Github {
     async fn make_generic_get_request(
         &self,
         uri: String,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a get request to {uri} on behalf of {module}");
 
@@ -123,7 +125,7 @@ impl Github {
         &self,
         uri: String,
         body: T,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a post request to {uri} on behalf of {module}");
 
@@ -149,7 +151,7 @@ impl Github {
         &self,
         uri: String,
         body: Option<&T>,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a put request to {uri} on behalf of {module}");
 
@@ -175,7 +177,7 @@ impl Github {
         &self,
         uri: String,
         body: Option<&T>,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a delete request to {uri} on behalf of {module}");
 

@@ -1,8 +1,8 @@
 use super::{Yubikey, YubikeyError};
 
-use crate::apis::ApiError;
+use crate::{apis::ApiError, loader::PlaidModule};
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use ring::{hmac, rand};
 
@@ -17,7 +17,7 @@ fn hex_encode<T: AsRef<[u8]>>(data: T) -> String {
 
 impl Yubikey {
     /// Verify an OTP is valid by checking it against the Yubico API
-    pub async fn verify_otp(&self, otp: &str, _: &str) -> Result<String, ApiError> {
+    pub async fn verify_otp(&self, otp: &str, _: Arc<PlaidModule>) -> Result<String, ApiError> {
         // Generate a random nonce to validate the OTP with
         let nonce: [u8; 16] = rand::generate(&self.rng)
             .map_err(|_| ApiError::YubikeyError(YubikeyError::RandError))?

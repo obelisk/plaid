@@ -89,6 +89,7 @@ pub enum ApiError {
     SplunkError(splunk::SplunkError),
     YubikeyError(yubikey::YubikeyError),
     WebError(web::WebError),
+    TestMode,
 }
 
 impl Api {
