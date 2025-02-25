@@ -24,7 +24,18 @@ module_dir = "../compiled_modules/"
 lru_cache_size = 200
 
 test_mode = true
-test_mode_exemptions = []
+test_mode_exemptions = [
+    "test_crashtest.wasm",
+    "test_db.wasm",
+    "test_fileopen.wasm",
+    "test_get_everything.wasm",
+    "test_logback.wasm",
+    "test_mnr.wasm",
+    "test_persistent_response.wasm",
+    "test_random.wasm",
+    "test_sshcerts_usage.wasm",
+    "test_time.wasm",
+]
 
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
