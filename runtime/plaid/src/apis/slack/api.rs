@@ -1,8 +1,11 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
-use crate::apis::{slack::SlackError, ApiError};
+use crate::{
+    apis::{slack::SlackError, ApiError},
+    loader::PlaidModule,
+};
 
 use super::Slack;
 
@@ -123,18 +126,22 @@ impl Slack {
 
     /// Open an arbitrary view for a configured bot. The view contents is defined by the caller but the bot
     /// must be configured in Plaid.
-    pub async fn views_open(&self, params: &str, _: &str) -> Result<u32, ApiError> {
+    pub async fn views_open(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32, ApiError> {
         self.call_slack(params, Apis::ViewsOpen).await.map(|_| 0)
     }
 
     /// Call the Slack postMessage API. The message and location are defined by the module but the bot
     /// must be configured in Plaid.
-    pub async fn post_message(&self, params: &str, _: &str) -> Result<u32, ApiError> {
+    pub async fn post_message(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32, ApiError> {
         self.call_slack(params, Apis::PostMessage).await.map(|_| 0)
     }
 
     /// Calls the Slack API to retrieve a user's Slack ID from their email address
-    pub async fn get_id_from_email(&self, params: &str, _: &str) -> Result<String, ApiError> {
+    pub async fn get_id_from_email(
+        &self,
+        params: &str,
+        _: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         self.call_slack(params, Apis::LookupByEmail).await
     }
 }

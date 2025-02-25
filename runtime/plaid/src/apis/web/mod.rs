@@ -1,7 +1,9 @@
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::Deserialize;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
+
+use crate::loader::PlaidModule;
 
 use super::ApiError;
 
@@ -51,7 +53,11 @@ impl Web {
     /// Create, sign, and encode a new JWT with the contents specified in `params`.
     /// This fails if `params` contains invalid values or if `module` is not allowed to
     /// use the key specified in `params`.
-    pub async fn issue_jwt(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn issue_jwt(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let mut request: HashMap<&str, serde_json::Value> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 

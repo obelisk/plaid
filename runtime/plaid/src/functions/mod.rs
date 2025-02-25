@@ -27,6 +27,7 @@ pub enum FunctionErrors {
     CouldNotGetAdequateMemory = -8,
     FailedToWriteGuestMemory = -9,
     StorageLimitReached = -10,
+    TestMode = -11,
 }
 
 #[derive(Debug)]

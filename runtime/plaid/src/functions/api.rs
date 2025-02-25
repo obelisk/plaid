@@ -1,7 +1,11 @@
 use super::{safely_write_data_back, FunctionErrors};
+use crate::apis::ApiError;
 use crate::executor::Env;
 use crate::functions::{get_memory, safely_get_string};
 use wasmer::{AsStoreRef, Function, FunctionEnv, FunctionEnvMut, Store, WasmPtr};
+
+const ALLOW_IN_TEST_MODE: bool = true;
+const DISALLOW_IN_TEST_MODE: bool = false;
 
 /// Macro to implement a new host function in a given API. The function does not fill a data buffer with returned values.
 ///
@@ -22,15 +26,21 @@ use wasmer::{AsStoreRef, Function, FunctionEnv, FunctionEnvMut, Store, WasmPtr};
 /// - `FunctionErrors::InternalApiError`: For internal API-related errors.
 /// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
 macro_rules! impl_new_function {
-    ($api:ident, $function_name:ident) => {
+    ($api:ident, $function_name:ident, $allow_in_test_mode:expr) => {
         paste::item! {
             fn [< $api _ $function_name _impl>] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> Result<i32, FunctionErrors> {
                 let store = env.as_store_ref();
                 let env_data = env.data();
 
-                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string()) {
+                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string(), env_data.module.test_mode) {
                     error!("Logging system is not working!!: {:?}", e);
                     return Err(FunctionErrors::InternalApiError);
+                }
+
+
+                // Disallow this function call from continuing if the module is in test mode
+                if !$allow_in_test_mode && env_data.module.test_mode {
+                    return Err(FunctionErrors::TestMode);
                 }
 
                 let memory_view = match get_memory(&env, &store) {
@@ -49,14 +59,17 @@ macro_rules! impl_new_function {
 
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
-
+                let module = env_data.module.clone();
                 // Run the function on the Tokio runtime and wait for the result
                 let result = env_api.runtime.block_on(async move {
-                    api.$function_name(&params, &env_data.module.name).await
+                    api.$function_name(&params, module).await
                 });
 
                 let return_data = match result {
                     Ok(return_data) => return_data,
+                    Err(ApiError::TestMode) => {
+                        return Err(FunctionErrors::TestMode);
+                    }
                     Err(e) => {
                         error!("{} experienced an issue calling {}: {:?}", env_data.module.name, stringify!([< $api _ $function_name >]), e);
                         return Err(FunctionErrors::InternalApiError);
@@ -101,15 +114,20 @@ macro_rules! impl_new_function {
 /// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
 /// - `FunctionErrors::ReturnBufferTooSmall`: If the provided return buffer is too small to hold the result.
 macro_rules! impl_new_function_with_error_buffer {
-    ($api:ident, $function_name:ident) => {
+    ($api:ident, $function_name:ident, $allow_in_test_mode:expr) => {
         paste::item! {
             fn [< $api _ $function_name _impl>] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> Result<i32, FunctionErrors> {
                 let store = env.as_store_ref();
                 let env_data = env.data();
 
-                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string()) {
+                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string(), env_data.module.test_mode) {
                     error!("Logging system is not working!!: {:?}", e);
                     return Err(FunctionErrors::InternalApiError);
+                }
+
+                // Disallow this function call from continuing if the module is in test mode
+                if !$allow_in_test_mode && env_data.module.test_mode {
+                    return Err(FunctionErrors::TestMode);
                 }
 
                 let memory_view = match get_memory(&env, &store) {
@@ -127,14 +145,17 @@ macro_rules! impl_new_function_with_error_buffer {
 
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
-                let name = &env_data.module.name.clone();
+                let module = env_data.module.clone();
                 // Run the function on the Tokio runtime and wait for the result
                 let result = env_api.runtime.block_on(async move {
-                    api.$function_name(&params, name).await
+                    api.$function_name(&params, module).await
                 });
 
                 let return_data = match result {
                     Ok(return_data) => return_data,
+                    Err(ApiError::TestMode) => {
+                        return Err(FunctionErrors::TestMode);
+                    }
                     Err(e) => {
                         error!("{} experienced an issue calling {}: {:?}", env_data.module.name, stringify!([< $api _ $function_name >]), e);
                         return Err(FunctionErrors::InternalApiError);
@@ -188,16 +209,22 @@ macro_rules! impl_new_function_with_error_buffer {
 /// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
 /// - `FunctionErrors::ReturnBufferTooSmall`: If the provided return buffer is too small to hold the result.
 macro_rules! impl_new_sub_module_function_with_error_buffer {
-    ($api:ident, $sub_module:ident, $function_name:ident) => {
+    ($api:ident, $sub_module:ident, $function_name:ident, $allow_in_test_mode:expr) => {
         paste::item! {
             fn [< $api _ $sub_module _ $function_name _impl>] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> Result<i32, FunctionErrors> {
                 let store = env.as_store_ref();
                 let env_data = env.data();
 
                 // Log function call by module
-                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $sub_module _ $function_name >]).to_string()) {
+                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $sub_module _ $function_name >]).to_string(), env_data.module.test_mode) {
                     error!("Logging system is not working!!: {:?}", e);
                     return Err(FunctionErrors::InternalApiError);
+                }
+
+
+                // Disallow this function call from continuing if the module is in test mode
+                if !$allow_in_test_mode && env_data.module.test_mode {
+                    return Err(FunctionErrors::TestMode);
                 }
 
                 let memory_view = match get_memory(&env, &store) {
@@ -216,14 +243,17 @@ macro_rules! impl_new_sub_module_function_with_error_buffer {
 
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
-                let name = &env_data.module.name.clone();
+                let module = env_data.module.clone();
                 // Run the function on the Tokio runtime and wait for the result
                 let result = env_api.runtime.block_on(async move {
-                    sub_module.$function_name(&params, name).await
+                    sub_module.$function_name(&params, module).await
                 });
 
                 let return_data = match result {
                     Ok(return_data) => return_data,
+                    Err(ApiError::TestMode) => {
+                        return Err(FunctionErrors::TestMode);
+                    }
                     Err(e) => {
                         error!("{} experienced an issue calling {}: {:?}", env_data.module.name, stringify!([< $api _ $sub_module _ $function_name >]), e);
                         return Err(FunctionErrors::InternalApiError);
@@ -257,86 +287,99 @@ macro_rules! impl_new_sub_module_function_with_error_buffer {
 }
 
 // General Functions
-impl_new_function!(general, simple_json_post_request);
-impl_new_function_with_error_buffer!(general, make_named_request);
+impl_new_function!(general, simple_json_post_request, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(general, make_named_request, ALLOW_IN_TEST_MODE);
 
 // GitHub Functions
-impl_new_function!(github, add_user_to_repo);
-impl_new_function!(github, remove_user_from_repo);
-impl_new_function!(github, add_user_to_team);
-impl_new_function!(github, remove_user_from_team);
-impl_new_function!(github, update_branch_protection_rule);
-impl_new_function!(github, create_environment_for_repo);
-impl_new_function!(github, configure_secret);
-impl_new_function!(github, create_deployment_branch_protection_rule);
-impl_new_function!(github, trigger_repo_dispatch);
-impl_new_function!(github, check_org_membership_of_user);
+impl_new_function!(github, add_user_to_repo, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, remove_user_from_repo, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, add_user_to_team, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, remove_user_from_team, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, update_branch_protection_rule, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, create_environment_for_repo, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, configure_secret, DISALLOW_IN_TEST_MODE);
+impl_new_function!(
+    github,
+    create_deployment_branch_protection_rule,
+    DISALLOW_IN_TEST_MODE
+);
+impl_new_function!(github, trigger_repo_dispatch, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, check_org_membership_of_user, ALLOW_IN_TEST_MODE);
 
-impl_new_function_with_error_buffer!(github, make_graphql_query);
-impl_new_function_with_error_buffer!(github, make_advanced_graphql_query);
-impl_new_function_with_error_buffer!(github, fetch_commit);
-impl_new_function_with_error_buffer!(github, list_files);
-impl_new_function_with_error_buffer!(github, fetch_file);
-impl_new_function_with_error_buffer!(github, get_branch_protection_rules);
-impl_new_function_with_error_buffer!(github, get_branch_protection_ruleset);
-impl_new_function_with_error_buffer!(github, get_repository_collaborators);
-impl_new_function_with_error_buffer!(github, search_for_file);
-impl_new_function_with_error_buffer!(github, list_seats_in_org_copilot);
-impl_new_function_with_error_buffer!(github, add_users_to_org_copilot);
-impl_new_function_with_error_buffer!(github, remove_users_from_org_copilot);
+impl_new_function_with_error_buffer!(github, make_graphql_query, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, make_advanced_graphql_query, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, fetch_commit, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, list_files, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, fetch_file, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_branch_protection_rules, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_branch_protection_ruleset, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_repository_collaborators, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, search_for_file, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, list_seats_in_org_copilot, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, add_users_to_org_copilot, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, remove_users_from_org_copilot, DISALLOW_IN_TEST_MODE);
 
 // GitHub Functions only available with GitHub App authentication
-impl_new_function!(github, review_fpat_requests_for_org);
-impl_new_function_with_error_buffer!(github, list_fpat_requests_for_org);
-impl_new_function_with_error_buffer!(github, get_repos_for_fpat);
+impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, list_fpat_requests_for_org, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_repos_for_fpat, ALLOW_IN_TEST_MODE);
 
 // AWS functions
 #[cfg(feature = "aws")]
-impl_new_sub_module_function_with_error_buffer!(aws, kms, sign_arbitrary_message);
+impl_new_sub_module_function_with_error_buffer!(
+    aws,
+    kms,
+    sign_arbitrary_message,
+    DISALLOW_IN_TEST_MODE
+);
 #[cfg(feature = "aws")]
-impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key);
+impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key, ALLOW_IN_TEST_MODE);
 
 // Npm Functions
-impl_new_function_with_error_buffer!(npm, publish_empty_stub);
-impl_new_function_with_error_buffer!(npm, set_team_permission_on_package);
-impl_new_function_with_error_buffer!(npm, create_granular_token_for_packages);
-impl_new_function_with_error_buffer!(npm, delete_granular_token);
-impl_new_function_with_error_buffer!(npm, list_granular_tokens);
-impl_new_function_with_error_buffer!(npm, delete_package);
-impl_new_function_with_error_buffer!(npm, add_user_to_team);
-impl_new_function_with_error_buffer!(npm, remove_user_from_team);
-impl_new_function_with_error_buffer!(npm, remove_user_from_organization);
-impl_new_function_with_error_buffer!(npm, invite_user_to_organization);
-impl_new_function_with_error_buffer!(npm, get_org_user_list);
-impl_new_function_with_error_buffer!(npm, get_org_users_without_2fa);
-impl_new_function_with_error_buffer!(npm, list_packages_with_team_permission);
-impl_new_function_with_error_buffer!(npm, get_token_details);
+impl_new_function_with_error_buffer!(npm, publish_empty_stub, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, set_team_permission_on_package, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(
+    npm,
+    create_granular_token_for_packages,
+    DISALLOW_IN_TEST_MODE
+);
+impl_new_function_with_error_buffer!(npm, delete_granular_token, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, list_granular_tokens, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, delete_package, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, add_user_to_team, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, remove_user_from_team, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, remove_user_from_organization, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, invite_user_to_organization, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, get_org_user_list, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, get_org_users_without_2fa, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, list_packages_with_team_permission, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(npm, get_token_details, ALLOW_IN_TEST_MODE);
 
 // Okta Functions
-impl_new_function!(okta, remove_user_from_group);
-impl_new_function_with_error_buffer!(okta, get_user_data);
+impl_new_function!(okta, remove_user_from_group, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(okta, get_user_data, ALLOW_IN_TEST_MODE);
 
 // PagerDuty Functions
-impl_new_function!(pagerduty, trigger_incident);
+impl_new_function!(pagerduty, trigger_incident, DISALLOW_IN_TEST_MODE);
 
 // Rustica Functions
-impl_new_function_with_error_buffer!(rustica, new_mtls_cert);
+impl_new_function_with_error_buffer!(rustica, new_mtls_cert, DISALLOW_IN_TEST_MODE);
 
 // Slack Functions
-impl_new_function!(slack, views_open);
-impl_new_function!(slack, post_message);
-impl_new_function_with_error_buffer!(slack, get_id_from_email);
-impl_new_function!(slack, post_to_arbitrary_webhook);
-impl_new_function!(slack, post_to_named_webhook);
+impl_new_function!(slack, views_open, ALLOW_IN_TEST_MODE);
+impl_new_function!(slack, post_message, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, get_id_from_email, ALLOW_IN_TEST_MODE);
+impl_new_function!(slack, post_to_arbitrary_webhook, ALLOW_IN_TEST_MODE);
+impl_new_function!(slack, post_to_named_webhook, ALLOW_IN_TEST_MODE);
 
 // Splunk Functions
-impl_new_function!(splunk, post_hec);
+impl_new_function!(splunk, post_hec, ALLOW_IN_TEST_MODE);
 
 // Yubikey Functions
-impl_new_function_with_error_buffer!(yubikey, verify_otp);
+impl_new_function_with_error_buffer!(yubikey, verify_otp, ALLOW_IN_TEST_MODE);
 
 // Web Functions
-impl_new_function_with_error_buffer!(web, issue_jwt);
+impl_new_function_with_error_buffer!(web, issue_jwt, DISALLOW_IN_TEST_MODE);
 
 pub fn to_api_function(
     name: &str,
@@ -353,26 +396,18 @@ pub fn to_api_function(
         "fetch_data_and_source" => {
             Function::new_typed_with_env(&mut store, &env, super::message::fetch_data_and_source)
         }
-        "get_accessory_data" => Function::new_typed_with_env(
-            &mut store,
-            &env,
-            super::runtime_data::get_accessory_data,
-        ),
-        "get_secrets" => Function::new_typed_with_env(
-            &mut store,
-            &env,
-            super::runtime_data::get_secrets,
-        ),
-        "get_headers" => Function::new_typed_with_env(
-            &mut store,
-            &env,
-            super::message::get_headers,
-        ),
-        "get_query_params" => Function::new_typed_with_env(
-            &mut store,
-            &env,
-            super::message::get_query_params,
-        ),
+        "get_accessory_data" => {
+            Function::new_typed_with_env(&mut store, &env, super::runtime_data::get_accessory_data)
+        }
+        "get_secrets" => {
+            Function::new_typed_with_env(&mut store, &env, super::runtime_data::get_secrets)
+        }
+        "get_headers" => {
+            Function::new_typed_with_env(&mut store, &env, super::message::get_headers)
+        }
+        "get_query_params" => {
+            Function::new_typed_with_env(&mut store, &env, super::message::get_query_params)
+        }
         "fetch_random_bytes" => {
             Function::new_typed_with_env(&mut store, &env, super::internal::fetch_random_bytes)
         }

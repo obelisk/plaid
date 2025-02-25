@@ -1,8 +1,11 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
-use crate::apis::{github::GitHubError, ApiError};
+use crate::{
+    apis::{github::GitHubError, ApiError},
+    loader::PlaidModule,
+};
 
 use super::Github;
 
@@ -49,7 +52,7 @@ impl Github {
     async fn make_gql_request<T: Serialize>(
         &self,
         query: T,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request = self.client._post(GITHUB_GQL_API, Some(&query)).await;
 
@@ -81,7 +84,7 @@ impl Github {
     pub async fn make_graphql_query(
         &self,
         request: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request: Request = serde_json::from_str(request).map_err(|_| ApiError::BadRequest)?;
 
@@ -106,7 +109,7 @@ impl Github {
     pub async fn make_advanced_graphql_query(
         &self,
         request: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request: AdvancedRequest =
             serde_json::from_str(request).map_err(|_| ApiError::BadRequest)?;

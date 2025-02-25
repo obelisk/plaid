@@ -37,6 +37,7 @@ pub enum Log {
     HostFunctionCall {
         module: String,
         function: String,
+        test_mode: bool,
     },
     TimeseriesPoint {
         measurement: String,
@@ -136,9 +137,18 @@ impl Logger {
             .map_err(|_| LoggingError::LoggingSystemDead)
     }
 
-    pub fn log_function_call(&self, module: String, function: String) -> Result<(), LoggingError> {
+    pub fn log_function_call(
+        &self,
+        module: String,
+        function: String,
+        test_mode: bool,
+    ) -> Result<(), LoggingError> {
         self.sender
-            .send(Log::HostFunctionCall { module, function })
+            .send(Log::HostFunctionCall {
+                module,
+                function,
+                test_mode,
+            })
             .map_err(|_| LoggingError::LoggingSystemDead)
     }
 

@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use super::{PagerDuty, PagerDutyError};
-use crate::apis::ApiError;
+use crate::{apis::ApiError, loader::PlaidModule};
 
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +42,7 @@ impl PagerDuty {
     pub async fn trigger_incident(
         &self,
         request: &str,
-        module_name: &str,
+        module_name: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
         let request: TriggerRequest = match serde_json::from_str(request) {
             Ok(r) => r,

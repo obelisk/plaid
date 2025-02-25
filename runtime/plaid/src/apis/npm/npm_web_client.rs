@@ -1,11 +1,11 @@
 use reqwest::{cookie::CookieStore, Response};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use totp_rs::{Algorithm, Secret, TOTP};
 use url::Url;
 
-use crate::apis::ApiError;
+use crate::{apis::ApiError, loader::PlaidModule};
 
 use plaid_stl::npm::shared_structs::*;
 
@@ -262,7 +262,7 @@ impl Npm {
     pub async fn set_team_permission_on_package(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -313,7 +313,7 @@ impl Npm {
     pub async fn create_granular_token_for_packages(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -413,7 +413,7 @@ impl Npm {
     pub async fn delete_granular_token(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -452,7 +452,11 @@ impl Npm {
     /// Retrieve a list of granular tokens for the account whose credentials have been configured for this client.
     ///
     /// Note: only granular tokens are returned. Other types of tokens (publish, automation, etc.) are filtered out.
-    pub async fn list_granular_tokens(&self, _: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn list_granular_tokens(
+        &self,
+        _: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         info!("Listing npm granular tokens on behalf of [{module}]");
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -501,7 +505,11 @@ impl Npm {
     /// Note: The package name should be unscoped. If you are trying to delete
     /// @scope/package_name, then you should pass only "package_name". The scope is
     /// preconfigured in the client and will be added automatically.
-    pub async fn delete_package(&self, package: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn delete_package(
+        &self,
+        package: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let package = self.validate_npm_package_name(package)?;
         info!("Deleting npm package [{package}] on behalf of [{module}]");
         if let Err(e) = self.login().await {
@@ -559,7 +567,11 @@ impl Npm {
     }
 
     /// Add a user to an npm team
-    pub async fn add_user_to_team(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn add_user_to_team(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
         }
@@ -603,7 +615,7 @@ impl Npm {
     pub async fn remove_user_from_team(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -645,7 +657,7 @@ impl Npm {
     pub async fn remove_user_from_organization(
         &self,
         user: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let user = self.validate_npm_username(user)?;
         info!("Removing user [{user}] from npm organization on behalf of [{module}]");
@@ -684,7 +696,7 @@ impl Npm {
     pub async fn invite_user_to_organization(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -732,7 +744,11 @@ impl Npm {
     }
 
     /// Return all users in the npm organization
-    pub async fn get_org_user_list(&self, _: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn get_org_user_list(
+        &self,
+        _: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         info!("Listing all members of npm organization on behalf of [{module}]");
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -789,7 +805,7 @@ impl Npm {
     pub async fn get_org_users_without_2fa(
         &self,
         _: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         info!("Listing all members of npm organization without 2FA on behalf of [{module}]");
         if let Err(e) = self.login().await {
@@ -849,7 +865,7 @@ impl Npm {
     pub async fn list_packages_with_team_permission(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let params: ListPackagesWithTeamPermissionParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -989,7 +1005,11 @@ impl Npm {
     }
 
     /// Return a JSON-encoded struct that contains details about a granular token
-    pub async fn get_token_details(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn get_token_details(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let params: GetTokenDetailsParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let token_id = self.validate_token_id(&params.token_id)?;

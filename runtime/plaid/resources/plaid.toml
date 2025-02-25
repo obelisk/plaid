@@ -22,6 +22,21 @@ path = "/tmp/sled"
 [loading]
 module_dir = "../compiled_modules/"
 lru_cache_size = 200
+
+test_mode = true
+test_mode_exemptions = [
+    "test_crashtest.wasm",
+    "test_db.wasm",
+    "test_fileopen.wasm",
+    "test_get_everything.wasm",
+    "test_logback.wasm",
+    "test_mnr.wasm",
+    "test_persistent_response.wasm",
+    "test_random.wasm",
+    "test_sshcerts_usage.wasm",
+    "test_time.wasm",
+]
+
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
 "test_sshcerts_usage.wasm" = 1024
@@ -50,16 +65,17 @@ lru_cache_size = 200
 "my_secret" = "verySecureSecret"
 
 [loading.log_type_overrides]
-"test_time.wasm" = "time"
-"test_sshcerts_usage.wasm" = "test_sshcerts"
 "test_crashtest.wasm" = "crashtest"
-"test_persistent_response.wasm" = "prtest"
-"test_logback.wasm" = "test_logback"
 "test_db.wasm" = "test_db"
 "test_fileopen.wasm" = "test_fileopen"
-"test_random.wasm" = "test_random"
-"test_mnr.wasm" = "test_mnr"
 "test_get_everything.wasm" = "test_geteverything"
+"test_logback.wasm" = "test_logback"
+"test_mnr.wasm" = "test_mnr"
+"test_persistent_response.wasm" = "prtest"
+"test_random.wasm" = "test_random"
+"test_sshcerts_usage.wasm" = "test_sshcerts"
+"test_testmode.wasm" = "testmode"
+"test_time.wasm" = "time"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -84,6 +100,7 @@ default = "Unlimited"
 [loading.storage_size.module_overrides]
 "test_db.wasm" = { Limited = 50 }
 
+
 # [apis."okta"]
 # token = ""
 # domain = ""
@@ -95,7 +112,15 @@ verb = "post"
 uri = "http://localhost:8998/response"
 return_body = true
 return_code = true
-allowed_rules = ["test_time.wasm", "test_logback.wasm", "test_db.wasm", "test_fileopen.wasm", "test_random.wasm", "test_mnr.wasm", "test_get_everything.wasm"]
+allowed_rules = [
+    "test_time.wasm",
+    "test_logback.wasm",
+    "test_db.wasm",
+    "test_fileopen.wasm",
+    "test_random.wasm",
+    "test_mnr.wasm",
+    "test_get_everything.wasm",
+]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 
@@ -131,6 +156,24 @@ return_body = true
 return_code = true
 allowed_rules = ["testing_test.wasm"]
 [apis."general"."network"."web_requests"."google_test"."headers"]
+
+[apis."general"."network"."web_requests"."testmode_allow"]
+verb = "get"
+uri = "https://captive.apple.com/"
+return_body = true
+return_code = true
+allowed_rules = ["test_testmode.wasm"]
+available_in_test_mode = true
+[apis."general"."network"."web_requests"."testmode_allow"."headers"]
+
+[apis."general"."network"."web_requests"."testmode_deny"]
+verb = "get"
+uri = "https://captive.apple.com/"
+return_body = true
+return_code = true
+allowed_rules = ["test_testmode.wasm"]
+available_in_test_mode = false
+[apis."general"."network"."web_requests"."testmode_deny"."headers"]
 
 # [apis."general"."network"."web_requests"."list_deploy_keys"]
 # verb = "get"
@@ -294,6 +337,10 @@ headers = ["Authorization", "my_secret"]
 response_mode = "rule:test_get_everything.wasm"
 [webhooks."internal".webhooks."testgeteverything".get_mode.caching_mode]
 type = "None"
+
+[webhooks."internal".webhooks."testmode"]
+log_type = "testmode"
+headers = []
 
 # End webhooks for tests
 

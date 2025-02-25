@@ -1,15 +1,22 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::Serialize;
 
-use crate::apis::{github::GitHubError, ApiError};
+use crate::{
+    apis::{github::GitHubError, ApiError},
+    loader::PlaidModule,
+};
 
 use super::Github;
 
 impl Github {
     /// Removes a collaborator from a repository.
     /// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2022-11-28#remove-a-repository-collaborator for more detail
-    pub async fn remove_user_from_repo(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+    pub async fn remove_user_from_repo(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -41,7 +48,11 @@ impl Github {
 
     /// Adds a collaborator to a repository.
     /// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2022-11-28#add-a-repository-collaborator for more detail
-    pub async fn add_user_to_repo(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+    pub async fn add_user_to_repo(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -85,7 +96,11 @@ impl Github {
 
     /// Returns the contents of a single commit reference.
     /// See https://docs.github.com/en/rest/commits/commits?apiVersion=2022-11-28#get-a-commit for more detail
-    pub async fn fetch_commit(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn fetch_commit(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -115,7 +130,11 @@ impl Github {
 
     /// Returns a list of all Files in a Pull Request.
     /// See https://docs.github.com/en/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests-files for more detail
-    pub async fn list_files(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn list_files(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -147,7 +166,11 @@ impl Github {
 
     /// Returns the contents of a file at a specific URI.
     /// See https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28#get-repository-content for more detail
-    pub async fn fetch_file(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn fetch_file(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -202,7 +225,7 @@ impl Github {
     pub async fn get_branch_protection_rules(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -236,7 +259,7 @@ impl Github {
     pub async fn get_branch_protection_ruleset(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -272,7 +295,7 @@ impl Github {
     pub async fn get_repository_collaborators(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -320,7 +343,7 @@ impl Github {
     pub async fn update_branch_protection_rule(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
