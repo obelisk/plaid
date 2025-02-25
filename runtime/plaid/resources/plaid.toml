@@ -22,6 +22,10 @@ path = "/tmp/sled"
 [loading]
 module_dir = "../compiled_modules/"
 lru_cache_size = 200
+
+test_mode = true
+test_mode_exemptions = []
+
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
 "test_sshcerts_usage.wasm" = 1024
@@ -84,6 +88,7 @@ default = "Unlimited"
 [loading.storage_size.module_overrides]
 "test_db.wasm" = { Limited = 50 }
 
+
 # [apis."okta"]
 # token = ""
 # domain = ""
@@ -95,7 +100,15 @@ verb = "post"
 uri = "http://localhost:8998/response"
 return_body = true
 return_code = true
-allowed_rules = ["test_time.wasm", "test_logback.wasm", "test_db.wasm", "test_fileopen.wasm", "test_random.wasm", "test_mnr.wasm", "test_get_everything.wasm"]
+allowed_rules = [
+    "test_time.wasm",
+    "test_logback.wasm",
+    "test_db.wasm",
+    "test_fileopen.wasm",
+    "test_random.wasm",
+    "test_mnr.wasm",
+    "test_get_everything.wasm",
+]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 

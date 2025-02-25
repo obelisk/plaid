@@ -1,10 +1,13 @@
 use super::Github;
-use crate::apis::{github::GitHubError, ApiError};
+use crate::{
+    apis::{github::GitHubError, ApiError},
+    loader::PlaidModule,
+};
 
 use alkali::asymmetric::seal;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Serialize)]
 struct UploadEnvironmentSecretPayload {
@@ -14,7 +17,11 @@ struct UploadEnvironmentSecretPayload {
 
 impl Github {
     /// Configure a secret in a GitHub repository or deployment environment
-    pub async fn configure_secret(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+    pub async fn configure_secret(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -47,7 +54,9 @@ impl Github {
                 format!("/repos/{owner}/{repo}/actions/secrets/public-key")
             }
         };
-        let (status, body) = self.make_generic_get_request(address, module).await?;
+        let (status, body) = self
+            .make_generic_get_request(address, module.clone())
+            .await?;
         if status != 200 {
             return Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                 status,

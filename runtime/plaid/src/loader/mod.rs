@@ -114,6 +114,20 @@ pub struct Configuration {
     pub accessory_data_file_overrides: HashMap<String, HashMap<String, String>>,
     /// See persistent_response_size in PlaidModule for an explanation on how to use this
     pub persistent_response_size: HashMap<String, usize>,
+    /// Modules will be loaded in test_mode meaning they will not be able to make any API calls that
+    /// cause side effects. This does not include:
+    /// * Storage
+    /// * Cache
+    /// * Persistent Response
+    /// * Some MNRs: Each MNR must decorate themselves as being available in test mode for them to be available.
+    /// What an API does in this mode is up to the API implementation and the relevant API module
+    /// should be consulted.
+    #[serde(default)]
+    pub test_mode: bool,
+    /// List of modules that should be exempt from being tested. This will allow all APIs to be called,
+    /// even if they have side effects.
+    #[serde(default)]
+    pub test_mode_exemptions: Vec<String>,
 }
 
 /// The persistent response allowed for the module. This is used for
@@ -180,6 +194,14 @@ pub struct PlaidModule {
     /// - If `Some`, the module is marked as unsafe for concurrent execution, and the `Mutex<()>`
     ///   is used to ensure mutual exclusion, preventing multiple threads from executing it simultaneously.
     pub concurrency_unsafe: Option<Mutex<()>>,
+    /// If the module is in test mode, meaning it should not be allowed to cause side effects
+    pub test_mode: bool,
+}
+
+impl std::fmt::Display for PlaidModule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
 }
 
 impl PlaidModule {
@@ -206,6 +228,7 @@ impl PlaidModule {
         module_bytes: Vec<u8>,
         log_type: &str,
         concurrency_unsafe: Option<Mutex<()>>,
+        test_mode: bool,
     ) -> Result<Self, Errors> {
         // Get the computation limit for the module
         let computation_limit =
@@ -242,7 +265,7 @@ impl PlaidModule {
         };
         let storage_current = Arc::new(RwLock::new(storage_current_bytes));
 
-        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Storage: [{storage_current_bytes}/{storage_limit} bytes used] Log Type: [{log_type}]. Concurrency Safe: [{}]", concurrency_unsafe.is_none());
+        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Storage: [{storage_current_bytes}/{storage_limit} bytes used] Log Type: [{log_type}]. Concurrency Safe: [{}] Test Mode: [{test_mode}]", concurrency_unsafe.is_none());
         for import in module.imports() {
             info!("\tImport: {}", import.name());
         }
@@ -260,6 +283,7 @@ impl PlaidModule {
             cache: None,
             persistent_response: None,
             concurrency_unsafe,
+            test_mode,
         })
     }
 }
@@ -341,6 +365,10 @@ pub async fn load(
             }
         });
 
+        // Default is the global test mode. Then if the module is in the exemptions specification
+        // we will disable test mode for that module.
+        let test_mode = config.test_mode && !config.test_mode_exemptions.contains(&filename);
+
         // Configure and compile module
         let Ok(mut plaid_module) = PlaidModule::configure_and_compile(
             &filename,
@@ -351,6 +379,7 @@ pub async fn load(
             module_bytes,
             &type_,
             concurrency_safe,
+            test_mode,
         )
         .await
         else {
@@ -380,8 +409,7 @@ pub async fn load(
         plaid_module.cache = cache;
         plaid_module.persistent_response = persistent_response;
         plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
-        plaid_module.accessory_data =
-            module_accessory_data(&config, &plaid_module.name, &type_);
+        plaid_module.accessory_data = module_accessory_data(&config, &plaid_module.name, &type_);
 
         // Put it in an Arc because we're going to have multiple references to it
         let plaid_module = Arc::new(plaid_module);

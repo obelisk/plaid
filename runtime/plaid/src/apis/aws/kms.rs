@@ -1,4 +1,4 @@
-use crate::apis::ApiError;
+use crate::{apis::ApiError, loader::PlaidModule};
 use aws_config::{BehaviorVersion, Region};
 use aws_sdk_kms::{
     config::Credentials,
@@ -8,7 +8,7 @@ use aws_sdk_kms::{
     Client,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 /// A request to sign a given message with a KMS key.
 #[derive(Deserialize)]
@@ -220,14 +220,14 @@ impl Kms {
     pub async fn sign_arbitrary_message(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         // Parse the information needed to make the request
         let request: SignRequestRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Fetch rules that are allowd to use this key
-        let allowed_rules = self.fetch_key_configuration(module, &request.key_id)?;
+        let allowed_rules = self.fetch_key_configuration(module.to_string(), &request.key_id)?;
 
         // Verify that caller is allowed to use this key
         if !allowed_rules.contains(&module.to_string()) {
@@ -256,7 +256,11 @@ impl Kms {
 
     /// Returns the public key of an asymmetric KMS key. Unlike the private key of a asymmetric KMS key,
     /// which never leaves KMS unencrypted, callers with `kms:GetPublicKey` permission can download the public key of an asymmetric KMS key.
-    pub async fn get_public_key(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn get_public_key(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         // Parse the information needed to make the request
         let request: HashMap<String, String> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -267,7 +271,7 @@ impl Kms {
             .to_string();
 
         // Fetch rules that are allowd to use this key
-        let allowed_rules = self.fetch_key_configuration(module, &key_id)?;
+        let allowed_rules = self.fetch_key_configuration(module.clone(), &key_id)?;
 
         // Verify that caller is allowed to use this key
         if !allowed_rules.contains(&module.to_string()) {
@@ -288,7 +292,11 @@ impl Kms {
         serde_json::to_string(&output).map_err(|_| ApiError::BadRequest)
     }
 
-    fn fetch_key_configuration(&self, module: &str, key_id: &str) -> Result<Vec<String>, ApiError> {
+    fn fetch_key_configuration<T: Display>(
+        &self,
+        module: T,
+        key_id: &str,
+    ) -> Result<Vec<String>, ApiError> {
         match self.key_configuration.get(key_id) {
             Some(config) => Ok(config.to_vec()),
             None => {

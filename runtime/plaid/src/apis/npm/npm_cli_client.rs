@@ -1,4 +1,4 @@
-use crate::apis::ApiError;
+use crate::{apis::ApiError, loader::PlaidModule};
 
 use super::{hashes, Npm, NpmError};
 
@@ -6,7 +6,7 @@ use flate2::{write::GzEncoder, Compression};
 use plaid_stl::npm::shared_structs::{PublishEmptyStubParams, RuntimeReturnValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use tar::{Builder, Header};
 
 const REGISTRY_URL: &str = "https://registry.npmjs.org";
@@ -76,7 +76,11 @@ struct PkgManifest<'a> {
 
 impl Npm {
     /// Upload an empty package stub to the npm registry.
-    pub async fn publish_empty_stub(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn publish_empty_stub(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let params: PublishEmptyStubParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let package_name = self.validate_npm_package_name(&params.package_name)?;
