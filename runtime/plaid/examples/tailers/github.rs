@@ -2,7 +2,7 @@ use crossbeam_channel::bounded;
 use plaid::apis::github::Authentication;
 use serde::Deserialize;
 
-use plaid::data::github::*;
+use plaid::data::{get_and_process_dg_logs, github::*};
 
 use std::env;
 use std::time::Duration;
@@ -60,7 +60,7 @@ async fn main() {
 
     loop {
         //println!("Start of log group");
-        gh.fetch_audit_logs().await.unwrap();
+        get_and_process_dg_logs(&mut gh).await.unwrap();
 
         while let Ok(log) = logger_rx.recv_timeout(Duration::from_secs(0)) {
             let log: GitHubLog = serde_json::from_slice(&log.data).unwrap();
