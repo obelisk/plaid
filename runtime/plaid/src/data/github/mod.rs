@@ -78,6 +78,20 @@ pub struct GithubConfig {
     sleep_duration: u64,
 }
 
+impl GithubConfig {
+    /// Create a new instance of a `GithubConfig`
+    pub fn new(authentication: Authentication, org: String, log_type: LogType) -> Self {
+        Self {
+            authentication,
+            org,
+            log_type,
+            logbacks_allowed: LogbacksAllowed::default(),
+            canon_time: 20,
+            sleep_duration: 1000,
+        }
+    }
+}
+
 /// This function provides the default sleep duration in milliseconds.
 /// It is used as the default value for deserialization of the `sleep_duration` field,
 /// of `GithubConfig` in the event that no value is provided.

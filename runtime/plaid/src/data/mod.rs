@@ -192,7 +192,7 @@ struct DataGeneratorLog {
 
 /// This is what data generators have in common
 #[allow(async_fn_in_trait)]
-trait DataGenerator {
+pub trait DataGenerator {
     /// Fetch from the source some logs that were produced between `since` and `until`.
     ///
     /// Note: this function does not necessarily return _all_ logs that were produced in that time frame,
@@ -240,7 +240,7 @@ fn get_time() -> u64 {
 
 /// Get logs from a data generator, one page at a time, and send them to rules for processing.
 /// Internally, this method handles making overlapping queries and logs de-duplication.
-async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), ()> {
+pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), ()> {
     let sleep_duration = Duration::from_millis(dg.get_sleep_duration());
 
     loop {
