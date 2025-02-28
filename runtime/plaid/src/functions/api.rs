@@ -429,8 +429,17 @@ pub fn to_api_function(
         }
         "get_time" => Function::new_typed(&mut store, super::internal::get_time),
         "storage_insert" => Function::new_typed_with_env(&mut store, &env, super::storage::insert),
+        "storage_insert_shared" => {
+            Function::new_typed_with_env(&mut store, &env, super::storage::insert_shared)
+        }
         "storage_get" => Function::new_typed_with_env(&mut store, &env, super::storage::get),
+        "storage_get_shared" => {
+            Function::new_typed_with_env(&mut store, &env, super::storage::get_shared)
+        }
         "storage_delete" => Function::new_typed_with_env(&mut store, &env, super::storage::delete),
+        "storage_delete_shared" => {
+            Function::new_typed_with_env(&mut store, &env, super::storage::delete_shared)
+        }
         "storage_list_keys" => {
             Function::new_typed_with_env(&mut store, &env, super::storage::list_keys)
         }

@@ -32,16 +32,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create the storage system is one is configured
     let storage = match config.storage {
-        Some(config) => Some(Arc::new(Storage::new(config)?)),
+        Some(config) => Some(Arc::new(Storage::new(config).await?)),
         None => None,
     };
 
-    if storage.is_some() {
-        info!("Storage system configured");
-    } else {
-        info!(
-            "No persistent storage system configured; unexecuted log backs will be lost on shutdown"
-        );
+    match storage {
+        None => info!("No persistent storage system configured; unexecuted log backs will be lost on shutdown"),
+        Some(ref storage) => {
+            info!("Storage system configured");
+            match &storage.shared_dbs {
+                None => info!("No shared DBs configured"),
+                Some(dbs) => {
+                    info!("Configured shared DBs: {:?}", dbs.keys().map(|v| v.clone()).collect::<Vec<String>>());
+                }
+            }
+        }
     }
 
     // This sender provides an internal route to sending logs. This is what
