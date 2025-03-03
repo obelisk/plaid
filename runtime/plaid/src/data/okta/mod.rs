@@ -118,7 +118,7 @@ impl Okta {
             config,
             last_seen: OffsetDateTime::now_utc(),
             logger,
-            seen_logs_uuid: LruCache::new(NonZeroUsize::new(512).unwrap()),
+            seen_logs_uuid: LruCache::new(NonZeroUsize::new(4096).unwrap()),
         }
     }
 }
