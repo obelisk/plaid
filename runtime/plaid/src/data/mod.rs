@@ -181,7 +181,7 @@ impl Data {
 }
 
 /// Represents a generic log produced by a data generator
-struct DataGeneratorLog {
+pub struct DataGeneratorLog {
     /// The unique ID for this log, as returned by the data source (e.g., GH, Okta)
     pub id: String,
     /// The timestamp at which this log was produced, as returned by the data source (e.g., GH, Okta).
@@ -269,13 +269,13 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
         }
 
         // Get some logs that happened between `last_seen` and `until`.
-        // Walk back a couple of second from the actual value of last_seen, to account for problems
+        // Walk back a second from the actual value of last_seen, to account for problems
         // with time granularity. E.g., events happening in the same second could be missed.
         // Overlapping queries will prevent this problem from happening.
         // We would introduce the issue of seeing the same log multiple times, but this is handled later.
         let since = dg
             .get_last_seen()
-            .saturating_sub(time::Duration::seconds(2));
+            .saturating_sub(time::Duration::seconds(1));
 
         let logs = match dg.fetch_logs(since, until).await {
             Ok(logs) => logs,
@@ -345,7 +345,7 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
             // This ensures that, eventually, we will get some new logs.
             dg.set_last_seen(
                 dg.get_last_seen()
-                    .saturating_add(time::Duration::seconds(1)),
+                    .saturating_add(time::Duration::milliseconds(500)),
             );
 
             return Ok(());
