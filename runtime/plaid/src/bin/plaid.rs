@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match &storage.shared_dbs {
                 None => info!("No shared DBs configured"),
                 Some(dbs) => {
-                    info!("Configured shared DBs: {:?}", dbs.keys().map(|v| v.clone()).collect::<Vec<String>>());
+                    info!("Configured shared DBs: {:?}", dbs.keys().collect::<Vec<&String>>());
                 }
             }
         }

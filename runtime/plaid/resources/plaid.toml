@@ -8,7 +8,7 @@ execution_threads = 2
 # output_file_path = "../somedirectory/file.txt" 
 
 [storage.shared_dbs."shared_db_1"]
-size_limit = "Unlimited"
+size_limit = { Limited = 50 }
 r = ["test_shared_db_rule_1.wasm"]
 rw = ["test_shared_db_rule_2.wasm"]
 

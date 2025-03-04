@@ -34,6 +34,32 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
             }
             make_named_request("test-response", "OK", HashMap::new()).unwrap();
         }
+        "3" => {
+            plaid::print_debug_string(&format!("[{RULE_NAME}] Filling up the shared DB..."));
+            plaid::storage::insert_shared(SHARED_DB, "my_key", &vec![0u8; 44]).unwrap();
+
+            plaid::print_debug_string(&format!("[{RULE_NAME}] Reading from DB..."));
+            let r = plaid::storage::get_shared(SHARED_DB, "my_key").unwrap();
+            plaid::print_debug_string(&format!(
+                "[{RULE_NAME}] Got {} bytes (+ {} bytes for the key)",
+                r.len(),
+                "my_key".as_bytes().len()
+            ));
+            make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        }
+        "4" => {
+            plaid::print_debug_string(&format!(
+                "[{RULE_NAME}] Writing to a full shared DB, should fail..."
+            ));
+            match plaid::storage::insert_shared(SHARED_DB, "another_key", &vec![0u8]) {
+                Ok(_) => panic!("This should have failed"),
+                Err(_) => {
+                    plaid::print_debug_string(&format!("[{RULE_NAME}] Failed as expected"));
+                }
+            }
+
+            make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        }
         _ => panic!("Got an unexpected log"),
     }
 
