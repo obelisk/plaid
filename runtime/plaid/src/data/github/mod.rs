@@ -146,7 +146,7 @@ impl Github {
             config,
             client,
             last_seen: OffsetDateTime::now_utc(),
-            seen_logs_uuid: LruCache::new(NonZeroUsize::new(512).unwrap()),
+            seen_logs_uuid: LruCache::new(NonZeroUsize::new(4096).unwrap()),
             logger,
         }
     }
