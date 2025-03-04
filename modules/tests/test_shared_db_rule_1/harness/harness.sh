@@ -31,10 +31,12 @@ curl -d "3" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
 curl -d "4" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
+curl -d "5" http://$PLAID_LOCATION/webhook/$URL2
+sleep 2
 
 kill $RH_PID 2>&1 > /dev/null
 
-echo -e "OK\nOK\nOK\nOK\nOK\nOK\nOK" > expected.txt
+echo -e "OK\nOK\nOK\nOK\nOK\nOK\nOK\nOK" > expected.txt
 diff expected.txt $FILE
 RESULT=$?
 

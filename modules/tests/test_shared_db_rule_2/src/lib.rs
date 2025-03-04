@@ -57,7 +57,18 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
                     plaid::print_debug_string(&format!("[{RULE_NAME}] Failed as expected"));
                 }
             }
-
+            make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        }
+        "5" => {
+            plaid::print_debug_string(&format!(
+                "[{RULE_NAME}] Writing to a non-existing shared DB, should fail..."
+            ));
+            match plaid::storage::insert_shared("this_does_not_exist", "some_key", &vec![0u8]) {
+                Ok(_) => panic!("This should have failed"),
+                Err(e) => {
+                    plaid::print_debug_string(&format!("[{RULE_NAME}] Failed as expected: {e}"));
+                }
+            }
             make_named_request("test-response", "OK", HashMap::new()).unwrap();
         }
         _ => panic!("Got an unexpected log"),
