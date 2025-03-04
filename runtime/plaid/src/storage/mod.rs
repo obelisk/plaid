@@ -7,6 +7,7 @@ use async_trait::async_trait;
 
 mod sled;
 
+use futures_util::future::join_all;
 use serde::Deserialize;
 
 use crate::loader::LimitValue;
@@ -17,9 +18,11 @@ pub struct SharedDbConfig {
     /// The max size of this shared DB
     pub size_limit: LimitValue,
     /// List of rules that can read from the DB
-    pub r: Option<Vec<String>>,
+    #[serde(default)]
+    pub r: Vec<String>,
     /// List of rules that can read from and write to the DB
-    pub rw: Option<Vec<String>>,
+    #[serde(default)]
+    pub rw: Vec<String>,
 }
 
 /// Represents a shared DB in the system
@@ -46,7 +49,7 @@ pub struct Storage {
 }
 
 /// Errors encountered while trying to use Plaid's persistent storage.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StorageError {
     NoStorageConfigured,
     CouldNotAccessStorage(String),
@@ -119,10 +122,9 @@ impl Storage {
 
         let shared_dbs = match config.shared_dbs {
             None => None,
-            Some(shared_dbs) => {
-                let mut dbs: HashMap<String, SharedDb> = HashMap::new();
-                for (db_name, db_config) in shared_dbs {
-                    if db_name.ends_with(".wasm") {
+            Some(shared_dbs) => Some(
+                join_all(shared_dbs.into_iter().map(async |(db_name, db_config)| {
+                    if db_name.to_string().ends_with(".wasm") {
                         return Err(StorageError::SharedDbError(
                             "The name of a shared DB must not end with .wasm".to_string(),
                         ));
@@ -139,10 +141,12 @@ impl Storage {
                         config: db_config,
                         used_storage: Arc::new(RwLock::new(used_storage)),
                     };
-                    dbs.insert(db_name, db);
-                }
-                Some(dbs)
-            }
+                    Ok((db_name, db))
+                }))
+                .await
+                .into_iter()
+                .collect::<Result<HashMap<_, _>, _>>()?,
+            ),
         };
 
         Ok(Storage {

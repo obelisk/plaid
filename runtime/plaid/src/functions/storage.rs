@@ -6,6 +6,36 @@ use crate::{executor::Env, functions::FunctionErrors, loader::LimitValue, storag
 
 use super::{get_memory, safely_get_memory, safely_get_string, safely_write_data_back};
 
+macro_rules! safely_get_guest_string {
+    ($variable:ident, $memory_view:expr, $buf:expr, $buf_len:expr, $env_data:expr) => {
+        let $variable = match safely_get_string(&$memory_view, $buf, $buf_len) {
+            Ok(s) => s,
+            Err(e) => {
+                error!(
+                    "{}: error while getting a string from guest memory: {:?}",
+                    $env_data.module.name, e
+                );
+                return FunctionErrors::ParametersNotUtf8 as i32;
+            }
+        };
+    };
+}
+
+macro_rules! safely_get_guest_memory {
+    ($variable:ident, $memory_view:expr, $buf:expr, $buf_len:expr, $env_data:expr) => {
+        let $variable = match safely_get_memory(&$memory_view, $buf, $buf_len) {
+            Ok(d) => d,
+            Err(e) => {
+                error!(
+                    "{}: error while getting bytes from guest memory: {:?}",
+                    $env_data.module.name, e
+                );
+                return FunctionErrors::ParametersNotUtf8 as i32;
+            }
+        };
+    };
+}
+
 /// Code which is common to `insert` and `insert_shared`
 fn insert_common(
     env_data: &Env,
@@ -77,6 +107,11 @@ fn insert_common(
             // If we would go above the limited storage, reject the insert
             if would_be_used_storage > storage_limit {
                 error!("{}: Could not insert key/value with key {key} as that would bring us above the configured storage limit.", env_data.module.name);
+                let _ = env_data.external_logging_system.log_module_error(
+                    env_data.module.name.clone(),
+                    "Could not insert key/value as that would bring us above the configured storage limit.".to_string(),
+                    vec![]
+                );
                 return FunctionErrors::StorageLimitReached as i32;
             }
 
@@ -160,28 +195,8 @@ pub fn insert(
         }
     };
 
-    let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "{}: Key error in storage_insert: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::ParametersNotUtf8 as i32;
-        }
-    };
-
-    // Get the storage data from the client's memory
-    let value = match safely_get_memory(&memory_view, value_buf, value_buf_len) {
-        Ok(d) => d,
-        Err(e) => {
-            error!(
-                "{}: Value error in storage_insert: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::CouldNotGetAdequateMemory as i32;
-        }
-    };
+    safely_get_guest_string!(key, memory_view, key_buf, key_buf_len, env_data);
+    safely_get_guest_memory!(value, memory_view, value_buf, value_buf_len, env_data);
 
     insert_common(
         env_data,
@@ -218,6 +233,14 @@ pub fn insert_shared(
         return FunctionErrors::ApiNotConfigured as i32;
     };
 
+    // Check if we have shared DBs at all, otherwise we just stop
+    let shared_dbs = match &storage.shared_dbs {
+        None => {
+            return FunctionErrors::OperationNotAllowed as i32;
+        }
+        Some(x) => x,
+    };
+
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
@@ -229,67 +252,34 @@ pub fn insert_shared(
         }
     };
 
-    let namespace = match safely_get_string(&memory_view, namespace_buf, namespace_buf_len) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "{}: Namespace error in storage_insert_shared: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::ParametersNotUtf8 as i32;
-        }
-    };
+    safely_get_guest_string!(
+        namespace,
+        memory_view,
+        namespace_buf,
+        namespace_buf_len,
+        env_data
+    );
 
-    let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "{}: Key error in storage_insert_shared: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::ParametersNotUtf8 as i32;
-        }
-    };
-
-    // Get the storage data from the client's memory
-    let value = match safely_get_memory(&memory_view, value_buf, value_buf_len) {
-        Ok(d) => d,
-        Err(e) => {
-            error!(
-                "{}: Value error in storage_insert_shared: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::CouldNotGetAdequateMemory as i32;
-        }
-    };
-
-    // Check if the rule can write to the shared DB.
-    // This is the case if the rule is in the "rw" section of the config.
-    let allowed = match &storage.shared_dbs {
+    // Check if we can access this namespace, otherwise we just stop
+    let allowed = match shared_dbs.get(&namespace) {
         None => false,
-        Some(dbs) => match dbs.get(&namespace) {
-            None => false,
-            Some(db) => db
-                .config
-                .rw
-                .as_ref()
-                .unwrap_or(&Vec::new())
-                .contains(&env_data.module.name),
-        },
+        Some(db) => db.config.rw.contains(&env_data.module.name),
     };
-
     if !allowed {
-        return FunctionErrors::ApiNotConfigured as i32; // TODO better error?
+        return FunctionErrors::OperationNotAllowed as i32;
     }
+
+    safely_get_guest_string!(key, memory_view, key_buf, key_buf_len, env_data);
+    safely_get_guest_memory!(value, memory_view, value_buf, value_buf_len, env_data);
 
     // Get storage limit and counter for the shared DB
     let (storage_limit, storage_current) = match &storage.shared_dbs {
         None => {
-            return FunctionErrors::ApiNotConfigured as i32;
+            return FunctionErrors::SharedDbError as i32;
         }
         Some(shared_dbs) => match shared_dbs.get(&namespace) {
             None => {
-                return FunctionErrors::ApiNotConfigured as i32;
+                return FunctionErrors::SharedDbError as i32;
             }
             Some(db) => (db.config.size_limit.clone(), db.used_storage.clone()),
         },
@@ -371,16 +361,7 @@ pub fn get(
         }
     };
 
-    let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "{}: Key error in storage_get: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::ParametersNotUtf8 as i32;
-        }
-    };
+    safely_get_guest_string!(key, memory_view, key_buf, key_buf_len, env_data);
 
     get_common(
         env_data,
@@ -412,6 +393,14 @@ pub fn get_shared(
         return FunctionErrors::ApiNotConfigured as i32;
     };
 
+    // Check if we have shared DBs at all, otherwise we just stop
+    let shared_dbs = match &storage.shared_dbs {
+        None => {
+            return FunctionErrors::OperationNotAllowed as i32;
+        }
+        Some(x) => x,
+    };
+
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
@@ -423,53 +412,27 @@ pub fn get_shared(
         }
     };
 
-    let namespace = match safely_get_string(&memory_view, namespace_buf, namespace_buf_len) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "{}: Namespace error in storage_get_shared: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::ParametersNotUtf8 as i32;
-        }
-    };
+    safely_get_guest_string!(
+        namespace,
+        memory_view,
+        namespace_buf,
+        namespace_buf_len,
+        env_data
+    );
 
-    let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "{}: Key error in storage_get_shared: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::ParametersNotUtf8 as i32;
-        }
-    };
-
-    // Check if the rule can read from the shared DB.
-    // This is the case if the rule is in either the "r" or "rw" section of the config.
-    let allowed = match &storage.shared_dbs {
+    // Check if we can access this namespace, otherwise we just stop
+    let allowed = match shared_dbs.get(&namespace) {
         None => false,
-        Some(dbs) => match dbs.get(&namespace) {
-            None => false,
-            Some(db) => {
-                db.config
-                    .r
-                    .as_ref()
-                    .unwrap_or(&Vec::new())
-                    .contains(&env_data.module.name)
-                    || db
-                        .config
-                        .rw
-                        .as_ref()
-                        .unwrap_or(&Vec::new())
-                        .contains(&env_data.module.name)
-            }
-        },
+        Some(db) => {
+            db.config.r.contains(&env_data.module.name)
+                || db.config.rw.contains(&env_data.module.name)
+        }
     };
-
     if !allowed {
         return FunctionErrors::ApiNotConfigured as i32; // TODO better error?
     }
+
+    safely_get_guest_string!(key, memory_view, key_buf, key_buf_len, env_data);
 
     get_common(
         env_data,
@@ -511,16 +474,8 @@ pub fn list_keys(
         }
     };
 
-    let prefix = match safely_get_string(&memory_view, prefix_buf, prefix_buf_len) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "{}: Prefix error in storage_list_keys: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::ParametersNotUtf8 as i32;
-        }
-    };
+    safely_get_guest_string!(prefix, memory_view, prefix_buf, prefix_buf_len, env_data);
+
     let result = env_data.api.clone().runtime.block_on(async move {
         storage
             .list_keys(&env_data.module.name, Some(prefix.as_str()))
@@ -677,16 +632,7 @@ pub fn delete(
         }
     };
 
-    let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "{}: Key error in storage_delete: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::ParametersNotUtf8 as i32;
-        }
-    };
+    safely_get_guest_string!(key, memory_view, key_buf, key_buf_len, env_data);
 
     delete_common(
         env_data,
@@ -720,6 +666,14 @@ pub fn delete_shared(
         return FunctionErrors::ApiNotConfigured as i32;
     };
 
+    // Check if we have shared DBs at all, otherwise we just stop
+    let shared_dbs = match &storage.shared_dbs {
+        None => {
+            return FunctionErrors::OperationNotAllowed as i32;
+        }
+        Some(x) => x,
+    };
+
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
@@ -731,42 +685,23 @@ pub fn delete_shared(
         }
     };
 
-    let namespace = match safely_get_string(&memory_view, namespace_buf, namespace_buf_len) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "{}: Namespace error in storage_insert_shared: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::ParametersNotUtf8 as i32;
-        }
-    };
+    safely_get_guest_string!(
+        namespace,
+        memory_view,
+        namespace_buf,
+        namespace_buf_len,
+        env_data
+    );
+    safely_get_guest_string!(key, memory_view, key_buf, key_buf_len, env_data);
 
-    let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "{}: Key error in storage_delete: {:?}",
-                env_data.module.name, e
-            );
-            return FunctionErrors::ParametersNotUtf8 as i32;
-        }
-    };
-
-    // Check if the rule can delete from the shared DB.
-    // This is the case if the rule is in the "rw" section of the config.
-    let allowed = match &storage.shared_dbs {
+    // Check if we can access this namespace, otherwise we just stop
+    let allowed = match shared_dbs.get(&namespace) {
         None => false,
-        Some(dbs) => match dbs.get(&namespace) {
-            None => false,
-            Some(db) => db
-                .config
-                .rw
-                .as_ref()
-                .unwrap_or(&Vec::new())
-                .contains(&env_data.module.name),
-        },
+        Some(db) => db.config.rw.contains(&env_data.module.name),
     };
+    if !allowed {
+        return FunctionErrors::OperationNotAllowed as i32;
+    }
 
     if !allowed {
         return FunctionErrors::ApiNotConfigured as i32; // TODO better error?

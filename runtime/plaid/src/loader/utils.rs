@@ -1,5 +1,5 @@
 use super::errors::Errors;
-use super::{LimitedAmount, LimitValue, LimitableAmount};
+use super::{LimitValue, LimitableAmount, LimitedAmount};
 
 use std::collections::HashMap;
 use std::fs::DirEntry;
@@ -13,7 +13,10 @@ pub fn read_and_parse_modules(path: &DirEntry) -> Result<(String, Vec<u8>), Erro
     // if it's not UTF8, we'll fail reading it and skip it.
     let filename = path.file_name().to_string_lossy().to_string();
 
-    // Also skip any files that aren't wasm files
+    // Also skip any files that aren't wasm files.
+    // Note : this is important because it ensures all our rules are named *.wasm, which
+    // guarantees that strings that do _not_ terminate with .wasm can be used for other
+    // things, like DBs shared across multiple rules.
     if !filename.ends_with(".wasm") {
         return Err(Errors::BadFilename);
     }
@@ -34,11 +37,7 @@ pub fn read_and_parse_modules(path: &DirEntry) -> Result<(String, Vec<u8>), Erro
 /// 1. Module Override
 /// 2. Log Type amount
 /// 3. Default amount
-fn get_limit_with_overrides(
-    limit_amount: &LimitedAmount,
-    filename: &str,
-    log_type: &str,
-) -> u64 {
+fn get_limit_with_overrides(limit_amount: &LimitedAmount, filename: &str, log_type: &str) -> u64 {
     if let Some(amount) = limit_amount.module_overrides.get(filename) {
         *amount
     } else if let Some(amount) = limit_amount.log_type.get(log_type) {
