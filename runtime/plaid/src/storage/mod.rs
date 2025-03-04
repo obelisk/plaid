@@ -49,7 +49,7 @@ pub struct Storage {
 }
 
 /// Errors encountered while trying to use Plaid's persistent storage.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum StorageError {
     NoStorageConfigured,
     CouldNotAccessStorage(String),
