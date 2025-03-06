@@ -28,6 +28,8 @@ pub enum FunctionErrors {
     FailedToWriteGuestMemory = -9,
     StorageLimitReached = -10,
     TestMode = -11,
+    OperationNotAllowed = -12,
+    SharedDbError = -13,
 }
 
 #[derive(Debug)]

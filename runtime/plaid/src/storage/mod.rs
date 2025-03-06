@@ -1,18 +1,51 @@
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
+
 use async_trait::async_trait;
 
 mod sled;
 
+use futures_util::future::join_all;
 use serde::Deserialize;
+
+use crate::loader::LimitValue;
+
+/// Config of a shared DB
+#[derive(Deserialize)]
+pub struct SharedDbConfig {
+    /// The max size of this shared DB
+    pub size_limit: LimitValue,
+    /// List of rules that can read from the DB
+    #[serde(default)]
+    pub r: Vec<String>,
+    /// List of rules that can read from and write to the DB
+    #[serde(default)]
+    pub rw: Vec<String>,
+}
+
+/// Represents a shared DB in the system
+pub struct SharedDb {
+    /// Configuration for the shared DB
+    pub config: SharedDbConfig,
+    /// Counter for the storage used by the shared DB
+    pub used_storage: Arc<RwLock<u64>>,
+}
 
 /// Plaid's storage configuration
 #[derive(Deserialize)]
 pub struct Config {
     pub sled: Option<sled::Config>,
+    /// Map `{ db_name --> db_config }`  
+    /// Note - `db_name` must not terminate with ".wasm" to avoid confusing it with a rule-specific namespace
+    pub shared_dbs: Option<HashMap<String, SharedDbConfig>>,
 }
 
 /// The storage that underpins Plaid
 pub struct Storage {
     database: Box<dyn StorageProvider + Send + Sync>,
+    pub shared_dbs: Option<HashMap<String, SharedDb>>,
 }
 
 /// Errors encountered while trying to use Plaid's persistent storage.
@@ -21,6 +54,7 @@ pub enum StorageError {
     NoStorageConfigured,
     CouldNotAccessStorage(String),
     Access(String),
+    SharedDbError(String),
 }
 
 impl std::fmt::Display for StorageError {
@@ -32,7 +66,10 @@ impl std::fmt::Display for StorageError {
             Self::CouldNotAccessStorage(ref e) => {
                 write!(f, "Access the storage datastore was not possible: {e}")
             }
-            StorageError::Access(ref e) => write!(f, "There was a failure accessing a key: {e}"),
+            Self::Access(ref e) => write!(f, "There was a failure accessing a key: {e}"),
+            Self::SharedDbError(ref e) => {
+                write!(f, "Error while attempting an operation on a shared DB: {e}")
+            }
         }
     }
 }
@@ -77,13 +114,49 @@ pub trait StorageProvider {
 }
 
 impl Storage {
-    pub fn new(config: Config) -> Result<Self, StorageError> {
+    pub async fn new(config: Config) -> Result<Self, StorageError> {
         let database = match config.sled {
             Some(sled) => Box::new(sled::Sled::new(sled)?),
             _ => return Err(StorageError::NoStorageConfigured),
         };
 
-        Ok(Storage { database })
+        let shared_dbs = config
+            .shared_dbs
+            .map(async |shared_dbs| {
+                join_all(shared_dbs.into_iter().map(async |(db_name, db_config)| {
+                    if db_name.to_string().ends_with(".wasm") {
+                        return Err(StorageError::SharedDbError(
+                            "The name of a shared DB must not end with .wasm".to_string(),
+                        ));
+                    }
+                    let used_storage = match database.get_namespace_byte_size(&db_name).await {
+                        Ok(r) => r,
+                        Err(_) => {
+                            return Err(StorageError::SharedDbError(
+                                "Could not count used storage in shared DB".to_string(),
+                            ))
+                        }
+                    };
+                    let db = SharedDb {
+                        config: db_config,
+                        used_storage: Arc::new(RwLock::new(used_storage)),
+                    };
+                    Ok((db_name, db))
+                }))
+                .await
+                .into_iter()
+                .collect::<Result<HashMap<_, _>, _>>()
+            })
+            .ok_or(StorageError::SharedDbError(
+                "Error while configuring shared storage".to_string(),
+            ))?
+            .await
+            .ok();
+
+        Ok(Storage {
+            database,
+            shared_dbs,
+        })
     }
 
     pub async fn insert(

@@ -14,6 +14,8 @@ members = [
     "tests/test_sshcerts_usage",
     "tests/test_testmode",
     "tests/test_time",
+    "tests/test_shared_db_rule_1",
+    "tests/test_shared_db_rule_2",
 ]
 
 [profile.release]

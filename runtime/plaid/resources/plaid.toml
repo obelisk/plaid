@@ -7,6 +7,11 @@ execution_threads = 2
 # file is written to /runtime/performance-monitoring/metrics.txt
 # output_file_path = "../somedirectory/file.txt" 
 
+[storage.shared_dbs."shared_db_1"]
+size_limit = { Limited = 50 }
+r = ["test_shared_db_rule_1.wasm"]
+rw = ["test_shared_db_rule_2.wasm"]
+
 [storage.sled]
 path = "/tmp/sled"
 
@@ -35,6 +40,8 @@ test_mode_exemptions = [
     "test_random.wasm",
     "test_sshcerts_usage.wasm",
     "test_time.wasm",
+    "test_shared_db_rule_1.wasm",
+    "test_shared_db_rule_2.wasm",
 ]
 
 [loading.persistent_response_size]
@@ -76,6 +83,8 @@ test_mode_exemptions = [
 "test_sshcerts_usage.wasm" = "test_sshcerts"
 "test_testmode.wasm" = "testmode"
 "test_time.wasm" = "time"
+"test_shared_db_rule_1.wasm" = "test_shareddb_1"
+"test_shared_db_rule_2.wasm" = "test_shareddb_2"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -85,6 +94,8 @@ default = 55_000_000
 okta = 9_000_000
 [loading.computation_amount.module_overrides]
 "example_rule.wasm" = 5_000_000
+"test_shared_db_rule_1.wasm" = 1_000_000_000
+"test_shared_db_rule_2.wasm" = 1_000_000_000
 
 [loading.memory_page_count]
 default = 300
@@ -120,6 +131,8 @@ allowed_rules = [
     "test_random.wasm",
     "test_mnr.wasm",
     "test_get_everything.wasm",
+    "test_shared_db_rule_1.wasm",
+    "test_shared_db_rule_2.wasm",
 ]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
@@ -320,6 +333,14 @@ headers = []
 
 [webhooks."internal".webhooks."testfileopen"]
 log_type = "test_fileopen"
+headers = []
+
+[webhooks."internal".webhooks."testshareddb_1"]
+log_type = "test_shareddb_1"
+headers = []
+
+[webhooks."internal".webhooks."testshareddb_2"]
+log_type = "test_shareddb_2"
 headers = []
 
 [webhooks."internal".webhooks."testrandom"]
