@@ -120,9 +120,9 @@ impl Storage {
             _ => return Err(StorageError::NoStorageConfigured),
         };
 
-        let shared_dbs = match config.shared_dbs {
-            None => None,
-            Some(shared_dbs) => Some(
+        let shared_dbs = config
+            .shared_dbs
+            .map(async |shared_dbs| {
                 join_all(shared_dbs.into_iter().map(async |(db_name, db_config)| {
                     if db_name.to_string().ends_with(".wasm") {
                         return Err(StorageError::SharedDbError(
@@ -145,9 +145,13 @@ impl Storage {
                 }))
                 .await
                 .into_iter()
-                .collect::<Result<HashMap<_, _>, _>>()?,
-            ),
-        };
+                .collect::<Result<HashMap<_, _>, _>>()
+            })
+            .ok_or(StorageError::SharedDbError(
+                "Error while configuring shared storage".to_string(),
+            ))?
+            .await
+            .ok();
 
         Ok(Storage {
             database,
