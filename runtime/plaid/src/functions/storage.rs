@@ -429,7 +429,7 @@ pub fn get_shared(
         }
     };
     if !allowed {
-        return FunctionErrors::ApiNotConfigured as i32; // TODO better error?
+        return FunctionErrors::OperationNotAllowed as i32;
     }
 
     safely_get_guest_string!(key, memory_view, key_buf, key_buf_len, env_data);
@@ -701,10 +701,6 @@ pub fn delete_shared(
     };
     if !allowed {
         return FunctionErrors::OperationNotAllowed as i32;
-    }
-
-    if !allowed {
-        return FunctionErrors::ApiNotConfigured as i32; // TODO better error?
     }
 
     // Get storage limit and counter for the shared DB
