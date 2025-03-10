@@ -2716,7 +2716,7 @@ checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
 
 [[package]]
 name = "plaid"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "alkali",
  "async-trait",
@@ -2762,7 +2762,7 @@ dependencies = [
 
 [[package]]
 name = "plaid_stl"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "base64 0.13.1",
  "chrono",

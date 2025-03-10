@@ -305,6 +305,7 @@ impl_new_function!(
 );
 impl_new_function!(github, trigger_repo_dispatch, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, check_org_membership_of_user, ALLOW_IN_TEST_MODE);
+impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query, ALLOW_IN_TEST_MODE);
@@ -583,6 +584,9 @@ pub fn to_api_function(
         }
         "github_check_org_membership_of_user" => {
             Function::new_typed_with_env(&mut store, &env, github_check_org_membership_of_user)
+        }
+        "github_delete_deploy_key" => {
+            Function::new_typed_with_env(&mut store, &env, github_delete_deploy_key)
         }
 
         // Slack Calls

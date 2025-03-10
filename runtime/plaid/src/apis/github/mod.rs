@@ -1,6 +1,7 @@
 mod actions;
 mod code;
 mod copilot;
+mod deploy_keys;
 mod environments;
 mod graphql;
 mod members;
