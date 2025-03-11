@@ -44,7 +44,7 @@ impl core::fmt::Display for PlaidFunctionError {
             PlaidFunctionError::FailedToWriteGuestMemory => write!(f, "Plaid could not write to guest memory"),
             PlaidFunctionError::StorageLimitReached => write!(f, "The storage limit has been reached"),
             PlaidFunctionError::TestMode => write!(f, "The function is not allowed in test mode"),
-            PlaidFunctionError::Unknown => write!(f, "An unknown error occurred. This can happen if the Plaid runtime is never than the STL this rule was compiled against."),
+            PlaidFunctionError::Unknown => write!(f, "An unknown error occurred. This can happen if the Plaid runtime is newer than the STL this rule was compiled against."),
 
         }
     }

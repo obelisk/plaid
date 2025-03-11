@@ -17,21 +17,21 @@ RH_PID=$!
 
 # Call the webhook
 sleep 2
-curl -d "1" http://$PLAID_LOCATION/webhook/$URL1
+curl -d "read and fail to write" http://$PLAID_LOCATION/webhook/$URL1
 sleep 2
-curl -d "1" http://$PLAID_LOCATION/webhook/$URL2
+curl -d "write and check" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
-curl -d "2" http://$PLAID_LOCATION/webhook/$URL1
+curl -d "read and check 2 bytes" http://$PLAID_LOCATION/webhook/$URL1
 sleep 2
-curl -d "2" http://$PLAID_LOCATION/webhook/$URL2
+curl -d "delete and check" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
-curl -d "3" http://$PLAID_LOCATION/webhook/$URL1
+curl -d "read after deletion" http://$PLAID_LOCATION/webhook/$URL1
 sleep 2
-curl -d "3" http://$PLAID_LOCATION/webhook/$URL2
+curl -d "fill up the db" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
-curl -d "4" http://$PLAID_LOCATION/webhook/$URL2
+curl -d "write to full db" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
-curl -d "5" http://$PLAID_LOCATION/webhook/$URL2
+curl -d "write to non-existing db" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
 
 kill $RH_PID 2>&1 > /dev/null

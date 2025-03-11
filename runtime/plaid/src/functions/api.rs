@@ -444,6 +444,9 @@ pub fn to_api_function(
         "storage_list_keys" => {
             Function::new_typed_with_env(&mut store, &env, super::storage::list_keys)
         }
+        "storage_list_keys_shared" => {
+            Function::new_typed_with_env(&mut store, &env, super::storage::list_keys_shared)
+        }
         "cache_insert" => Function::new_typed_with_env(&mut store, &env, super::cache::insert),
         "cache_get" => Function::new_typed_with_env(&mut store, &env, super::cache::get),
         "log_back" => Function::new_typed_with_env(&mut store, &env, super::internal::log_back),

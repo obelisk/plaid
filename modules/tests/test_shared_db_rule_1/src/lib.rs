@@ -10,7 +10,7 @@ const RULE_NAME: &str = "test_shared_db_rule_1";
 fn main(log: String, _: LogSource) -> Result<(), i32> {
     // Depending on the value of "log", we do different things
     match log.as_str() {
-        "1" => {
+        "read and fail to write" => {
             plaid::print_debug_string(&format!("[{RULE_NAME}] Reading from DB..."));
             let r = plaid::storage::get_shared(SHARED_DB, "my_key").unwrap();
             plaid::print_debug_string(&format!("[{RULE_NAME}] Got {} bytes", r.len()));
@@ -27,7 +27,7 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
             plaid::print_debug_string(&format!("[{RULE_NAME}] Failed as expected"));
             make_named_request("test-response", "OK", HashMap::new()).unwrap();
         }
-        "2" => {
+        "read and check 2 bytes" => {
             // Meanwhile, another rule will have written 2 bytes to the shared DB
             plaid::print_debug_string(&format!("[{RULE_NAME}] Reading from DB..."));
             let r = plaid::storage::get_shared(SHARED_DB, "my_key").unwrap();
@@ -37,7 +37,7 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
             }
             make_named_request("test-response", "OK", HashMap::new()).unwrap();
         }
-        "3" => {
+        "read after deletion" => {
             // Meanwhile, another rule will have deleted the key from the shared DB
             plaid::print_debug_string(&format!("[{RULE_NAME}] Reading from DB..."));
             let r = plaid::storage::get_shared(SHARED_DB, "my_key").unwrap();
