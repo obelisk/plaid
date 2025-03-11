@@ -135,6 +135,14 @@ pub struct RepositoryDispatchParams<T> {
     pub client_payload: T,
 }
 
+/// Parameters sent to the runtime when deleting a GH deploy key
+#[derive(Serialize, Deserialize)]
+pub struct DeleteDeployKeyParams {
+    pub owner: String,
+    pub repo: String,
+    pub key_id: u64,
+}
+
 impl FileSearchResultItem {
     /// Retrieve the content of the search result
     pub fn retrieve_raw_content(&self) -> Result<String, PlaidFunctionError> {
@@ -1561,10 +1569,7 @@ pub fn check_org_membership_of_user(
     let request = serde_json::to_string(&params).unwrap();
 
     let res = unsafe {
-        github_check_org_membership_of_user(
-            request.as_bytes().as_ptr(),
-            request.as_bytes().len(),
-        )
+        github_check_org_membership_of_user(request.as_bytes().as_ptr(), request.as_bytes().len())
     };
 
     if res < 0 {
@@ -1575,4 +1580,34 @@ pub fn check_org_membership_of_user(
         0 => Ok(false),
         _ => Ok(true),
     }
+}
+
+/// Delete a deploy key with given ID from a given repository.
+/// For more details, see https://docs.github.com/en/rest/deploy-keys/deploy-keys?apiVersion=2022-11-28#delete-a-deploy-key
+pub fn delete_deploy_key(
+    owner: impl Display,
+    repo: impl Display,
+    key_id: u64,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, delete_deploy_key);
+    }
+
+    let params = DeleteDeployKeyParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        key_id,
+    };
+
+    let params = serde_json::to_string(&params).unwrap();
+    let res =
+        unsafe { github_delete_deploy_key(params.as_bytes().as_ptr(), params.as_bytes().len()) };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
 }
