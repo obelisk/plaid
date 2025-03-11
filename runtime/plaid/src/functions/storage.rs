@@ -476,11 +476,104 @@ pub fn list_keys(
 
     safely_get_guest_string!(prefix, memory_view, prefix_buf, prefix_buf_len, env_data);
 
-    let result = env_data.api.clone().runtime.block_on(async move {
+    list_keys_common(
+        env_data,
+        storage,
+        env_data.module.name.clone(),
+        prefix,
+        memory_view,
+        data_buffer,
+        data_buffer_len,
+    )
+}
+
+/// Fetch all the keys from a shared namespace in the storage system and filter for a prefix
+/// before returning the data.
+pub fn list_keys_shared(
+    env: FunctionEnvMut<Env>,
+    namespace_buf: WasmPtr<u8>,
+    namespace_buf_len: u32,
+    prefix_buf: WasmPtr<u8>,
+    prefix_buf_len: u32,
+    data_buffer: WasmPtr<u8>,
+    data_buffer_len: u32,
+) -> i32 {
+    let store = env.as_store_ref();
+    let env_data = env.data();
+
+    let storage = if let Some(storage) = &env_data.storage {
         storage
-            .list_keys(&env_data.module.name, Some(prefix.as_str()))
-            .await
-    });
+    } else {
+        return FunctionErrors::ApiNotConfigured as i32;
+    };
+
+    // Check if we have shared DBs at all, otherwise we just stop
+    let shared_dbs = match &storage.shared_dbs {
+        None => {
+            return FunctionErrors::OperationNotAllowed as i32;
+        }
+        Some(x) => x,
+    };
+
+    let memory_view = match get_memory(&env, &store) {
+        Ok(memory_view) => memory_view,
+        Err(e) => {
+            error!(
+                "{}: Memory error in storage_list_keys: {:?}",
+                env_data.module.name, e
+            );
+            return FunctionErrors::CouldNotGetAdequateMemory as i32;
+        }
+    };
+
+    safely_get_guest_string!(
+        namespace,
+        memory_view,
+        namespace_buf,
+        namespace_buf_len,
+        env_data
+    );
+
+    // Check if we can access this namespace, otherwise we just stop
+    let allowed = match shared_dbs.get(&namespace) {
+        None => false,
+        Some(db) => {
+            db.config.r.contains(&env_data.module.name)
+                || db.config.rw.contains(&env_data.module.name)
+        }
+    };
+    if !allowed {
+        return FunctionErrors::OperationNotAllowed as i32;
+    }
+
+    safely_get_guest_string!(prefix, memory_view, prefix_buf, prefix_buf_len, env_data);
+
+    list_keys_common(
+        env_data,
+        storage,
+        namespace,
+        prefix,
+        memory_view,
+        data_buffer,
+        data_buffer_len,
+    )
+}
+
+/// Code which is common to `list_keys` and `list_keys_shared`
+pub fn list_keys_common(
+    env_data: &Env,
+    storage: &Arc<Storage>,
+    namespace: String,
+    prefix: String,
+    memory_view: MemoryView,
+    data_buffer: WasmPtr<u8>,
+    data_buffer_len: u32,
+) -> i32 {
+    let result = env_data
+        .api
+        .clone()
+        .runtime
+        .block_on(async move { storage.list_keys(&namespace, Some(prefix.as_str())).await });
 
     match result {
         Ok(keys) => {
@@ -489,7 +582,7 @@ pub fn list_keys(
                 Err(e) => {
                     error!(
                         "Could not serialize keys for namespaces {}: {e}",
-                        &env_data.module.name
+                        env_data.module.name
                     );
                     return 0;
                 }
@@ -504,7 +597,7 @@ pub fn list_keys(
                 Ok(x) => x,
                 Err(e) => {
                     error!(
-                        "{}: Data write error in storage_get: {:?}",
+                        "{}: Data write error in storage_list: {:?}",
                         env_data.module.name, e
                     );
                     e as i32
