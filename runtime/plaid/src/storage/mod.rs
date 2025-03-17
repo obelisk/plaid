@@ -5,6 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 
+mod dynamodb;
 mod sled;
 
 use futures_util::future::join_all;
@@ -37,6 +38,7 @@ pub struct SharedDb {
 #[derive(Deserialize)]
 pub struct Config {
     pub sled: Option<sled::Config>,
+    pub dynamodb: Option<dynamodb::Config>,
     /// Map `{ db_name --> db_config }`  
     /// Note - `db_name` must not terminate with ".wasm" to avoid confusing it with a rule-specific namespace
     pub shared_dbs: Option<HashMap<String, SharedDbConfig>>,
@@ -115,9 +117,18 @@ pub trait StorageProvider {
 
 impl Storage {
     pub async fn new(config: Config) -> Result<Self, StorageError> {
-        let database = match config.sled {
-            Some(sled) => Box::new(sled::Sled::new(sled)?),
-            _ => return Err(StorageError::NoStorageConfigured),
+        // Try building a database by checking the config in this order:
+        // 1. sled
+        // 2. dynamodb
+        // If none of these works, then error because no storage is configured
+        let database: Box<dyn StorageProvider + Send + Sync> = {
+            if let Some(sled) = config.sled {
+                Box::new(sled::Sled::new(sled)?)
+            } else if let Some(dynamodb) = config.dynamodb {
+                Box::new(dynamodb::DynamoDb::new(dynamodb).await)
+            } else {
+                return Err(StorageError::NoStorageConfigured);
+            }
         };
 
         let shared_dbs = config
