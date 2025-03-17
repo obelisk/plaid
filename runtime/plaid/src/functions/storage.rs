@@ -106,7 +106,7 @@ fn insert_common(
 
             // If we would go above the limited storage, reject the insert
             if would_be_used_storage > storage_limit {
-                error!("{}: Could not insert key/value with key {key} as that would bring us above the configured storage limit.", env_data.module.name);
+                error!("{}: Could not insert key/value with key [{key}] as that would bring us above the configured storage limit.", env_data.module.name);
                 let _ = env_data.external_logging_system.log_module_error(
                     env_data.module.name.clone(),
                     "Could not insert key/value as that would bring us above the configured storage limit.".to_string(),
