@@ -1349,23 +1349,35 @@ pub fn configure_secret(
     }
 }
 
-/// Search for files with given filename in GitHub.
+/// Search for code in GitHub.
 /// If additional selection criteria are given, these are used to decide whether
 /// results are selected or discarded.
 ///
 /// **Arguments:**
-/// - `filename`: The name of the files to search, e.g., "README.md"
+/// - `filename`: The name of the files to search, e.g., "README"
+/// - `extension`: The extension of the files to search, e.g., "yml"
+/// - `path`: The path under which files are searched, e.g., "src"
 /// - `search_criteria`: An optional `CodeSearchCriteria` object with additional search criteria
-pub fn search_for_file(
-    filename: impl Display,
+pub fn search_code(
+    filename: Option<impl Display>,
+    extension: Option<impl Display>,
+    path: Option<impl Display>,
     search_criteria: Option<&CodeSearchCriteria>,
 ) -> Result<Vec<FileSearchResultItem>, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(github, search_for_file);
+        new_host_function_with_error_buffer!(github, search_code);
     }
 
     let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("filename", filename.to_string());
+    if let Some(filename) = filename {
+        params.insert("filename", filename.to_string());
+    }
+    if let Some(extension) = extension {
+        params.insert("extension", extension.to_string());
+    }
+    if let Some(path) = path {
+        params.insert("path", path.to_string());
+    }
 
     // If we are given selection criteria, then we divide them between
     //
@@ -1406,7 +1418,7 @@ pub fn search_for_file(
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
         let res = unsafe {
-            github_search_for_file(
+            github_search_code(
                 request.as_bytes().as_ptr(),
                 request.as_bytes().len(),
                 return_buffer.as_mut_ptr(),
