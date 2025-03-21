@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (els, _logging_handler) = Logger::start(config.logging);
     info!("Logging subsystem started");
 
-    // Create the storage system is one is configured
+    // Create the storage system if one is configured
     let storage = match config.storage {
         Some(config) => Some(Arc::new(Storage::new(config).await?)),
         None => None,

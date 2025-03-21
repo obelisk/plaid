@@ -1,7 +1,5 @@
-use crate::{apis::ApiError, loader::PlaidModule};
-use aws_config::{BehaviorVersion, Region};
+use crate::{apis::ApiError, get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
 use aws_sdk_kms::{
-    config::Credentials,
     operation::{get_public_key::GetPublicKeyOutput, sign::SignOutput},
     primitives::Blob,
     types::{MessageType, SigningAlgorithmSpec},
@@ -57,22 +55,9 @@ pub struct KmsConfig {
     /// This can either be:
     /// - `IAM`: Uses the IAM role assigned to the instance or environment.
     /// - `ApiKey`: Uses explicit credentials, including an access key ID, secret access key, and region.
-    authentication: Authentication,
+    authentication: AwsAuthentication,
     /// Configured keys - maps a KMS key ID to a list of rules that are allowed to use it
     key_configuration: HashMap<String, Vec<String>>,
-}
-
-/// Defines methods to authenticate to KMS with
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Authentication {
-    ApiKey {
-        access_key_id: String,
-        secret_access_key: String,
-        session_token: Option<String>,
-        region: String,
-    },
-    Iam {},
 }
 
 /// Custom parser for signing_algorithm. Returns an error if an invalid message type is provided.
@@ -172,34 +157,7 @@ pub struct Kms {
 impl Kms {
     /// Creates a new instance of `Kms`
     pub async fn new(config: KmsConfig) -> Self {
-        let sdk_config = match config.authentication {
-            Authentication::ApiKey {
-                access_key_id,
-                secret_access_key,
-                session_token,
-                region,
-            } => {
-                info!("Using API keys to authenticate to KMS");
-                let credentials = Credentials::new(
-                    access_key_id,
-                    secret_access_key,
-                    session_token,
-                    None,
-                    "Plaid",
-                );
-
-                aws_config::defaults(BehaviorVersion::latest())
-                    .region(Region::new(region.clone()))
-                    .credentials_provider(credentials)
-                    .load()
-                    .await
-            }
-            Authentication::Iam {} => {
-                info!("Using IAM role assigned to environment for KMS authentication");
-                aws_config::load_defaults(BehaviorVersion::latest()).await
-            }
-        };
-
+        let sdk_config = get_aws_sdk_config(config.authentication).await;
         let client = aws_sdk_kms::Client::new(&sdk_config);
 
         Self {
