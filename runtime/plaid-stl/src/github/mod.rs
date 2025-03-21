@@ -1349,7 +1349,7 @@ pub fn configure_secret(
     }
 }
 
-/// Search for files with given filename in GitHub.
+/// Search for code in GitHub.
 /// If additional selection criteria are given, these are used to decide whether
 /// results are selected or discarded.
 ///
