@@ -315,7 +315,7 @@ impl_new_function_with_error_buffer!(github, fetch_file, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_branch_protection_rules, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_branch_protection_ruleset, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_repository_collaborators, ALLOW_IN_TEST_MODE);
-impl_new_function_with_error_buffer!(github, search_for_file, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, search_code, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, list_seats_in_org_copilot, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, add_users_to_org_copilot, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, remove_users_from_org_copilot, DISALLOW_IN_TEST_MODE);
@@ -570,9 +570,7 @@ pub fn to_api_function(
             &env,
             github_create_deployment_branch_protection_rule,
         ),
-        "github_search_for_file" => {
-            Function::new_typed_with_env(&mut store, &env, github_search_for_file)
-        }
+        "github_search_code" => Function::new_typed_with_env(&mut store, &env, github_search_code),
         "github_add_users_to_org_copilot" => {
             Function::new_typed_with_env(&mut store, &env, github_add_users_to_org_copilot)
         }
