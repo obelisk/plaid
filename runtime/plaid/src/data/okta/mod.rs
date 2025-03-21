@@ -1,13 +1,14 @@
-use crate::executor::Message;
+use crate::{data::DataGeneratorLog, executor::Message};
 use crossbeam_channel::Sender;
 use lru::LruCache;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
-use std::num::NonZeroUsize;
-use std::time::Duration;
+use std::{num::NonZeroUsize, time::Duration};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+
+use super::DataGenerator;
 
 const OKTA_LOG_PUBLISHED_FIELD_KEY: &str = "published";
 const OKTA_LOG_UUID_FIELD_KEY: &str = "uuid";
@@ -40,6 +41,9 @@ pub struct OktaConfig {
     /// will be able to as well). If this is not set, it will default to Limited(0).
     #[serde(default)]
     pub logbacks_allowed: LogbacksAllowed,
+    /// Canonicalization time, i.e., after how many seconds we can consider logs as "stable"
+    #[serde(default = "default_canon_time")]
+    canon_time: u64,
 }
 
 /// Custom parser for limit. Returns an error if a limit = 0 or limit > 1000 is given
@@ -67,6 +71,10 @@ fn default_sleep_milliseconds() -> u64 {
     1
 }
 
+fn default_canon_time() -> u64 {
+    60
+}
+
 /// This function provides the default limit for the number of system logs returned from Okta.
 /// It is used as the default value for deserialization of the `limit` field,
 /// of `OktaConfig` in the event that no value is provided.
@@ -86,8 +94,8 @@ pub struct Okta {
     client: Client,
     /// Contains domain and token
     config: OktaConfig,
-    /// Filters the lower time bound of the log events published property for bounded queries or persistence time for polling queries
-    since: OffsetDateTime,
+    /// Timestamp of the last seen log we have processed
+    last_seen: OffsetDateTime,
     /// Sending channel used to send logs into the execution system
     logger: Sender<Message>,
     /// An LRU where we store the UUIDs of Okta logs that we have already seen and sent into the logging system.
@@ -108,199 +116,177 @@ impl Okta {
         Self {
             client,
             config,
-            since: OffsetDateTime::now_utc(),
+            last_seen: OffsetDateTime::now_utc(),
             logger,
-            seen_logs_uuid: LruCache::new(NonZeroUsize::new(512).unwrap()),
+            seen_logs_uuid: LruCache::new(NonZeroUsize::new(4096).unwrap()),
         }
     }
+}
 
-    /// Fetch logs from Okta API
-    pub async fn fetch_system_logs(&mut self) -> Result<(), ()> {
-        // Start with the most recent logs
-        let mut most_recent_log_seen = OffsetDateTime::UNIX_EPOCH;
+impl DataGenerator for &mut Okta {
+    // For the documentation on these methods, see the trait.
 
-        let sleep_duration = Duration::from_millis(self.config.sleep_duration);
+    async fn fetch_logs(
+        &self,
+        since: OffsetDateTime,
+        until: OffsetDateTime,
+    ) -> Result<Vec<super::DataGeneratorLog>, ()> {
+        // Okta requires the query parameters to be in RFC3339 format. We attempt to format them here.
+        // On failure, we return and allow the data orchestrator to restart the loop
+        let since = match since.format(&Rfc3339) {
+            Ok(since) => since,
+            Err(e) => {
+                error!("Failed to parse 'since' datetime to RFC3339 format. Error: {e}");
+                return Err(());
+            }
+        };
+        let until = match until.format(&Rfc3339) {
+            Ok(until) => until,
+            Err(e) => {
+                error!("Failed to parse 'until' datetime to RFC3339 format. Error: {e}");
+                return Err(());
+            }
+        };
 
-        loop {
-            // To ensure we are not missing any logs that might have come through in the meantime, we
-            // go 1 minute back in time. This produces overlapping calls, i.e., we will see some logs
-            // multiple times. To avoid processing these logs more than once, we store their UUIDs in
-            // a dedicated data struct. So we pay a performance price in exchange for more log stability.
-            let since = match self.since.checked_sub(time::Duration::minutes(1)) {
-                Some(s) => s,
-                None => {
-                    error!("Something went wrong while computing `since` value");
-                    return Ok(());
-                }
-            };
-            // Okta requires the query parameter to be in RFC3339 format. We attempt to format it here.
-            // On failure, we return and allow the data orchestrator to restart the loop
-            let since = match since.format(&Rfc3339) {
-                Ok(since) => since,
-                Err(e) => {
-                    error!("Failed to parse datetime to RFC3339 format. Error: {e}");
-                    return Ok(());
-                }
-            };
+        // TODO Maybe remove configurability for sortOrder. With this new system, only ASCENDING
+        // really makes sense. Otherwise we are most likely going to miss older logs.
+        let address = format!(
+            "https://{}/api/v1/logs?sortOrder={}&since={since}&until={until}&limit={}",
+            self.config.domain, self.config.log_sorting, self.config.limit
+        );
 
-            let address = format!(
-                "https://{}/api/v1/logs?sortOrder={}&since={since}&limit={}",
-                self.config.domain, self.config.log_sorting, self.config.limit
+        let response = self
+            .client
+            .get(address)
+            .header("Accept", "application/json")
+            .header("Authorization", format!("SSWS {}", self.config.token))
+            .send()
+            .await
+            .map_err(|e| {
+                error!("Could not get logs from Okta: {e}");
+            })?;
+
+        // Check the response status code
+        // If it's outside of the 2XX range, we log the error and exit the loop, allowing the
+        // data generator to handle a restart
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_body = response.text().await.ok();
+            error!(
+                "Call to Okta API failed with code: {status}. Error: {}",
+                error_body.unwrap_or_default()
             );
+            return Err(());
+        }
 
-            let response = self
-                .client
-                .get(address)
-                .header("Accept", "application/json")
-                .header("Authorization", format!("SSWS {}", self.config.token))
-                .send()
-                .await
-                .map_err(|e| {
-                    error!("Could not get logs from Okta: {e}");
-                })?;
+        // Get the body from the response from Okta
+        let body = response
+            .text()
+            .await
+            .map_err(|e| error!("Could not get logs from Okta: {e}"))?;
 
-            // Check the response status code
-            // If it's outside of the 2XX range, we log the error and exit the loop, allowing the
-            // data generator to handle a restart
-            if !response.status().is_success() {
-                let status = response.status();
-                let error_body = response.text().await.ok();
-                error!(
-                    "Call to Okta API failed with code: {status}. Error: {}",
-                    error_body.unwrap_or_default()
-                );
-                return Ok(());
-            }
+        // Attempt to deserialize the response from Okta
+        let logs: Vec<Value> = serde_json::from_str(body.as_str())
+            .map_err(|e| error!("Could not parse data from Okta: {e}\n\n{body}"))?;
 
-            // Get the body from the response from Okta
-            let body = response
-                .text()
-                .await
-                .map_err(|e| error!("Could not get logs from Okta: {e}"))?;
+        // If there have been no new logs since we last polled, we can exit the loop early
+        // Exiting here will result in a 10 second wait between restarts
+        if logs.is_empty() {
+            debug!("No new Okta logs since: {}", self.last_seen);
+            return Ok(vec![]);
+        }
 
-            // Attempt to deserialize the response from Okta
-            let logs: Vec<Value> = serde_json::from_str(body.as_str())
-                .map_err(|e| error!("Could not parse data from Okta: {e}\n\n{body}"))?;
+        // Loop over the logs we did get from Okta, attempt to parse their timestamps, and return a vector of such logs
+        let mut output_logs: Vec<DataGeneratorLog> = Vec::with_capacity(logs.len());
 
-            // If there have been no new logs since we last polled, we can exit the loop early
-            // Exiting here will result in a 10 second wait between restarts
-            if logs.is_empty() {
-                debug!("No new Okta logs since: {}", self.since);
-                return Ok(());
-            }
-
-            // Loop over the logs we did get from Okta, attempt to parse their timestamps, check if they are really new, and send them into the logging system
-
-            // Keep track of how many logs we actually send for processing (and do not discard because already-seen)
-            let mut sent_for_processing = 0u32;
-
-            for log in &logs {
-                let published = match log
-                    .as_object()
-                    .and_then(|obj| obj.get(OKTA_LOG_PUBLISHED_FIELD_KEY))
-                    .and_then(|val| val.as_str())
-                {
-                    Some(published) => published,
-                    None => {
-                        error!("Missing or invalid 'published' field in Okta log: {log:?}",);
-                        continue;
-                    }
-                };
-
-                let uuid = match log
-                    .as_object()
-                    .and_then(|obj| obj.get(OKTA_LOG_UUID_FIELD_KEY))
-                    .and_then(|val| val.as_str())
-                {
-                    Some(uuid) => uuid,
-                    None => {
-                        error!("Missing or invalid 'uuid' field in Okta log: {log:?}",);
-                        continue;
-                    }
-                };
-
-                // Check if we have already seen this UUID:
-                // - If we have, skip this log and continue
-                // - If we haven't, add this log's UUID to the data structure and keep processing it
-                if self.seen_logs_uuid.contains(uuid) {
-                    // We have already seen this log
+        for log in &logs {
+            let published = match log
+                .as_object()
+                .and_then(|obj| obj.get(OKTA_LOG_PUBLISHED_FIELD_KEY))
+                .and_then(|val| val.as_str())
+            {
+                Some(published) => published,
+                None => {
+                    error!("Missing or invalid 'published' field in Okta log: {log:?}",);
                     continue;
                 }
-                // We have not seen this log: add it to the cache
-                self.seen_logs_uuid.put(uuid.to_string(), 0u32);
+            };
 
-                let log_timestamp = match OffsetDateTime::parse(published, &Rfc3339) {
-                    Ok(dt) => dt,
-                    Err(_) => {
-                        error!("Got an invalid date from Okta: {}", published);
-                        continue;
-                    }
-                };
-
-                // Check if this is the latest log we've seen and update if so
-                // We'll use the new most_recent_log_seen time to filter the subsequent
-                // API calls to Okta afterwards
-                //
-                // By default, the Okta API returns the logs in ascending order so we could in theory just
-                // take the last timstamp and set it as our max log time. I'm okay with doing another check here in the
-                // case that Okta's sorting fails to ensure that we do not miss any logs. The number of comparisions here (1000 max)
-                // is nothing to be concerned about.
-                if log_timestamp > most_recent_log_seen {
-                    most_recent_log_seen = log_timestamp;
+            let log_timestamp = match OffsetDateTime::parse(published, &Rfc3339) {
+                Ok(dt) => dt,
+                Err(_) => {
+                    error!("Got an invalid date from Okta: {}", published);
+                    continue;
                 }
+            };
 
-                // Attempts to parse the log received from Okta to bytes.
-                let log_bytes = match serde_json::to_vec(&log) {
-                    Ok(bytes) => bytes,
-                    Err(e) => {
-                        error!("Failed to serialize Okta logs to bytes. Error: {e}");
-                        continue;
-                    }
-                };
+            let uuid = match log
+                .as_object()
+                .and_then(|obj| obj.get(OKTA_LOG_UUID_FIELD_KEY))
+                .and_then(|val| val.as_str())
+            {
+                Some(uuid) => uuid,
+                None => {
+                    error!("Missing or invalid 'uuid' field in Okta log: {log:?}",);
+                    continue;
+                }
+            };
 
-                // Send log into logging system to be processed by rule(s)
-                //
-                // Eventually these errors need to bubble up so the service can shut down
-                // then be restarted by an orchestration service
-                self.logger
-                    .send(Message::new(
-                        "okta".to_string(),
-                        log_bytes,
-                        LogSource::Generator(Generator::Okta),
-                        self.config.logbacks_allowed.clone(),
-                    ))
-                    .unwrap();
-                sent_for_processing += 1;
-            }
-            // If there have been no new logs sent for processing, we exit.
-            // Exiting here will result in a 10 second wait between restarts
-            if sent_for_processing == 0 {
-                debug!(
-                    "No new Okta logs since: {}. We have already seen them all.",
-                    self.since
-                );
-                // Important: we have to move the window forward. Otherwise, on the next call nothing will
-                // change: with the same `since`, we will get the same logs and we will discard them all because
-                // they will all be in the cache. I.e., the system will enter a deadlock.
-                // To prevent this, we move `since` forward by 30 seconds. When we call, we will still go back
-                // 1 minute, effectively shifting the window forward by 30 seconds.
-                // Eventually, we will get some new logs.
-                self.since = match self.since.checked_add(time::Duration::seconds(30)) {
-                    Some(s) => s,
-                    None => {
-                        error!("Error while moving the Okta log window forward");
-                        OffsetDateTime::now_utc() // for lack of anything better
-                    }
-                };
-                return Ok(());
-            }
-            info!(
-                "Sent {sent_for_processing} Okta logs for processing. Newest time seen is: {most_recent_log_seen}"
-            );
+            // Attempt to parse the log received from Okta to bytes.
+            let log_bytes = match serde_json::to_vec(&log) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    error!("Failed to serialize Okta logs to bytes. Error: {e}");
+                    continue;
+                }
+            };
 
-            // Update the time of our most recent log and wait for the specified period
-            self.since = most_recent_log_seen + sleep_duration;
-            tokio::time::sleep(sleep_duration).await
+            output_logs.push(DataGeneratorLog {
+                id: uuid.to_string(),
+                timestamp: log_timestamp,
+                payload: log_bytes,
+            });
         }
+
+        Ok(output_logs)
+    }
+
+    fn get_name(&self) -> String {
+        "Okta".to_string()
+    }
+
+    fn get_sleep_duration(&self) -> u64 {
+        self.config.sleep_duration
+    }
+
+    fn get_canon_time(&self) -> u64 {
+        self.config.canon_time
+    }
+
+    fn get_last_seen(&self) -> OffsetDateTime {
+        self.last_seen
+    }
+
+    fn set_last_seen(&mut self, v: OffsetDateTime) {
+        self.last_seen = v;
+    }
+
+    fn was_already_seen(&self, id: impl std::fmt::Display) -> bool {
+        self.seen_logs_uuid.contains(&id.to_string())
+    }
+
+    fn mark_already_seen(&mut self, id: impl std::fmt::Display) {
+        self.seen_logs_uuid.put(id.to_string(), 0u32);
+    }
+
+    fn send_for_processing(&self, payload: Vec<u8>) {
+        self.logger
+            .send(Message::new(
+                "okta".to_string(),
+                payload,
+                LogSource::Generator(Generator::Okta),
+                self.config.logbacks_allowed.clone(),
+            ))
+            .unwrap();
     }
 }
