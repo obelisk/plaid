@@ -10,6 +10,16 @@ if  uname | grep -q Darwin; then
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
 
+echo "Building Plaid Runtime Without Default Features"
+cd runtime
+cargo build --all --release --no-default-features
+if [ $? -ne 0 ]; then
+  echo "Failed to build Plaid without default features"
+  # Exit with an error
+  exit 1
+fi
+cd ..
+
 echo "Building Plaid Runtime"
 cd runtime
 cargo build --all --release

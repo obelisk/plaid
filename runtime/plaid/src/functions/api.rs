@@ -208,6 +208,7 @@ macro_rules! impl_new_function_with_error_buffer {
 /// - `FunctionErrors::InternalApiError`: For internal API-related errors.
 /// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
 /// - `FunctionErrors::ReturnBufferTooSmall`: If the provided return buffer is too small to hold the result.
+#[allow(unused_macros)] // not to have a warning when compiling without the `aws` feature
 macro_rules! impl_new_sub_module_function_with_error_buffer {
     ($api:ident, $sub_module:ident, $function_name:ident, $allow_in_test_mode:expr) => {
         paste::item! {

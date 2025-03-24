@@ -173,7 +173,7 @@ impl std::fmt::Display for ModuleExecutionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ModuleExecutionError::ComputationExhausted(limit) => {
-                write!(f, "Computation Exhaused. Limit: [{limit}]")
+                write!(f, "Computation Exhausted. Limit: [{limit}]")
             }
             ModuleExecutionError::ModuleError(context) => {
                 write!(

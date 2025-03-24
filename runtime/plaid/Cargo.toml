@@ -1,19 +1,19 @@
 [package]
 name = "plaid"
-version = "0.19.0"
+version = "0.20.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
 default = ["aws"]
-aws = ["aws-sdk-kms", "aws-config"]
+aws = ["aws-sdk-kms", "aws-sdk-dynamodb"]
 
 [dependencies]
 alkali = "0.3.0"
 async-trait = "0.1.56"
-aws-config = { version = "1.5.5", optional = true }
-aws-sdk-dynamodb = "1.69.0"
+aws-config = "1.5.5"
+aws-sdk-dynamodb = { version = "1.69.0", optional = true }
 aws-sdk-kms = { version = "1.41.0", optional = true }
 aws-sdk-secretsmanager = "1.57.0"
 base64 = "0.13"

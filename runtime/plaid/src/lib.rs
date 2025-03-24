@@ -1,6 +1,7 @@
+#[cfg(feature = "aws")]
 use aws_config::{BehaviorVersion, Region, SdkConfig};
+#[cfg(feature = "aws")]
 use aws_sdk_kms::config::Credentials;
-use serde::Deserialize;
 
 #[macro_use]
 extern crate log;
@@ -16,7 +17,8 @@ pub mod performance;
 pub mod storage;
 
 /// Defines methods to authenticate to AWS with
-#[derive(Deserialize)]
+#[cfg(feature = "aws")]
+#[derive(serde::Deserialize)]
 #[serde(untagged)]
 pub enum AwsAuthentication {
     ApiKey {
@@ -29,6 +31,7 @@ pub enum AwsAuthentication {
 }
 
 /// Get an `SdkConfig` to be used when interacting with AWS services
+#[cfg(feature = "aws")]
 pub async fn get_aws_sdk_config(authentication: AwsAuthentication) -> SdkConfig {
     match authentication {
         AwsAuthentication::ApiKey {
