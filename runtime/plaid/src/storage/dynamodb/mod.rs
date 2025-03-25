@@ -109,7 +109,14 @@ impl StorageProvider for DynamoDb {
     ) -> Result<Vec<String>, StorageError> {
         let mut all_keys = vec![];
 
-        let items = dynamodb_query(&self.client, &self.table_name, namespace, prefix, KEY).await?;
+        let items = dynamodb_query(
+            &self.client,
+            &self.table_name,
+            namespace,
+            prefix,
+            vec![KEY].as_slice(),
+        )
+        .await?;
 
         // Add retrieved items to our growing list
         for item in &items {
@@ -141,7 +148,7 @@ impl StorageProvider for DynamoDb {
             &self.table_name,
             namespace,
             prefix,
-            "key,value",
+            vec!["key", "value"].as_slice(),
         )
         .await?;
 
@@ -178,7 +185,7 @@ impl StorageProvider for DynamoDb {
         let mut counter = 0u64;
         for item in all {
             // Count bytes for keys and values
-            counter = counter + item.0.as_bytes().len() as u64 + item.1.len() as u64;
+            counter += item.0.as_bytes().len() as u64 + item.1.len() as u64;
         }
         Ok(counter)
     }
@@ -191,13 +198,13 @@ impl StorageProvider for DynamoDb {
 /// `table_name` - the name of the DynamoDB table  
 /// `namespace` - the namespace we want to query  
 /// `prefix` - [Optional] a prefix that keys must have in order to be returned by this query  
-/// `attributes_to_get` - A comma-separated list of attributes to get from DynamoDB
+/// `attributes_to_get` - A list of attributes to get from DynamoDB
 async fn dynamodb_query(
     client: &Client,
     table_name: &str,
     namespace: &str,
     prefix: Option<&str>,
-    attributes_to_get: &str,
+    attributes_to_get: &[&str],
 ) -> Result<Vec<HashMap<String, AttributeValue>>, StorageError> {
     // This is necessary because the STL is converting a None prefix to an empty string,
     // which would result in passing an empty string to DynamoDB, which then complains.
@@ -212,16 +219,15 @@ async fn dynamodb_query(
     // For pagination
     let mut last_evaluated_key: Option<HashMap<String, AttributeValue>> = None;
 
-    // Prepare the projection expression
-    let attributes: Vec<&str> = attributes_to_get.split(",").collect();
+    // Prepare the projection expression.
     // Alias all attributes by prepending with a #, to address the case where the attribute name is a reserved DynamoDB keyword
-    let aliased: Vec<String> = attributes.iter().map(|v| format!("#{v}")).collect();
+    let aliased: Vec<String> = attributes_to_get.iter().map(|v| format!("#{v}")).collect();
     // Now that everything is aliased, we can have a "safe" projection expression
     let projection_expression = aliased.join(",");
 
     // Start filling in the mappings for names and attributes (to go back from aliased to real names)
     let mut expression_attribute_names = vec![];
-    for (index, attribute) in attributes.iter().enumerate() {
+    for (index, attribute) in attributes_to_get.iter().enumerate() {
         expression_attribute_names.push((aliased[index].to_string(), attribute.to_string()));
     }
     expression_attribute_names.push(("#pk".to_string(), NAMESPACE.to_string()));

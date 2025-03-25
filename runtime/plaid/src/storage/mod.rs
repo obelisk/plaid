@@ -36,12 +36,19 @@ pub struct SharedDb {
     pub used_storage: Arc<RwLock<u64>>,
 }
 
+/// Plaid's DB layer
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum DatabaseConfig {
+    Sled(sled::Config),
+    #[cfg(feature = "aws")]
+    DynamoDb(dynamodb::Config),
+}
+
 /// Plaid's storage configuration
 #[derive(Deserialize)]
 pub struct Config {
-    pub sled: Option<sled::Config>,
-    #[cfg(feature = "aws")]
-    pub dynamodb: Option<dynamodb::Config>,
+    pub db: Option<DatabaseConfig>,
     /// Map `{ db_name --> db_config }`  
     /// Note - `db_name` must not terminate with ".wasm" to avoid confusing it with a rule-specific namespace
     pub shared_dbs: Option<HashMap<String, SharedDbConfig>>,
@@ -120,26 +127,14 @@ pub trait StorageProvider {
 
 impl Storage {
     pub async fn new(config: Config) -> Result<Self, StorageError> {
-        // Try building a database by checking the config in this order:
-        // 1. sled
-        // 2. dynamodb (if the `aws` feature is enabled)
-        // If none of these works, then error because no storage is configured
-        #[cfg(feature = "aws")]
-        let database: Box<dyn StorageProvider + Send + Sync> = {
-            if let Some(sled) = config.sled {
-                Box::new(sled::Sled::new(sled)?)
-            } else if let Some(dynamodb) = config.dynamodb {
+        // Try building a database from the values in the config
+        let database: Box<dyn StorageProvider + Send + Sync> = match config.db {
+            Some(DatabaseConfig::Sled(sled)) => Box::new(sled::Sled::new(sled)?),
+            #[cfg(feature = "aws")]
+            Some(DatabaseConfig::DynamoDb(dynamodb)) => {
                 Box::new(dynamodb::DynamoDb::new(dynamodb).await)
-            } else {
-                return Err(StorageError::NoStorageConfigured);
             }
-        };
-
-        #[cfg(not(feature = "aws"))]
-        let database: Box<dyn StorageProvider + Send + Sync> = {
-            if let Some(sled) = config.sled {
-                Box::new(sled::Sled::new(sled)?)
-            } else {
+            _ => {
                 return Err(StorageError::NoStorageConfigured);
             }
         };

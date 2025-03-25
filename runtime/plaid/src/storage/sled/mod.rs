@@ -145,7 +145,7 @@ impl StorageProvider for Sled {
         let mut counter = 0u64;
         for item in all {
             // Count bytes for keys and values
-            counter = counter + item.0.as_bytes().len() as u64 + item.1.len() as u64;
+            counter += item.0.as_bytes().len() as u64 + item.1.len() as u64;
         }
         Ok(counter)
     }
