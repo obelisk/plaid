@@ -5,6 +5,9 @@ use std::{
 
 use async_trait::async_trait;
 
+#[cfg(feature = "aws")]
+mod dynamodb;
+
 mod sled;
 
 use futures_util::future::join_all;
@@ -33,10 +36,19 @@ pub struct SharedDb {
     pub used_storage: Arc<RwLock<u64>>,
 }
 
+/// Plaid's DB layer
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum DatabaseConfig {
+    Sled(sled::Config),
+    #[cfg(feature = "aws")]
+    DynamoDb(dynamodb::Config),
+}
+
 /// Plaid's storage configuration
 #[derive(Deserialize)]
 pub struct Config {
-    pub sled: Option<sled::Config>,
+    pub db: Option<DatabaseConfig>,
     /// Map `{ db_name --> db_config }`  
     /// Note - `db_name` must not terminate with ".wasm" to avoid confusing it with a rule-specific namespace
     pub shared_dbs: Option<HashMap<String, SharedDbConfig>>,
@@ -115,9 +127,16 @@ pub trait StorageProvider {
 
 impl Storage {
     pub async fn new(config: Config) -> Result<Self, StorageError> {
-        let database = match config.sled {
-            Some(sled) => Box::new(sled::Sled::new(sled)?),
-            _ => return Err(StorageError::NoStorageConfigured),
+        // Try building a database from the values in the config
+        let database: Box<dyn StorageProvider + Send + Sync> = match config.db {
+            Some(DatabaseConfig::Sled(sled)) => Box::new(sled::Sled::new(sled)?),
+            #[cfg(feature = "aws")]
+            Some(DatabaseConfig::DynamoDb(dynamodb)) => {
+                Box::new(dynamodb::DynamoDb::new(dynamodb).await)
+            }
+            _ => {
+                return Err(StorageError::NoStorageConfigured);
+            }
         };
 
         let shared_dbs = config

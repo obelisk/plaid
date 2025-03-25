@@ -1,17 +1,20 @@
 [package]
 name = "plaid"
-version = "0.19.0"
+version = "0.20.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
 default = ["aws"]
-aws = ["aws-sdk-kms", "aws-config"]
+aws = ["aws-sdk-kms", "aws-sdk-dynamodb"]
 
 [dependencies]
 alkali = "0.3.0"
 async-trait = "0.1.56"
+aws-config = "1.5.5"
+aws-sdk-dynamodb = { version = "1.69.0", optional = true }
+aws-sdk-kms = { version = "1.41.0", optional = true }
 aws-sdk-secretsmanager = "1.57.0"
 base64 = "0.13"
 clap = { version = "4", default-features = false, features = [
@@ -22,8 +25,10 @@ clap = { version = "4", default-features = false, features = [
 crossbeam-channel = "0.5"
 env_logger = "0.8"
 flate2 = "1.0"
+futures-util = "0.3.30"
 hex = "0.4.3"
 http = "1"
+jsonwebtoken = { version = "9.2" }
 jwt-simple = { version = "0.12.10", default-features = false, features = [
     "pure-rust",
 ] }
@@ -58,10 +63,6 @@ urlencoding = "2.1.3"
 warp = { version = "0.3", features = ["tls"] }
 wasmer = { version = "4", default-features = false, features = ["cranelift"] }
 wasmer-middlewares = "4"
-jsonwebtoken = { version = "9.2" }
-futures-util = "0.3.30"
-aws-sdk-kms = { version = "1.41.0", optional = true }
-aws-config = { version = "1.5.5", optional = true }
 
 [[example]]
 name = "github-tailer"
