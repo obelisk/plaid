@@ -13,7 +13,7 @@ r = ["test_shared_db_rule_1.wasm"]
 rw = ["test_shared_db_rule_2.wasm"]
 
 [storage.db]
-path = "/tmp/sled"
+sled_path = "/tmp/sled"
 
 # [storage.db]
 # table_name = "test-plaid"

@@ -11,7 +11,7 @@ use super::{StorageError, StorageProvider};
 /// Configuration for a Sled DB
 #[derive(Deserialize)]
 pub struct Config {
-    path: String,
+    sled_path: String,
 }
 
 /// A wrapper around a Sled DB object
@@ -21,7 +21,7 @@ pub struct Sled {
 
 impl Sled {
     pub fn new(config: Config) -> Result<Self, StorageError> {
-        let db: sled::Db = sled::open(&config.path)
+        let db: sled::Db = sled::open(&config.sled_path)
             .map_err(|e| StorageError::CouldNotAccessStorage(e.to_string()))?;
         Ok(Self { db })
     }
