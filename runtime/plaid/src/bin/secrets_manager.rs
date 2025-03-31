@@ -12,8 +12,8 @@ use serde_json::Value;
 /// * Reading secrets from a JSON file and uploading them to Secrets Manager
 /// * Fetching secrets from Secrets Manager and writing them to a JSON file
 enum Operation {
-    JsonToAws(String, String),
-    AwsToJson(String),
+    JsonToAws(String, String, String),
+    AwsToJson(String, String),
 }
 
 /// CLI parameters
@@ -31,13 +31,14 @@ struct PlaidSecret {
 }
 
 /// Take something that looks like `{plaid-secret{secret-name}}`
-/// and extract `secret-name`. Then prepend it with `plaid-plaid-` or `plaid-ingress-`
-/// depending on which instance we are processing for.
+/// and extract `secret-name`. Then prepend it with `plaid-<deployment>-plaid-` or `plaid-<deployment>-ingress-`
+/// depending on which deployment and instance we are processing for.
 ///
 /// Note - This method will panic if the input string is not in the expected format.
 fn json_name_to_secret_name(
     r: &regex::Regex,
     instance: impl Display,
+    deployment: impl Display,
     s: impl AsRef<str>,
 ) -> String {
     let inner_name = r
@@ -47,23 +48,29 @@ fn json_name_to_secret_name(
         .unwrap()
         .as_str()
         .to_string();
-    format!("plaid-{instance}-{inner_name}")
+    format!("plaid-{deployment}-{instance}-{inner_name}")
 }
 
-/// Take something that looks like `plaid-plaid-<something>` or `plaid-ingress-<something>`
+/// Take something that looks like `plaid-<deployment>-plaid-<something>` or `plaid-<deployment>-ingress-<something>`
 /// and turn it into `{plaid-secret{something}}`, which is the format expected in secrets.json
 ///
 /// Note - This method will panic if the input string is not in the expected format.
-fn secret_name_to_json_name(instance: impl Display, s: impl Display) -> String {
+fn secret_name_to_json_name(
+    instance: impl Display,
+    deployment: impl Display,
+    s: impl Display,
+) -> String {
     let input = s.to_string();
-    let stripped = input.strip_prefix(&format!("plaid-{instance}-")).unwrap();
+    let stripped = input
+        .strip_prefix(&format!("plaid-{deployment}-{instance}-"))
+        .unwrap();
     format!("{{plaid-secret{{{stripped}}}}}")
 }
 
 /// Parse the CLI arguments
 fn parse_args() -> Options {
     let matches = Command::new("Plaid Secrets Manager")
-        .version("0.14.2")
+        .version("0.20.1")
         .about("A simple tool that helps with managing Plaid secrets")
         .subcommand_required(true)
         .subcommand(
@@ -120,6 +127,12 @@ fn parse_args() -> Options {
                 .help("Warning - Overwrite secrets or files with same name")
                 .action(ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("deployment")
+                .long("deployment")
+                .help("The deployment that this Plaid instance belongs to")
+                .required(true),
+        )
         .group(
             ArgGroup::new("instance")
                 .args(["plaid", "ingress", "other"])
@@ -131,6 +144,7 @@ fn parse_args() -> Options {
     let region = matches.get_one::<String>("region").unwrap().to_string(); // unwrap OK: it has a default value
     let overwrite = matches.get_one::<bool>("overwrite").unwrap(); // unwrap OK: defaults to false
     let filename = matches.get_one::<String>("filename").unwrap().to_string(); // unwrap OK: it's required
+    let deployment = matches.get_one::<String>("deployment").unwrap().to_string(); // unwrap OK: it's required
 
     let (subcmd_name, subcmd_args) = matches.subcommand().unwrap(); // OK: subcommand is required
     let operation = match subcmd_name {
@@ -140,8 +154,9 @@ fn parse_args() -> Options {
                 .get_one::<String>("kms_key_id")
                 .unwrap() // OK: it has a default value
                 .to_string(),
+            deployment,
         ),
-        "aws_to_json" => Operation::AwsToJson(filename),
+        "aws_to_json" => Operation::AwsToJson(filename, deployment),
         _ => unreachable!(), // those above are the only valid subcommands
     };
 
@@ -169,6 +184,7 @@ async fn json_to_aws(
     sm_client: &Client,
     kms_key_id: impl Display,
     overwrite: bool,
+    deployment: impl Display,
 ) {
     let secret_name_regex = regex::Regex::new(r"^\{plaid-secret\{([a-zA-Z0-9_-]+)\}\}$").unwrap(); // unwrap OK: hardcoded input
 
@@ -181,7 +197,12 @@ async fn json_to_aws(
     let mut secrets = vec![];
     for (key, value) in value {
         secrets.push(PlaidSecret {
-            name: json_name_to_secret_name(&secret_name_regex, instance.to_string(), key),
+            name: json_name_to_secret_name(
+                &secret_name_regex,
+                instance.to_string(),
+                &deployment,
+                key,
+            ),
             value: value.as_str().unwrap().to_string(),
         });
     }
@@ -224,6 +245,7 @@ async fn aws_to_json(
     instance: impl Display,
     sm_client: &Client,
     overwrite: bool,
+    deployment: impl Display,
 ) {
     // If the file exists and we don't want to overwrite it, then exit early
     let filename = filename.to_string();
@@ -233,7 +255,7 @@ async fn aws_to_json(
         return;
     }
 
-    println!("Fetching all secrets whose name starts with plaid-{instance}");
+    println!("Fetching all secrets whose name starts with plaid-{deployment}-{instance}");
     let mut retrieved_secrets = vec![];
     let mut next_token = None::<String>;
 
@@ -243,7 +265,7 @@ async fn aws_to_json(
             .filters(
                 Filter::builder()
                     .key(FilterNameStringType::Name)
-                    .values(format!("plaid-{instance}"))
+                    .values(format!("plaid-{deployment}-{instance}"))
                     .build(),
             )
             .max_results(100)
@@ -283,7 +305,7 @@ async fn aws_to_json(
         .into_iter()
         .map(|ps| {
             (
-                secret_name_to_json_name(&instance, ps.name),
+                secret_name_to_json_name(&instance, &deployment, ps.name),
                 Value::String(ps.value),
             )
         })
@@ -308,22 +330,24 @@ async fn main() {
     let sm_client = aws_sdk_secretsmanager::Client::new(&sdk_config);
 
     match cli_options.operation {
-        Operation::JsonToAws(filename, kms_key_id) => {
+        Operation::JsonToAws(filename, kms_key_id, deployment) => {
             json_to_aws(
                 filename,
                 cli_options.instance,
                 &sm_client,
                 kms_key_id,
                 cli_options.overwrite,
+                deployment,
             )
             .await
         }
-        Operation::AwsToJson(filename) => {
+        Operation::AwsToJson(filename, deployment) => {
             aws_to_json(
                 filename,
                 cli_options.instance,
                 &sm_client,
                 cli_options.overwrite,
+                deployment,
             )
             .await
         }
