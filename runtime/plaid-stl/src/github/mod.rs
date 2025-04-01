@@ -135,6 +135,14 @@ pub struct RepositoryDispatchParams<T> {
     pub client_payload: T,
 }
 
+/// Parameters sent to the runtime when deleting a GH deploy key
+#[derive(Serialize, Deserialize)]
+pub struct DeleteDeployKeyParams {
+    pub owner: String,
+    pub repo: String,
+    pub key_id: u64,
+}
+
 impl FileSearchResultItem {
     /// Retrieve the content of the search result
     pub fn retrieve_raw_content(&self) -> Result<String, PlaidFunctionError> {
@@ -720,7 +728,7 @@ pub fn fetch_commit(user: &str, repo: &str, commit: &str) -> Result<String, Plai
     extern "C" {
         new_host_function_with_error_buffer!(github, fetch_commit);
     }
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
 
     #[derive(Serialize)]
     struct Request<'a> {
@@ -1344,23 +1352,35 @@ pub fn configure_secret(
     }
 }
 
-/// Search for files with given filename in GitHub.
+/// Search for code in GitHub.
 /// If additional selection criteria are given, these are used to decide whether
 /// results are selected or discarded.
 ///
 /// **Arguments:**
-/// - `filename`: The name of the files to search, e.g., "README.md"
+/// - `filename`: The name of the files to search, e.g., "README"
+/// - `extension`: The extension of the files to search, e.g., "yml"
+/// - `path`: The path under which files are searched, e.g., "src"
 /// - `search_criteria`: An optional `CodeSearchCriteria` object with additional search criteria
-pub fn search_for_file(
-    filename: impl Display,
+pub fn search_code(
+    filename: Option<impl Display>,
+    extension: Option<impl Display>,
+    path: Option<impl Display>,
     search_criteria: Option<&CodeSearchCriteria>,
 ) -> Result<Vec<FileSearchResultItem>, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(github, search_for_file);
+        new_host_function_with_error_buffer!(github, search_code);
     }
 
     let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("filename", filename.to_string());
+    if let Some(filename) = filename {
+        params.insert("filename", filename.to_string());
+    }
+    if let Some(extension) = extension {
+        params.insert("extension", extension.to_string());
+    }
+    if let Some(path) = path {
+        params.insert("path", path.to_string());
+    }
 
     // If we are given selection criteria, then we divide them between
     //
@@ -1401,7 +1421,7 @@ pub fn search_for_file(
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
         let res = unsafe {
-            github_search_for_file(
+            github_search_code(
                 request.as_bytes().as_ptr(),
                 request.as_bytes().len(),
                 return_buffer.as_mut_ptr(),
@@ -1564,10 +1584,7 @@ pub fn check_org_membership_of_user(
     let request = serde_json::to_string(&params).unwrap();
 
     let res = unsafe {
-        github_check_org_membership_of_user(
-            request.as_bytes().as_ptr(),
-            request.as_bytes().len(),
-        )
+        github_check_org_membership_of_user(request.as_bytes().as_ptr(), request.as_bytes().len())
     };
 
     // There was an error with the Plaid system. Maybe the API is not
@@ -1600,6 +1617,36 @@ pub fn comment_on_pull_request(
         )
     };
 
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
+
+/// Delete a deploy key with given ID from a given repository.
+/// For more details, see https://docs.github.com/en/rest/deploy-keys/deploy-keys?apiVersion=2022-11-28#delete-a-deploy-key
+pub fn delete_deploy_key(
+    owner: impl Display,
+    repo: impl Display,
+    key_id: u64,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, delete_deploy_key);
+    }
+
+    let params = DeleteDeployKeyParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        key_id,
+    };
+
+    let params = serde_json::to_string(&params).unwrap();
+    let res =
+        unsafe { github_delete_deploy_key(params.as_bytes().as_ptr(), params.as_bytes().len()) };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
     if res < 0 {
         return Err(res.into());
     }

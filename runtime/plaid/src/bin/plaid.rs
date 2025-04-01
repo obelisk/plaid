@@ -30,18 +30,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (els, _logging_handler) = Logger::start(config.logging);
     info!("Logging subsystem started");
 
-    // Create the storage system is one is configured
+    // Create the storage system if one is configured
     let storage = match config.storage {
-        Some(config) => Some(Arc::new(Storage::new(config)?)),
+        Some(config) => Some(Arc::new(Storage::new(config).await?)),
         None => None,
     };
 
-    if storage.is_some() {
-        info!("Storage system configured");
-    } else {
-        info!(
-            "No persistent storage system configured; unexecuted log backs will be lost on shutdown"
-        );
+    match storage {
+        None => info!("No persistent storage system configured; unexecuted log backs will be lost on shutdown"),
+        Some(ref storage) => {
+            info!("Storage system configured");
+            match &storage.shared_dbs {
+                None => info!("No shared DBs configured"),
+                Some(dbs) => {
+                    info!("Configured shared DBs: {:?}", dbs.keys().collect::<Vec<&String>>());
+                }
+            }
+        }
     }
 
     // This sender provides an internal route to sending logs. This is what
@@ -85,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Loading all the modules");
     // Load all the modules that form our Nanoservices and Plaid rules
-    let modules = Arc::new(loader::load(config.loading).unwrap());
+    let modules = Arc::new(loader::load(config.loading, storage.clone()).await.unwrap());
     let modules_by_name = Arc::new(modules.get_modules());
 
     info!(
@@ -143,9 +148,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         for requested_header in webhook_configuration.headers.iter() {
                             // TODO: Investigate if this should be get_all?
                             // Without this we don't support receiving multiple headers with the same name
-                            // I don't know if this is an issue or not, practicially, or if there are security implications.
+                            // I don't know if this is an issue or not, practically, or if there are security implications.
                             if let Some(value) = headers.get(requested_header) {
-                                message.accessory_data.insert(requested_header.to_string(), value.as_bytes().to_vec());
+                                message.headers.insert(requested_header.to_string(), value.as_bytes().to_vec());
                             }
                         }
 
@@ -260,7 +265,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let message = Message {
                                     type_: name.to_string(),
                                     data: String::new().into_bytes(),
-                                    accessory_data: query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
+                                    headers: HashMap::new(),
+                                    query_params: query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
                                     source,
                                     logbacks_allowed,
                                     response_sender: Some(response_send),

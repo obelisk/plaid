@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 # Build all of the Plaid workspace
 PLATFORM=$(uname -a)
@@ -10,6 +9,16 @@ if  uname | grep -q Darwin; then
   echo "macOS detected so using LLVM from Homebrew for wasm32 compatibility"
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
+
+echo "Building Plaid Runtime Without Default Features"
+cd runtime
+cargo build --all --release --no-default-features
+if [ $? -ne 0 ]; then
+  echo "Failed to build Plaid without default features"
+  # Exit with an error
+  exit 1
+fi
+cd ..
 
 echo "Building Plaid Runtime"
 cd runtime
@@ -27,12 +36,12 @@ echo "Copying Compiled Test Modules to compiled_modules"
 mkdir -p compiled_modules
 cp -r modules/target/wasm32-unknown-unknown/release/test_*.wasm compiled_modules/
 
-echo "Starting Plaid In The Background and waiting 10 seconds for it to boot"
+echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
 RUST_LOG=plaid=debug cargo run --bin=plaid --release -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
 cd ..
-sleep 10
+sleep 20
 
 # Set the variables the test harnesses will need
 export PLAID_LOCATION="localhost:4554"

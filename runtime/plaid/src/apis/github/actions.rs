@@ -1,5 +1,10 @@
+use std::sync::Arc;
+
 use super::Github;
-use crate::apis::{github::GitHubError, ApiError};
+use crate::{
+    apis::{github::GitHubError, ApiError},
+    loader::PlaidModule,
+};
 use plaid_stl::github::RepositoryDispatchParams;
 use serde::Serialize;
 use serde_json::Value;
@@ -19,7 +24,11 @@ impl Github {
     /// For more details, see
     /// * https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#create-a-repository-dispatch-event
     /// * https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#repository_dispatch
-    pub async fn trigger_repo_dispatch(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+    pub async fn trigger_repo_dispatch(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
         let request: RepositoryDispatchParams<Value> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -38,10 +47,7 @@ impl Github {
             client_payload: &request.client_payload,
         };
 
-        match self
-            .make_generic_post_request(address, &body, &module)
-            .await
-        {
+        match self.make_generic_post_request(address, &body, module).await {
             Ok((status, Ok(_))) => {
                 if status == 204 {
                     Ok(0)

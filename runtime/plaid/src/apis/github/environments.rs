@@ -1,24 +1,35 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::Serialize;
 
-use crate::apis::{github::GitHubError, ApiError};
+use crate::{
+    apis::{github::GitHubError, ApiError},
+    loader::PlaidModule,
+};
 
 use super::Github;
 
+/// Policy that determines which branches can deploy.
+/// Exactly one of the fields must be set to `true`.
 #[derive(Serialize)]
 struct DeploymentBranchPolicy {
+    /// Only branches with branch protection rules can deploy.
     protected_branches: bool,
+    /// Only branches that match the specified name patterns can deploy.
     custom_branch_policies: bool,
 }
 
+/// Represents someone who can review a deployment job
 #[derive(Serialize)]
 struct Reviewer {
+    /// The type of reviewer (user or team)
     #[serde(rename = "type")]
     type_: String,
+    /// The ID of the reviewer
     id: u64,
 }
 
+/// Payload sent to the GitHub REST API to create a new deployment environment.
 /// See https://docs.github.com/en/rest/deployments/environments?apiVersion=2022-11-28#create-or-update-an-environment for details
 #[derive(Serialize)]
 struct CreateEnvironmentPayload {
@@ -32,10 +43,13 @@ struct CreateEnvironmentPayload {
     deployment_branch_policy: DeploymentBranchPolicy,
 }
 
+/// Payload sent to the GitHub REST API to create a new deployment branch policy.
 #[derive(Serialize)]
 struct CreateDeploymentBranchPolicyPayload {
+    /// The name pattern that branches or tags must match in order to deploy to the environment.
     name: String,
     #[serde(rename = "type")]
+    /// Whether this rule targets a branch or tag.
     type_: String,
 }
 
@@ -45,7 +59,7 @@ impl Github {
     pub async fn create_environment_for_repo(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -94,7 +108,7 @@ impl Github {
     pub async fn create_deployment_branch_protection_rule(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;

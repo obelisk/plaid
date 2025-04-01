@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
 use super::{PagerDuty, PagerDutyError};
-use crate::apis::ApiError;
+use crate::{apis::ApiError, loader::PlaidModule};
 
 use serde::{Deserialize, Serialize};
 
 const PAGERDUTY_ENQUEUE_ADDRESS: &str = "https://events.pagerduty.com/v2/enqueue";
 
+/// Payload sent to PagerDuty to trigger an incident
 #[derive(Serialize)]
 struct PagerDutyTriggerPayload {
     summary: String,
@@ -12,6 +15,7 @@ struct PagerDutyTriggerPayload {
     severity: String,
 }
 
+/// Payload sent to PagerDuty to trigger an incident
 #[derive(Serialize)]
 struct PagerDutyTrigger {
     routing_key: String,
@@ -26,6 +30,7 @@ enum TriggerIncidentResult {
     TriggerFailed = 3,
 }
 
+/// Request to trigger a PagerDuty incident
 #[derive(Deserialize)]
 struct TriggerRequest<'a> {
     service: &'a str,
@@ -33,10 +38,11 @@ struct TriggerRequest<'a> {
 }
 
 impl PagerDuty {
+    /// Trigger a PagerDuty incident
     pub async fn trigger_incident(
         &self,
         request: &str,
-        module_name: &str,
+        module_name: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
         let request: TriggerRequest = match serde_json::from_str(request) {
             Ok(r) => r,

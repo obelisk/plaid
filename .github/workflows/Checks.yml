@@ -6,6 +6,9 @@ on:
   pull_request:
     branches:  "**"
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -14,14 +17,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Get Rust Nightly
-      run: rustup toolchain install nightly
-
-    - name: Use Rust Nightly
-      run: rustup default nightly
-
-    - name: Get Wasm32
-      run: rustup target add wasm32-unknown-unknown
+    - name: Setup Rust
+      run: |
+        rustup toolchain install nightly-2024-12-14  # pinning the nightly version should help with caching dependencies
+        rustup default nightly-2024-12-14
+        rustup target add wasm32-unknown-unknown
 
     - uses: actions/checkout@v4
 
@@ -32,12 +32,14 @@ jobs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/
+          runtime/target/
+          modules/target/
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Run Integration Tests
       run: ./testing/integration.sh
-  
+
+
   ubuntu-docker-build-amd64-test:
     runs-on: ubuntu-latest
 
@@ -51,11 +53,12 @@ jobs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          runtime/target/
+        key: ${{ runner.os }}-cargo-amd64-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Run Docker Build Test (amd64)
       run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.amd64 .
+
 
   ubuntu-docker-build-aarch64-test:
     runs-on: ubuntu-latest
@@ -70,8 +73,8 @@ jobs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          runtime/target/
+        key: ${{ runner.os }}-cargo-aarch64-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Run Docker Build Test (aarch64)
       run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.aarch64 .

@@ -1,0 +1,13 @@
+[package]
+name = "test_shared_db_rule_2"
+description = "Rule used to test the shared DB functionality."
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plaid_stl = { path = "../../../runtime/plaid-stl" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+crate-type = ["cdylib"]

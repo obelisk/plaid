@@ -18,7 +18,7 @@ pub fn get_response(
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
@@ -28,7 +28,7 @@ pub fn get_response(
     let response = match &env.data().response {
         Some(r) => r,
         None => {
-            error!("{}: No response set", env.data().name);
+            error!("{}: No response set", env.data().module.name);
             return 0;
         }
     };
@@ -43,7 +43,7 @@ pub fn get_response(
         Err(e) => {
             error!(
                 "{}: Data write error in get_response: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             e as i32
@@ -64,7 +64,7 @@ pub fn set_response(
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return;
@@ -74,7 +74,7 @@ pub fn set_response(
     let message = match safely_get_string(&memory_view, response_buffer, response_buffer_size) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Error in set_response: {:?}", env.data().name, e);
+            error!("{}: Error in set_response: {:?}", env.data().module.name, e);
             return;
         }
     };

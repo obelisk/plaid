@@ -4,9 +4,18 @@ resolver = "2"
 
 members = [
     "tests/test_crashtest",
+    "tests/test_db",
+    "tests/test_fileopen",
+    "tests/test_get_everything",
+    "tests/test_logback",
+    "tests/test_mnr",
     "tests/test_persistent_response",
+    "tests/test_random",
     "tests/test_sshcerts_usage",
+    "tests/test_testmode",
     "tests/test_time",
+    "tests/test_shared_db_rule_1",
+    "tests/test_shared_db_rule_2",
 ]
 
 [profile.release]

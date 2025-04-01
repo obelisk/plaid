@@ -1,0 +1,34 @@
+name: Release config checker
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  release_config_checker:
+    name: Release config checker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            runtime/target/
+          key: ${{ runner.os }}-cargo-configchecker-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build config checker
+        run: cd runtime && cargo build --bin=config_check --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: config_check
+          path: runtime/target/release/config_check

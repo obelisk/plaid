@@ -2,9 +2,11 @@ use reqwest::Client;
 
 use serde::{Deserialize, Serialize};
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use std::collections::HashMap;
+
+use crate::loader::PlaidModule;
 
 use super::{default_timeout_seconds, ApiError};
 
@@ -22,7 +24,9 @@ pub struct SplunkConfig {
 }
 
 pub struct Splunk {
+    /// Config for the Splunk API
     config: SplunkConfig,
+    /// A client to make requests with
     client: Client,
 }
 
@@ -49,7 +53,7 @@ impl Splunk {
 
     /// Make a post to a preconfigured slack webhook. This should be preferred
     /// over the arbitrary API call
-    pub async fn post_hec(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+    pub async fn post_hec(&self, params: &str, module: Arc<PlaidModule>) -> Result<u32, ApiError> {
         let request: HashMap<String, String> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 

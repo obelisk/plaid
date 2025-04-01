@@ -4,6 +4,7 @@ mod internal;
 mod memory;
 mod message;
 mod response;
+mod runtime_data;
 mod storage;
 
 use memory::*;
@@ -25,6 +26,10 @@ pub enum FunctionErrors {
     CacheDisabled = -7,
     CouldNotGetAdequateMemory = -8,
     FailedToWriteGuestMemory = -9,
+    StorageLimitReached = -10,
+    TestMode = -11,
+    OperationNotAllowed = -12,
+    SharedDbError = -13,
 }
 
 #[derive(Debug)]
@@ -40,7 +45,6 @@ impl std::fmt::Display for LinkError {
     }
 }
 
-/// Implement a way for a module to get the current unixtime
 pub fn fake_wbindgen_describe(placeholder: i32) {
     warn!("Fake __wbindgen_describe called with placeholder: {placeholder}");
 }
@@ -54,7 +58,6 @@ pub fn fake_wbindgen_externref_table_grow(x: i32) -> i32 {
     return 0;
 }
 
-/// Implement a way for a module to get the current unixtime
 pub fn fake_wbindgen_externref_table_set_null(placeholder: i32) {
     warn!("Fake __wbindgen_externref_table_set_null called with placeholder: {placeholder}");
 }

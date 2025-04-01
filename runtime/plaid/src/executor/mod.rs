@@ -16,9 +16,8 @@ use serde::{Deserialize, Serialize};
 use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedFunction};
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
-use lru::LruCache;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
@@ -33,15 +32,17 @@ pub struct ResponseMessage {
     pub body: String,
 }
 
+/// A message to be processed by one or more modules
 #[derive(Serialize, Deserialize)]
 pub struct Message {
     /// The message channel that this message is going to run on
     pub type_: String,
     /// The data passed to the module
     pub data: Vec<u8>,
-    /// Any additional data that is provided as context to the module
-    /// This is usually either headers, or secrets
-    pub accessory_data: HashMap<String, Vec<u8>>,
+    /// Any headers the module will have access to, while processing this message
+    pub headers: HashMap<String, Vec<u8>>,
+    /// Any query parameters the module will have access to, while processing this message
+    pub query_params: HashMap<String, Vec<u8>>,
     /// Where the message came from
     pub source: LogSource,
     /// If this message is allowed to trigger additional messages to the same
@@ -68,7 +69,8 @@ impl Message {
         Self {
             type_,
             data,
-            accessory_data: HashMap::new(),
+            headers: HashMap::new(),
+            query_params: HashMap::new(),
             source,
             logbacks_allowed,
             response_sender: None,
@@ -82,7 +84,8 @@ impl Message {
         Self {
             type_: self.type_.clone(),
             data: self.data.clone(),
-            accessory_data: self.accessory_data.clone(),
+            headers: self.headers.clone(),
+            query_params: self.query_params.clone(),
             source: self.source.clone(),
             logbacks_allowed: self.logbacks_allowed.clone(),
             response_sender: None,
@@ -91,11 +94,10 @@ impl Message {
     }
 }
 
+/// Environment for executing a module on a message
 pub struct Env {
-    // Name of the current module
-    pub name: String,
-    // Cache if available
-    pub cache: Option<Arc<RwLock<LruCache<String, String>>>>,
+    // A handle to the module which is processing the message
+    pub module: Arc<PlaidModule>,
     // The message that is being processed.
     pub message: Message,
     // A handle to the API to make external calls
@@ -104,6 +106,7 @@ pub struct Env {
     pub storage: Option<Arc<Storage>>,
     // A sender to the external logging system
     pub external_logging_system: Logger,
+    /// Memory for host-guest communication
     pub memory: Option<Memory>,
     // A special value that can be filled to leave a string response available after
     // the module has execute. Generally this is used for GET mode responses.
@@ -112,10 +115,12 @@ pub struct Env {
     pub execution_error_context: Option<String>,
 }
 
+/// The executor that processes messages
 pub struct Executor {
     _handles: Vec<JoinHandle<Result<(), ExecutorError>>>,
 }
 
+/// Errors encountered by the executor while trying to execute a module
 pub enum ExecutorError {
     ExternalLoggingError(LoggingError),
     IncomingLogError,
@@ -145,6 +150,7 @@ impl std::fmt::Display for ExecutorError {
     }
 }
 
+/// Error encountered during the execution of a module
 pub enum ModuleExecutionError {
     ComputationExhausted(u64),
     ModuleError(String),
@@ -167,7 +173,7 @@ impl std::fmt::Display for ModuleExecutionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ModuleExecutionError::ComputationExhausted(limit) => {
-                write!(f, "Computation Exhaused. Limit: [{limit}]")
+                write!(f, "Computation Exhausted. Limit: [{limit}]")
             }
             ModuleExecutionError::ModuleError(context) => {
                 write!(
@@ -203,7 +209,7 @@ impl From<LoggingError> for ExecutorError {
 /// Take a message, a module, and an executor and get an instance back that is ready to run
 /// the provided module.
 fn prepare_for_execution(
-    mut message: Message,
+    message: Message,
     plaid_module: Arc<PlaidModule>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
@@ -218,16 +224,8 @@ fn prepare_for_execution(
     // for this message only.
     let mut store = Store::new(plaid_module.engine.clone());
 
-    // Load the secrets if they exist. This overwrites any thing that is already
-    // in the accessory data meaning secrets always take precedence over possible user
-    // provided data, like headers (the other major use case for accessory data)
-    if let Some(secrets) = &plaid_module.secrets {
-        message.accessory_data.extend(secrets.clone());
-    }
-
     let env = Env {
-        name: plaid_module.name.clone(),
-        cache: plaid_module.cache.clone(),
+        module: plaid_module.clone(),
         message: message.create_duplicate(),
         api: api.clone(),
         storage: storage.clone(),
@@ -301,6 +299,7 @@ fn prepare_for_execution(
     Ok((store, instance, ep, envr))
 }
 
+/// Update a module's persistent response
 fn update_persistent_response(
     plaid_module: &Arc<PlaidModule>,
     env: &FunctionEnv<Env>,

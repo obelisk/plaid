@@ -18,7 +18,7 @@ pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return;
@@ -28,12 +28,12 @@ pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log
     let message = match safely_get_string(&memory_view, log_buffer, log_buffer_size) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Error in print_debug_string: {:?}", env.data().name, e);
+            error!("{}: Error in print_debug_string: {:?}", env.data().module.name, e);
             return;
         }
     };
 
-    debug!("Message from [{}]: {message}", env.data().name);
+    debug!("Message from [{}]: {message}", env.data().module.name);
 }
 
 /// Implement a way for a module to set a descriptive context for
@@ -49,7 +49,7 @@ pub fn set_error_context(
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return;
@@ -59,7 +59,7 @@ pub fn set_error_context(
     let message = match safely_get_string(&memory_view, context_buffer, context_buffer_size) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Error in set_error_context: {:?}", env.data().name, e);
+            error!("{}: Error in set_error_context: {:?}", env.data().module.name, e);
             return;
         }
     };
@@ -132,7 +132,7 @@ pub fn log_back_detailed(
     // How many logbacks the rule would like this new invocation to be able to trigger
     logbacks_requested: LogbacksAllowed,
 ) -> u32 {
-    let name = env.data().name.clone();
+    let name = env.data().module.name.clone();
     // We need to check that the that the module has the logbacks_allowed "budget"
     // for the logback they are requesting
     let assigned_budget = match &mut env.data_mut().message.logbacks_allowed {
@@ -178,7 +178,7 @@ pub fn log_back_detailed(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in log_back: {:?}", env_data.name, e);
+            error!("{}: Memory error in log_back: {:?}", env_data.module.name, e);
             return 1;
         }
     };
@@ -186,7 +186,7 @@ pub fn log_back_detailed(
     let type_ = match safely_get_string(&memory_view, type_buf, type_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Error in log_back: {:?}", env_data.name, e);
+            error!("{}: Error in log_back: {:?}", env_data.module.name, e);
             return 1;
         }
     };
@@ -195,7 +195,7 @@ pub fn log_back_detailed(
     let log = match safely_get_memory(&memory_view, log_buf, log_buf_len) {
         Ok(d) => d,
         Err(e) => {
-            error!("{}: Error in log_back: {:?}", env_data.name, e);
+            error!("{}: Error in log_back: {:?}", env_data.module.name, e);
             return 1;
         }
     };
@@ -204,7 +204,7 @@ pub fn log_back_detailed(
     api.clone().runtime.block_on(async move {
         match api.general.as_ref() {
             Some(general) => {
-                if general.log_back(&type_, &log, &env_data.name, delay as u64, assigned_budget) {
+                if general.log_back(&type_, &log, &env_data.module.name, delay as u64, assigned_budget) {
                     0
                 } else {
                     1
@@ -245,7 +245,7 @@ pub fn fetch_random_bytes(
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_random_bytes: {:?}",
-                env_data.name, e
+                env_data.module.name, e
             );
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
@@ -256,7 +256,7 @@ pub fn fetch_random_bytes(
         Err(e) => {
             error!(
                 "{}: Data write error in fetch_random_bytes: {:?}",
-                env_data.name, e
+                env_data.module.name, e
             );
             e as i32
         }

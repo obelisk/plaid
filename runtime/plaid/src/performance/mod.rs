@@ -6,6 +6,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
 
+/// The performance monitoring system, which collects execution data about modules.
 #[derive(Deserialize)]
 pub struct PerformanceMonitoring {
     /// The full path to the output file where performance metrics should be written
@@ -77,6 +78,7 @@ impl AggregatePerformanceData {
 }
 
 impl PerformanceMonitoring {
+    /// Start the performance monitoring
     pub async fn start(
         &self,
         receiver: Receiver<ModulePerformanceMetadata>,
@@ -93,6 +95,9 @@ impl PerformanceMonitoring {
     }
 }
 
+/// Run the performance monitoring loop, which receives performance data about module runs and
+/// processes them into aggregate performance data. A report can then be generated from this.
+/// The loop continues until the server is shut down.
 async fn performance_monitoring_loop(
     receiver: Receiver<ModulePerformanceMetadata>,
     cancellation_token: CancellationToken,

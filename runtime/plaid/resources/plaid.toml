@@ -7,8 +7,22 @@ execution_threads = 2
 # file is written to /runtime/performance-monitoring/metrics.txt
 # output_file_path = "../somedirectory/file.txt" 
 
-[storage.sled]
-path = "/tmp/sled"
+[storage.shared_dbs."shared_db_1"]
+size_limit = { Limited = 50 }
+r = ["test_shared_db_rule_1.wasm"]
+rw = ["test_shared_db_rule_2.wasm"]
+
+[storage.db]
+sled_path = "/tmp/sled"
+
+# [storage.db]
+# table_name = "test-plaid"
+
+# [storage.db.authentication]
+# access_key_id = "value here"
+# secret_access_key = "value here"
+# session_token = "value here"
+# region = "value here"
 
 # Configure the logging system. In this case we only configure the
 # stdout logger
@@ -22,19 +36,64 @@ path = "/tmp/sled"
 [loading]
 module_dir = "../compiled_modules/"
 lru_cache_size = 200
+
+test_mode = true
+test_mode_exemptions = [
+    "test_crashtest.wasm",
+    "test_db.wasm",
+    "test_fileopen.wasm",
+    "test_get_everything.wasm",
+    "test_logback.wasm",
+    "test_mnr.wasm",
+    "test_persistent_response.wasm",
+    "test_random.wasm",
+    "test_sshcerts_usage.wasm",
+    "test_time.wasm",
+    "test_shared_db_rule_1.wasm",
+    "test_shared_db_rule_2.wasm",
+]
+
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
 "test_sshcerts_usage.wasm" = 1024
+"test_logback.wasm" = 1024
+"test_mnr.wasm" = 1024
+"test_get_everything.wasm" = 1024
+
+[loading.universal_accessory_data]
+"key_1" = "value_1"
+"key_2" = "value_2"
+"key_4" = "value_4_ignored"
+
+[loading.accessory_data_log_type_overrides.test_geteverything]
+"key_1" = "value_1_intermediate"
+"key_4" = "value_4"
+
+[loading.accessory_data_file_overrides."test_get_everything.wasm"]
+"key_1" = "value_1_new"
+"key_3" = "value_3"
 
 [loading.secrets]
 [loading.secrets."testing"]
 "test_secret" = "{plaid-secret{test-secret}}"
 
+[loading.secrets."test_geteverything"]
+"my_secret" = "verySecureSecret"
+
 [loading.log_type_overrides]
-"test_time.wasm" = "time"
-"test_sshcerts_usage.wasm" = "test_sshcerts"
 "test_crashtest.wasm" = "crashtest"
+"test_db.wasm" = "test_db"
+"test_fileopen.wasm" = "test_fileopen"
+"test_get_everything.wasm" = "test_geteverything"
+"test_logback.wasm" = "test_logback"
+"test_mnr.wasm" = "test_mnr"
 "test_persistent_response.wasm" = "prtest"
+"test_random.wasm" = "test_random"
+"test_sshcerts_usage.wasm" = "test_sshcerts"
+"test_testmode.wasm" = "testmode"
+"test_time.wasm" = "time"
+"test_shared_db_rule_1.wasm" = "test_shareddb_1"
+"test_shared_db_rule_2.wasm" = "test_shareddb_2"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -44,6 +103,8 @@ default = 55_000_000
 okta = 9_000_000
 [loading.computation_amount.module_overrides]
 "example_rule.wasm" = 5_000_000
+"test_shared_db_rule_1.wasm" = 1_000_000_000
+"test_shared_db_rule_2.wasm" = 1_000_000_000
 
 [loading.memory_page_count]
 default = 300
@@ -52,6 +113,13 @@ okta = 200
 [loading.memory_page_count.module_overrides]
 "example_rule.wasm" = 50
 "test_crashtest.wasm" = 150
+
+[loading.storage_size]
+default = "Unlimited"
+[loading.storage_size.log_type]
+[loading.storage_size.module_overrides]
+"test_db.wasm" = { Limited = 50 }
+
 
 # [apis."okta"]
 # token = ""
@@ -64,17 +132,70 @@ verb = "post"
 uri = "http://localhost:8998/response"
 return_body = true
 return_code = true
-allowed_rules = ["test_time.wasm"]
+allowed_rules = [
+    "test_time.wasm",
+    "test_logback.wasm",
+    "test_db.wasm",
+    "test_fileopen.wasm",
+    "test_random.wasm",
+    "test_mnr.wasm",
+    "test_get_everything.wasm",
+    "test_shared_db_rule_1.wasm",
+    "test_shared_db_rule_2.wasm",
+]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 
-# [apis."general"."network"."web_requests"."google_test"]
-# verb = "get"
-# uri = "https://www.google.com/"
-# return_body = true
-# return_code = true
-# allowed_rules = ["testing_test.wasm"]
-# [apis."general"."network"."web_requests"."google_test"."headers"]
+[apis."general"."network"."web_requests"."test-response-mnr"]
+verb = "post"
+uri = "http://localhost:8998/testmnr"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr"."headers"]
+
+[apis."general"."network"."web_requests"."test-response-mnr-headers"]
+verb = "post"
+uri = "http://localhost:8998/testmnr/headers"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr-headers"."headers"]
+first_header = "first_value"
+
+[apis."general"."network"."web_requests"."test-response-mnr-vars"]
+verb = "post"
+uri = "http://localhost:8998/testmnr/{variable}"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr-vars"."headers"]
+
+[apis."general"."network"."web_requests"."google_test"]
+verb = "get"
+uri = "https://www.google.com/"
+return_body = true
+return_code = true
+allowed_rules = ["testing_test.wasm"]
+[apis."general"."network"."web_requests"."google_test"."headers"]
+
+[apis."general"."network"."web_requests"."testmode_allow"]
+verb = "get"
+uri = "https://captive.apple.com/"
+return_body = true
+return_code = true
+allowed_rules = ["test_testmode.wasm"]
+available_in_test_mode = true
+[apis."general"."network"."web_requests"."testmode_allow"."headers"]
+
+[apis."general"."network"."web_requests"."testmode_deny"]
+verb = "get"
+uri = "https://captive.apple.com/"
+return_body = true
+return_code = true
+allowed_rules = ["test_testmode.wasm"]
+available_in_test_mode = false
+[apis."general"."network"."web_requests"."testmode_deny"."headers"]
 
 # [apis."general"."network"."web_requests"."list_deploy_keys"]
 # verb = "get"
@@ -188,7 +309,6 @@ headers = []
 [webhooks."internal".webhooks."persistentresponsetest"]
 log_type = "prtest"
 logbacks_allowed = "Unlimited"
-
 headers = ["x-forwarded-for"]
 [webhooks."internal".webhooks."persistentresponsetest".get_mode]
 response_mode = "rule:test_persistent_response.wasm"
@@ -206,6 +326,52 @@ type = "None"
 [webhooks."internal".webhooks."crashtest"]
 log_type = "crashtest"
 headers = []
+
+[webhooks."internal".webhooks."testlogback"]
+log_type = "test_logback"
+logbacks_allowed = { Limited = 1 }
+headers = []
+[webhooks."internal".webhooks."testlogback".get_mode]
+response_mode = "rule:test_logback.wasm"
+[webhooks."internal".webhooks."testlogback".get_mode.caching_mode]
+type = "None"
+
+[webhooks."internal".webhooks."testdb"]
+log_type = "test_db"
+headers = []
+
+[webhooks."internal".webhooks."testfileopen"]
+log_type = "test_fileopen"
+headers = []
+
+[webhooks."internal".webhooks."testshareddb_1"]
+log_type = "test_shareddb_1"
+headers = []
+
+[webhooks."internal".webhooks."testshareddb_2"]
+log_type = "test_shareddb_2"
+headers = []
+
+[webhooks."internal".webhooks."testrandom"]
+log_type = "test_random"
+headers = []
+
+[webhooks."internal".webhooks."testmnr"]
+log_type = "test_mnr"
+headers = []
+
+[webhooks."internal".webhooks."testgeteverything"]
+log_type = "test_geteverything"
+headers = ["Authorization", "my_secret"]
+[webhooks."internal".webhooks."testgeteverything".get_mode]
+response_mode = "rule:test_get_everything.wasm"
+[webhooks."internal".webhooks."testgeteverything".get_mode.caching_mode]
+type = "None"
+
+[webhooks."internal".webhooks."testmode"]
+log_type = "testmode"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples

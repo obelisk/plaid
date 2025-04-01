@@ -1,24 +1,34 @@
 use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, KeyPair};
 use serde::{Deserialize, Serialize};
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use time::{Duration, OffsetDateTime};
+
+use crate::loader::PlaidModule;
 
 use super::ApiError;
 
 #[derive(Deserialize)]
 pub struct Environment {
+    /// Public key for the CA
     pub tls_ca: String,
+    /// Common name for the certificate
     pub mtls_cn: String,
+    /// Key pair for the CA
     pub mtls_key: String,
+    /// Server address
     pub server: String,
 }
 
 #[derive(Serialize)]
 pub struct ServerConfiguration {
+    /// Server address
     pub address: String,
+    /// Public key for the CA
     pub ca_pem: String,
+    /// mTLS user certificate
     pub mtls_cert: String,
+    /// mTLS user private key
     pub mtls_key: String,
 }
 
@@ -48,7 +58,12 @@ impl Rustica {
 }
 
 impl Rustica {
-    pub async fn new_mtls_cert(&self, params: &str, _: &str) -> Result<String, ApiError> {
+    /// Create a new mTLS certificate and return a serialized `ServerConfiguration` object
+    pub async fn new_mtls_cert(
+        &self,
+        params: &str,
+        _: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 

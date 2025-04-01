@@ -1,11 +1,11 @@
 use reqwest::{cookie::CookieStore, Response};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use totp_rs::{Algorithm, Secret, TOTP};
 use url::Url;
 
-use crate::apis::ApiError;
+use crate::{apis::ApiError, loader::PlaidModule};
 
 use plaid_stl::npm::shared_structs::*;
 
@@ -16,59 +16,94 @@ const NPMJS_COM_URL: &str = "https://www.npmjs.com";
 #[derive(Serialize)]
 /// Payload sent to npm website to change a team's permissions over a package
 struct PermissionChangePayload<'a> {
+    /// CSRF token to validate the request
     csrftoken: &'a str,
+    /// The package we are changing permissions for
     package: &'a str,
+    /// The permission we are setting
     permissions: &'a str,
 }
 
 #[derive(Serialize)]
 /// Payload sent to npm website to generate a new granular token
 struct GenerateGranularTokenPayload<'a> {
+    /// IPs that can use the token
     #[serde(rename = "allowedIPRanges")]
     allowed_ip_ranges: Vec<String>,
+    /// CSRF token to validate the request
     csrftoken: &'a str,
+    /// After how many days the token will expire
     #[serde(rename = "expirationDays")]
     expiration_days: &'a str,
+    /// Permissions that the token has on the selected npm org
     #[serde(rename = "orgsPermission")]
     orgs_permission: &'a str,
+    /// Permissions that the token has on the selected packages
     #[serde(rename = "packagesAndScopesPermission")]
     packages_and_scopes_permission: &'a str,
+    /// Which organizations the token has permissions on
     #[serde(rename = "selectedOrgs")]
     selected_orgs: Vec<String>,
+    /// Which packages the token has permissions on
     #[serde(rename = "selectedPackages")]
     selected_packages: Vec<String>,
+    /// Which packages and scopes the token has permissions on
     #[serde(rename = "selectedPackagesAndScopes")]
     selected_packages_and_scopes: &'a str,
+    /// Which scopes the token has permissions on
     #[serde(rename = "selectedScopes")]
     selected_scopes: Vec<String>,
+    /// A description for the token
     #[serde(rename = "tokenDescription")]
     token_description: &'a str,
+    /// The token's name. This must be unique.
     #[serde(rename = "tokenName")]
     token_name: &'a str,
 }
 
+/// Payload sent to npm website to invite a user into the configured npm organization
 #[derive(Serialize)]
 struct InviteUserToOrganizationPayload<'a> {
+    /// CSRF token to validate the request
     csrftoken: &'a str,
+    /// The team the user will be added to, upon accepting the invite
     team: &'a str,
+    /// Map that contains "name": <user name>
     user: HashMap<&'a str, &'a str>,
 }
 
+/// Payload sent to npm website to add a user to a given team in the npm org
 #[derive(Serialize)]
 struct AddUserToTeamPayload<'a> {
+    /// CSRF token to validate the request
     csrftoken: &'a str,
+    /// Username
     user: &'a str,
 }
 
+/// Payload sent to npm website to remove a user from a team or from the configured npm org.
 #[derive(Serialize)]
 struct RemoveUserPayload<'a> {
+    /// CSRF token to validate the request
     csrftoken: &'a str,
 }
 
+/// Payload sent to npm website to delete an access token.
 #[derive(Serialize)]
 struct DeleteTokenPayload<'a> {
+    /// CSRF token to validate the request
     csrftoken: &'a str,
+    /// The ID of the token to be deleted (only one)
     tokens: &'a str,
+}
+
+/// Groups an npm package name with a permission (read or write).
+#[derive(Serialize, Clone)]
+struct NpmPackageWithPermission {
+    /// Name of the package
+    package_name: String,
+    /// Permission on the package (read or write)
+    permission: NpmPackagePermission,
 }
 
 /// Takes a response with an unexpected status code and serializes it to
@@ -227,7 +262,7 @@ impl Npm {
     pub async fn set_team_permission_on_package(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -278,7 +313,7 @@ impl Npm {
     pub async fn create_granular_token_for_packages(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -378,7 +413,7 @@ impl Npm {
     pub async fn delete_granular_token(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -417,7 +452,11 @@ impl Npm {
     /// Retrieve a list of granular tokens for the account whose credentials have been configured for this client.
     ///
     /// Note: only granular tokens are returned. Other types of tokens (publish, automation, etc.) are filtered out.
-    pub async fn list_granular_tokens(&self, _: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn list_granular_tokens(
+        &self,
+        _: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         info!("Listing npm granular tokens on behalf of [{module}]");
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -466,7 +505,11 @@ impl Npm {
     /// Note: The package name should be unscoped. If you are trying to delete
     /// @scope/package_name, then you should pass only "package_name". The scope is
     /// preconfigured in the client and will be added automatically.
-    pub async fn delete_package(&self, package: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn delete_package(
+        &self,
+        package: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let package = self.validate_npm_package_name(package)?;
         info!("Deleting npm package [{package}] on behalf of [{module}]");
         if let Err(e) = self.login().await {
@@ -524,7 +567,11 @@ impl Npm {
     }
 
     /// Add a user to an npm team
-    pub async fn add_user_to_team(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn add_user_to_team(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
         }
@@ -568,7 +615,7 @@ impl Npm {
     pub async fn remove_user_from_team(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -595,6 +642,7 @@ impl Npm {
                 NPMJS_COM_URL, self.config.npm_scope, team, user
             ))
             .header("Content-Type", "text/plain;charset=UTF-8")
+            .header("X-Spiferack", "1")
             .body(body)
             .send()
             .await
@@ -609,7 +657,7 @@ impl Npm {
     pub async fn remove_user_from_organization(
         &self,
         user: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let user = self.validate_npm_username(user)?;
         info!("Removing user [{user}] from npm organization on behalf of [{module}]");
@@ -630,6 +678,7 @@ impl Npm {
                 "{}/settings/{}/members/{}/delete",
                 NPMJS_COM_URL, self.config.npm_scope, user
             ))
+            .header("X-Spiferack", "1")
             .json(&payload)
             .send()
             .await
@@ -647,7 +696,7 @@ impl Npm {
     pub async fn invite_user_to_organization(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -683,6 +732,7 @@ impl Npm {
                 NPMJS_COM_URL, self.config.npm_scope
             ))
             .header("Content-Type", "text/plain;charset=UTF-8")
+            .header("X-Spiferack", "1")
             .body(body)
             .send()
             .await
@@ -694,7 +744,11 @@ impl Npm {
     }
 
     /// Return all users in the npm organization
-    pub async fn get_org_user_list(&self, _: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn get_org_user_list(
+        &self,
+        _: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         info!("Listing all members of npm organization on behalf of [{module}]");
         if let Err(e) = self.login().await {
             return Ok(RuntimeReturnValue::serialize_from_err(e));
@@ -751,7 +805,7 @@ impl Npm {
     pub async fn get_org_users_without_2fa(
         &self,
         _: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         info!("Listing all members of npm organization without 2FA on behalf of [{module}]");
         if let Err(e) = self.login().await {
@@ -811,7 +865,7 @@ impl Npm {
     pub async fn list_packages_with_team_permission(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let params: ListPackagesWithTeamPermissionParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -951,7 +1005,11 @@ impl Npm {
     }
 
     /// Return a JSON-encoded struct that contains details about a granular token
-    pub async fn get_token_details(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn get_token_details(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let params: GetTokenDetailsParams =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let token_id = self.validate_token_id(&params.token_id)?;
@@ -1062,12 +1120,7 @@ impl Paginable for NpmPackageWithPermission {
     }
 }
 
-#[derive(Serialize, Clone)]
-struct NpmPackageWithPermission {
-    package_name: String,
-    permission: NpmPackagePermission,
-}
-
+/// Trait for objects that can be constructed from a paginated response provided by the npm website.
 trait Paginable {
     fn from_paginated_response(value: &Value) -> Result<Vec<Self>, ()>
     where

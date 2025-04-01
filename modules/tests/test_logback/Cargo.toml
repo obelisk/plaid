@@ -1,0 +1,13 @@
+[package]
+name = "test_logback"
+description = "Test rule that returns a value, which is set when a logback is received. The goal is to test the (delayed) log back system."
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plaid_stl = { path = "../../../runtime/plaid-stl" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+crate-type = ["cdylib"]

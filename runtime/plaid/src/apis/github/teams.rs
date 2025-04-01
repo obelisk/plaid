@@ -1,12 +1,20 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::Serialize;
 
 use super::Github;
-use crate::apis::{github::GitHubError, ApiError};
+use crate::{
+    apis::{github::GitHubError, ApiError},
+    loader::PlaidModule,
+};
 
 impl Github {
-    pub async fn remove_user_from_team(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+    /// Remove a user from a GitHub team.
+    pub async fn remove_user_from_team(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -36,7 +44,12 @@ impl Github {
         }
     }
 
-    pub async fn add_user_to_team(&self, params: &str, module: &str) -> Result<u32, ApiError> {
+    /// Add a user to a GitHub team.
+    pub async fn add_user_to_team(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 

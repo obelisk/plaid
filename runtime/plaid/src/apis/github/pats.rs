@@ -1,16 +1,20 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
-use crate::apis::{github::GitHubError, ApiError};
+use crate::{
+    apis::{github::GitHubError, ApiError},
+    loader::PlaidModule,
+};
 
 use super::Github;
 
 impl Github {
+    /// Fetch a list of all FPAT requests for a GitHub organization.
     pub async fn list_fpat_requests_for_org(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -35,7 +39,12 @@ impl Github {
         }
     }
 
-    pub async fn get_repos_for_fpat(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    /// List the repositories a fine-grained personal access token request is requesting access to.
+    pub async fn get_repos_for_fpat(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -64,10 +73,11 @@ impl Github {
         }
     }
 
+    /// Approves or denies multiple pending requests to access organization resources via a fine-grained personal access token.
     pub async fn review_fpat_requests_for_org(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
         #[derive(Deserialize, Serialize)]
         struct Request {
@@ -104,7 +114,7 @@ impl Github {
         let address = format!("/orgs/{org}/personal-access-token-requests");
 
         match self
-            .make_generic_post_request(address, &request, &module)
+            .make_generic_post_request(address, &request, module.clone())
             .await
         {
             Ok((status, Ok(body))) => {

@@ -1,3 +1,5 @@
+//! This module provides a way for Plaid to log to stdout.
+
 use super::{Log, LoggingError, PlaidLogger, Severity, WrappedLog};
 
 use serde::Deserialize;
@@ -21,8 +23,16 @@ impl PlaidLogger for StdoutLogger {
                 Severity::Warning => warn!("{}", message),
                 Severity::Info => info!("{}", message),
             },
-            Log::HostFunctionCall { module, function } => {
-                debug!("[{module}] is calling [{function}]")
+            Log::HostFunctionCall {
+                module,
+                function,
+                test_mode,
+            } => {
+                if *test_mode {
+                    debug!("TEST MODE [{module}] is calling [{function}]")
+                } else {
+                    debug!("[{module}] is calling [{function}]")
+                }
             }
             Log::ModuleExecutionError { module, error, log } => {
                 debug!("[{module}] errored with error [{error}]. Provided Log: {log}")

@@ -1,15 +1,14 @@
-use crate::apis::ApiError;
-use aws_config::{BehaviorVersion, Region};
+use crate::{apis::ApiError, get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
 use aws_sdk_kms::{
-    config::Credentials,
     operation::{get_public_key::GetPublicKeyOutput, sign::SignOutput},
     primitives::Blob,
     types::{MessageType, SigningAlgorithmSpec},
     Client,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
+/// A request to sign a given message with a KMS key.
 #[derive(Deserialize)]
 struct SignRequestRequest {
     /// To specify a KMS key, use its key ID, key ARN, alias name, or alias ARN.
@@ -56,22 +55,9 @@ pub struct KmsConfig {
     /// This can either be:
     /// - `IAM`: Uses the IAM role assigned to the instance or environment.
     /// - `ApiKey`: Uses explicit credentials, including an access key ID, secret access key, and region.
-    authentication: Authentication,
+    authentication: AwsAuthentication,
     /// Configured keys - maps a KMS key ID to a list of rules that are allowed to use it
     key_configuration: HashMap<String, Vec<String>>,
-}
-
-/// Defines methods to authenticate to KMS with
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Authentication {
-    ApiKey {
-        access_key_id: String,
-        secret_access_key: String,
-        session_token: Option<String>,
-        region: String,
-    },
-    Iam {},
 }
 
 /// Custom parser for signing_algorithm. Returns an error if an invalid message type is provided.
@@ -171,34 +157,7 @@ pub struct Kms {
 impl Kms {
     /// Creates a new instance of `Kms`
     pub async fn new(config: KmsConfig) -> Self {
-        let sdk_config = match config.authentication {
-            Authentication::ApiKey {
-                access_key_id,
-                secret_access_key,
-                session_token,
-                region,
-            } => {
-                info!("Using API keys to authenticate to KMS");
-                let credentials = Credentials::new(
-                    access_key_id,
-                    secret_access_key,
-                    session_token,
-                    None,
-                    "Plaid",
-                );
-
-                aws_config::defaults(BehaviorVersion::latest())
-                    .region(Region::new(region.clone()))
-                    .credentials_provider(credentials)
-                    .load()
-                    .await
-            }
-            Authentication::Iam {} => {
-                info!("Using IAM role assigned to environment for KMS authentication");
-                aws_config::load_defaults(BehaviorVersion::latest()).await
-            }
-        };
-
+        let sdk_config = get_aws_sdk_config(config.authentication).await;
         let client = aws_sdk_kms::Client::new(&sdk_config);
 
         Self {
@@ -219,14 +178,14 @@ impl Kms {
     pub async fn sign_arbitrary_message(
         &self,
         params: &str,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         // Parse the information needed to make the request
         let request: SignRequestRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Fetch rules that are allowd to use this key
-        let allowed_rules = self.fetch_key_configuration(module, &request.key_id)?;
+        let allowed_rules = self.fetch_key_configuration(module.to_string(), &request.key_id)?;
 
         // Verify that caller is allowed to use this key
         if !allowed_rules.contains(&module.to_string()) {
@@ -255,7 +214,11 @@ impl Kms {
 
     /// Returns the public key of an asymmetric KMS key. Unlike the private key of a asymmetric KMS key,
     /// which never leaves KMS unencrypted, callers with `kms:GetPublicKey` permission can download the public key of an asymmetric KMS key.
-    pub async fn get_public_key(&self, params: &str, module: &str) -> Result<String, ApiError> {
+    pub async fn get_public_key(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         // Parse the information needed to make the request
         let request: HashMap<String, String> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
@@ -266,7 +229,7 @@ impl Kms {
             .to_string();
 
         // Fetch rules that are allowd to use this key
-        let allowed_rules = self.fetch_key_configuration(module, &key_id)?;
+        let allowed_rules = self.fetch_key_configuration(module.clone(), &key_id)?;
 
         // Verify that caller is allowed to use this key
         if !allowed_rules.contains(&module.to_string()) {
@@ -287,7 +250,11 @@ impl Kms {
         serde_json::to_string(&output).map_err(|_| ApiError::BadRequest)
     }
 
-    fn fetch_key_configuration(&self, module: &str, key_id: &str) -> Result<Vec<String>, ApiError> {
+    fn fetch_key_configuration<T: Display>(
+        &self,
+        module: T,
+        key_id: &str,
+    ) -> Result<Vec<String>, ApiError> {
         match self.key_configuration.get(key_id) {
             Some(config) => Ok(config.to_vec()),
             None => {

@@ -4,8 +4,7 @@ use crate::apis::ApiError;
 
 use super::{GitHubError, Github};
 
-// new_regex_validator!("REPOSITORY_NAME", "^[\w\-\.]+$");
-
+/// Macro that compiles a regex validator and inserts it into a list of available validators.
 macro_rules! define_regex_validator {
     ($validators:expr,$validator:tt,$regex: tt) => {
         $validators.insert(
@@ -16,6 +15,7 @@ macro_rules! define_regex_validator {
     };
 }
 
+/// Macro that creates a function which uses a given validator to validate an input.
 macro_rules! create_regex_validator_func {
     ($validator:ident) => {
         paste::item! {
@@ -37,6 +37,7 @@ macro_rules! create_regex_validator_func {
     }
 }
 
+/// Initialize all available validators.
 pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     let mut validators = HashMap::new();
 
@@ -71,6 +72,8 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     );
     define_regex_validator!(validators, "secret_name", r"^[A-Z][A-Z0-9_]*$");
     define_regex_validator!(validators, "filename", r"^[a-zA-Z0-9\.]{1,32}$");
+    define_regex_validator!(validators, "extension", r"^[a-zA-Z0-9]{1,5}$");
+    define_regex_validator!(validators, "path", r"^[a-zA-Z0-9\./]{1,64}$");
 
     define_regex_validator!(validators, "event_type", r"^[\w\-_]+$");
 
@@ -90,5 +93,7 @@ create_regex_validator_func!(branch_name);
 create_regex_validator_func!(environment_name);
 create_regex_validator_func!(secret_name);
 create_regex_validator_func!(filename);
+create_regex_validator_func!(extension);
+create_regex_validator_func!(path);
 create_regex_validator_func!(event_type);
 create_regex_validator_func!(contains_parent_directory_component);

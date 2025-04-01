@@ -1,6 +1,7 @@
 mod actions;
 mod code;
 mod copilot;
+mod deploy_keys;
 mod environments;
 mod graphql;
 mod members;
@@ -16,7 +17,9 @@ use octocrab::Octocrab;
 
 use serde::{Deserialize, Serialize};
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
+
+use crate::loader::PlaidModule;
 
 use super::ApiError;
 
@@ -52,12 +55,17 @@ pub struct GithubConfig {
     graphql_queries: HashMap<String, String>,
 }
 
+/// Represents the configured GitHub API
 pub struct Github {
+    /// Configuration for Plaid's GitHub API
     config: GithubConfig,
+    /// Client to make requests with
     client: Octocrab,
+    /// Validators used to check parameters passed by modules
     validators: HashMap<&'static str, regex::Regex>,
 }
 
+/// All the errors that can be encountered while executing GitHub calls
 #[derive(Debug)]
 pub enum GitHubError {
     GraphQLUnserializable,
@@ -92,7 +100,7 @@ impl Github {
     async fn make_generic_get_request(
         &self,
         uri: String,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a get request to {uri} on behalf of {module}");
 
@@ -118,7 +126,7 @@ impl Github {
         &self,
         uri: String,
         body: T,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a post request to {uri} on behalf of {module}");
 
@@ -144,7 +152,7 @@ impl Github {
         &self,
         uri: String,
         body: Option<&T>,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a put request to {uri} on behalf of {module}");
 
@@ -170,7 +178,7 @@ impl Github {
         &self,
         uri: String,
         body: Option<&T>,
-        module: &str,
+        module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a delete request to {uri} on behalf of {module}");
 

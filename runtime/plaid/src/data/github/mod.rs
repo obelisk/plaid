@@ -6,10 +6,11 @@ use octocrab::{self, Octocrab};
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use serde::Deserialize;
 use serde_json::Value;
-use std::cmp::{Ordering, Reverse};
-use std::collections::BinaryHeap;
+use std::cmp::Ordering;
 use std::num::NonZeroUsize;
-use std::time::{SystemTime, UNIX_EPOCH};
+use time::OffsetDateTime;
+
+use super::{DataGenerator, DataGeneratorLog};
 
 /// Represents the event types GitHub will include in the response
 /// to the audit log request
@@ -21,13 +22,6 @@ pub enum LogType {
     /// Returns both web and Git events.
     All,
 }
-
-/// If a log at the top of the heap is this much older than a log that just came in
-/// we will assume we will not see an earlier log and will ship it.
-///
-/// GitHub seems to find canonicalization after 20 seconds (at least on web)
-/// 1000 = 1 second
-const CANONICALIZATION_TIME: u64 = 20_000;
 
 impl std::fmt::Display for LogType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -75,6 +69,13 @@ pub struct GithubConfig {
     /// Denotes if logs produced by this generator are allowed to initiate log backs
     #[serde(default)]
     logbacks_allowed: LogbacksAllowed,
+    /// Canonicalization time, i.e., after how many seconds we can consider logs as "stable"
+    #[serde(default = "default_canon_time")]
+    canon_time: u64,
+    /// Number of milliseconds to wait in between calls to the GH API.
+    /// If no value is provided here, we will use a default value (1 second).
+    #[serde(default = "default_sleep_milliseconds")]
+    sleep_duration: u64,
 }
 
 impl GithubConfig {
@@ -85,8 +86,21 @@ impl GithubConfig {
             org,
             log_type,
             logbacks_allowed: LogbacksAllowed::default(),
+            canon_time: 20,
+            sleep_duration: 1000,
         }
     }
+}
+
+/// This function provides the default sleep duration in milliseconds.
+/// It is used as the default value for deserialization of the `sleep_duration` field,
+/// of `GithubConfig` in the event that no value is provided.
+fn default_sleep_milliseconds() -> u64 {
+    1000
+}
+
+fn default_canon_time() -> u64 {
+    20
 }
 
 /// Custom parser for log type
@@ -112,12 +126,16 @@ pub struct Github {
     client: Octocrab,
     /// The configuration of the generator
     config: GithubConfig,
-    /// Contains GitHub logs that are yet to be cannonicalized
-    canonicalization_contents: LruCache<String, u64>,
-    /// Logs awaiting to be sent to the execution system.
-    canonicalization: BinaryHeap<Reverse<GithubAuditLog>>,
+    /// Timestamp of the last seen log we have processed
+    last_seen: OffsetDateTime,
     /// The logger used to send logs to the execution system for processing
     logger: Sender<Message>,
+    /// An LRU where we store the UUIDs of logs that we have already seen and sent into the logging system.
+    /// This, together with some overlapping queries to the GH API, helps us ensure that all logs are processed
+    /// exactly once.
+    /// This LRU has a limited capacity: when this is reached, the least-recently-used item is removed to make space for a new insertion.
+    /// Note: we only use the "key" part to keep track of the UUIDs we have seen. The "value" part is not used and always set to 0u32.
+    seen_logs_uuid: LruCache<String, u32>,
 }
 
 impl Github {
@@ -127,53 +145,76 @@ impl Github {
         Self {
             config,
             client,
-            canonicalization_contents: LruCache::new(NonZeroUsize::new(512).unwrap()),
-            canonicalization: BinaryHeap::new(),
+            last_seen: OffsetDateTime::now_utc(),
+            seen_logs_uuid: LruCache::new(NonZeroUsize::new(4096).unwrap()),
             logger,
         }
     }
+}
 
-    /// Gets the audit log for an organization.
-    ///
-    /// The audit log allows organization admins to quickly review the actions performed by members of the organization.
-    /// It includes details such as who performed the action, what the action was, and when it was performed.
-    pub async fn fetch_audit_logs(&mut self) -> Result<(), String> {
-        // Get the most recent 100 logs
+impl DataGenerator for &mut Github {
+    // For the documentation on these methods, see the trait.
+
+    async fn fetch_logs(
+        &self,
+        since: time::OffsetDateTime,
+        until: time::OffsetDateTime,
+    ) -> Result<Vec<super::DataGeneratorLog>, ()> {
+        let since = match since.format(&time::format_description::well_known::Rfc3339) {
+            Ok(since) => since,
+            Err(e) => {
+                error!("Failed to parse 'since' datetime. Error: {e}");
+                return Err(());
+            }
+        };
+        let until = match until.format(&time::format_description::well_known::Rfc3339) {
+            Ok(until) => until,
+            Err(e) => {
+                error!("Failed to parse 'until' datetime. Error: {e}");
+                return Err(());
+            }
+        };
+
         let address = format!(
-            "https://api.github.com/orgs/{}/audit-log?include={}&per_page=100",
+            "https://api.github.com/orgs/{}/audit-log?include={}&per_page=100&order=asc&phrase=created:{since}..{until}",
             self.config.org, self.config.log_type
         );
 
-        let response = self
-            .client
-            ._get(&address)
-            .await
-            .map_err(|e| format!("Could not get logs from GitHub: {}", e))?;
+        let response = self.client._get(&address).await.map_err(|e| {
+            let err_str = format!("Could not get logs from GitHub: {}", e);
+            error!("{}", err_str);
+        })?;
 
         if !response.status().is_success() {
-            return Err(format!(
+            let err_str = format!(
                 "Call to get GitHub logs failed with code: {}",
                 response.status()
-            ));
+            );
+            error!("{}", err_str);
+            return Err(());
         }
 
-        let body = self
-            .client
-            .body_to_string(response)
-            .await
-            .map_err(|e| format!("Failed to read body of GitHub response. Error: {e}"))?;
+        let body = self.client.body_to_string(response).await.map_err(|e| {
+            let err_str = format!("Failed to read body of GitHub response. Error: {e}");
+            error!("{}", err_str);
+        })?;
 
-        let logs: Vec<Value> = serde_json::from_str(body.as_str())
-            .map_err(|e| format!("Could not parse data from Github: {}\n\n{}", e, body))?;
+        let logs: Vec<Value> = serde_json::from_str(body.as_str()).map_err(|e| {
+            let err_str = format!("Could not parse data from Github: {}\n\n{}", e, body);
+            error!("{}", err_str);
+        })?;
 
-        let mut new_logs = 0;
-        for log in logs {
-            // We parsed from JSON so serialization back should be safe
-            let log_str = serde_json::to_string(&log).unwrap();
-            if self.canonicalization_contents.contains(&log_str) {
-                continue;
-            }
+        // If there have been no new logs since we last polled, we can exit the loop early
+        // Exiting here will result in a 10 second wait between restarts
+        if logs.is_empty() {
+            debug!("No new GitHub logs since: {}", self.last_seen);
+            return Ok(vec![]);
+        }
 
+        // Loop over the logs we did get from GitHub, attempt to parse their timestamps, and return a vector of such logs
+        let mut output_logs: Vec<DataGeneratorLog> = Vec::with_capacity(logs.len());
+
+        for log in &logs {
             let timestamp = match log.get("@timestamp") {
                 Some(v) => {
                     let Some(v) = v.as_u64() else {
@@ -189,65 +230,73 @@ impl Github {
                 }
             };
 
-            let gh_audit_log = GithubAuditLog {
-                timestamp,
-                serialized_log: log_str.clone(),
+            // The timestamp from GitHub is in milliseconds
+            let log_timestamp =
+                match OffsetDateTime::from_unix_timestamp_nanos(timestamp as i128 * 1_000_000) {
+                    Ok(t) => t,
+                    Err(_) => {
+                        error!("Couldn't parse timestamp into datetime");
+                        continue;
+                    }
+                };
+
+            let uuid = match log.get("_document_id").and_then(|v| v.as_str()) {
+                Some(id) => id,
+                None => {
+                    error!("Got a GH log without ID");
+                    continue;
+                }
             };
 
-            self.canonicalization.push(std::cmp::Reverse(gh_audit_log));
-            self.canonicalization_contents.push(log_str, timestamp);
-            new_logs += 1;
+            // We parsed from JSON so serialization back should be safe
+            let log_bytes = serde_json::to_vec(&log).unwrap();
+
+            output_logs.push(DataGeneratorLog {
+                id: uuid.to_string(),
+                timestamp: log_timestamp,
+                payload: log_bytes,
+            });
         }
 
-        let heap_time = match self.canonicalization.peek() {
-            Some(x) => x.0.timestamp,
-            _ => 0,
-        };
+        Ok(output_logs)
+    }
 
-        info!("Received {new_logs} new logs which are waiting for canonicalization. Next time on heap is: {heap_time}");
-        // In theory, if we've added all logs above into the heap, we should go back and add more
-        // until we see logs we recognize up to the capacity of the LRU cache.
+    fn get_name(&self) -> String {
+        "GitHub".to_string()
+    }
 
-        // In practice, for this to be a concern we'd need to receive more than 100 logs in the calling period
-        // (about 10 seconds) which I have not seen happen
+    fn get_sleep_duration(&self) -> u64 {
+        self.config.sleep_duration
+    }
 
-        let start = SystemTime::now();
-        let current_time = start
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_millis() as u64;
+    fn get_canon_time(&self) -> u64 {
+        self.config.canon_time
+    }
 
-        while let Some(heap_top) = self.canonicalization.peek() {
-            let heap_top = &heap_top.0;
+    fn get_last_seen(&self) -> time::OffsetDateTime {
+        self.last_seen
+    }
 
-            // If GitHub servers are ahead of us in time, this will occur
-            if current_time < heap_top.timestamp {
-                info!("Most recent log is from the future. Waiting for canonicalization");
-                break;
-            }
+    fn set_last_seen(&mut self, v: time::OffsetDateTime) {
+        self.last_seen = v;
+    }
 
-            // If the difference between the heap top and the current time is greater
-            // than the time to wait for canonicalization, then we can send the log and
-            // take it off the heap.
-            if current_time - heap_top.timestamp > CANONICALIZATION_TIME {
-                let log = self.canonicalization.pop().unwrap();
-                if let Err(e) = self.logger.send(Message::new(
-                    format!("github"),
-                    log.0.serialized_log.into_bytes(),
-                    LogSource::Generator(Generator::Github),
-                    self.config.logbacks_allowed.clone(),
-                )) {
-                    error!("Failed to send GitHub log to executor. Error: {e}")
-                }
-            } else {
-                trace!("Top of heap is: {}", heap_top.timestamp);
-                break;
-            }
-        }
+    fn was_already_seen(&self, id: impl std::fmt::Display) -> bool {
+        self.seen_logs_uuid.contains(&id.to_string())
+    }
 
-        debug!("Heap Size: {}", self.canonicalization.len());
-        debug!("LRU Size: {}", self.canonicalization_contents.len());
-        debug!("Current Timestamp: {}", current_time);
-        Ok(())
+    fn mark_already_seen(&mut self, id: impl std::fmt::Display) {
+        self.seen_logs_uuid.put(id.to_string(), 0u32);
+    }
+
+    fn send_for_processing(&self, payload: Vec<u8>) {
+        self.logger
+            .send(Message::new(
+                format!("github"),
+                payload,
+                LogSource::Generator(Generator::Github),
+                self.config.logbacks_allowed.clone(),
+            ))
+            .unwrap();
     }
 }

@@ -22,6 +22,11 @@ pub enum PlaidFunctionError {
     InternalApiError,
     ParametersNotUtf8,
     InvalidPointer,
+    CacheDisabled,
+    CouldNotGetAdequateMemory,
+    FailedToWriteGuestMemory,
+    StorageLimitReached,
+    TestMode,
     Unknown,
 }
 
@@ -34,7 +39,12 @@ impl core::fmt::Display for PlaidFunctionError {
             PlaidFunctionError::InternalApiError => write!(f, "An opaque error occurred within Plaid. Talk to the Plaid management team."),
             PlaidFunctionError::ParametersNotUtf8 => write!(f, "Data sent to the Plaid subsystem was not UTF8 so could not be used."),
             PlaidFunctionError::InvalidPointer => write!(f, "We passed a pointer to Plaid that it couldn't use for some reason"),
-            PlaidFunctionError::Unknown => write!(f, "An unknown error occurred. This can happen if the Plaid runtime is never than the STL this rule was compiled against."),
+            PlaidFunctionError::CacheDisabled => write!(f, "The cache is disabled"),
+            PlaidFunctionError::CouldNotGetAdequateMemory => write!(f, "Plaid could not get enough memory"),
+            PlaidFunctionError::FailedToWriteGuestMemory => write!(f, "Plaid could not write to guest memory"),
+            PlaidFunctionError::StorageLimitReached => write!(f, "The storage limit has been reached"),
+            PlaidFunctionError::TestMode => write!(f, "The function is not allowed in test mode"),
+            PlaidFunctionError::Unknown => write!(f, "An unknown error occurred. This can happen if the Plaid runtime is newer than the STL this rule was compiled against."),
 
         }
     }
@@ -49,6 +59,11 @@ impl From<i32> for PlaidFunctionError {
             -4 => Self::InternalApiError,
             -5 => Self::ParametersNotUtf8,
             -6 => Self::InvalidPointer,
+            -7 => Self::CacheDisabled,
+            -8 => Self::CouldNotGetAdequateMemory,
+            -9 => Self::FailedToWriteGuestMemory,
+            -10 => Self::StorageLimitReached,
+            -11 => Self::TestMode,
             _ => Self::Unknown,
         }
     }

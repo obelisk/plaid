@@ -3,6 +3,7 @@ use crate::executor::Env;
 
 use wasmer::{AsStoreRef, FunctionEnvMut, WasmPtr};
 
+/// Native WASM function that provides the data and source for a log.
 pub fn fetch_data_and_source(
     env: FunctionEnvMut<Env>,
     data_buffer: WasmPtr<u8>,
@@ -14,7 +15,7 @@ pub fn fetch_data_and_source(
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return e as i32;
@@ -37,7 +38,7 @@ pub fn fetch_data_and_source(
         Err(e) => {
             error!(
                 "{}: Could not serialize the source: {}. Error: {e}",
-                env.data().name,
+                env.data().module.name,
                 env.data().message.source,
             );
             return -4;
@@ -55,7 +56,7 @@ pub fn fetch_data_and_source(
     match safely_write_data_back(&memory_view, &rule_data, data_buffer, buffer_size) {
         Ok(x) => x,
         Err(e) => {
-            error!("{}: Error in fetch_data: {:?}", env.data().name, e);
+            error!("{}: Error in fetch_data: {:?}", env.data().module.name, e);
             e as i32
         }
     }
@@ -69,7 +70,7 @@ pub fn fetch_data(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_siz
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return e as i32;
@@ -81,7 +82,7 @@ pub fn fetch_data(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_siz
     match safely_write_data_back(&memory_view, data, data_buffer, buffer_size) {
         Ok(x) => x,
         Err(e) => {
-            error!("{}: Error in fetch_data: {:?}", env.data().name, e);
+            error!("{}: Error in fetch_data: {:?}", env.data().module.name, e);
             e as i32
         }
     }
@@ -95,7 +96,7 @@ pub fn fetch_source(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_s
         Err(e) => {
             error!(
                 "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
+                env.data().module.name,
                 e
             );
             return e as i32;
@@ -116,7 +117,7 @@ pub fn fetch_source(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_s
     } else {
         error!(
             "{}: Could not serialize the source: {}",
-            env.data().name,
+            env.data().module.name,
             env.data().message.source,
         );
         return -4;
@@ -126,63 +127,74 @@ pub fn fetch_source(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_s
     match safely_write_data_back(&memory_view, source.as_bytes(), data_buffer, buffer_size) {
         Ok(x) => x,
         Err(e) => {
-            error!("{}: Error in fetch_source: {:?}", env.data().name, e);
+            error!("{}: Error in fetch_source: {:?}", env.data().module.name, e);
             e as i32
         }
     }
 }
 
-/// Wrap the fetch_accessory_data_by_name call in a native WASM function.
-pub fn fetch_accessory_data_by_name(
-    env: FunctionEnvMut<Env>,
-    name_buf: WasmPtr<u8>,
-    name_len: u32,
-    data_buffer: WasmPtr<u8>,
-    buffer_size: u32,
-) -> i32 {
-    let store = env.as_store_ref();
-    let memory_view = match get_memory(&env, &store) {
-        Ok(memory_view) => memory_view,
-        Err(e) => {
-            error!(
-                "{}: Memory error in fetch_from_module: {:?}",
-                env.data().name,
-                e
-            );
-            return e as i32;
-        }
-    };
+macro_rules! generate_string_getter {
+    ($what:ident) => {
+        paste::item! {
+            #[doc = "Wrap the `" [<get_ $what>] "` call in a native WASM function."]
+            pub fn [<get_ $what>](env: FunctionEnvMut<Env>,
+                name_buf: WasmPtr<u8>,
+                name_len: u32,
+                data_buffer: WasmPtr<u8>,
+                buffer_size: u32) -> i32 {
+                let store = env.as_store_ref();
+                let memory_view = match get_memory(&env, &store) {
+                    Ok(memory_view) => memory_view,
+                    Err(e) => {
+                        error!(
+                            "{}: Memory error in get_{}: {:?}",
+                            env.data().module.name,
+                            stringify!($what),
+                            e
+                        );
+                        return e as i32;
+                    }
+                };
 
-    let accessory_data = &env.data().message.accessory_data;
+                let $what = &env.data().message.$what;
 
-    let name = match safely_get_string(&memory_view, name_buf, name_len) {
-        Ok(x) => x,
-        Err(e) => {
-            error!(
-                "{}: Error in fetch_accessory_data_by_name: {:?}",
-                env.data().name,
-                e
-            );
-            return e as i32;
-        }
-    };
+                let name = match safely_get_string(&memory_view, name_buf, name_len) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        error!(
+                            "{}: Error in get_{}: {:?}",
+                            env.data().module.name,
+                            stringify!($what),
+                            e
+                        );
+                        return e as i32;
+                    }
+                };
 
-    // Check if this accessory data field is present at all
-    if let Some(data) = accessory_data.get(&name) {
-        match safely_write_data_back(&memory_view, &data, data_buffer, buffer_size) {
-            Ok(x) => x,
-            Err(e) => {
-                error!(
-                    "{}: Error in fetch_accessory_data_by_name: {:?}",
-                    env.data().name,
-                    e
-                );
-                e as i32
+                // Check if this field is present at all
+                if let Some(data) = $what.get(&name) {
+                    match safely_write_data_back(&memory_view, &data, data_buffer, buffer_size) {
+                        Ok(x) => x,
+                        Err(e) => {
+                            error!(
+                                "{}: Error in get_{}: {:?}",
+                                env.data().module.name,
+                                stringify!($what),
+                                e
+                            );
+                            e as i32
+                        }
+                    }
+                } else {
+                    // If there is no field with that name, we return 0 similar to
+                    // fetching the from_module
+                    0
+                }
             }
         }
-    } else {
-        // If there is no field with that name, we return 0 similar to
-        // fetching the from_module
-        0
-    }
+    };
 }
+
+// Documentation for these methods is generated by the macro itself
+generate_string_getter!(headers);
+generate_string_getter!(query_params);
