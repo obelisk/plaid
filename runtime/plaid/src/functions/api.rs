@@ -320,6 +320,7 @@ impl_new_function_with_error_buffer!(github, search_code, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, list_seats_in_org_copilot, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, add_users_to_org_copilot, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, remove_users_from_org_copilot, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, comment_on_pull_request, DISALLOW_IN_TEST_MODE);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
@@ -586,6 +587,9 @@ pub fn to_api_function(
         }
         "github_check_org_membership_of_user" => {
             Function::new_typed_with_env(&mut store, &env, github_check_org_membership_of_user)
+        }
+        "github_comment_on_pull_request" => {
+            Function::new_typed_with_env(&mut store, &env, github_comment_on_pull_request)
         }
         "github_delete_deploy_key" => {
             Function::new_typed_with_env(&mut store, &env, github_delete_deploy_key)

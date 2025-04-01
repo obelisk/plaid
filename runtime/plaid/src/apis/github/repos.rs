@@ -145,9 +145,10 @@ impl Github {
         )?;
         let pull_request =
             self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
+        let page = self.validate_pint(request.get("page").ok_or(ApiError::BadRequest)?)?;
 
         info!("Fetching files for Pull Request Nr {pull_request} from [{organization}/{repository_name}] on behalf of {module}");
-        let address = format!("/repos/{organization}/{repository_name}/pulls/{pull_request}/files");
+        let address = format!("/repos/{organization}/{repository_name}/pulls/{pull_request}/files?page={page}");
 
         match self.make_generic_get_request(address, module).await {
             Ok((status, Ok(body))) => {
@@ -360,6 +361,47 @@ impl Github {
 
         match self
             .make_generic_put_request(address, Some(body), module)
+            .await
+        {
+            Ok((status, _)) => {
+                if status == 200 {
+                    Ok(0)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Comment on a Pull Request
+    /// See https://docs.github.com/en/rest/issues/comments?apiVersion=2022-11-28#create-an-issue-comment for more detail
+    pub async fn comment_on_pull_request(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let username = self.validate_username(request.get("usename").ok_or(ApiError::BadRequest)?)?;
+        let repository_name =
+            self.validate_repository_name(request.get("repository_name").ok_or(ApiError::BadRequest)?)?;
+        let pull_request = self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
+        let comment = request.get("comment").ok_or(ApiError::BadRequest)?;
+
+        info!("Commenting on Pull Request [{pull_request}] in repo [{repository_name}] on behalf of {module}");
+        let address = format!("/repos/{username}/{repository_name}/issues/{pull_request}/comments");
+
+        #[derive(Serialize)]
+        struct Body<'a> {
+            body: &'a str
+        }
+
+        match self
+            .make_generic_post_request(address, Body { body: comment }, module)
             .await
         {
             Ok((status, _)) => {

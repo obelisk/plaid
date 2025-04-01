@@ -768,6 +768,7 @@ pub fn list_files(
     organization: &str,
     repository_name: &str,
     pull_request: &str,
+    page: &str,
 ) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, list_files);
@@ -779,12 +780,14 @@ pub fn list_files(
         organization: &'a str,
         repository_name: &'a str,
         pull_request: &'a str,
+        page: &'a str,
     }
 
     let request = Request {
         organization,
         repository_name,
         pull_request,
+        page,
     };
 
     let request = serde_json::to_string(&request).unwrap();
@@ -1584,14 +1587,41 @@ pub fn check_org_membership_of_user(
         github_check_org_membership_of_user(request.as_bytes().as_ptr(), request.as_bytes().len())
     };
 
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    Ok(res != 0)
+}
+
+pub fn comment_on_pull_request(
+    username: impl Display,
+    repository_name: impl Display,
+    pull_request: impl Display,
+    comment: impl Display,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, comment_on_pull_request);
+    }
+
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("username", username.to_string());
+    params.insert("repostory_name", repository_name.to_string());
+    params.insert("pull_request", pull_request.to_string());
+    params.insert("comment", comment.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    let res = unsafe {
+        github_comment_on_pull_request(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+        )
+    };
+
     if res < 0 {
         return Err(res.into());
     }
 
-    match res {
-        0 => Ok(false),
-        _ => Ok(true),
-    }
+    Ok(())
 }
 
 /// Delete a deploy key with given ID from a given repository.
