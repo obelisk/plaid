@@ -74,6 +74,12 @@ rm plaidrules_key_ed25519*
 
 echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
+cargo build --release --no-default-features --features aws,sled,$1
+if [ $? -ne 0 ]; then
+  echo "Failed to build Plaid with $1 compiler"
+  # Exit with an error
+  exit 1
+fi
 RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features aws,sled,$1 -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
 cd ..
