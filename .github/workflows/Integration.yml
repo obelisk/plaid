@@ -77,7 +77,7 @@ jobs:
         rustup toolchain install nightly-2024-12-14  # pinning the nightly version should help with caching dependencies
         rustup default nightly-2024-12-14
         rustup target add wasm32-unknown-unknown
-        sudo apt install -y llvm libpolly
+        sudo apt install -y llvm libpolly-19-dev
 
     - uses: actions/checkout@v4
 
