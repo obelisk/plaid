@@ -67,9 +67,33 @@ jobs:
 
     - name: Run Integration Tests on Cranelift
       run: ./testing/integration.sh cranelift
+
+  ubuntu-integration-test-llvm:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Setup Rust
+      run: |
+        rustup toolchain install nightly-2024-12-14  # pinning the nightly version should help with caching dependencies
+        rustup default nightly-2024-12-14
+        rustup target add wasm32-unknown-unknown
+        sudo apt install -y llvm  
+
+    - uses: actions/checkout@v4
+
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          runtime/target/
+          modules/target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Run Integration Tests on LLVM
-      run: sudo apt install -y llvm && ./testing/integration.sh llvm
+      run: ./testing/integration.sh llvm
 
 
   ubuntu-docker-build-amd64-test:
