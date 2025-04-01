@@ -8,6 +8,7 @@ use async_trait::async_trait;
 #[cfg(feature = "aws")]
 mod dynamodb;
 
+#[cfg(feature = "sled")]
 mod sled;
 
 use futures_util::future::join_all;
@@ -40,6 +41,7 @@ pub struct SharedDb {
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub enum DatabaseConfig {
+    #[cfg(feature = "sled")]
     Sled(sled::Config),
     #[cfg(feature = "aws")]
     DynamoDb(dynamodb::Config),
@@ -129,6 +131,7 @@ impl Storage {
     pub async fn new(config: Config) -> Result<Self, StorageError> {
         // Try building a database from the values in the config
         let database: Box<dyn StorageProvider + Send + Sync> = match config.db {
+            #[cfg(feature = "sled")]
             Some(DatabaseConfig::Sled(sled)) => Box::new(sled::Sled::new(sled)?),
             #[cfg(feature = "aws")]
             Some(DatabaseConfig::DynamoDb(dynamodb)) => {

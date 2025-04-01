@@ -6,8 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["aws"]
-aws = ["aws-sdk-kms", "aws-sdk-dynamodb"]
+default = ["aws", "sled"]
+aws = ["dep:aws-sdk-kms", "dep:aws-sdk-dynamodb"]
 
 [dependencies]
 alkali = "0.3.0"
@@ -48,7 +48,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 reqwest_cookie_store = "0.8.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
-sled = "0.34.7"
+sled = { version = "0.34.7", optional = true }
 tar = "0.4.41"
 time = "0.3"
 tokio = { version = "1", features = ["full"] }
@@ -61,8 +61,8 @@ totp-rs = "5.6.0"
 url = "2.5.2"
 urlencoding = "2.1.3"
 warp = { version = "0.3", features = ["tls"] }
-wasmer = { version = "4", default-features = false, features = ["cranelift"] }
-wasmer-middlewares = "4"
+wasmer = { version = "5", default-features = false, features = ["cranelift"] }
+wasmer-middlewares = "5"
 
 [[example]]
 name = "github-tailer"
