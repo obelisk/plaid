@@ -397,6 +397,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_regex"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "test_shared_db_rule_1"
 version = "0.1.0"
 dependencies = [
