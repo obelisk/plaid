@@ -18,9 +18,13 @@ use utils::{
     cost_function, get_module_computation_limit, get_module_page_count,
     get_module_persistent_storage_limit, read_and_configure_secrets, read_and_parse_modules,
 };
-use wasmer::{
-    sys::BaseTunables, CompilerConfig, Cranelift, Engine, Module, NativeEngineExt, Pages, Target,
-};
+#[cfg(feature = "llvm")]
+use wasmer::LLVM;
+
+#[cfg(feature = "cranelift")]
+use wasmer::Cranelift;
+
+use wasmer::{sys::BaseTunables, CompilerConfig, Engine, Module, NativeEngineExt, Pages, Target};
 use wasmer_middlewares::Metering;
 
 use crate::storage::Storage;
@@ -303,7 +307,10 @@ impl PlaidModule {
             get_module_persistent_storage_limit(storage_amount, &filename, log_type);
 
         let metering = Arc::new(Metering::new(computation_limit, cost_function));
+        #[cfg(feature = "cranelift")]
         let mut compiler = Cranelift::default();
+        #[cfg(feature = "llvm")]
+        let mut compiler = LLVM::default();
         compiler.push_middleware(metering);
 
         // Configure module tunables - this includes our computation limit and page count

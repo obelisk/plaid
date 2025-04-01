@@ -65,8 +65,11 @@ jobs:
           modules/target/
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Run Integration Tests
-      run: ./testing/integration.sh
+    - name: Run Integration Tests on Cranelift
+      run: ./testing/integration.sh cranelift
+    
+    - name: Run Integration Tests on LLVM
+      run: ./testing/integration.sh llvm
 
 
   ubuntu-docker-build-amd64-test:

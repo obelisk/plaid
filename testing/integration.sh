@@ -3,6 +3,13 @@
 # Build all of the Plaid workspace
 PLATFORM=$(uname -a)
 
+# Compiler should be passed in as the first argument
+if [ -z "$1" ]; then
+  echo "No compiler specified. Please specify a compiler as the first argument."
+  exit 1
+fi
+echo "Testing runtime with compiler: $1"
+
 # On macOS, we need to install a brew provided version of LLVM
 # so that we can compile WASM binaries.
 if uname | grep -q Darwin; then
@@ -10,14 +17,18 @@ if uname | grep -q Darwin; then
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
 
-echo "Building Plaid Runtime"
 cd runtime
-cargo build --all --release
+cargo build --all --release --no-default-features --features aws,sled,$1
+if [ $? -ne 0 ]; then
+  echo "Failed to build Plaid with support for AWS and Sled"
+  # Exit with an error
+  exit 1
+fi
 cd ..
 
 export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
 
-echo "Building Plaid All Plaid Modules"
+echo "Building All Plaid Modules"
 cd modules
 cargo build --all --release
 cd ..
@@ -63,7 +74,7 @@ rm plaidrules_key_ed25519*
 
 echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
-RUST_LOG=plaid=debug cargo run --bin=plaid --release -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
+RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features aws,sled,$1 -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
 cd ..
 sleep 20
