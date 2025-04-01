@@ -83,7 +83,7 @@ fi
 RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features aws,sled,$1 -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
 cd ..
-sleep 20
+sleep 40
 
 # Set the variables the test harnesses will need
 export PLAID_LOCATION="localhost:4554"
