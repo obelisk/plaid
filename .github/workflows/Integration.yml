@@ -1,4 +1,4 @@
-name: Checks
+name: Integration Tests
 
 on:
   push:
@@ -68,7 +68,7 @@ jobs:
     - name: Run Integration Tests on Cranelift
       run: ./testing/integration.sh cranelift
 
-  ubuntu-integration-test-llvm:
+  ubuntu-llvm:
     runs-on: ubuntu-latest
 
     steps:
@@ -94,45 +94,3 @@ jobs:
     
     - name: Run Integration Tests on LLVM
       run: ./testing/integration.sh llvm
-
-
-  ubuntu-docker-build-amd64-test:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          runtime/target/
-        key: ${{ runner.os }}-cargo-amd64-${{ hashFiles('**/Cargo.lock') }}
-    
-    - name: Run Docker Build Test (amd64)
-      run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.amd64 .
-
-
-  ubuntu-docker-build-aarch64-test:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          runtime/target/
-        key: ${{ runner.os }}-cargo-aarch64-${{ hashFiles('**/Cargo.lock') }}
-    
-    - name: Run Docker Build Test (aarch64)
-      run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.aarch64 .
-
-  
