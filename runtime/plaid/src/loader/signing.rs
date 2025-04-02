@@ -33,7 +33,7 @@ pub fn check_module_signatures(
 
     // If the number of available signature files does not exceed the required count,
     // return an error immediately to avoid unnecessary processing.
-    if module_signatures.len() <= signing.signatures_required {
+    if module_signatures.len() < signing.signatures_required {
         return Err(Errors::NotEnoughValidSignatures(
             0,
             signing.signatures_required,
