@@ -10,37 +10,6 @@ if  uname | grep -q Darwin; then
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
 
-echo "Building Plaid Runtime With Support for AWS"
-cd runtime
-cargo build --all --release --no-default-features --features aws
-if [ $? -ne 0 ]; then
-  echo "Failed to build Plaid with support for AWS"
-  # Exit with an error
-  exit 1
-fi
-cd ..
-
-echo "Building Plaid Runtime With Support for Sled"
-cd runtime
-cargo build --all --release --no-default-features --features sled
-if [ $? -ne 0 ]; then
-  echo "Failed to build Plaid with support for Sled"
-  # Exit with an error
-  exit 1
-fi
-cd ..
-
-echo "Building Plaid Runtime With Support for AWS and Sled"
-cd runtime
-cargo build --all --release --no-default-features --features aws,sled
-if [ $? -ne 0 ]; then
-  echo "Failed to build Plaid with support for AWS and Sled"
-  # Exit with an error
-  exit 1
-fi
-cd ..
-
-# This is the same build with default features, but will take no time since we have just done it
 echo "Building Plaid Runtime"
 cd runtime
 cargo build --all --release
