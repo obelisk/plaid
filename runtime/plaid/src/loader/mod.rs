@@ -130,14 +130,14 @@ pub struct Configuration {
     /// even if they have side effects.
     #[serde(default)]
     pub test_mode_exemptions: Vec<String>,
-    /// Configuration for rule signing. If defined, we require that ALL
-    /// rules are signed by an authorized signer
-    pub rule_signing: Option<RuleSigningConfiguration>,
+    /// Configuration for module signing. If defined, we require that ALL
+    /// module are signed by an authorized signer
+    pub module_signing: Option<ModuleSigningConfiguration>,
 }
 
-/// This structure defines the parameters required to validate signatures for rules.
+/// This structure defines the parameters required to validate signatures for modules.
 #[derive(Deserialize)]
-pub struct RuleSigningConfiguration {
+pub struct ModuleSigningConfiguration {
     /// A list of authorized signer key fingerprints.
     ///
     /// This list should contain the fingerprints of the keys belonging to the authorized signers,
@@ -375,7 +375,7 @@ pub async fn load(
         //
         // If ANY rule does not have a valid signature, we panic instead of continuing because this should be
         // considered a blocking issue and we do not want to continue booting the system
-        if let Some(signing) = &config.rule_signing {
+        if let Some(signing) = &config.module_signing {
             let signature =
                 fs::read_to_string(format!("{}/{filename}.sig", signing.signatures_dir))
                     .expect(&format!("Expected signature to be present for {filename}."));

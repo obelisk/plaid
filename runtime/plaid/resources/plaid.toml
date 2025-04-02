@@ -55,7 +55,7 @@ test_mode_exemptions = [
 
 
 # Uncomment this to require that all rules be signed by an authorized signer
-# [loading.rule_signing]
+# [loading.module_signing]
 # authorized_signers = [""]
 # signature_namespace = "SomeNamespace"
 
