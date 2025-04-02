@@ -87,3 +87,4 @@ path = "src/bin/secrets_manager.rs"
 [[bin]]
 name = "sled_ddb_migrator"
 path = "src/bin/sled_ddb_migrator.rs"
+required-features = ["sled"]

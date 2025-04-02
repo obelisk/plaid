@@ -2,8 +2,8 @@ use aws_config::meta::region::RegionProviderChain;
 use aws_config::{BehaviorVersion, Region};
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_dynamodb::{Client, Error};
+use clap::{Arg, Command};
 use sled::{Db, Tree};
-use std::env;
 
 /// Migrate a sled tree by pushing all its entries to AWS DynamoDB.
 ///
@@ -38,14 +38,27 @@ async fn migrate_tree(
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 3 {
-        eprintln!("Usage: {} <sled_db_path> <dynamo_table_name>", args[0]);
-        std::process::exit(1);
-    }
+    let matches = Command::new("sled_dynamodb_migrator")
+        .version("0.21.0")
+        .about("Tool to migrate data from sled to DynamoDB")
+        .arg(
+            Arg::new("sled_db_path")
+                .long("sled-path")
+                .value_name("PATH")
+                .help("Path to the sled database")
+                .required(true),
+        )
+        .arg(
+            Arg::new("dynamo_table_name")
+                .long("dynamodb-table")
+                .value_name("TABLE")
+                .help("DynamoDB table name")
+                .required(true),
+        )
+        .get_matches();
 
-    let sled_path = &args[1];
-    let table_name = &args[2];
+    let sled_path = matches.get_one::<String>("sled_db_path").unwrap();
+    let table_name = matches.get_one::<String>("dynamo_table_name").unwrap();
 
     let db: Db = sled::open(sled_path).expect("Failed to open sled database");
 
@@ -69,7 +82,6 @@ async fn main() -> Result<(), Error> {
     // Migrate all named trees
     for tree_name in db.tree_names() {
         if tree_name != b"" {
-            // let name_str = bytes_to_string(&tree_name.clone().into());
             let name_str =
                 String::from_utf8(tree_name.to_vec()).expect("Failed to parse tree name");
             if name_str == "__sled__default" {
