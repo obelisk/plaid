@@ -6,6 +6,8 @@ use errors::Errors;
 use limits::LimitingTunables;
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use sshcerts::ssh::{SshSignature, VerifiedSshSignature};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs::{self};
@@ -128,6 +130,30 @@ pub struct Configuration {
     /// even if they have side effects.
     #[serde(default)]
     pub test_mode_exemptions: Vec<String>,
+    /// Configuration for rule signing. If defined, we require that ALL
+    /// rules are signed by an authorized signer
+    pub rule_signing: Option<RuleSigningConfiguration>,
+}
+
+/// This structure defines the parameters required to validate signatures for rules.
+#[derive(Deserialize)]
+pub struct RuleSigningConfiguration {
+    /// A list of authorized signer key fingerprints.
+    ///
+    /// This list should contain the fingerprints of the keys belonging to the authorized signers,
+    /// typically the administrators responsible for managing the Plaid instance.
+    pub authorized_signers: Vec<String>,
+    /// Where to load signatures from. Defaults to `../module_signatures` if no
+    /// value is provided
+    #[serde(default = "default_sig_dir")]
+    pub signatures_dir: String,
+    /// The namespace of the signature
+    pub signature_namespace: String,
+}
+
+/// The default directory to look for module signatures in if none is provided
+fn default_sig_dir() -> String {
+    "../module_signatures".to_string()
 }
 
 /// The persistent response allowed for the module. This is used for
@@ -343,6 +369,48 @@ pub async fn load(
                 continue;
             }
         };
+
+        // Fetch and verify the corresponding signature over this module if we require
+        // rule signing
+        //
+        // If ANY rule does not have a valid signature, we panic instead of continuing because this should be
+        // considered a blocking issue and we do not want to continue booting the system
+        if let Some(signing) = &config.rule_signing {
+            let signature =
+                fs::read_to_string(format!("{}/{filename}.sig", signing.signatures_dir))
+                    .expect(&format!("Expected signature to be present for {filename}."));
+
+            // Validate signature
+            let ssh_signature = SshSignature::from_armored_string(&signature)
+                .expect(&format!("Invalid signature provided for {filename}"));
+
+            let pubkey = ssh_signature.pubkey.clone();
+
+            // Validate that signature was produced by an authorized signer
+            if !signing
+                .authorized_signers
+                .iter()
+                .any(|signer| *signer == pubkey.fingerprint().to_string())
+            {
+                panic!(
+                    "{filename} was signed by an unexpected signer: {}",
+                    pubkey.fingerprint()
+                )
+            }
+
+            // Hash file and validate signature contents
+            let mut hasher = Sha256::new();
+            hasher.update(&module_bytes);
+            let module_hash = hex::encode(hasher.finalize());
+
+            VerifiedSshSignature::from_ssh_signature(
+                module_hash.as_bytes(),
+                ssh_signature,
+                &signing.signature_namespace,
+                Some(pubkey),
+            )
+            .expect(&format!("Failed to verify signature for {filename}"));
+        }
 
         // See if a type is defined in the configuration file, if not then we will grab the first part
         // of the filename up to the first underscore.

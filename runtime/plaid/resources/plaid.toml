@@ -53,6 +53,12 @@ test_mode_exemptions = [
     "test_shared_db_rule_2.wasm",
 ]
 
+
+# Uncomment this to require that all rules be signed by an authorized signer
+# [loading.rule_signing]
+# authorized_signers = [""]
+# signature_namespace = "SomeNamespace"
+
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
 "test_sshcerts_usage.wasm" = 1024
