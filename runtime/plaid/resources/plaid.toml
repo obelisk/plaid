@@ -56,7 +56,9 @@ test_mode_exemptions = [
 
 # Uncomment this to require that all rules be signed by an authorized signer
 # [loading.module_signing]
-# authorized_signers = [""]
+# authorized_signers = [
+#     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHkbe7gwx7s0dlApEEzpUyOAPrzPLy4czEZw/sh8m8rd me@home",
+# ]
 # signature_namespace = "SomeNamespace"
 # signatures_required = 1
 

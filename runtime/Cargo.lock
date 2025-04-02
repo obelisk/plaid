@@ -3177,7 +3177,6 @@ dependencies = [
  "ring 0.17.14",
  "serde",
  "serde_json",
- "sha2",
  "sled",
  "sshcerts",
  "tar",

@@ -3,12 +3,14 @@ mod limits;
 mod utils;
 
 use errors::Errors;
+use hex::ToHex;
 use limits::LimitingTunables;
 use lru::LruCache;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use ring::digest::{digest, SHA256};
+use serde::{de, Deserialize, Serialize};
 use sshcerts::ssh::{SshSignature, VerifiedSshSignature};
-use std::collections::HashMap;
+use sshcerts::PublicKey;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::fs::{self, DirEntry};
 use std::num::NonZeroUsize;
@@ -131,7 +133,7 @@ pub struct Configuration {
     #[serde(default)]
     pub test_mode_exemptions: Vec<String>,
     /// Configuration for module signing. If defined, we require that ALL
-    /// module are signed by an authorized signer
+    /// module are signed by a set of authorized signers
     pub module_signing: Option<ModuleSigningConfiguration>,
 }
 
@@ -142,7 +144,8 @@ pub struct ModuleSigningConfiguration {
     ///
     /// This list should contain the fingerprints of the keys belonging to the authorized signers,
     /// typically the administrators responsible for managing the Plaid instance.
-    pub authorized_signers: Vec<String>,
+    #[serde(deserialize_with = "pubkey_deserializer")]
+    pub authorized_signers: Vec<PublicKey>,
     /// Where to load signatures from. Defaults to `../module_signatures` if no
     /// value is provided
     #[serde(default = "default_sig_dir")]
@@ -150,7 +153,26 @@ pub struct ModuleSigningConfiguration {
     /// The namespace of the signature
     pub signature_namespace: String,
     /// The number of valid signatures required on each module
-    pub signatures_required: u8,
+    pub signatures_required: usize,
+}
+
+/// Deserializer for a public key
+fn pubkey_deserializer<'de, D>(deserializer: D) -> Result<Vec<PublicKey>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let raw = Vec::<String>::deserialize(deserializer)?;
+    Ok(raw
+        .iter()
+        .filter_map(|key| {
+            PublicKey::from_string(key)
+                .map_err(|e| {
+                    error!("Invalid public key provided: {key} - skipping. Error: {e}");
+                    e
+                })
+                .ok()
+        })
+        .collect())
 }
 
 /// The default directory to look for module signatures in if none is provided
@@ -386,12 +408,11 @@ pub async fn load(
                 ));
 
             // Hash file
-            let mut hasher = Sha256::new();
-            hasher.update(&module_bytes);
-            let module_hash = hex::encode(hasher.finalize());
+            let module_hash: String = digest(&SHA256, &module_bytes).encode_hex();
             let module_hash = module_hash.as_bytes();
 
-            let mut valid_signatures = 0;
+            // We use a HashSet here to ensure that we don't allow the same key to produce multiple valid signatures
+            let mut valid_signatures = HashSet::new();
             for signature in module_signatures {
                 let entry = match signature {
                     Ok(path) => path,
@@ -401,18 +422,25 @@ pub async fn load(
                     }
                 };
 
-                if verify_signature_file(entry, module_hash, signing, &filename).is_ok() {
-                    valid_signatures += 1;
+                if let Ok(fingerprint) =
+                    verify_signature_file(entry, module_hash, signing, &filename)
+                {
+                    valid_signatures.insert(fingerprint);
                 }
 
                 // Break early once the threshold is met.
-                if valid_signatures >= signing.signatures_required {
+                if valid_signatures.len() >= signing.signatures_required {
                     break;
                 }
             }
 
-            if valid_signatures < signing.signatures_required {
-                panic!("Not enough valid signatures provided for {filename}. Got {valid_signatures} but needed {}", signing.signatures_required)
+            if valid_signatures.len() < signing.signatures_required {
+                error!(
+                    "Not enough valid signatures provided for {filename}. Got {} but needed {}",
+                    valid_signatures.len(),
+                    signing.signatures_required
+                );
+                continue;
             }
         }
 
@@ -506,7 +534,7 @@ fn verify_signature_file(
     module_hash: &[u8],
     signing: &ModuleSigningConfiguration,
     module_name: &str,
-) -> Result<(), Errors> {
+) -> Result<String, Errors> {
     // Convert file name to string for logging and filtering.
     let sig_filename = signature_path.file_name().to_string_lossy().to_string();
     if !sig_filename.ends_with(".sig") {
@@ -530,18 +558,14 @@ fn verify_signature_file(
         Ok(sig) => sig,
         Err(e) => {
             error!("Invalid signature provided for {}", module_name);
-            return Err(Errors::SshCertsError(e));
+            return Err(Errors::SigningError(e));
         }
     };
 
     let pubkey = ssh_signature.pubkey.clone();
 
     // Check if the signature was made by an authorized signer.
-    if !signing
-        .authorized_signers
-        .iter()
-        .any(|s| *s == pubkey.fingerprint().to_string())
-    {
+    if !signing.authorized_signers.iter().any(|s| *s == pubkey) {
         error!(
             "{} was signed by an unexpected signer: {}",
             module_name,
@@ -551,15 +575,15 @@ fn verify_signature_file(
     }
 
     // Verify the signature using the module hash.
-    VerifiedSshSignature::from_ssh_signature(
+    let verified = VerifiedSshSignature::from_ssh_signature(
         module_hash,
         ssh_signature,
         &signing.signature_namespace,
         Some(pubkey),
     )
-    .map_err(|e| Errors::SshCertsError(e))?;
+    .map_err(|e| Errors::SigningError(e))?;
 
-    Ok(())
+    Ok(verified.signature.pubkey.fingerprint().to_string())
 }
 
 /// Read the loading configuration and some data about the module, and return the optional

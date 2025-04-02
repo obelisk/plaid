@@ -1,9 +1,10 @@
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum Errors {
     BadFilename,
     ModuleParseFailure,
     ModuleCompilationFailure,
-    SshCertsError(sshcerts::error::Error),
+    SigningError(sshcerts::error::Error),
     UnauthorizedSigner,
     MissingSignatureFile,
 }
