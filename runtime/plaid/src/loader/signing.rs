@@ -4,6 +4,7 @@ use super::ModuleSigningConfiguration;
 use hex::ToHex;
 use ring::digest::{digest, SHA256};
 use sshcerts::ssh::{SshSignature, VerifiedSshSignature};
+use sshcerts::PublicKey;
 use std::collections::HashSet;
 use std::fs::{self, DirEntry};
 
@@ -19,8 +20,25 @@ pub fn check_module_signatures(
 ) -> Result<(), Errors> {
     // We expect each module's signatures to be located in a subdirectory of signatures_dir.
     // This subdirectory should share its name with the module
-    let module_signatures = fs::read_dir(format!("{}/{filename}", signing.signatures_dir))
-        .map_err(|e| Errors::FileError(e))?;
+    let module_signatures =
+        fs::read_dir(format!("{}/{filename}", signing.signatures_dir))
+            .map_err(|e| Errors::FileError(e))?
+            .into_iter()
+            .filter_map(|entry| {
+                entry.inspect_err(|e| {
+                    warn!("Bad entry in signature directory for {filename} - skipping. Error: {e}")
+                }).ok()
+            })
+            .collect::<Vec<_>>();
+
+    // If the number of available signature files does not exceed the required count,
+    // return an error immediately to avoid unnecessary processing.
+    if module_signatures.len() <= signing.signatures_required {
+        return Err(Errors::NotEnoughValidSignatures(
+            0,
+            signing.signatures_required,
+        ));
+    }
 
     // Hash file
     let module_hash: String = digest(&SHA256, &module_bytes).encode_hex();
@@ -29,72 +47,67 @@ pub fn check_module_signatures(
     // We use a HashSet here to ensure that we don't allow the same key to produce multiple valid signatures
     let mut valid_signatures = HashSet::new();
     for signature in module_signatures {
-        let entry = match signature {
-            Ok(path) => path,
-            Err(e) => {
-                error!("Bad entry in signature directory for {filename} - skipping. Error: {e}");
-                continue;
-            }
-        };
+        let pubkey =
+            match verify_signature_file(signature, module_hash, &signing.signature_namespace) {
+                Ok(pk) => pk,
+                Err(e) => {
+                    error!("Failed to verify signature for {filename}. Error: {e}");
+                    continue;
+                }
+            };
 
-        if let Ok(fingerprint) = verify_signature_file(entry, module_hash, &signing, &filename) {
-            valid_signatures.insert(fingerprint);
+        // If the provided signature wasn't from an authorized signer, log occurrence
+        // and continue processing signature files
+        if !signing
+            .authorized_signers
+            .iter()
+            .any(|signer| *signer == pubkey)
+        {
+            error!(
+                "{filename} was signed by an unexpected signer: {}",
+                pubkey.fingerprint()
+            );
+            continue;
         }
 
-        // Return early once the threshold is met.
+        valid_signatures.insert(pubkey.fingerprint().to_string());
+
+        // Return once the threshold is met
         if valid_signatures.len() >= signing.signatures_required {
             return Ok(());
         }
     }
 
-    error!(
-        "Not enough valid signatures provided for {filename}. Got {} but needed {}",
+    Err(Errors::NotEnoughValidSignatures(
         valid_signatures.len(),
-        signing.signatures_required
-    );
-    Err(Errors::NotEnoughValidSignatures)
+        signing.signatures_required,
+    ))
 }
 
 /// Verifies a signature file against a module's hash and ensures it is signed by an authorized signer.
 fn verify_signature_file(
     signature_path: DirEntry,
     module_hash: &[u8],
-    signing: &ModuleSigningConfiguration,
-    module_name: &str,
-) -> Result<String, Errors> {
+    namespace: &str,
+) -> Result<PublicKey, Errors> {
     let signature = read_in_signature(signature_path)?;
 
     // Parse and validate the signature.
-    let ssh_signature = match SshSignature::from_armored_string(&signature) {
-        Ok(sig) => sig,
-        Err(e) => {
-            error!("Invalid signature provided for {}", module_name);
-            return Err(Errors::SigningError(e));
-        }
-    };
+    let ssh_signature =
+        SshSignature::from_armored_string(&signature).map_err(|e| Errors::SigningError(e))?;
 
     let pubkey = ssh_signature.pubkey.clone();
-
-    // Check if the signature was made by an authorized signer.
-    if !signing.authorized_signers.iter().any(|s| *s == pubkey) {
-        error!(
-            "{} was signed by an unexpected signer: {}",
-            module_name,
-            pubkey.fingerprint()
-        );
-        return Err(Errors::UnauthorizedSigner);
-    }
 
     // Verify the signature using the module hash.
     let verified = VerifiedSshSignature::from_ssh_signature(
         module_hash,
         ssh_signature,
-        &signing.signature_namespace,
+        namespace,
         Some(pubkey),
     )
     .map_err(|e| Errors::SigningError(e))?;
 
-    Ok(verified.signature.pubkey.fingerprint().to_string())
+    Ok(verified.signature.pubkey)
 }
 
 /// Reads a signature file from the given directory entry.
@@ -104,15 +117,9 @@ fn verify_signature_file(
 fn read_in_signature(signature_path: DirEntry) -> Result<String, Errors> {
     let sig_filename = signature_path.file_name().to_string_lossy().to_string();
     if !sig_filename.ends_with(".sig") {
-        return Err(Errors::BadFilename);
+        return Err(Errors::BadFilename(".sig".to_string()));
     }
 
     // Try to read the signature file.
-    std::fs::read_to_string(signature_path.path()).map_err(|e| {
-        error!(
-            "Failed to read signature at [{:?}]. Error: {}",
-            signature_path, e
-        );
-        Errors::FileError(e)
-    })
+    std::fs::read_to_string(signature_path.path()).map_err(|e| Errors::FileError(e))
 }

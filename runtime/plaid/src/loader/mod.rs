@@ -301,10 +301,11 @@ impl PlaidModule {
         engine.set_tunables(tunables);
 
         // Compile the module using the middleware and tunables we just set up
-        let mut module = Module::new(&engine, module_bytes).map_err(|e| {
-            error!("Failed to compile module [{filename}]. Error: {e}");
-            Errors::ModuleCompilationFailure
-        })?;
+        let mut module =
+            Module::new(&engine, module_bytes).map_err(|e: wasmer::CompileError| {
+                error!("Failed to compile module [{filename}]. Error: {e}");
+                Errors::CompileError(e)
+            })?;
         module.set_name(&filename);
 
         // Count bytes already in storage
@@ -396,7 +397,10 @@ pub async fn load(
         // Fetch and verify the corresponding signature over this module if we require
         // rule signing. If any rule does not have enough valid signatures it will not be loaded.
         if let Some(signing) = &config.module_signing {
-            if check_module_signatures(signing, &filename, &module_bytes).is_err() {
+            if let Err(e) = check_module_signatures(signing, &filename, &module_bytes) {
+                error!(
+                    "Module [{filename}] failed signature verification: {e}. Skipping module load"
+                );
                 continue;
             }
         }
