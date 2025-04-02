@@ -6,5 +6,6 @@ pub enum Errors {
     ModuleCompilationFailure,
     SigningError(sshcerts::error::Error),
     UnauthorizedSigner,
-    MissingSignatureFile,
+    NotEnoughValidSignatures,
+    FileError(std::io::Error),
 }
