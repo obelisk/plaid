@@ -84,6 +84,18 @@ pub struct LimitableAmount {
     module_overrides: HashMap<String, LimitValue>,
 }
 
+/// The compiler backend to use for the modules
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompilerBackend {
+    /// Use the Cranelift compiler backend
+    #[cfg(feature = "cranelift")]
+    Cranelift,
+    /// Use the LLVM compiler backend
+    #[cfg(feature = "llvm")]
+    LLVM,
+}
+
 /// Configuration for loading Plaid modules
 #[derive(Deserialize)]
 pub struct Configuration {
@@ -138,6 +150,8 @@ pub struct Configuration {
     /// Configuration for module signing. If defined, we require that ALL
     /// module are signed by a set of authorized signers
     pub module_signing: Option<ModuleSigningConfiguration>,
+    /// The compiler backend to use for the modules.
+    pub compiler_backend: CompilerBackend,
 }
 
 /// This structure defines the parameters required to validate signatures for modules.
@@ -235,7 +249,7 @@ pub struct PlaidModule {
     pub name: String,
     /// The compiled WASM module
     pub module: Module,
-    /// The WASM enginer used to run the module
+    /// The WASM engine used to run the module
     pub engine: Engine,
     /// The maximum computation allowed for the module
     pub computation_limit: u64,
@@ -294,6 +308,7 @@ impl PlaidModule {
         log_type: &str,
         concurrency_unsafe: Option<Mutex<()>>,
         test_mode: bool,
+        compiler_backend: &CompilerBackend,
     ) -> Result<Self, Errors> {
         // Get the computation limit for the module
         let computation_limit =
@@ -307,16 +322,27 @@ impl PlaidModule {
             get_module_persistent_storage_limit(storage_amount, &filename, log_type);
 
         let metering = Arc::new(Metering::new(computation_limit, cost_function));
-        #[cfg(feature = "cranelift")]
-        let mut compiler = Cranelift::default();
-        #[cfg(feature = "llvm")]
-        let mut compiler = LLVM::default();
-        compiler.push_middleware(metering);
 
         // Configure module tunables - this includes our computation limit and page count
         let base = BaseTunables::for_target(&Target::default());
         let tunables = LimitingTunables::new(base, Pages(page_limit));
-        let mut engine: Engine = compiler.into();
+
+        // Configure the compiler backend
+        let mut engine: Engine = match compiler_backend {
+            #[cfg(feature = "cranelift")]
+            CompilerBackend::Cranelift => {
+                let mut compiler = Cranelift::default();
+                compiler.push_middleware(metering);
+                compiler.into()
+            }
+            #[cfg(feature = "llvm")]
+            CompilerBackend::LLVM => {
+                let mut compiler = LLVM::default();
+                compiler.push_middleware(metering);
+                compiler.into()
+            }
+        };
+
         engine.set_tunables(tunables);
 
         // Compile the module using the middleware and tunables we just set up
@@ -393,10 +419,19 @@ pub async fn load(
     storage: Option<Arc<Storage>>,
 ) -> Result<PlaidModules, ()> {
     let module_paths = fs::read_dir(config.module_dir.clone()).unwrap();
-
     let mut modules = PlaidModules::default();
-
     let byte_secrets = read_and_configure_secrets(&config.secrets);
+
+    match &config.compiler_backend {
+        #[cfg(feature = "cranelift")]
+        CompilerBackend::Cranelift => {
+            info!("Using Cranelift compiler backend");
+        }
+        #[cfg(feature = "llvm")]
+        CompilerBackend::LLVM => {
+            info!("Using LLVM compiler backend");
+        }
+    };
 
     for path in module_paths {
         let (filename, module_bytes) = match path {
@@ -460,6 +495,7 @@ pub async fn load(
             &type_,
             concurrency_safe,
             test_mode,
+            &config.compiler_backend,
         )
         .await
         else {
