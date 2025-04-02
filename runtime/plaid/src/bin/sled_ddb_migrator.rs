@@ -76,6 +76,8 @@ async fn main() -> Result<(), Error> {
     let client = Client::new(&sdk_config);
 
     // Migrate the default tree (unnamed)
+    // See https://docs.rs/sled/latest/sled/struct.Tree.html
+    // Db implements Deref<Target = Tree> such that a Db acts like the “default” Tree.
     let default_tree = &*db;
     migrate_tree(&client, table_name, "default", default_tree).await?;
 
