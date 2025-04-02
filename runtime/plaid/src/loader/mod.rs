@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use sshcerts::ssh::{SshSignature, VerifiedSshSignature};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::fs::{self};
+use std::fs::{self, DirEntry};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, RwLock};
 use utils::{
@@ -149,6 +149,8 @@ pub struct ModuleSigningConfiguration {
     pub signatures_dir: String,
     /// The namespace of the signature
     pub signature_namespace: String,
+    /// The number of valid signatures required on each module
+    pub signatures_required: u8,
 }
 
 /// The default directory to look for module signatures in if none is provided
@@ -376,40 +378,42 @@ pub async fn load(
         // If ANY rule does not have a valid signature, we panic instead of continuing because this should be
         // considered a blocking issue and we do not want to continue booting the system
         if let Some(signing) = &config.module_signing {
-            let signature =
-                fs::read_to_string(format!("{}/{filename}.sig", signing.signatures_dir))
-                    .expect(&format!("Expected signature to be present for {filename}."));
+            // We expect each module's signatures to be located in a subdirectory of signatures_dir.
+            // This subdirectory should share its name with the module
+            let module_signatures = fs::read_dir(format!("{}/{filename}", signing.signatures_dir))
+                .expect(&format!(
+                    "Expected signatures to be present for {filename}."
+                ));
 
-            // Validate signature
-            let ssh_signature = SshSignature::from_armored_string(&signature)
-                .expect(&format!("Invalid signature provided for {filename}"));
-
-            let pubkey = ssh_signature.pubkey.clone();
-
-            // Validate that signature was produced by an authorized signer
-            if !signing
-                .authorized_signers
-                .iter()
-                .any(|signer| *signer == pubkey.fingerprint().to_string())
-            {
-                panic!(
-                    "{filename} was signed by an unexpected signer: {}",
-                    pubkey.fingerprint()
-                )
-            }
-
-            // Hash file and validate signature contents
+            // Hash file
             let mut hasher = Sha256::new();
             hasher.update(&module_bytes);
             let module_hash = hex::encode(hasher.finalize());
+            let module_hash = module_hash.as_bytes();
 
-            VerifiedSshSignature::from_ssh_signature(
-                module_hash.as_bytes(),
-                ssh_signature,
-                &signing.signature_namespace,
-                Some(pubkey),
-            )
-            .expect(&format!("Failed to verify signature for {filename}"));
+            let mut valid_signatures = 0;
+            for signature in module_signatures {
+                let entry = match signature {
+                    Ok(path) => path,
+                    Err(e) => {
+                        error!("Bad entry in signature directory for {filename} - skipping. Error: {e}");
+                        continue;
+                    }
+                };
+
+                if verify_signature_file(entry, module_hash, signing, &filename).is_ok() {
+                    valid_signatures += 1;
+                }
+
+                // Break early once the threshold is met.
+                if valid_signatures >= signing.signatures_required {
+                    break;
+                }
+            }
+
+            if valid_signatures < signing.signatures_required {
+                panic!("Not enough valid signatures provided for {filename}. Got {valid_signatures} but needed {}", signing.signatures_required)
+            }
         }
 
         // See if a type is defined in the configuration file, if not then we will grab the first part
@@ -494,6 +498,68 @@ pub async fn load(
     }
 
     Ok(modules)
+}
+
+/// Verifies a signature file against a module's hash and ensures it is signed by an authorized signer.
+fn verify_signature_file(
+    signature_path: DirEntry,
+    module_hash: &[u8],
+    signing: &ModuleSigningConfiguration,
+    module_name: &str,
+) -> Result<(), Errors> {
+    // Convert file name to string for logging and filtering.
+    let sig_filename = signature_path.file_name().to_string_lossy().to_string();
+    if !sig_filename.ends_with(".sig") {
+        return Err(Errors::BadFilename);
+    }
+
+    // Try to read the signature file.
+    let signature_content = match std::fs::read_to_string(signature_path.path()) {
+        Ok(content) => content,
+        Err(e) => {
+            error!(
+                "Failed to read signature at [{:?}]. Error: {}",
+                signature_path, e
+            );
+            return Err(Errors::MissingSignatureFile);
+        }
+    };
+
+    // Parse and validate the signature.
+    let ssh_signature = match SshSignature::from_armored_string(&signature_content) {
+        Ok(sig) => sig,
+        Err(e) => {
+            error!("Invalid signature provided for {}", module_name);
+            return Err(Errors::SshCertsError(e));
+        }
+    };
+
+    let pubkey = ssh_signature.pubkey.clone();
+
+    // Check if the signature was made by an authorized signer.
+    if !signing
+        .authorized_signers
+        .iter()
+        .any(|s| *s == pubkey.fingerprint().to_string())
+    {
+        error!(
+            "{} was signed by an unexpected signer: {}",
+            module_name,
+            pubkey.fingerprint()
+        );
+        return Err(Errors::UnauthorizedSigner);
+    }
+
+    // Verify the signature using the module hash.
+    VerifiedSshSignature::from_ssh_signature(
+        module_hash,
+        ssh_signature,
+        &signing.signature_namespace,
+        Some(pubkey),
+    )
+    .map_err(|e| Errors::SshCertsError(e))?;
+
+    Ok(())
 }
 
 /// Read the loading configuration and some data about the module, and return the optional

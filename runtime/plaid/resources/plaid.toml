@@ -58,6 +58,7 @@ test_mode_exemptions = [
 # [loading.module_signing]
 # authorized_signers = [""]
 # signature_namespace = "SomeNamespace"
+# signatures_required = 1
 
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
