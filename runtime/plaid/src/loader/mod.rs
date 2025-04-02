@@ -149,7 +149,8 @@ pub struct ModuleSigningConfiguration {
     /// value is provided
     #[serde(default = "default_sig_dir")]
     pub signatures_dir: String,
-    /// The namespace of the signature
+    /// The namespace of the signature. Defaults to `PlaidRule` if no value is provided
+    #[serde(default = "default_sig_namespace")]
     pub signature_namespace: String,
     /// The number of valid signatures required on each module
     pub signatures_required: usize,
@@ -176,6 +177,11 @@ where
 /// The default directory to look for module signatures in if none is provided
 fn default_sig_dir() -> String {
     "../module_signatures".to_string()
+}
+
+/// The default signature namespace if none is provided
+fn default_sig_namespace() -> String {
+    "PlaidRule".to_string()
 }
 
 /// The persistent response allowed for the module. This is used for
@@ -396,6 +402,14 @@ pub async fn load(
         // Fetch and verify the corresponding signature over this module if we require
         // rule signing. If any rule does not have enough valid signatures it will not be loaded.
         if let Some(signing) = &config.module_signing {
+            info!(
+                "Loaded {} authorized signers",
+                signing.authorized_signers.len()
+            );
+            for signer in &signing.authorized_signers {
+                info!("\tFingerprint: {}", signer.fingerprint())
+            }
+
             if let Err(e) = check_module_signatures(signing, &filename, &module_bytes) {
                 error!(
                     "Module [{filename}] failed signature verification: {e}. Skipping module load"
