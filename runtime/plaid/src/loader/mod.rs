@@ -162,7 +162,7 @@ where
     D: de::Deserializer<'de>,
 {
     let raw = Vec::<String>::deserialize(deserializer)?;
-    Ok(raw
+    let pubkeys = raw
         .iter()
         .filter_map(|key| {
             PublicKey::from_string(key)
@@ -171,7 +171,14 @@ where
                 })
                 .ok()
         })
-        .collect())
+        .collect::<Vec<_>>();
+
+    info!("Loaded {} authorized signers", pubkeys.len());
+    for signer in &pubkeys {
+        info!("\tFingerprint: {}", signer.fingerprint())
+    }
+
+    Ok(pubkeys)
 }
 
 /// The default directory to look for module signatures in if none is provided
@@ -402,14 +409,6 @@ pub async fn load(
         // Fetch and verify the corresponding signature over this module if we require
         // rule signing. If any rule does not have enough valid signatures it will not be loaded.
         if let Some(signing) = &config.module_signing {
-            info!(
-                "Loaded {} authorized signers",
-                signing.authorized_signers.len()
-            );
-            for signer in &signing.authorized_signers {
-                info!("\tFingerprint: {}", signer.fingerprint())
-            }
-
             if let Err(e) = check_module_signatures(signing, &filename, &module_bytes) {
                 error!(
                     "Module [{filename}] failed signature verification: {e}. Skipping module load"
