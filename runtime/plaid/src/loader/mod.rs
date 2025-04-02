@@ -165,9 +165,8 @@ where
         .iter()
         .filter_map(|key| {
             PublicKey::from_string(key)
-                .map_err(|e| {
+                .inspect_err(|e| {
                     error!("Invalid public key provided: {key} - skipping. Error: {e}");
-                    e
                 })
                 .ok()
         })
