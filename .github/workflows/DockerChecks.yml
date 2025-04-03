@@ -1,4 +1,4 @@
-name: Build Checks
+name: Docker Checks
 
 on:
   push:
