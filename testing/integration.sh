@@ -10,6 +10,7 @@ if [ -z "$1" ]; then
 fi
 echo "Testing runtime with compiler: $1"
 
+
 # On macOS, we need to install a brew provided version of LLVM
 # so that we can compile WASM binaries.
 if uname | grep -q Darwin; then
@@ -74,6 +75,15 @@ rm plaidrules_key_ed25519*
 
 echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
+
+if [ "$1" == "llvm" ]; then
+  # If macOS
+  if  uname | grep -q Darwin; then
+    export RUSTFLAGS="-L /opt/homebrew/lib/"
+    export LLVM_SYS_180_PREFIX="/opt/homebrew/Cellar/llvm@18/18.1.8"
+  fi
+fi
+
 cargo build --release --no-default-features --features aws,sled,$1
 if [ $? -ne 0 ]; then
   echo "Failed to build Plaid with $1 compiler"
