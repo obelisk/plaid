@@ -61,7 +61,7 @@ pub fn check_module_signatures(
         if !signing
             .authorized_signers
             .iter()
-            .any(|signer| *signer == pubkey)
+            .any(|signer| signer.fingerprint() == pubkey.fingerprint())
         {
             error!(
                 "{filename} was signed by an unexpected signer: {}",

@@ -55,13 +55,11 @@ test_mode_exemptions = [
 
 
 # Uncomment this to require that all rules be signed by an authorized signer
-# [loading.module_signing]
-# authorized_signers = [
-#     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHkbe7gwx7s0dlApEEzpUyOAPrzPLy4czEZw/sh8m8rd me@home",
-# ]
-# signatures_required = 1
-# signature_namespace = "SomeNamespace" # Defaults to PlaidRule if not provided
-# signature_dir = "/path/to/signatures" # Defaults to ../module_signatures if not provided
+[loading.module_signing]
+authorized_signers = [
+    "{plaid-secret{public-key}}",
+]
+signatures_required = 1
 
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
