@@ -13,7 +13,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  ubuntu-docker-build-amd64:
+  ubuntu-docker-build-musl-amd64:
     runs-on: ubuntu-latest
 
     steps:
@@ -30,10 +30,10 @@ jobs:
         key: ${{ runner.os }}-cargo-amd64-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Run Docker Build Test (amd64)
-      run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.amd64 .
+      run: cd runtime && docker build -t latest -f plaid/resources/docker/musl/Dockerfile.amd64 .
 
 
-  ubuntu-docker-build-aarch64:
+  ubuntu-docker-build-musl-aarch64:
     runs-on: ubuntu-latest
 
     steps:
@@ -50,9 +50,9 @@ jobs:
         key: ${{ runner.os }}-cargo-aarch64-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Run Docker Build Test (aarch64)
-      run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.aarch64 .
+      run: cd runtime && docker build -t latest -f plaid/resources/docker/musl/Dockerfile.aarch64 .
 
-  ubuntu-docker-build-aarch64-with-llvm:
+  ubuntu-docker-build-llvm:
     runs-on: ubuntu-latest
 
     steps:
@@ -66,9 +66,9 @@ jobs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           runtime/target/
-        key: ${{ runner.os }}-cargo-aarch64-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
-    - name: Run Docker Build Test (aarch64)
-      run: cd runtime && docker build -t latest -f plaid/resources/Dockerfile.aarch64 . --build-arg FEATURES=llvm
+    - name: Run Docker Build Test (llvm)
+      run: cd runtime && docker build -t latest -f plaid/resources/docker/Dockerfile . --build-arg FEATURES=llvm
 
   
