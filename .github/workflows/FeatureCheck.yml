@@ -16,7 +16,7 @@ jobs:
   build-feature-combination:
     strategy:
       matrix:
-        features: ["sled", "aws", "aws,sled"]
+        features: ["sled,cranelift", "aws,cranelift", "aws,sled,cranelift"]
     runs-on: ubuntu-latest
     steps:
       - name: Setup Rust
