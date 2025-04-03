@@ -1,11 +1,14 @@
 mod errors;
 mod limits;
+mod signing;
 mod utils;
 
 use errors::Errors;
 use limits::LimitingTunables;
 use lru::LruCache;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
+use signing::check_module_signatures;
+use sshcerts::PublicKey;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs::{self};
@@ -128,6 +131,64 @@ pub struct Configuration {
     /// even if they have side effects.
     #[serde(default)]
     pub test_mode_exemptions: Vec<String>,
+    /// Configuration for module signing. If defined, we require that ALL
+    /// module are signed by a set of authorized signers
+    pub module_signing: Option<ModuleSigningConfiguration>,
+}
+
+/// This structure defines the parameters required to validate signatures for modules.
+#[derive(Deserialize)]
+pub struct ModuleSigningConfiguration {
+    /// A list of authorized signer key fingerprints.
+    ///
+    /// This list should contain the fingerprints of the keys belonging to the authorized signers,
+    /// typically the administrators responsible for managing the Plaid instance.
+    #[serde(deserialize_with = "pubkey_deserializer")]
+    pub authorized_signers: Vec<PublicKey>,
+    /// Where to load signatures from. Defaults to `../module_signatures` if no
+    /// value is provided
+    #[serde(default = "default_sig_dir")]
+    pub signatures_dir: String,
+    /// The namespace of the signature. Defaults to `PlaidRule` if no value is provided
+    #[serde(default = "default_sig_namespace")]
+    pub signature_namespace: String,
+    /// The number of valid signatures required on each module
+    pub signatures_required: usize,
+}
+
+/// Deserializer for a public key
+fn pubkey_deserializer<'de, D>(deserializer: D) -> Result<Vec<PublicKey>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let raw = Vec::<String>::deserialize(deserializer)?;
+    let pubkeys = raw
+        .iter()
+        .filter_map(|key| {
+            PublicKey::from_string(key)
+                .inspect_err(|e| {
+                    error!("Invalid public key provided: {key} - skipping. Error: {e}");
+                })
+                .ok()
+        })
+        .collect::<Vec<_>>();
+
+    info!("Loaded {} authorized signers", pubkeys.len());
+    for signer in &pubkeys {
+        info!("\tFingerprint: {}", signer.fingerprint())
+    }
+
+    Ok(pubkeys)
+}
+
+/// The default directory to look for module signatures in if none is provided
+fn default_sig_dir() -> String {
+    "../module_signatures".to_string()
+}
+
+/// The default signature namespace if none is provided
+fn default_sig_namespace() -> String {
+    "PlaidRule".to_string()
 }
 
 /// The persistent response allowed for the module. This is used for
@@ -252,10 +313,11 @@ impl PlaidModule {
         engine.set_tunables(tunables);
 
         // Compile the module using the middleware and tunables we just set up
-        let mut module = Module::new(&engine, module_bytes).map_err(|e| {
-            error!("Failed to compile module [{filename}]. Error: {e}");
-            Errors::ModuleCompilationFailure
-        })?;
+        let mut module =
+            Module::new(&engine, module_bytes).map_err(|e: wasmer::CompileError| {
+                error!("Failed to compile module [{filename}]. Error: {e}");
+                Errors::CompileError(e)
+            })?;
         module.set_name(&filename);
 
         // Count bytes already in storage
@@ -343,6 +405,17 @@ pub async fn load(
                 continue;
             }
         };
+
+        // Fetch and verify the corresponding signature over this module if we require
+        // rule signing. If any rule does not have enough valid signatures it will not be loaded.
+        if let Some(signing) = &config.module_signing {
+            if let Err(e) = check_module_signatures(signing, &filename, &module_bytes) {
+                error!(
+                    "Module [{filename}] failed signature verification: {e}. Skipping module load"
+                );
+                continue;
+            }
+        }
 
         // See if a type is defined in the configuration file, if not then we will grab the first part
         // of the filename up to the first underscore.

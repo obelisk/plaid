@@ -18,7 +18,7 @@ pub fn read_and_parse_modules(path: &DirEntry) -> Result<(String, Vec<u8>), Erro
     // guarantees that strings that do _not_ terminate with .wasm can be used for other
     // things, like DBs shared across multiple rules.
     if !filename.ends_with(".wasm") {
-        return Err(Errors::BadFilename);
+        return Err(Errors::InvalidFileType(".wasm".to_string(), filename));
     }
 
     // Read in the bytes of the module
@@ -26,7 +26,7 @@ pub fn read_and_parse_modules(path: &DirEntry) -> Result<(String, Vec<u8>), Erro
         Ok(b) => b,
         Err(e) => {
             error!("Failed to read module at [{:?}]. Error: {e}", path.path());
-            return Err(Errors::ModuleParseFailure);
+            return Err(Errors::FileError(e));
         }
     };
 

@@ -3178,6 +3178,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled",
+ "sshcerts",
  "tar",
  "time",
  "tokio",
@@ -4305,6 +4306,18 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "sshcerts"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "752ad8923d32fb5c117b8a9983266e294edc072401133720aa9af3959d63248d"
+dependencies = [
+ "base64 0.13.1",
+ "chrono",
+ "ring 0.17.14",
+ "zeroize",
 ]
 
 [[package]]
