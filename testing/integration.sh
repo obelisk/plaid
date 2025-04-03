@@ -2,6 +2,7 @@
 
 # Build all of the Plaid workspace
 PLATFORM=$(uname -a)
+CONFIG_PATH="plaid/resources/plaid.toml"
 
 # Compiler should be passed in as the first argument
 if [ -z "$1" ]; then
@@ -17,15 +18,6 @@ if uname | grep -q Darwin; then
   echo "macOS detected so using LLVM from Homebrew for wasm32 compatibility"
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
-
-cd runtime
-cargo build --all --release --no-default-features --features aws,sled,$1
-if [ $? -ne 0 ]; then
-  echo "Failed to build Plaid with support for AWS and Sled"
-  # Exit with an error
-  exit 1
-fi
-cd ..
 
 export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
 
@@ -77,6 +69,11 @@ echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
 
 if [ "$1" == "llvm" ]; then
+  # If the compiler is llvm, modify the plaid.toml file to use the llvm backend
+  # and save to a new file
+  cp plaid/resources/plaid.toml plaid/resources/plaid.llvm.toml
+  sed -i.bak 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' plaid/resources/plaid.llvm.toml && rm plaid/resources/plaid.llvm.toml.bak
+  CONFIG_PATH="plaid/resources/plaid.llvm.toml"
   # If macOS
   if  uname | grep -q Darwin; then
     export RUSTFLAGS="-L /opt/homebrew/lib/"
@@ -84,13 +81,13 @@ if [ "$1" == "llvm" ]; then
   fi
 fi
 
-cargo build --release --no-default-features --features aws,sled,$1
+cargo build --release --no-default-features --features sled,$1
 if [ $? -ne 0 ]; then
   echo "Failed to build Plaid with $1 compiler"
   # Exit with an error
   exit 1
 fi
-RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features aws,sled,$1 -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
+RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features sled,$1 -- --config ${CONFIG_PATH} --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
 cd ..
 sleep 60

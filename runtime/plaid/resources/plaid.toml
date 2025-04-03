@@ -36,7 +36,7 @@ sled_path = "/tmp/sled"
 [loading]
 module_dir = "../compiled_modules/"
 lru_cache_size = 200
-compiler_backend = "llvm"
+compiler_backend = "cranelift"
 
 test_mode = true
 test_mode_exemptions = [
