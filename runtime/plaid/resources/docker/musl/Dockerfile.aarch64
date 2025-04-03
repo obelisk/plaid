@@ -1,5 +1,3 @@
-ARG FEATURES=""
-
 FROM messense/rust-musl-cross:aarch64-musl AS builder
 
 RUN rustup component add rustfmt
@@ -7,7 +5,7 @@ RUN mkdir /build
 WORKDIR /build
 COPY . .
 
-RUN cargo build --release --bin=plaid --features=$FEATURES
+RUN cargo build --release --bin=plaid
 
 FROM alpine:3.6 AS alpine
 RUN apk add -U --no-cache ca-certificates
