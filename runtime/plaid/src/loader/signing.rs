@@ -117,7 +117,7 @@ fn verify_signature_file(
 fn read_in_signature(signature_path: DirEntry) -> Result<String, Errors> {
     let sig_filename = signature_path.file_name().to_string_lossy().to_string();
     if !sig_filename.ends_with(".sig") {
-        return Err(Errors::BadFilename(".sig".to_string()));
+        return Err(Errors::InvalidFileType(".sig".to_string(), sig_filename));
     }
 
     // Try to read the signature file.

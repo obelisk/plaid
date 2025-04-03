@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 #[derive(Debug)]
 pub enum Errors {
-    BadFilename(String),
+    InvalidFileType(String, String),
     CompileError(wasmer::CompileError),
     SigningError(sshcerts::error::Error),
     NotEnoughValidSignatures(usize, usize),
@@ -12,9 +12,9 @@ pub enum Errors {
 impl Display for Errors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::BadFilename(extension) => write!(
+            Self::InvalidFileType(expected, received) => write!(
                 f,
-                "Invalid filename: file must have a '{extension}' extension."
+                "Invalid file type '{received}': expected a {expected} file "
             ),
             Self::CompileError(error) => write!(f, "Wasm compilation error: {error}"),
             Self::SigningError(error) => write!(f, "SshCerts error: {error}"),
