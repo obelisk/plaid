@@ -41,7 +41,7 @@ fi
 # Create module signatures directory
 mkdir module_signatures
 
-# Iterate over all .wasm files in the target directory
+# Iterate over all test_*.wasm files in the target directory
 for wasm_file in ./modules/target/wasm32-unknown-unknown/release/test_*.wasm; do
     # Extract the base filename (without extension)
     base_name=$(basename "$wasm_file" .wasm)
@@ -51,7 +51,7 @@ for wasm_file in ./modules/target/wasm32-unknown-unknown/release/test_*.wasm; do
     # Compute SHA-256 hash without a trailing newline and assign it to a variable
     shasum -a 256 "$wasm_file" | awk '{printf "%s", $1}' > "$base_name".sha256
     
-    # Sign the computed hash using process substitution to feed the hash to ssh-keygen
+    # Sign the computed hash
     ssh-keygen -Y sign -n PlaidRule -f plaidrules_key_ed25519 "$base_name.sha256"
 
     mv "$base_name.sha256.sig" "./module_signatures/$base_name.wasm/$base_name.wasm.sig"
