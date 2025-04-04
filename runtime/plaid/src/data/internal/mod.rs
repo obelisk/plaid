@@ -166,7 +166,7 @@ impl Internal {
                 if let Ok(message) = message {
                     match storage.delete(LOGBACK_NS, &message).await {
                         Ok(None) => {
-                            error!("We tried to deleted a log back message that wasn't persisted")
+                            error!("We tried to delete a log back message that wasn't persisted")
                         }
                         Ok(Some(_)) => (),
                         Err(e) => error!("Error removing persisted log: {e}"),
