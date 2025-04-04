@@ -8,6 +8,8 @@
 
 # Private items
 /runtime/plaid/private-resources
+/runtime/plaid/resources/secrets.json
+/runtime/plaid/resources/plaid.llvm.toml
 
 # Target folders
 /runtime/target

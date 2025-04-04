@@ -36,6 +36,7 @@ sled_path = "/tmp/sled"
 [loading]
 module_dir = "../compiled_modules/"
 lru_cache_size = 200
+compiler_backend = "cranelift"
 
 test_mode = true
 test_mode_exemptions = [
@@ -47,6 +48,7 @@ test_mode_exemptions = [
     "test_mnr.wasm",
     "test_persistent_response.wasm",
     "test_random.wasm",
+    "test_regex.wasm",
     "test_sshcerts_usage.wasm",
     "test_time.wasm",
     "test_shared_db_rule_1.wasm",
@@ -97,6 +99,7 @@ signatures_required = 1
 "test_mnr.wasm" = "test_mnr"
 "test_persistent_response.wasm" = "prtest"
 "test_random.wasm" = "test_random"
+"test_regex.wasm" = "test_regex"
 "test_sshcerts_usage.wasm" = "test_sshcerts"
 "test_testmode.wasm" = "testmode"
 "test_time.wasm" = "time"
@@ -367,6 +370,11 @@ headers = []
 [webhooks."internal".webhooks."testmnr"]
 log_type = "test_mnr"
 headers = []
+
+[webhooks."internal".webhooks."testregex"]
+log_type = "test_regex"
+headers = []
+
 
 [webhooks."internal".webhooks."testgeteverything"]
 log_type = "test_geteverything"

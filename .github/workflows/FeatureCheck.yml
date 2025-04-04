@@ -1,0 +1,40 @@
+name: Feature Checks
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches:  "**"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-feature-combination:
+    strategy:
+      matrix:
+        features: ["sled,cranelift", "aws,cranelift", "aws,sled,cranelift"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Rust
+        run: |
+          rustup target add wasm32-unknown-unknown
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            runtime/target/
+            modules/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cd runtime && cargo build --all --release --no-default-features --features ${{ matrix.features }}

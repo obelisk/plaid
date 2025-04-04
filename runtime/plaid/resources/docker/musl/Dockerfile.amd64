@@ -1,4 +1,4 @@
-FROM messense/rust-musl-cross:x86_64-musl as builder
+FROM messense/rust-musl-cross:x86_64-musl AS builder
 
 RUN rustup component add rustfmt
 RUN mkdir /build
@@ -7,10 +7,10 @@ COPY . .
 
 RUN cargo build --release --bin=plaid
 
-FROM alpine:3.6 as alpine
+FROM alpine:3.6 AS alpine
 RUN apk add -U --no-cache ca-certificates
 
-from scratch as runtime
+FROM scratch AS runtime
 COPY --from=alpine /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/plaid /plaid
 USER 1000

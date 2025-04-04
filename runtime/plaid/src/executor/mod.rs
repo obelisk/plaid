@@ -449,6 +449,10 @@ fn process_message_with_module(
                         format!("{}_computation_percentage_used", module.name),
                         computation_used as i64,
                     )?;
+                    els.log_ts(
+                        format!("{}_execution_duration", module.name),
+                        begin.elapsed().as_micros() as i64,
+                    )?;
 
                     // If performance monitoring is enabled, log data to the monitoring system
                     if let Some(ref sender) = performance_mode {

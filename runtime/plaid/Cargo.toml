@@ -1,13 +1,15 @@
 [package]
 name = "plaid"
-version = "0.21.1"
+version = "0.22.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["aws", "sled"]
+default = ["aws", "sled", "cranelift"]
 aws = ["dep:aws-sdk-kms", "dep:aws-sdk-dynamodb"]
+cranelift = ["wasmer/cranelift"]
+llvm = ["wasmer/llvm"]
 
 [dependencies]
 alkali = "0.3.0"
@@ -62,7 +64,7 @@ totp-rs = "5.6.0"
 url = "2.5.2"
 urlencoding = "2.1.3"
 warp = { version = "0.3", features = ["tls"] }
-wasmer = { version = "5", default-features = false, features = ["cranelift"] }
+wasmer = { version = "5", default-features = false }
 wasmer-middlewares = "5"
 
 [[example]]

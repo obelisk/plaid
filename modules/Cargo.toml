@@ -11,6 +11,7 @@ members = [
     "tests/test_mnr",
     "tests/test_persistent_response",
     "tests/test_random",
+    "tests/test_regex",
     "tests/test_sshcerts_usage",
     "tests/test_testmode",
     "tests/test_time",

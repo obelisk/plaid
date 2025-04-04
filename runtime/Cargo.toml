@@ -4,5 +4,9 @@ resolver = "2"
 members = ["plaid", "plaid-stl"]
 
 [profile.release]
-lto = true
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+incremental = false
 strip = "symbols"

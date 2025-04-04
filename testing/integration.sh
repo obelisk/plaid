@@ -2,6 +2,15 @@
 
 # Build all of the Plaid workspace
 PLATFORM=$(uname -a)
+CONFIG_PATH="plaid/resources/plaid.toml"
+
+# Compiler should be passed in as the first argument
+if [ -z "$1" ]; then
+  echo "No compiler specified. Please specify a compiler as the first argument."
+  exit 1
+fi
+echo "Testing runtime with compiler: $1"
+
 
 # On macOS, we need to install a brew provided version of LLVM
 # so that we can compile WASM binaries.
@@ -10,14 +19,9 @@ if uname | grep -q Darwin; then
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
 
-echo "Building Plaid Runtime"
-cd runtime
-cargo build --all --release
-cd ..
-
 export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
 
-echo "Building Plaid All Plaid Modules"
+echo "Building All Plaid Modules"
 cd modules
 cargo build --all --release
 cd ..
@@ -63,10 +67,30 @@ rm plaidrules_key_ed25519*
 
 echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
-RUST_LOG=plaid=debug cargo run --bin=plaid --release -- --config plaid/resources/plaid.toml --secrets plaid/resources/secrets.example.json &
+
+if [ "$1" == "llvm" ]; then
+  # If the compiler is llvm, modify the plaid.toml file to use the llvm backend
+  # and save to a new file
+  cp plaid/resources/plaid.toml plaid/resources/plaid.llvm.toml
+  sed -i.bak 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' plaid/resources/plaid.llvm.toml && rm plaid/resources/plaid.llvm.toml.bak
+  CONFIG_PATH="plaid/resources/plaid.llvm.toml"
+  # If macOS
+  if  uname | grep -q Darwin; then
+    export RUSTFLAGS="-L /opt/homebrew/lib/"
+    export LLVM_SYS_180_PREFIX="/opt/homebrew/Cellar/llvm@18/18.1.8"
+  fi
+fi
+
+cargo build --release --no-default-features --features sled,$1
+if [ $? -ne 0 ]; then
+  echo "Failed to build Plaid with $1 compiler"
+  # Exit with an error
+  exit 1
+fi
+RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features sled,$1 -- --config ${CONFIG_PATH} --secrets plaid/resources/secrets.example.json &
 PLAID_PID=$!
 cd ..
-sleep 20
+sleep 60
 
 # Set the variables the test harnesses will need
 export PLAID_LOCATION="localhost:4554"
