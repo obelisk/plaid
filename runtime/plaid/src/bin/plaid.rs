@@ -264,16 +264,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let (response_send, response_recv) = tokio::sync::oneshot::channel();
 
                                 // Construct a message to send to the rule
-                                let message = Message {
-                                    type_: name.to_string(),
-                                    data: String::new().into_bytes(),
-                                    headers: Some(HashMap::new()),
-                                    query_params: Some(query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect()),
+                                let message = Message::new_detailed(
+                                    name.to_string(),
+                                    String::new().into_bytes(),
                                     source,
                                     logbacks_allowed,
-                                    response_sender: Some(response_send),
-                                    module: Some(rule.clone()),
-                                };
+                                    Some(HashMap::new()),
+                                    Some(query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect()),
+                                    Some(response_send),
+                                    Some(rule.clone()));
 
                                 // Put the message into the standard message queue
                                 if let Err(e) = log_sender.try_send(message) {
