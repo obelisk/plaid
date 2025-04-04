@@ -89,6 +89,9 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Run Docker Build Test (llvm)
-      run: cd runtime && docker buildx build --platform linux/amd64,linux/arm64 -t plaid:0.22.0 -f plaid/resources/docker/Dockerfile  . --build-arg FEATURES=llvm --load
+      run: |
+        sudo apt update && \ 
+        sudo apt-get upgrade -y && \
+        cd runtime && docker buildx build --platform linux/amd64,linux/arm64 -t plaid:0.22.0 -f plaid/resources/docker/Dockerfile  . --build-arg FEATURES=llvm --load
 
   
