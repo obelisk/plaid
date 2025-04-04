@@ -2789,9 +2789,9 @@ checksum = "6367d84fb54d4242af283086402907277715b8fe46976963af5ebf173f8efba3"
 
 [[package]]
 name = "miniz_oxide"
-version = "0.8.7"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff70ce3e48ae43fa075863cef62e8b43b71a4f2382229920e0df362592919430"
+checksum = "3be647b768db090acb35d5ec5db2b0e1f1de11133ca123b9eacf5137868f892a"
 dependencies = [
  "adler2",
 ]
@@ -3205,7 +3205,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "plaid"
-version = "0.22.2"
+version = "0.23.0"
 dependencies = [
  "alkali",
  "async-trait",
@@ -3254,7 +3254,7 @@ dependencies = [
 
 [[package]]
 name = "plaid_stl"
-version = "0.22.2"
+version = "0.23.0"
 dependencies = [
  "base64 0.13.1",
  "chrono",
