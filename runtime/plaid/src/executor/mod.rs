@@ -35,6 +35,8 @@ pub struct ResponseMessage {
 /// A message to be processed by one or more modules
 #[derive(Serialize, Deserialize)]
 pub struct Message {
+    /// A unique identifier for this message
+    pub id: String,
     /// The message channel that this message is going to run on
     pub type_: String,
     /// The data passed to the module
@@ -67,6 +69,7 @@ impl Message {
         logbacks_allowed: LogbacksAllowed,
     ) -> Self {
         Self {
+            id: uuid::Uuid::new_v4().to_string(),
             type_,
             data,
             headers: Some(HashMap::new()),
@@ -78,10 +81,35 @@ impl Message {
         }
     }
 
+    /// Construct a new message with optional fields
+    pub fn new_detailed(
+        type_: String,
+        data: Vec<u8>,
+        source: LogSource,
+        logbacks_allowed: LogbacksAllowed,
+        headers: Option<HashMap<String, Vec<u8>>>,
+        query_params: Option<HashMap<String, Vec<u8>>>,
+        response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
+        module: Option<Arc<PlaidModule>>,
+    ) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            type_,
+            data,
+            headers,
+            query_params,
+            source,
+            logbacks_allowed,
+            response_sender,
+            module,
+        }
+    }
+
     /// Create a duplicate of the message that does
     /// not have the response sender.
     pub fn create_duplicate(&self) -> Self {
         Self {
+            id: self.id.clone(),
             type_: self.type_.clone(),
             data: self.data.clone(),
             headers: self.headers.clone(),

@@ -65,9 +65,6 @@ pub struct Internal {
     storage: Option<Arc<Storage>>,
 }
 
-#[derive(Deserialize, Serialize)]
-struct InternalLog {}
-
 impl Internal {
     pub async fn new(
         config: InternalConfig,
@@ -84,22 +81,41 @@ impl Internal {
                 .await
                 .map_err(|e| DataError::StorageError(e))?;
 
-            for (message, time) in previous_logs {
-                let message: Message = match serde_json::from_str(message.as_str()) {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        warn!(
-                            "Skipping log in storage system which could not be deserialized [{e}]: {:X?}",
-                            message
-                        );
-                        continue;
+            for (key, value) in previous_logs {
+                // We want to extract from the DB a message and a delay.
+                // First, we try deserializing the new format, where the DB key is a message ID, and the value is the serialized DelayedMessage
+                let (message, delay) = match serde_json::from_slice::<DelayedMessage>(&value) {
+                    Ok(item) => {
+                        // Everything OK, we were deserializing a logback in the "new" format
+                        (item.message, item.delay)
+                    }
+                    Err(_) => {
+                        // Deserialization failed: try to deserialize in backward-compat mode,
+                        // where the key was the message itself and the value was the time.
+                        let message: Message = match serde_json::from_str(key.as_str()) {
+                            Ok(msg) => msg,
+                            Err(e) => {
+                                // This deserialization failed too: we give up
+                                warn!(
+                                    "Skipping log in storage system which could not be deserialized [{e}]: {:X?}",
+                                    key
+                                );
+                                continue;
+                            }
+                        };
+                        let delay: Result<[u8; 8], _> = value.try_into();
+                        let delay = match delay {
+                            Ok(delay) => u64::from_be_bytes(delay),
+                            Err(_) => {
+                                warn!("Something went wrong while deserializing delay");
+                                continue;
+                            }
+                        };
+                        // We managed to recover a message and a delay
+                        (message, delay)
                     }
                 };
-                let time: Result<[u8; 8], _> = time.try_into();
-                if let Ok(time) = time {
-                    let delay = u64::from_be_bytes(time);
-                    log_heap.push(Reverse(DelayedMessage { delay, message }));
-                }
+                log_heap.push(Reverse(DelayedMessage { delay, message }));
             }
         }
 
@@ -132,14 +148,12 @@ impl Internal {
             log.delay += current_time;
 
             if let Some(storage) = &self.storage {
-                let time: Vec<u8> = log.delay.to_be_bytes().to_vec();
-                // It is my understanding that serde is deterministic given the same structure
-                // meaning that below when it comes time to remove this key serializing the same
-                // struct will result in the same bytes.
-                let message = serde_json::to_string(&log.message);
-
-                if let Ok(message) = message {
-                    if let Err(e) = storage.insert(LOGBACK_NS.to_string(), message, time).await {
+                // Prepare what will be stored in the DB by serializing the DelayedMessage
+                if let Ok(db_item) = serde_json::to_vec(&log) {
+                    if let Err(e) = storage
+                        .insert(LOGBACK_NS.to_string(), log.message.id.clone(), db_item)
+                        .await
+                    {
                         error!("Storage system could not persist a message: {e}");
                     }
                 }
@@ -162,15 +176,25 @@ impl Internal {
 
             let log = self.log_heap.pop().unwrap();
             if let Some(storage) = &self.storage {
-                let message = serde_json::to_string(&log.0.message);
-                if let Ok(message) = message {
-                    match storage.delete(LOGBACK_NS, &message).await {
-                        Ok(None) => {
-                            error!("We tried to deleted a log back message that wasn't persisted")
+                // Delete the logback from the storage because we are about to send it for processing.
+                // According to the new format, the key is the ID inside the DelayedMessage's message field
+                match storage.delete(LOGBACK_NS, &log.0.message.id).await {
+                    Ok(None) => {
+                        // We did not find this logback in the DB. There is a chance we were processing a message serialized in the old format,
+                        // where the key was the message itself. Try to remove that
+                        let message = serde_json::to_string(&log.0.message);
+                        if let Ok(message) = message {
+                            match storage.delete(LOGBACK_NS, &message).await {
+                                Ok(None) => error!(
+                                    "We tried to deleted a log back message that wasn't persisted"
+                                ),
+                                Ok(Some(_)) => (),
+                                Err(e) => error!("Error removing persisted log: {e}"),
+                            }
                         }
-                        Ok(Some(_)) => (),
-                        Err(e) => error!("Error removing persisted log: {e}"),
                     }
+                    Ok(Some(_)) => (),
+                    Err(e) => error!("Error removing persisted log: {e}"),
                 }
             }
             self.sender.send(log.0.message).unwrap();
