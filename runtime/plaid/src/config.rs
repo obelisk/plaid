@@ -3,7 +3,6 @@ use clap::{Arg, Command};
 use plaid_stl::messages::LogbacksAllowed;
 use ring::digest::{self, digest};
 use serde::{de, Deserialize};
-use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::performance::PerformanceMonitoring;
@@ -242,21 +241,27 @@ pub fn read_and_interpolate(
         }
     };
 
-    // Read the secrets file and parse into a serde object
-    let secrets = match std::fs::read(secrets_path) {
-        Ok(secret_bytes) => {
-            let secrets = serde_json::from_slice::<Value>(&secret_bytes).unwrap();
-            secrets.as_object().cloned().unwrap()
-        }
-        Err(e) => {
-            error!("Encountered file error when trying to read secrets file!. Error: {e}");
-            return Err(ConfigurationError::FileError);
-        }
-    };
+    // Read the secrets file and parse into a TOML object
+    let secrets = std::fs::read_to_string(secrets_path)
+        .map_err(|e| {
+            error!("Encountered file error when trying to read secrets file! Error: {e}");
+            ConfigurationError::FileError
+        })
+        .and_then(|s| {
+            toml::from_str::<toml::value::Table>(&s).map_err(|e| {
+                error!(
+                    "Encountered error when trying to parse secrets into a TOML table! Error: {e}"
+                );
+                ConfigurationError::FileError
+            })
+        })?;
 
     // Iterate over the secrets we just parsed and replace matching keys in the config
     for (secret, value) in secrets {
-        config = config.replace(&secret, value.as_str().unwrap());
+        config = config.replace(
+            &format!("{{plaid-secret{{{secret}}}}}"), // this means {plaid-secret{secret}}
+            value.as_str().unwrap(),
+        );
     }
 
     if show_config {
