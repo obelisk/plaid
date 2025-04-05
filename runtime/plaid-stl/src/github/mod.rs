@@ -143,6 +143,14 @@ pub struct DeleteDeployKeyParams {
     pub key_id: u64,
 }
 
+/// A custom property of a repo
+/// See https://docs.github.com/en/organizations/managing-organization-settings/managing-custom-properties-for-repositories-in-your-organization for more details
+#[derive(Debug, Deserialize)]
+pub struct RepositoryCustomProperty {
+    pub property_name: String,
+    pub value: String,
+}
+
 impl FileSearchResultItem {
     /// Retrieve the content of the search result
     pub fn retrieve_raw_content(&self) -> Result<String, PlaidFunctionError> {
@@ -1050,6 +1058,51 @@ pub fn get_branch_protection_rules(
     // This should be safe because unless the Plaid runtime is expressly trying
     // to mess with us, this came from a String in the API module.
     Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+/// Get custom properties for a repository
+/// ## Arguments
+///
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+pub fn get_custom_properties_values(
+    owner: impl Display,
+    repo: impl Display,
+) -> Result<Vec<RepositoryCustomProperty>, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_custom_properties_values);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_get_custom_properties_values(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response_body =
+        String::from_utf8(return_buffer).map_err(|_| PlaidFunctionError::InternalApiError)?;
+    let response_body = serde_json::from_str::<Vec<RepositoryCustomProperty>>(&response_body)
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    Ok(response_body)
 }
 
 /// Get protection rules (as in ruleset) for a branch
