@@ -89,30 +89,12 @@ impl Internal {
                         // Everything OK, we were deserializing a logback in the "new" format
                         (item.message, item.delay)
                     }
-                    Err(_) => {
-                        // Deserialization failed: try to deserialize in backward-compat mode,
-                        // where the key was the message itself and the value was the time.
-                        let message: Message = match serde_json::from_str(key.as_str()) {
-                            Ok(msg) => msg,
-                            Err(e) => {
-                                // This deserialization failed too: we give up
-                                warn!(
-                                    "Skipping log in storage system which could not be deserialized [{e}]: {:X?}",
-                                    key
-                                );
-                                continue;
-                            }
-                        };
-                        let delay: Result<[u8; 8], _> = value.try_into();
-                        let delay = match delay {
-                            Ok(delay) => u64::from_be_bytes(delay),
-                            Err(_) => {
-                                warn!("Something went wrong while deserializing delay");
-                                continue;
-                            }
-                        };
-                        // We managed to recover a message and a delay
-                        (message, delay)
+                    Err(e) => {
+                        warn!(
+                            "Skipping log in storage system which could not be deserialized [{e}]: {:X?}",
+                            key
+                        );
+                        continue;
                     }
                 };
                 log_heap.push(Reverse(DelayedMessage { delay, message }));
@@ -180,18 +162,7 @@ impl Internal {
                 // According to the new format, the key is the ID inside the DelayedMessage's message field
                 match storage.delete(LOGBACK_NS, &log.0.message.id).await {
                     Ok(None) => {
-                        // We did not find this logback in the DB. There is a chance we were processing a message serialized in the old format,
-                        // where the key was the message itself. Try to remove that
-                        let message = serde_json::to_string(&log.0.message);
-                        if let Ok(message) = message {
-                            match storage.delete(LOGBACK_NS, &message).await {
-                                Ok(None) => error!(
-                                    "We tried to deleted a log back message that wasn't persisted"
-                                ),
-                                Ok(Some(_)) => (),
-                                Err(e) => error!("Error removing persisted log: {e}"),
-                            }
-                        }
+                        error!("We tried to deleted a log back message that wasn't persisted")
                     }
                     Ok(Some(_)) => (),
                     Err(e) => error!("Error removing persisted log: {e}"),

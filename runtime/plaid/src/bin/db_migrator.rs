@@ -20,22 +20,20 @@ fn create_migration_function(
             return (key, value);
         }
         // Try to deserialize `key` as a JSON value with a `data` field.
-        // If the `data` field is not there, then we assume we have a UUID:
-        // this means the log is already serialized in the new format.
-        // In this case, we leave the entry untouched.
+        // If the `data` field is not there, then we leave the entry untouched.
         // If deserialization to a Value fails, then we don't know what to do and
         // leave everything untouched.
         match serde_json::from_str::<Value>(&key) {
             Err(_) => (key, value), // identity mapping
             Ok(mut v) => {
                 if v.get("data").is_none() {
-                    // `data` is missing: this is probably just a UUID: leave it
+                    // `data` is missing: leave it
                     // Note - This shouldn't really be possible, but it does not hurt
                     return (key, value); // identity mapping
                 }
                 // We managed to deserialize, so now we look at the JSON fields
                 if v.get("source").is_none() {
-                    // `source` is missing: we add it
+                    // `source` is missing: we add it based on what we received as input
                     v.as_object_mut().unwrap().insert(
                         "source".to_string(),
                         serde_json::to_value(plaid_stl::messages::LogSource::Logback(
@@ -45,7 +43,8 @@ fn create_migration_function(
                     );
                 }
                 if v.get("accessory_data").is_some() {
-                    // `accessory_data` is present: we remove it and add `headers` and `query_params`
+                    // `accessory_data` is present: we remove it and add `headers` and `query_params`.
+                    // Note: the content of `accessory_data` is lost.
                     v.as_object_mut().unwrap().remove("accessory_data");
                     v.as_object_mut()
                         .unwrap()
@@ -56,7 +55,8 @@ fn create_migration_function(
                     );
                 }
                 let id = uuid::Uuid::new_v4().to_string(); // new ID for the logback
-                                                           // Insert the ID into the Map
+
+                // Insert the ID into the Map
                 v.as_object_mut()
                     .unwrap()
                     .insert("id".to_string(), serde_json::to_value(id.clone()).unwrap());
@@ -73,20 +73,6 @@ fn create_migration_function(
                 // Finally we serialize the DelayedMessage, ready for insertion in the DB
                 let delayed_message = serde_json::to_vec(&delayed_message).unwrap();
                 return (id, delayed_message);
-
-                // match serde_json::from_slice::<u64>(&value) {
-                //     Err(_) => {
-                //         // Something went wrong: this is very strange. We leave the pair untouched but it should not happen
-                //         return (key, value);
-                //     }
-                //     Ok(delay) => {
-                //         // We construct the DelayedMessage which will be the new value
-                //         let delayed_message = DelayedMessage::new(delay, message);
-                //         // Finally we serialize the DelayedMessage, ready for insertion in the DB
-                //         let delayed_message = serde_json::to_vec(&delayed_message).unwrap();
-                //         return (id, delayed_message);
-                //     }
-                // }
             }
         }
     })
