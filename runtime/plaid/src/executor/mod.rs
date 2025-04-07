@@ -42,9 +42,9 @@ pub struct Message {
     /// The data passed to the module
     pub data: Vec<u8>,
     /// Any headers the module will have access to, while processing this message
-    pub headers: Option<HashMap<String, Vec<u8>>>,
+    pub headers: HashMap<String, Vec<u8>>,
     /// Any query parameters the module will have access to, while processing this message
-    pub query_params: Option<HashMap<String, Vec<u8>>>,
+    pub query_params: HashMap<String, Vec<u8>>,
     /// Where the message came from
     pub source: LogSource,
     /// If this message is allowed to trigger additional messages to the same
@@ -72,8 +72,8 @@ impl Message {
             id: uuid::Uuid::new_v4().to_string(),
             type_,
             data,
-            headers: Some(HashMap::new()),
-            query_params: Some(HashMap::new()),
+            headers: HashMap::new(),
+            query_params: HashMap::new(),
             source,
             logbacks_allowed,
             response_sender: None,
@@ -87,8 +87,8 @@ impl Message {
         data: Vec<u8>,
         source: LogSource,
         logbacks_allowed: LogbacksAllowed,
-        headers: Option<HashMap<String, Vec<u8>>>,
-        query_params: Option<HashMap<String, Vec<u8>>>,
+        headers: HashMap<String, Vec<u8>>,
+        query_params: HashMap<String, Vec<u8>>,
         response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
         module: Option<Arc<PlaidModule>>,
     ) -> Self {

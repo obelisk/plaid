@@ -6,10 +6,10 @@ use std::{
 use async_trait::async_trait;
 
 #[cfg(feature = "aws")]
-mod dynamodb;
+pub mod dynamodb;
 
 #[cfg(feature = "sled")]
-mod sled;
+pub mod sled;
 
 use futures_util::future::join_all;
 use serde::Deserialize;
@@ -125,6 +125,15 @@ pub trait StorageProvider {
     ) -> Result<Vec<(String, Vec<u8>)>, StorageError>;
     /// Get the number of bytes stored in a namespace. This will include keys and values.
     async fn get_namespace_byte_size(&self, namespace: &str) -> Result<u64, StorageError>;
+    /// Apply a migration to all the entries of a namespace by computing a function on each `(key,value)`
+    /// pair. The old pair is deleted from the DB and the new one is inserted.  
+    /// Note - The function is applied in a random order over the entries. If the function is not injective over the space
+    /// of DB keys (i.e., it produces two equal keys for different inputs), then one of the entries will be overwritten.
+    async fn apply_migration(
+        &self,
+        namespace: &str,
+        f: Box<dyn Fn(String, Vec<u8>) -> (String, Vec<u8>) + Send + Sync>,
+    ) -> Result<(), StorageError>;
 }
 
 impl Storage {

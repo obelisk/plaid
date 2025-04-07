@@ -1,5 +1,5 @@
 pub mod github;
-mod internal;
+pub mod internal;
 mod interval;
 mod okta;
 mod websocket;
