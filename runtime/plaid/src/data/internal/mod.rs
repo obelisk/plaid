@@ -162,7 +162,7 @@ impl Internal {
                 // According to the new format, the key is the ID inside the DelayedMessage's message field
                 match storage.delete(LOGBACK_NS, &log.0.message.id).await {
                     Ok(None) => {
-                        error!("We tried to deleted a log back message that wasn't persisted")
+                        error!("We tried to delete a log back message that wasn't persisted")
                     }
                     Ok(Some(_)) => (),
                     Err(e) => error!("Error removing persisted log: {e}"),
