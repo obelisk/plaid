@@ -93,6 +93,11 @@ pub struct LoggingConfiguration {
     /// so it's easy to operate on Plaid events. It's likely in future the
     /// Splunk logger code will be a specific instantiation of this.
     webhook: Option<webhook::Config>,
+    /// Enables redaction of module logs from all configured logging destinations.
+    /// When set to `true`, logs sent to rules will be omitted from output on module failure.
+    /// Defaults to `false` if not explicitly configured.
+    #[serde(default)]
+    redact_rule_logs: bool,
 }
 
 /// Errors encountered while trying to log something.
@@ -128,6 +133,7 @@ trait PlaidLogger {
 #[derive(Clone)]
 pub struct Logger {
     sender: Sender<Log>,
+    redact_rule_logs: bool,
 }
 
 impl Logger {
@@ -158,9 +164,13 @@ impl Logger {
         error: String,
         log: Vec<u8>,
     ) -> Result<(), LoggingError> {
-        let log = match String::from_utf8(log.clone()) {
-            Ok(log) => log,
-            Err(_) => base64::encode(log),
+        let log = if self.redact_rule_logs {
+            String::default()
+        } else {
+            match String::from_utf8(log.clone()) {
+                Ok(log) => log,
+                Err(_) => base64::encode(log),
+            }
         };
         self.sender
             .send(Log::ModuleExecutionError { module, error, log })
@@ -262,8 +272,15 @@ impl Logger {
 
     pub fn start(config: LoggingConfiguration) -> (Self, JoinHandle<Result<(), LoggingError>>) {
         let (sender, rx) = bounded(4096);
+        let redact_rule_logs = config.redact_rule_logs;
         let _handle = thread::spawn(move || Self::logging_thread_loop(config, rx));
 
-        (Self { sender }, _handle)
+        (
+            Self {
+                sender,
+                redact_rule_logs,
+            },
+            _handle,
+        )
     }
 }
