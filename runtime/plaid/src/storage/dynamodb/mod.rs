@@ -19,9 +19,9 @@ const VALUE: &str = "value";
 #[derive(Deserialize)]
 pub struct Config {
     /// How to authenticate to AWS
-    authentication: AwsAuthentication,
+    pub authentication: AwsAuthentication,
     /// The name of DynamoDB table used for Plaid's DB
-    table_name: String,
+    pub table_name: String,
 }
 
 /// A wrapper for DynamoDB
@@ -188,6 +188,26 @@ impl StorageProvider for DynamoDb {
             counter += item.0.as_bytes().len() as u64 + item.1.len() as u64;
         }
         Ok(counter)
+    }
+
+    async fn apply_migration(
+        &self,
+        namespace: &str,
+        f: Box<dyn Fn(String, Vec<u8>) -> (String, Vec<u8>) + Send + Sync>,
+    ) -> Result<(), StorageError> {
+        // Get all the data for this namespace
+        let data = self.fetch_all(namespace, None).await?;
+        // For each key/value pair, perform the migration...
+        for (key, value) in data {
+            // Apply the transformation and obtain a new key and new value
+            let (new_key, new_value) = f(key.clone(), value);
+            // Delete the old entry because we are about to insert the new one
+            self.delete(namespace, &key).await?;
+            // And insert the new pair
+            self.insert(namespace.to_string(), new_key, new_value)
+                .await?;
+        }
+        Ok(())
     }
 }
 

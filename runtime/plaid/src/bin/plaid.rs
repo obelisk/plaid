@@ -145,16 +145,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // Create the message we're going to send into the execution system.
                         let mut message = Message::new(webhook_configuration.log_type.to_owned(), data[..].to_vec(), source, logbacks_allowed);
 
-                        let mut message_headers = HashMap::new();
                         for requested_header in webhook_configuration.headers.iter() {
                             // TODO: Investigate if this should be get_all?
                             // Without this we don't support receiving multiple headers with the same name
                             // I don't know if this is an issue or not, practically, or if there are security implications.
                             if let Some(value) = headers.get(requested_header) {
-                                message_headers.insert(requested_header.to_string(), value.as_bytes().to_vec());
+                                message.headers.insert(requested_header.to_string(), value.as_bytes().to_vec());
                             }
                         }
-                        message.headers = Some(message_headers);
 
                         // Webhook exists, buffer log
                         if let Err(e) = webhook_server_post_log_sender.try_send(message) {
@@ -264,16 +262,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let (response_send, response_recv) = tokio::sync::oneshot::channel();
 
                                 // Construct a message to send to the rule
-                                let message = Message {
-                                    type_: name.to_string(),
-                                    data: String::new().into_bytes(),
-                                    headers: Some(HashMap::new()),
-                                    query_params: Some(query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect()),
+                                let message = Message::new_detailed(
+                                    name.to_string(),
+                                    String::new().into_bytes(),
                                     source,
                                     logbacks_allowed,
-                                    response_sender: Some(response_send),
-                                    module: Some(rule.clone()),
-                                };
+                                    HashMap::new(),
+                                    query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
+                                    Some(response_send),
+                                    Some(rule.clone()));
 
                                 // Put the message into the standard message queue
                                 if let Err(e) = log_sender.try_send(message) {

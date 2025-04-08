@@ -156,14 +156,7 @@ macro_rules! generate_string_getter {
                     }
                 };
 
-                let $what = match &env.data().message.$what {
-                    Some(v) => v,
-                    None => {
-                        // This should never happen. If the message doesn't have this data,
-                        // we should always have Some(empty_map).
-                        return crate::functions::FunctionErrors::InternalApiError as i32;
-                    }
-                };
+                let $what = &env.data().message.$what;
 
                 let name = match safely_get_string(&memory_view, name_buf, name_len) {
                     Ok(x) => x,
