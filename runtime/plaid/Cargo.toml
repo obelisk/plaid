@@ -1,6 +1,6 @@
 [package]
 name = "plaid"
-version = "0.22.2"
+version = "0.23.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -97,3 +97,7 @@ required-features = ["sled", "aws"]
 name = "db_migrator"
 path = "src/bin/db_migrator.rs"
 required-features = ["sled", "aws"]
+
+[[bin]]
+name = "secrets_json_to_toml"
+path = "src/bin/secrets_json_to_toml.rs"

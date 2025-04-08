@@ -36,10 +36,10 @@ public_key=$(cat plaidrules_key_ed25519.pub | awk '{printf "%s %s %s", $1, $2, $
 
 if uname | grep -q Darwin; then
     # macOS (BSD sed)
-    sed -i '' "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" ./runtime/plaid/resources/secrets.example.json
+    sed -i '' "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" ./runtime/plaid/resources/secrets.example.toml
 else
     # Linux (GNU sed)
-    sed -i "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" ./runtime/plaid/resources/secrets.example.json
+    sed -i "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" ./runtime/plaid/resources/secrets.example.toml
 fi
 
 # Create module signatures directory
@@ -87,7 +87,7 @@ if [ $? -ne 0 ]; then
   # Exit with an error
   exit 1
 fi
-RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features sled,$1 -- --config ${CONFIG_PATH} --secrets plaid/resources/secrets.example.json &
+RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features sled,$1 -- --config ${CONFIG_PATH} --secrets plaid/resources/secrets.example.toml &
 PLAID_PID=$!
 cd ..
 sleep 60
