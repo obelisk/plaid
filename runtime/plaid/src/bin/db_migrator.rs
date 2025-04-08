@@ -2,10 +2,14 @@ use clap::{Arg, Command};
 use plaid::{data::DelayedMessage, executor::Message, storage::StorageProvider};
 use serde_json::Value;
 
-/// This function takes additional parameters and produces the function that defines the data migration.
-/// We use this pattern to be able to take arbitrary parameters that would not fit in the migration
-/// function's signature.
-fn create_migration_function(
+// These functions take additional parameters and produce the function that defines the data migration.
+// We use this pattern to be able to take arbitrary parameters that would not fit in the migration
+// function's signature.
+
+/// Create a migration function that harmonizes logbacks in the DB so that they comply with the latest
+/// serialization format. This ensures that there are no stuck logbacks in the DB that cannot be
+/// deserialized, executed, and then properly deleted.
+fn create_migration_function_harmonize_logbacks_0_22_2(
     log_source_if_missing: String,
 ) -> Box<dyn Fn(String, Vec<u8>) -> (String, Vec<u8>) + Send + Sync> {
     Box::new(move |key, value| {
@@ -77,6 +81,20 @@ fn create_migration_function(
         }
     })
 }
+
+/*
+If other migrations are needed, add functions like
+
+fn create_migration_function_<MIGRATION_NAME>_<DESTINATION_VERSION>(
+    params...
+) -> Box<dyn Fn(String, Vec<u8>) -> (String, Vec<u8>) + Send + Sync> {
+    Box::new(move |key, value| {
+        ... Code for the migration
+    })
+}
+
+and call appropriately from the code below.
+*/
 
 #[tokio::main]
 async fn main() -> Result<(), ()> {
@@ -154,9 +172,12 @@ async fn apply_sled_migration(path: &str, namespace: &str, logsource: &str) -> R
         sled_path: path.to_string(),
     };
     let sled = plaid::storage::sled::Sled::new(config).unwrap();
-    sled.apply_migration(namespace, create_migration_function(logsource.to_string()))
-        .await
-        .unwrap();
+    sled.apply_migration(
+        namespace,
+        create_migration_function_harmonize_logbacks_0_22_2(logsource.to_string()),
+    )
+    .await
+    .unwrap();
     Ok(())
 }
 
@@ -171,7 +192,10 @@ async fn apply_dynamodb_migration(
     };
     let dynamodb = plaid::storage::dynamodb::DynamoDb::new(config).await;
     dynamodb
-        .apply_migration(namespace, create_migration_function(logsource.to_string()))
+        .apply_migration(
+            namespace,
+            create_migration_function_harmonize_logbacks_0_22_2(logsource.to_string()),
+        )
         .await
         .unwrap();
     Ok(())
