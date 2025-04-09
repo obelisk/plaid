@@ -214,9 +214,9 @@ pub fn configure() -> Result<Configuration, ConfigurationError> {
         )
         .arg(
             Arg::new("secrets")
-                .help("Path to the secrets json file")
+                .help("Path to the secrets file")
                 .long("secrets")
-                .default_value("./plaid/private-resources/secrets.json")
+                .default_value("./plaid/private-resources/secrets.toml")
         ).get_matches();
 
     let config_path = matches.get_one::<String>("config").unwrap();
