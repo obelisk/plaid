@@ -101,3 +101,8 @@ required-features = ["sled", "aws"]
 [[bin]]
 name = "secrets_json_to_toml"
 path = "src/bin/secrets_json_to_toml.rs"
+
+[[bin]]
+name = "ddb_logback_explorer"
+path = "src/bin/ddb_logback_explorer.rs"
+required-features = ["aws"]

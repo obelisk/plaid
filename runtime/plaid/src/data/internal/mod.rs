@@ -21,8 +21,8 @@ pub struct InternalConfig {}
 
 #[derive(Serialize, Deserialize)]
 pub struct DelayedMessage {
-    delay: u64,
-    message: Message,
+    pub delay: u64,
+    pub message: Message,
 }
 
 impl DelayedMessage {
