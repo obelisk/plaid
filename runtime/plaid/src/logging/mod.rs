@@ -93,6 +93,16 @@ pub struct LoggingConfiguration {
     /// so it's easy to operate on Plaid events. It's likely in future the
     /// Splunk logger code will be a specific instantiation of this.
     webhook: Option<webhook::Config>,
+    /// Determines whether logs forwarded to rules are output to the configured logging destinations when a module fails.
+    /// When set to `true`, logs are displayed for debugging; when `false`, they are omitted.
+    /// Defaults to `true` if not explicitly configured.
+    #[serde(default = "default_show_log")]
+    show_log_on_error: bool,
+}
+
+/// Default value for `show_log_on_error` if none is provided
+fn default_show_log() -> bool {
+    true
 }
 
 /// Errors encountered while trying to log something.
@@ -128,6 +138,7 @@ trait PlaidLogger {
 #[derive(Clone)]
 pub struct Logger {
     sender: Sender<Log>,
+    show_log_on_error: bool,
 }
 
 impl Logger {
@@ -158,9 +169,13 @@ impl Logger {
         error: String,
         log: Vec<u8>,
     ) -> Result<(), LoggingError> {
-        let log = match String::from_utf8(log.clone()) {
-            Ok(log) => log,
-            Err(_) => base64::encode(log),
+        let log = if self.show_log_on_error {
+            match String::from_utf8(log.clone()) {
+                Ok(log) => log,
+                Err(_) => base64::encode(log),
+            }
+        } else {
+            String::default()
         };
         self.sender
             .send(Log::ModuleExecutionError { module, error, log })
@@ -262,8 +277,15 @@ impl Logger {
 
     pub fn start(config: LoggingConfiguration) -> (Self, JoinHandle<Result<(), LoggingError>>) {
         let (sender, rx) = bounded(4096);
+        let show_log_on_error = config.show_log_on_error;
         let _handle = thread::spawn(move || Self::logging_thread_loop(config, rx));
 
-        (Self { sender }, _handle)
+        (
+            Self {
+                sender,
+                show_log_on_error,
+            },
+            _handle,
+        )
     }
 }
