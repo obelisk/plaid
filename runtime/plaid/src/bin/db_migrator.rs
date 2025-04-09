@@ -65,6 +65,13 @@ fn create_migration_function_harmonize_logbacks_0_22_2(
                     .unwrap()
                     .insert("id".to_string(), serde_json::to_value(id.clone()).unwrap());
 
+                if v.get("logbacks_allowed").is_none() {
+                    v.as_object_mut().unwrap().insert(
+                        "logbacks_allowed".to_string(),
+                        serde_json::Value::String("Unlimited".to_string()),
+                    );
+                }
+
                 // With the changes we have made above, the value v is now basically a serialized Message.
                 // We deserialize it because we need the Message itself
                 let message = serde_json::from_value::<Message>(v).unwrap();
