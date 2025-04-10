@@ -1,3 +1,6 @@
+#[cfg(feature = "aws")]
+mod cloudtrail;
+
 pub mod github;
 pub mod internal;
 mod interval;
@@ -27,6 +30,8 @@ pub use self::internal::DelayedMessage;
 // send to modules
 #[derive(Deserialize)]
 pub struct DataConfig {
+    #[cfg(feature = "aws")]
+    cloudtrail: Option<cloudtrail::CloudtrailConfig>,
     github: Option<github::GithubConfig>,
     okta: Option<okta::OktaConfig>,
     internal: Option<internal::InternalConfig>,
@@ -35,6 +40,8 @@ pub struct DataConfig {
 }
 
 struct DataInternal {
+    #[cfg(feature = "aws")]
+    cloudtrail: Option<cloudtrail::Cloudtrail>,
     github: Option<github::Github>,
     okta: Option<okta::Okta>,
     // Perhaps in the future there will be a reason to explicitly disallow
@@ -61,6 +68,13 @@ impl DataInternal {
         storage: Option<Arc<Storage>>,
         els: Logger,
     ) -> Result<Self, DataError> {
+        #[cfg(feature = "aws")]
+        let cloudtrail = if let Some(ct) = config.cloudtrail {
+            Some(cloudtrail::Cloudtrail::new(ct, logger.clone()).await)
+        } else {
+            None
+        };
+
         let github = config
             .github
             .map(|gh| github::Github::new(gh, logger.clone()));
@@ -92,6 +106,8 @@ impl DataInternal {
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
         Ok(Self {
+            #[cfg(feature = "aws")]
+            cloudtrail,
             github,
             okta,
             internal: Some(internal?),
@@ -110,6 +126,20 @@ impl Data {
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
         let di = DataInternal::new(config, sender, storage, els).await?;
         let handle = tokio::runtime::Handle::current();
+
+        // Start the Cloudtrail task if there is one
+        #[cfg(feature = "aws")]
+        if let Some(mut ct) = di.cloudtrail {
+            handle.spawn(async move {
+                loop {
+                    if let Err(_) = get_and_process_dg_logs(&mut ct).await {
+                        error!("Cloudtrail Data Fetch Error")
+                    }
+
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            });
+        }
 
         // Start the Github Audit task if there is one
         if let Some(mut gh) = di.github {

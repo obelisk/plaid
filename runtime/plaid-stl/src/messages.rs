@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Generator {
+    Cloudtrail,
     Github,
     Okta,
     Interval(String),
@@ -11,6 +12,7 @@ pub enum Generator {
 impl std::fmt::Display for Generator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Generator::Cloudtrail => write!(f, "cloudtrail"),
             Generator::Github => write!(f, "github"),
             Generator::Okta => write!(f, "okta"),
             Generator::Interval(job) => write!(f, "interval/{job}"),
