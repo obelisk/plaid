@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 
 use crate::{executor::Message, get_aws_sdk_config, AwsAuthentication};
 
-use super::DataGenerator;
+use super::{DataGenerator, DataGeneratorLog};
 
 #[derive(Deserialize)]
 pub struct CloudtrailConfig {
@@ -36,7 +36,11 @@ fn default_sleep_milliseconds() -> u64 {
 }
 
 fn default_canon_time() -> u64 {
-    30
+    // According to https://docs.aws.amazon.com/awscloudtrail/latest/userguide/how-cloudtrail-works.html,
+    // "CloudTrail typically delivers logs within an average of about 5 minutes of an API call. This time is not guaranteed."
+    // Some experiments and other resources like https://tracebit.com/blog/how-fast-is-cloudtrail-today-investigating-cloudtrail-delays-using-athena
+    // suggest it is typically lower (average 2m30s), but we take the conservative value.
+    300
 }
 
 /// Represents the entire Cloudtrail data generator set up
@@ -77,7 +81,7 @@ impl DataGenerator for &mut Cloudtrail {
         &self,
         since: time::OffsetDateTime,
         until: time::OffsetDateTime,
-    ) -> Result<Vec<super::DataGeneratorLog>, ()> {
+    ) -> Result<Vec<DataGeneratorLog>, ()> {
         let mut next_token: Option<String> = None;
         let mut logs = vec![];
 
@@ -98,7 +102,7 @@ impl DataGenerator for &mut Cloudtrail {
             if let Some(events) = res.events {
                 // Process Cloudtrail events and convert them into logs, then collect everything into a vector.
                 // We keep only events for which we have an ID, a timestamp and a payload.
-                let log_page: Vec<super::DataGeneratorLog> = events
+                let log_page: Vec<DataGeneratorLog> = events
                     .into_iter()
                     .filter_map(|event| {
                         let id = event.event_id;
@@ -111,7 +115,7 @@ impl DataGenerator for &mut Cloudtrail {
                         match (id, timestamp, payload) {
                             (Some(id), Some(timestamp), Some(payload)) => {
                                 // We have all the pieces: assemble a DataGeneratorLog
-                                let log = super::DataGeneratorLog {
+                                let log = DataGeneratorLog {
                                     id,
                                     timestamp,
                                     payload,

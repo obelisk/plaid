@@ -343,11 +343,6 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
 
             // Check if this is the latest log we've seen and update if so.
             // We'll use the new value to filter the subsequent API calls.
-            //
-            // We can ask the API to return the logs in ascending order so we could in theory just
-            // take the last timstamp and set it as our max log time. I'm okay with doing another check here in the
-            // case that the API's sorting fails to ensure that we do not miss any logs. The number of comparisions here
-            // is nothing to be concerned about.
             if log.timestamp > dg.get_last_seen() {
                 dg.set_last_seen(log.timestamp);
             }
@@ -369,8 +364,8 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
             );
 
             // Important: we have to move the window forward. Otherwise, on the next call nothing will
-            // change: with the same `since`, we will get the same logs and we will discard them all because
-            // they will all be in the cache. I.e., the system will enter a deadlock.
+            // change: with the same `since` and `until`, we will get the same logs and we will discard
+            // them all because they will all be in the cache. I.e., the system will enter a deadlock.
             // To prevent this, we move `since` forward by a portion of the lookback window.
             // This ensures that, eventually, we will get some new logs.
             dg.set_last_seen(
