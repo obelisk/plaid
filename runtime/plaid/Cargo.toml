@@ -1,6 +1,6 @@
 [package]
 name = "plaid"
-version = "0.23.1"
+version = "0.23.2"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -86,7 +86,7 @@ path = "src/bin/request_handler.rs"
 
 [[bin]]
 name = "secrets_manager"
-path = "src/bin/secrets_manager.rs"
+path = "src/bin/secrets_manager/main.rs"
 
 [[bin]]
 name = "sled_ddb_migrator"
