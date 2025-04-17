@@ -293,6 +293,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-cloudtrail"
+version = "1.70.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b42efbe93cce06dd3ec322eb33d96269063b63389d2025351d18a6fa57557685"
+dependencies = [
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 0.2.12",
+ "once_cell",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-dynamodb"
 version = "1.71.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3205,11 +3228,12 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "plaid"
-version = "0.23.1"
+version = "0.24.0"
 dependencies = [
  "alkali",
  "async-trait",
  "aws-config",
+ "aws-sdk-cloudtrail",
  "aws-sdk-dynamodb",
  "aws-sdk-kms",
  "aws-sdk-secretsmanager",
@@ -3254,7 +3278,7 @@ dependencies = [
 
 [[package]]
 name = "plaid_stl"
-version = "0.23.1"
+version = "0.24.0"
 dependencies = [
  "base64 0.13.1",
  "chrono",

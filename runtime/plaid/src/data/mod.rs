@@ -1,3 +1,6 @@
+#[cfg(feature = "aws")]
+mod cloudtrail;
+
 pub mod github;
 pub mod internal;
 mod interval;
@@ -27,6 +30,8 @@ pub use self::internal::DelayedMessage;
 // send to modules
 #[derive(Deserialize)]
 pub struct DataConfig {
+    #[cfg(feature = "aws")]
+    cloudtrail: Option<cloudtrail::CloudtrailConfig>,
     github: Option<github::GithubConfig>,
     okta: Option<okta::OktaConfig>,
     internal: Option<internal::InternalConfig>,
@@ -35,6 +40,8 @@ pub struct DataConfig {
 }
 
 struct DataInternal {
+    #[cfg(feature = "aws")]
+    cloudtrail: Option<cloudtrail::Cloudtrail>,
     github: Option<github::Github>,
     okta: Option<okta::Okta>,
     // Perhaps in the future there will be a reason to explicitly disallow
@@ -61,6 +68,13 @@ impl DataInternal {
         storage: Option<Arc<Storage>>,
         els: Logger,
     ) -> Result<Self, DataError> {
+        #[cfg(feature = "aws")]
+        let cloudtrail = if let Some(ct) = config.cloudtrail {
+            Some(cloudtrail::Cloudtrail::new(ct, logger.clone()).await)
+        } else {
+            None
+        };
+
         let github = config
             .github
             .map(|gh| github::Github::new(gh, logger.clone()));
@@ -92,6 +106,8 @@ impl DataInternal {
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
         Ok(Self {
+            #[cfg(feature = "aws")]
+            cloudtrail,
             github,
             okta,
             internal: Some(internal?),
@@ -110,6 +126,20 @@ impl Data {
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
         let di = DataInternal::new(config, sender, storage, els).await?;
         let handle = tokio::runtime::Handle::current();
+
+        // Start the Cloudtrail task if there is one
+        #[cfg(feature = "aws")]
+        if let Some(mut ct) = di.cloudtrail {
+            handle.spawn(async move {
+                loop {
+                    if let Err(_) = get_and_process_dg_logs(&mut ct).await {
+                        error!("Cloudtrail Data Fetch Error")
+                    }
+
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            });
+        }
 
         // Start the Github Audit task if there is one
         if let Some(mut gh) = di.github {
@@ -313,11 +343,6 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
 
             // Check if this is the latest log we've seen and update if so.
             // We'll use the new value to filter the subsequent API calls.
-            //
-            // We can ask the API to return the logs in ascending order so we could in theory just
-            // take the last timstamp and set it as our max log time. I'm okay with doing another check here in the
-            // case that the API's sorting fails to ensure that we do not miss any logs. The number of comparisions here
-            // is nothing to be concerned about.
             if log.timestamp > dg.get_last_seen() {
                 dg.set_last_seen(log.timestamp);
             }
@@ -339,8 +364,8 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
             );
 
             // Important: we have to move the window forward. Otherwise, on the next call nothing will
-            // change: with the same `since`, we will get the same logs and we will discard them all because
-            // they will all be in the cache. I.e., the system will enter a deadlock.
+            // change: with the same `since` and `until`, we will get the same logs and we will discard
+            // them all because they will all be in the cache. I.e., the system will enter a deadlock.
             // To prevent this, we move `since` forward by a portion of the lookback window.
             // This ensures that, eventually, we will get some new logs.
             dg.set_last_seen(
