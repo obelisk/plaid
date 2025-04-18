@@ -1461,7 +1461,8 @@ pub fn search_code(
     let mut page = 0;
 
     // Use a larger page size to make less requests and reduce chances of hitting the rate limit
-    params.insert("per_page", "100".to_owned());
+    let per_page = 100;
+    params.insert("per_page", per_page.to_string());
 
     const RETURN_BUFFER_SIZE: usize = 1 * 1024 * 1024; // 1 MiB
 
@@ -1498,7 +1499,16 @@ pub fn search_code(
             break; // we are past the last page
         }
 
+        // Number of items we got on this page
+        let received_page_size = file_search_result.items.len();
+
         search_results.extend(file_search_result.items);
+
+        // If we did not fill this page, we know there won't be a next one.
+        // So we can stop here and save one API call.
+        if received_page_size < per_page {
+            break;
+        }
     }
 
     // Now that all the search results have been collected, apply the module-side selection criteria.
@@ -1664,10 +1674,7 @@ pub fn comment_on_pull_request(
     let request = serde_json::to_string(&params).unwrap();
 
     let res = unsafe {
-        github_comment_on_pull_request(
-            request.as_bytes().as_ptr(),
-            request.as_bytes().len(),
-        )
+        github_comment_on_pull_request(request.as_bytes().as_ptr(), request.as_bytes().len())
     };
 
     if res < 0 {
