@@ -52,22 +52,22 @@ impl std::fmt::Display for Apis {
 
 impl Slack {
     /// Get token for a bot, if present
-    fn get_token(&self, bot: &str) -> Result<String> {
-        match self.config.bot_tokens.get(bot) {
-            Some(token) => Ok(format!("Bearer {token}")),
-            None => Err(ApiError::SlackError(SlackError::UnknownBot(
+    fn get_token(&self, bot: &str) -> Result<&String> {
+        self.config
+            .bot_tokens
+            .get(bot)
+            .ok_or(ApiError::SlackError(SlackError::UnknownBot(
                 bot.to_string(),
-            ))),
-        }
+            )))
     }
 
     /// Make a call to the Slack API
-    async fn call_slack(&self, bot_name: String, api: Apis) -> Result<(u16, String)> {
+    async fn call_slack(&self, bot: String, api: Apis) -> Result<(u16, String)> {
         let r = api
             .build_request(&self.client)
-            .header("Authorization", self.get_token(&bot_name)?);
+            .header("Authorization", format!("Bearer {}", self.get_token(&bot)?));
 
-        info!("Calling [{api}] for bot: {bot_name}");
+        info!("Calling [{api}] for bot: {bot}");
         let resp = r.send().await.map_err(|e| ApiError::NetworkError(e))?;
         let status = resp.status();
         let response = resp.text().await.unwrap_or_default();
