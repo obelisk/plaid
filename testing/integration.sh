@@ -3,7 +3,7 @@
 # Set up all the variables we need to run the integration tests
 PLATFORM=$(uname -a)
 
-CONFIG_PATH="runtime/plaid/resources/plaid.toml"
+CONFIG_PATH="plaid/resources/config/"
 CONFIG_WORKING_PATH=/tmp/plaid_config.toml
 
 SECRET_PATH="runtime/plaid/resources/secrets.example.toml"
@@ -91,9 +91,8 @@ echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
 
 if [ "$1" == "llvm" ]; then
-  # If the compiler is llvm, modify the plaid.toml file to use the llvm backend
-  # and save to a new file
-  sed -i.bak 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' $CONFIG_WORKING_PATH && rm $CONFIG_WORKING_PATH.bak
+  # If the compiler is llvm, modify the config to use the llvm backend
+  sed -i 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' ${CONFIG_WORKING_PATH}/loading.toml
   # If macOS
   if  uname | grep -q Darwin; then
     export RUSTFLAGS="-L /opt/homebrew/lib/"
