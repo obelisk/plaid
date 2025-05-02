@@ -182,7 +182,7 @@ pub struct GetIdFromEmail {
     pub email: String,
 }
 
-/// Get a Slack user's ID from their email address
+/// Get a user's ID from their email address
 pub fn get_id_from_email(bot: &str, email: &str) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(slack, get_id_from_email);
@@ -215,4 +215,134 @@ pub fn get_id_from_email(bot: &str, email: &str) -> Result<String, PlaidFunction
     let res = String::from_utf8(return_buffer).unwrap();
 
     Ok(res)
+}
+
+/// Data to be sent to the runtime for getting a user's presence status
+#[derive(Serialize, Deserialize)]
+pub struct GetPresence {
+    pub bot: String,
+    pub id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetPresenceResponse {
+    pub ok: bool,
+    pub presence: String,
+}
+
+/// Get a user's presence status from their ID
+pub fn get_presence(bot: &str, id: &str) -> Result<GetPresenceResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, get_presence);
+    }
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&GetPresence {
+        bot: bot.to_string(),
+        id: id.to_string(),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_get_presence(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    // This should only happen if the Slack API returns a different structure
+    // than expected. Which would be odd because to get here the runtime
+    // successfully parsed the response.
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SlackUser {
+    pub id: String,
+    pub team_id: String,
+    pub name: String,
+    pub deleted: bool,
+    pub color: String,
+    pub real_name: String,
+    pub tz: String,
+    pub tz_label: String,
+    pub tz_offset: i32,
+    pub profile: SlackUserProfile,
+    pub is_admin: bool,
+    pub is_owner: bool,
+    pub is_primary_owner: bool,
+    pub is_restricted: bool,
+    pub is_ultra_restricted: bool,
+    pub is_bot: bool,
+    pub is_app_user: bool,
+    pub updated: i32,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SlackUserProfile {
+    pub status_text: String,
+    pub status_emoji: String,
+}
+
+/// Data to be sent to the runtime for getting a user's presence status
+#[derive(Serialize, Deserialize)]
+pub struct UserInfo {
+    pub bot: String,
+    pub id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct UserInfoResponse {
+    pub ok: bool,
+    pub user: SlackUser,
+}
+
+/// Get a user's info from their ID
+pub fn user_info(bot: &str, id: &str) -> Result<UserInfoResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, user_info);
+    }
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&GetPresence {
+        bot: bot.to_string(),
+        id: id.to_string(),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_user_info(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    // This should only happen if the Slack API returns a different structure
+    // than expected. Which would be odd because to get here the runtime
+    // successfully parsed the response.
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
 }
