@@ -21,17 +21,13 @@ fi
 RH_PID=$!
 
 
-# Define what webhook within Plaid we're going to call
-
-# Check if we're running in GitHub Actions
-
 
 # Call the webhook
 OUTPUT=$(curl -XPOST -d 'slack_input' http://$PLAID_LOCATION/webhook/$URL)
 sleep 2
 kill $RH_PID 2>&1 > /dev/null
 
-echo -e "OK" > expected.txt
+echo -e "OK\nOK\nOK" > expected.txt
 diff expected.txt $FILE
 RESULT=$?
 

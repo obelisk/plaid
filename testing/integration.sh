@@ -51,10 +51,12 @@ if uname | grep -q Darwin; then
     # macOS (BSD sed)
     sed -i '' "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" $SECRET_WORKING_PATH
     sed -i '' "s|{CI_SLACK_TEST_WEBHOOK}|$SLACK_TEST_WEBHOOK|g" $SECRET_WORKING_PATH
+    sed -i '' "s|{CI_SLACK_TEST_BOT_TOKEN}|$SLACK_TEST_BOT_TOKEN|g" $SECRET_WORKING_PATH
 else
     # Linux (GNU sed)
     sed -i "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" $SECRET_WORKING_PATH
     sed -i "s|{CI_SLACK_TEST_WEBHOOK}|$SLACK_TEST_WEBHOOK|g" $SECRET_WORKING_PATH
+    sed -i "s|{CI_SLACK_TEST_BOT_TOKEN}|$SLACK_TEST_BOT_TOKEN|g" $SECRET_WORKING_PATH
 fi
 
 # Clear out the module_signatures directory

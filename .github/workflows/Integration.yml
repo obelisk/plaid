@@ -12,6 +12,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   SLACK_TEST_WEBHOOK: ${{ secrets.SLACK_TEST_WEBHOOK }}
+  SLACK_TEST_BOT_TOKEN: ${{ secrets.SLACK_TEST_BOT_TOKEN }}
 
 jobs:
   ubuntu-cranelift:
