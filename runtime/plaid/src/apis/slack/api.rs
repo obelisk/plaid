@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use plaid_stl::slack::{GetIdFromEmail, PostMessage, ViewOpen};
 use reqwest::{Client, RequestBuilder};
 use serde::{Deserialize, Serialize};
 
@@ -88,20 +89,13 @@ impl Slack {
     /// Open an arbitrary view for a configured bot. The view contents is defined by the caller but the bot
     /// must be configured in Plaid.
     pub async fn views_open(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32, ApiError> {
-        let params: plaid_stl::slack::ViewOpen =
-            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let p: ViewOpen = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        match self
-            .call_slack(params.bot.clone(), Apis::ViewsOpen(params))
-            .await
-        {
+        match self.call_slack(p.bot.clone(), Apis::ViewsOpen(p)).await {
             Ok((200, _)) => Ok(0),
-            Ok((status, _)) => {
-                error!("Slack returned unexpected status code: {status}");
-                Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
-                    status,
-                )))
-            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
             Err(e) => Err(e),
         }
     }
@@ -109,19 +103,12 @@ impl Slack {
     /// Call the Slack postMessage API. The message and location are defined by the module but the bot
     /// must be configured in Plaid.
     pub async fn post_message(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32, ApiError> {
-        let params: plaid_stl::slack::PostMessage =
-            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
-        match self
-            .call_slack(params.bot.clone(), Apis::PostMessage(params))
-            .await
-        {
+        let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self.call_slack(p.bot.clone(), Apis::PostMessage(p)).await {
             Ok((200, _)) => Ok(0),
-            Ok((status, _)) => {
-                error!("Slack returned unexpected status code: {status}");
-                Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
-                    status,
-                )))
-            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
             Err(e) => Err(e),
         }
     }
@@ -132,27 +119,18 @@ impl Slack {
         params: &str,
         _: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let params: plaid_stl::slack::GetIdFromEmail =
-            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let p: GetIdFromEmail = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        match self
-            .call_slack(params.bot.clone(), Apis::LookupByEmail(params))
-            .await
-        {
+        match self.call_slack(p.bot.clone(), Apis::LookupByEmail(p)).await {
             Ok((200, response)) => {
-                let response: SlackUserProfile = serde_json::from_str(&response).map_err(|_| {
-                    ApiError::SlackError(SlackError::UnexpectedPayload(
-                        "could not deserialize to Slack user profile".to_string(),
-                    ))
+                let response: SlackUserProfile = serde_json::from_str(&response).map_err(|e| {
+                    ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
                 })?;
                 Ok(response.user.id)
             }
-            Ok((status, _)) => {
-                error!("Slack returned unexpected status code: {status}");
-                Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
-                    status,
-                )))
-            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
             Err(e) => Err(e),
         }
     }
