@@ -53,14 +53,13 @@ test_mode_exemptions = [
     "test_time.wasm",
     "test_shared_db_rule_1.wasm",
     "test_shared_db_rule_2.wasm",
+    "test_slack.wasm",
 ]
 
 
 # Uncomment this to require that all rules be signed by an authorized signer
 [loading.module_signing]
-authorized_signers = [
-    "{plaid-secret{public-key}}",
-]
+authorized_signers = ["{plaid-secret{public-key}}"]
 signatures_required = 1
 
 [loading.persistent_response_size]
@@ -105,6 +104,7 @@ signatures_required = 1
 "test_time.wasm" = "time"
 "test_shared_db_rule_1.wasm" = "test_shareddb_1"
 "test_shared_db_rule_2.wasm" = "test_shareddb_2"
+"test_slack.wasm" = "test_slack"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -131,7 +131,6 @@ default = "Unlimited"
 [loading.storage_size.module_overrides]
 "test_db.wasm" = { Limited = 50 }
 
-
 # [apis."okta"]
 # token = ""
 # domain = ""
@@ -153,6 +152,7 @@ allowed_rules = [
     "test_get_everything.wasm",
     "test_shared_db_rule_1.wasm",
     "test_shared_db_rule_2.wasm",
+    "test_slack.wasm",
 ]
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
@@ -238,6 +238,7 @@ available_in_test_mode = false
 
 [apis."slack"]
 [apis."slack"."webhooks"]
+test_webhook = "{plaid-secret{test-webhook-secret}}"
 [apis."slack"."bot_tokens"]
 
 [apis."web"]
@@ -373,6 +374,10 @@ headers = []
 
 [webhooks."internal".webhooks."testregex"]
 log_type = "test_regex"
+headers = []
+
+[webhooks."internal".webhooks."testslack"]
+log_type = "test_slack"
 headers = []
 
 
