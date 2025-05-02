@@ -18,6 +18,7 @@ enum Apis {
 }
 
 const SLACK_API_URL: &str = "https://slack.com/api/";
+type Result<T> = std::result::Result<T, ApiError>;
 
 impl Apis {
     fn build_request(&self, client: &Client) -> RequestBuilder {
@@ -51,7 +52,7 @@ impl std::fmt::Display for Apis {
 
 impl Slack {
     /// Get token for a bot, if present
-    fn get_token(&self, bot: &str) -> Result<String, ApiError> {
+    fn get_token(&self, bot: &str) -> Result<String> {
         match self.config.bot_tokens.get(bot) {
             Some(token) => Ok(format!("Bearer {token}")),
             None => Err(ApiError::SlackError(SlackError::UnknownBot(
@@ -61,7 +62,7 @@ impl Slack {
     }
 
     /// Make a call to the Slack API
-    async fn call_slack(&self, bot_name: String, api: Apis) -> Result<(u16, String), ApiError> {
+    async fn call_slack(&self, bot_name: String, api: Apis) -> Result<(u16, String)> {
         let r = api
             .build_request(&self.client)
             .header("Authorization", self.get_token(&bot_name)?);
@@ -76,7 +77,7 @@ impl Slack {
 
     /// Open an arbitrary view for a configured bot. The view contents is defined by the caller but the bot
     /// must be configured in Plaid.
-    pub async fn views_open(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32, ApiError> {
+    pub async fn views_open(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32> {
         let p: ViewOpen = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         match self.call_slack(p.bot.clone(), Apis::ViewsOpen(p)).await {
             Ok((200, _)) => Ok(0),
@@ -89,7 +90,7 @@ impl Slack {
 
     /// Call the Slack postMessage API. The message and location are defined by the module but the bot
     /// must be configured in Plaid.
-    pub async fn post_message(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32, ApiError> {
+    pub async fn post_message(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32> {
         let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         match self.call_slack(p.bot.clone(), Apis::PostMessage(p)).await {
             Ok((200, _)) => Ok(0),
@@ -101,11 +102,7 @@ impl Slack {
     }
 
     /// Calls the Slack API to retrieve a user's Slack ID from their email address
-    pub async fn get_id_from_email(
-        &self,
-        params: &str,
-        _: Arc<PlaidModule>,
-    ) -> Result<String, ApiError> {
+    pub async fn get_id_from_email(&self, params: &str, _: Arc<PlaidModule>) -> Result<String> {
         /// Slack user profile as returned by https://api.slack.com/methods/users.lookupByEmail
         #[derive(Serialize, Deserialize)]
         struct SlackUserProfile {
