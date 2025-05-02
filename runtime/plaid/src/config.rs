@@ -4,6 +4,7 @@ use plaid_stl::messages::LogbacksAllowed;
 use ring::digest::{self, digest};
 use serde::{de, Deserialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crate::performance::PerformanceMonitoring;
 
@@ -232,15 +233,16 @@ pub fn configure() -> Result<Configuration, ConfigurationError> {
     read_and_interpolate(config_folder, secrets_path, false)
 }
 
-/// Reads a configuration file and a secrets file, interpolates the secrets into the configuration,
-/// and parses the result into a `Configuration` struct.
+/// Reads configuration files from a given folder and a secrets file, concatenates the config files into one,
+/// interpolates the secrets into the configuration, and parses the result into a `Configuration` struct.
 pub fn read_and_interpolate(
     config_folder: &str,
     secrets_path: &str,
     show_config: bool,
 ) -> Result<Configuration, ConfigurationError> {
-    // Read the configuration files from a given folder, and assemble them into one
+    // Read the configuration files from a given folder, and concatenate them into one
     let mut config = String::new();
+
     let entries = match std::fs::read_dir(config_folder) {
         Ok(x) => x,
         Err(e) => {
@@ -248,24 +250,26 @@ pub fn read_and_interpolate(
             return Err(ConfigurationError::FileError);
         }
     };
-    for entry in entries {
-        let path = match entry {
-            Ok(entry) => entry.path(),
+
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|dir_entry| dir_entry.path())
+        .filter(|path| path.is_file())
+        .collect();
+    paths.sort_by(|a, b| {
+        a.file_name()
+            .and_then(|a_name| b.file_name().map(|b_name| a_name.cmp(b_name)))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    for path in paths {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => config.push_str(&content),
             Err(e) => {
-                error!("Encountered file error when trying to read configuration! Error: {e}");
+                error!("Encountered error when trying to read configuration! Error: {e}");
                 return Err(ConfigurationError::FileError);
             }
         };
-
-        if path.is_file() {
-            match std::fs::read_to_string(&path) {
-                Ok(content) => config.push_str(&content),
-                Err(e) => {
-                    error!("Encountered error when trying to read configuration! Error: {e}");
-                    return Err(ConfigurationError::FileError);
-                }
-            };
-        }
     }
 
     // Read the secrets file and parse into a TOML object
