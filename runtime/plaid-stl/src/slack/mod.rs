@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
 
@@ -22,7 +22,7 @@ fn slack_format(msg: &str) -> String {
     struct SlackText {
         text: String,
     }
-    
+
     let new_message = SlackText {
         text: msg.to_string(),
     };
@@ -87,6 +87,14 @@ pub fn post_raw_text_to_webhook(name: &str, log: &str) -> Result<(), i32> {
     Ok(())
 }
 
+/// Definition of the structured data to be sent to the Plaid runtime for opening
+/// a Slack view
+#[derive(Serialize, Deserialize)]
+pub struct PostMessage {
+    pub bot: String,
+    pub body: String,
+}
+
 pub fn post_message(bot: &str, channel: &str, text: &str) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(slack, post_message);
@@ -97,11 +105,11 @@ pub fn post_message(bot: &str, channel: &str, text: &str) -> Result<(), PlaidFun
         text: text.to_owned(),
     };
 
-    let mut params: HashMap<&'static str, String> = HashMap::new();
-    params.insert("bot", bot.to_string());
-    params.insert("body", serde_json::to_string(&message).unwrap());
-
-    let params = serde_json::to_string(&params).unwrap();
+    let params = serde_json::to_string(&PostMessage {
+        bot: bot.to_string(),
+        body: serde_json::to_string(&message).unwrap(),
+    })
+    .unwrap();
 
     let res = unsafe { slack_post_message(params.as_ptr(), params.len()) };
 
@@ -126,11 +134,11 @@ pub fn post_message_with_blocks(
         blocks: text.to_owned(),
     };
 
-    let mut params: HashMap<&'static str, String> = HashMap::new();
-    params.insert("bot", bot.to_string());
-    params.insert("body", serde_json::to_string(&message).unwrap());
-
-    let params = serde_json::to_string(&params).unwrap();
+    let params = serde_json::to_string(&PostMessage {
+        bot: bot.to_string(),
+        body: serde_json::to_string(&message).unwrap(),
+    })
+    .unwrap();
 
     let res = unsafe { slack_post_message(params.as_ptr(), params.len()) };
 
@@ -141,16 +149,24 @@ pub fn post_message_with_blocks(
     Ok(())
 }
 
+/// Definition of the structured data to be sent to the Plaid runtime for opening
+/// a Slack view
+#[derive(Serialize, Deserialize)]
+pub struct ViewOpen {
+    pub bot: String,
+    pub body: String,
+}
+
 pub fn views_open(bot: &str, view: &str) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(slack, views_open);
     }
 
-    let mut params: HashMap<&'static str, &str> = HashMap::new();
-    params.insert("bot", bot);
-    params.insert("body", view);
-
-    let params = serde_json::to_string(&params).unwrap();
+    let params = serde_json::to_string(&ViewOpen {
+        bot: bot.to_string(),
+        body: view.to_string(),
+    })
+    .unwrap();
 
     let res = unsafe { slack_views_open(params.as_ptr(), params.len()) };
 
@@ -161,6 +177,14 @@ pub fn views_open(bot: &str, view: &str) -> Result<(), PlaidFunctionError> {
     Ok(())
 }
 
+/// Definition of the structured data to be sent to the Plaid runtime for getting
+/// a Slack user's ID from their email address
+#[derive(Serialize, Deserialize)]
+pub struct GetIdFromEmail {
+    pub bot: String,
+    pub email: String,
+}
+
 /// Get a Slack user's ID from their email address
 pub fn get_id_from_email(bot: &str, email: &str) -> Result<String, PlaidFunctionError> {
     extern "C" {
@@ -169,11 +193,11 @@ pub fn get_id_from_email(bot: &str, email: &str) -> Result<String, PlaidFunction
     const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let mut params: HashMap<&'static str, &str> = HashMap::new();
-    params.insert("bot", bot);
-    params.insert("email", email);
-
-    let params = serde_json::to_string(&params).unwrap();
+    let params = serde_json::to_string(&GetIdFromEmail {
+        bot: bot.to_string(),
+        email: email.to_string(),
+    })
+    .unwrap();
 
     let res = unsafe {
         slack_get_id_from_email(
