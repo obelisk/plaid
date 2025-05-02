@@ -10,56 +10,37 @@ use crate::{
 
 use super::Slack;
 
+#[derive(Debug)]
 enum Apis {
     PostMessage,
     ViewsOpen,
     LookupByEmail,
 }
 
+const SLACK_API_URL: &str = "https://slack.com/api/";
+
 impl Apis {
-    fn get_uri(&self) -> &str {
+    fn build_request(&self, client: &Client, uri_params: Option<String>) -> RequestBuilder {
+        let uri_params = uri_params.map(|p| format!("?{p}")).unwrap_or_default();
+
         match self {
-            Self::PostMessage => "chat.postMessage",
-            Self::ViewsOpen => "views.open",
-            Self::LookupByEmail => "users.lookupByEmail",
+            Self::PostMessage => client
+                .post(format!(
+                    "{SLACK_API_URL}{api}{uri_params}",
+                    api = "chat.postMessage"
+                ))
+                .header("Content-Type", "application/json; charset=utf-8"),
+            Self::ViewsOpen => client
+                .post(format!(
+                    "{SLACK_API_URL}{api}{uri_params}",
+                    api = "view.open"
+                ))
+                .header("Content-Type", "application/json; charset=utf-8"),
+            Self::LookupByEmail => client.get(format!(
+                "{SLACK_API_URL}{api}{uri_params}",
+                api = "users.lookupByEmail"
+            )),
         }
-    }
-
-    fn build_post_request(client: &Client, api: &Apis, uri_params: String) -> RequestBuilder {
-        client
-            .post(format!(
-                "https://slack.com/api/{}{uri_params}",
-                api.get_uri()
-            ))
-            .header("Content-Type", "application/json; charset=utf-8")
-    }
-
-    fn build_get_request(client: &Client, api: &Apis, uri_params: String) -> RequestBuilder {
-        client.get(format!(
-            "https://slack.com/api/{}{uri_params}",
-            api.get_uri()
-        ))
-    }
-
-    /// Create a request builder and properly configure the API, headers, and authorization token
-    fn request_builder<T: AsRef<str>>(
-        client: &Client,
-        api: &Apis,
-        token: String,
-        uri_params: Option<T>,
-    ) -> RequestBuilder {
-        let uri_params = match uri_params {
-            Some(p) => format!("?{}", p.as_ref()),
-            None => String::new(),
-        };
-
-        let builder = match api {
-            Apis::PostMessage => Self::build_post_request(client, api, uri_params),
-            Apis::ViewsOpen => Self::build_post_request(client, api, uri_params),
-            Apis::LookupByEmail => Self::build_get_request(client, api, uri_params),
-        };
-
-        builder.header("Authorization", token)
     }
 }
 
@@ -93,14 +74,15 @@ impl Slack {
         body: Option<String>,
         uri_params: Option<String>,
     ) -> Result<(u16, String), ApiError> {
-        let mut request =
-            Apis::request_builder(&self.client, &api, self.get_token(&bot_name)?, uri_params);
+        let mut request = api
+            .build_request(&self.client, uri_params)
+            .header("Authorization", self.get_token(&bot_name)?);
 
         if let Some(body) = body {
             request = request.body(body);
         }
 
-        info!("Calling [{}] for bot: {bot_name}", api.get_uri());
+        info!("Calling [{:?}] for bot: {bot_name}", api);
         match request.send().await {
             Ok(r) => {
                 let status = r.status();
