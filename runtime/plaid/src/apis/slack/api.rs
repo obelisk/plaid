@@ -63,16 +63,6 @@ impl Apis {
     }
 }
 
-impl std::fmt::Display for Apis {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::PostMessage => write!(f, "Chat Post Message"),
-            Self::ViewsOpen => write!(f, "Views Open"),
-            Self::LookupByEmail => write!(f, "Users Lookup By Email"),
-        }
-    }
-}
-
 /// Slack user profile as returned by https://api.slack.com/methods/users.lookupByEmail
 #[derive(Serialize, Deserialize)]
 struct SlackUserProfile {
@@ -110,7 +100,7 @@ impl Slack {
             request = request.body(body);
         }
 
-        info!("Calling {api} for bot: {bot_name}");
+        info!("Calling [{}] for bot: {bot_name}", api.get_uri());
         match request.send().await {
             Ok(r) => {
                 let status = r.status();
