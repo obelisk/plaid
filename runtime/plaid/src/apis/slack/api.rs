@@ -49,17 +49,6 @@ impl std::fmt::Display for Apis {
     }
 }
 
-/// Slack user profile as returned by https://api.slack.com/methods/users.lookupByEmail
-#[derive(Serialize, Deserialize)]
-struct SlackUserProfile {
-    user: SlackUser,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SlackUser {
-    id: String,
-}
-
 impl Slack {
     /// Get token for a bot, if present
     fn get_token(&self, bot: &str) -> Result<String, ApiError> {
@@ -78,7 +67,6 @@ impl Slack {
             .header("Authorization", self.get_token(&bot_name)?);
 
         info!("Calling [{api}] for bot: {bot_name}");
-
         let resp = r.send().await.map_err(|e| ApiError::NetworkError(e))?;
         let status = resp.status();
         let response = resp.text().await.unwrap_or_default();
@@ -90,7 +78,6 @@ impl Slack {
     /// must be configured in Plaid.
     pub async fn views_open(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32, ApiError> {
         let p: ViewOpen = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
-
         match self.call_slack(p.bot.clone(), Apis::ViewsOpen(p)).await {
             Ok((200, _)) => Ok(0),
             Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
@@ -119,8 +106,18 @@ impl Slack {
         params: &str,
         _: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let p: GetIdFromEmail = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        /// Slack user profile as returned by https://api.slack.com/methods/users.lookupByEmail
+        #[derive(Serialize, Deserialize)]
+        struct SlackUserProfile {
+            user: SlackUser,
+        }
 
+        #[derive(Serialize, Deserialize)]
+        struct SlackUser {
+            id: String,
+        }
+
+        let p: GetIdFromEmail = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         match self.call_slack(p.bot.clone(), Apis::LookupByEmail(p)).await {
             Ok((200, response)) => {
                 let response: SlackUserProfile = serde_json::from_str(&response).map_err(|e| {
