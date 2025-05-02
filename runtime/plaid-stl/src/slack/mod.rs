@@ -87,8 +87,7 @@ pub fn post_raw_text_to_webhook(name: &str, log: &str) -> Result<(), i32> {
     Ok(())
 }
 
-/// Definition of the structured data to be sent to the Plaid runtime for opening
-/// a Slack view
+/// Data to be sent to the Plaid runtime for posting a message
 #[derive(Serialize, Deserialize)]
 pub struct PostMessage {
     pub bot: String,
@@ -149,8 +148,7 @@ pub fn post_message_with_blocks(
     Ok(())
 }
 
-/// Definition of the structured data to be sent to the Plaid runtime for opening
-/// a Slack view
+/// Data to be sent to the runtime to open a view
 #[derive(Serialize, Deserialize)]
 pub struct ViewOpen {
     pub bot: String,
@@ -177,8 +175,7 @@ pub fn views_open(bot: &str, view: &str) -> Result<(), PlaidFunctionError> {
     Ok(())
 }
 
-/// Definition of the structured data to be sent to the Plaid runtime for getting
-/// a Slack user's ID from their email address
+/// Data to be sent to the runtime for getting a user's ID from their email address
 #[derive(Serialize, Deserialize)]
 pub struct GetIdFromEmail {
     pub bot: String,
