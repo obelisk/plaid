@@ -10,36 +10,40 @@ use crate::{
 
 use super::Slack;
 
-#[derive(Debug)]
 enum Apis {
-    PostMessage,
-    ViewsOpen,
-    LookupByEmail,
+    PostMessage(plaid_stl::slack::PostMessage),
+    ViewsOpen(plaid_stl::slack::ViewOpen),
+    LookupByEmail(plaid_stl::slack::GetIdFromEmail),
 }
 
 const SLACK_API_URL: &str = "https://slack.com/api/";
 
 impl Apis {
-    fn build_request(&self, client: &Client, uri_params: Option<String>) -> RequestBuilder {
-        let uri_params = uri_params.map(|p| format!("?{p}")).unwrap_or_default();
-
+    fn build_request(&self, client: &Client) -> RequestBuilder {
         match self {
-            Self::PostMessage => client
-                .post(format!(
-                    "{SLACK_API_URL}{api}{uri_params}",
-                    api = "chat.postMessage"
-                ))
+            Self::PostMessage(p) => client
+                .post(format!("{SLACK_API_URL}{api}", api = "chat.postMessage"))
+                .body(p.body.clone())
                 .header("Content-Type", "application/json; charset=utf-8"),
-            Self::ViewsOpen => client
-                .post(format!(
-                    "{SLACK_API_URL}{api}{uri_params}",
-                    api = "view.open"
-                ))
+            Self::ViewsOpen(p) => client
+                .post(format!("{SLACK_API_URL}{api}", api = "view.open"))
+                .body(p.body.clone())
                 .header("Content-Type", "application/json; charset=utf-8"),
-            Self::LookupByEmail => client.get(format!(
-                "{SLACK_API_URL}{api}{uri_params}",
-                api = "users.lookupByEmail"
+            Self::LookupByEmail(p) => client.get(format!(
+                "{SLACK_API_URL}{api}?email={email}",
+                api = "users.lookupByEmail",
+                email = p.email,
             )),
+        }
+    }
+}
+
+impl std::fmt::Display for Apis {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PostMessage(_) => write!(f, "PostMessage"),
+            Self::ViewsOpen(_) => write!(f, "ViewsOpen"),
+            Self::LookupByEmail(_) => write!(f, "LookupByEmail"),
         }
     }
 }
@@ -67,31 +71,18 @@ impl Slack {
     }
 
     /// Make a call to the Slack API
-    async fn call_slack(
-        &self,
-        bot_name: String,
-        api: Apis,
-        body: Option<String>,
-        uri_params: Option<String>,
-    ) -> Result<(u16, String), ApiError> {
-        let mut request = api
-            .build_request(&self.client, uri_params)
+    async fn call_slack(&self, bot_name: String, api: Apis) -> Result<(u16, String), ApiError> {
+        let r = api
+            .build_request(&self.client)
             .header("Authorization", self.get_token(&bot_name)?);
 
-        if let Some(body) = body {
-            request = request.body(body);
-        }
+        info!("Calling [{api}] for bot: {bot_name}");
 
-        info!("Calling [{:?}] for bot: {bot_name}", api);
-        match request.send().await {
-            Ok(r) => {
-                let status = r.status();
-                let response = r.text().await.unwrap_or_default();
-                trace!("Slack returned: {status}: {response}");
-                Ok((status.as_u16(), response))
-            }
-            Err(e) => return Err(ApiError::NetworkError(e)),
-        }
+        let resp = r.send().await.map_err(|e| ApiError::NetworkError(e))?;
+        let status = resp.status();
+        let response = resp.text().await.unwrap_or_default();
+        trace!("Slack returned: {status}: {response}");
+        Ok((status.as_u16(), response))
     }
 
     /// Open an arbitrary view for a configured bot. The view contents is defined by the caller but the bot
@@ -101,7 +92,7 @@ impl Slack {
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         match self
-            .call_slack(params.bot, Apis::ViewsOpen, Some(params.body), None)
+            .call_slack(params.bot.clone(), Apis::ViewsOpen(params))
             .await
         {
             Ok((200, _)) => Ok(0),
@@ -121,7 +112,7 @@ impl Slack {
         let params: plaid_stl::slack::PostMessage =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         match self
-            .call_slack(params.bot, Apis::PostMessage, Some(params.body), None)
+            .call_slack(params.bot.clone(), Apis::PostMessage(params))
             .await
         {
             Ok((200, _)) => Ok(0),
@@ -145,7 +136,7 @@ impl Slack {
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         match self
-            .call_slack(params.bot, Apis::LookupByEmail, None, Some(params.email))
+            .call_slack(params.bot.clone(), Apis::LookupByEmail(params))
             .await
         {
             Ok((200, response)) => {
