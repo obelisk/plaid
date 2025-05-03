@@ -17,6 +17,7 @@ members = [
     "tests/test_time",
     "tests/test_shared_db_rule_1",
     "tests/test_shared_db_rule_2",
+    "tests/test_slack",
 ]
 
 [profile.release]

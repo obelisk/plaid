@@ -425,6 +425,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_slack"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "test_sshcerts_usage"
 version = "0.1.0"
 dependencies = [
