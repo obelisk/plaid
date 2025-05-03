@@ -1,8 +1,16 @@
 #!/bin/bash
 
-# Build all of the Plaid workspace
+# Set up all the variables we need to run the integration tests
 PLATFORM=$(uname -a)
-CONFIG_PATH="plaid/resources/plaid.toml"
+
+CONFIG_PATH="runtime/plaid/resources/plaid.toml"
+CONFIG_WORKING_PATH=/tmp/plaid_config.toml
+
+SECRET_PATH="runtime/plaid/resources/secrets.example.toml"
+SECRET_WORKING_PATH=/tmp/secrets.example.toml
+
+export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
+
 
 # Compiler should be passed in as the first argument
 if [ -z "$1" ]; then
@@ -12,6 +20,10 @@ fi
 echo "Testing runtime with compiler: $1"
 
 
+# Copy the configuration and secrets to the tmp directory
+cp $CONFIG_PATH $CONFIG_WORKING_PATH
+cp $SECRET_PATH $SECRET_WORKING_PATH
+
 # On macOS, we need to install a brew provided version of LLVM
 # so that we can compile WASM binaries.
 if uname | grep -q Darwin; then
@@ -19,7 +31,7 @@ if uname | grep -q Darwin; then
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
 
-export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
+
 
 echo "Building All Plaid Modules"
 cd modules
@@ -34,13 +46,23 @@ cp -r modules/target/wasm32-unknown-unknown/release/test_*.wasm compiled_modules
 ssh-keygen -t ed25519 -f plaidrules_key_ed25519 -N ""
 public_key=$(cat plaidrules_key_ed25519.pub | awk '{printf "%s %s %s", $1, $2, $3}')
 
+# Do any needed replacements within the secrets file
 if uname | grep -q Darwin; then
     # macOS (BSD sed)
-    sed -i '' "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" ./runtime/plaid/resources/secrets.example.toml
+    sed -i '' "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" $SECRET_WORKING_PATH
+    sed -i '' "s|{CI_SLACK_TEST_WEBHOOK}|$SLACK_TEST_WEBHOOK|g" $SECRET_WORKING_PATH
+    sed -i '' "s|{CI_SLACK_TEST_BOT_TOKEN}|$SLACK_TEST_BOT_TOKEN|g" $SECRET_WORKING_PATH
 else
     # Linux (GNU sed)
-    sed -i "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" ./runtime/plaid/resources/secrets.example.toml
+    sed -i "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" $SECRET_WORKING_PATH
+    sed -i "s|{CI_SLACK_TEST_WEBHOOK}|$SLACK_TEST_WEBHOOK|g" $SECRET_WORKING_PATH
+    sed -i "s|{CI_SLACK_TEST_BOT_TOKEN}|$SLACK_TEST_BOT_TOKEN|g" $SECRET_WORKING_PATH
 fi
+
+# Clear out the module_signatures directory
+rm -rf module_signatures/*
+# Remove the old sled database if there is one (happens on repeated test runs)
+rm -rf /tmp/sled
 
 # Create module signatures directory
 mkdir module_signatures
@@ -71,9 +93,7 @@ cd runtime
 if [ "$1" == "llvm" ]; then
   # If the compiler is llvm, modify the plaid.toml file to use the llvm backend
   # and save to a new file
-  cp plaid/resources/plaid.toml plaid/resources/plaid.llvm.toml
-  sed -i.bak 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' plaid/resources/plaid.llvm.toml && rm plaid/resources/plaid.llvm.toml.bak
-  CONFIG_PATH="plaid/resources/plaid.llvm.toml"
+  sed -i.bak 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' $CONFIG_WORKING_PATH && rm $CONFIG_WORKING_PATH.bak
   # If macOS
   if  uname | grep -q Darwin; then
     export RUSTFLAGS="-L /opt/homebrew/lib/"
@@ -87,7 +107,7 @@ if [ $? -ne 0 ]; then
   # Exit with an error
   exit 1
 fi
-RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features sled,$1 -- --config ${CONFIG_PATH} --secrets plaid/resources/secrets.example.toml &
+RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features sled,$1 -- --config ${CONFIG_WORKING_PATH} --secrets $SECRET_WORKING_PATH &
 PLAID_PID=$!
 cd ..
 sleep 60
@@ -101,6 +121,7 @@ for module in modules/tests/*; do
   if [ -d "$module" ]; then
     # If the module has a harness.sh file
     if [ -f "$module/harness/harness.sh" ]; then
+      echo "Running integration test for module $module"
       # Run the harness.sh file
       bash $module/harness/harness.sh
       # If the harness.sh file returns an error
