@@ -77,6 +77,10 @@ type = "None"
 log_type = "testmode"
 headers = []
 
+[webhooks."internal".webhooks."testslack"]
+log_type = "test_slack"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples

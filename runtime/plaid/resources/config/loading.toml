@@ -67,6 +67,7 @@ test_mode_exemptions = [
 "test_time.wasm" = "time"
 "test_shared_db_rule_1.wasm" = "test_shareddb_1"
 "test_shared_db_rule_2.wasm" = "test_shareddb_2"
+"test_slack.wasm" = "test_slack"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -92,3 +93,7 @@ default = "Unlimited"
 [loading.storage_size.log_type]
 [loading.storage_size.module_overrides]
 "test_db.wasm" = { Limited = 50 }
+
+[loading.module_signing]
+authorized_signers = ["{plaid-secret{public-key}}"]
+signatures_required = 1
