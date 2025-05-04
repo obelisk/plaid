@@ -1,13 +1,11 @@
 #!/bin/bash
 
 # Set up all the variables we need to run the integration tests
-PLATFORM=$(uname -a)
-
-CONFIG_PATH="runtime/plaid/resources/config/"
-CONFIG_WORKING_PATH=/tmp/plaid_config/configs/
+CONFIG_PATH="runtime/plaid/resources/config"
+CONFIG_WORKING_PATH="/tmp/plaid_config/configs"
 
 SECRET_PATH="runtime/plaid/resources/secrets.example.toml"
-SECRET_WORKING_PATH=/tmp/plaid_config/secrets.example.toml
+SECRET_WORKING_PATH="/tmp/plaid_config/secrets.example.toml"
 
 export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
 
@@ -24,7 +22,7 @@ rm -rf $CONFIG_WORKING_PATH
 mkdir -p $CONFIG_WORKING_PATH
 
 # Copy the configuration and secrets to the tmp directory
-cp -r $CONFIG_PATH/ $CONFIG_WORKING_PATH
+cp -r $CONFIG_PATH/* $CONFIG_WORKING_PATH
 cp $SECRET_PATH $SECRET_WORKING_PATH
 
 # On macOS, we need to install a brew provided version of LLVM
