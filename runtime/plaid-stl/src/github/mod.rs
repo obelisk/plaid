@@ -1713,3 +1713,48 @@ pub fn delete_deploy_key(
 
     Ok(())
 }
+
+/// Request reviewers for a pull request.
+#[derive(Serialize, Deserialize)]
+pub struct PullRequestRequestReviewers {
+    pub owner: String,
+    pub repo: String,
+    pub pull_number: u64,
+    pub reviewers: Vec<String>,
+    pub team_reviewers: Vec<String>,
+}
+
+/// Delete a deploy key with given ID from a given repository.
+/// For more details, see https://docs.github.com/en/rest/deploy-keys/deploy-keys?apiVersion=2022-11-28#delete-a-deploy-key
+pub fn pull_request_request_reviewers(
+    owner: impl Display,
+    repo: impl Display,
+    pull_request: u64,
+    reviewers: &[impl Display],
+    team_reviewers: &[impl Display],
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, pull_request_request_reviewers);
+    }
+
+    let params = PullRequestRequestReviewers {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        pull_number: pull_request,
+        reviewers: reviewers.iter().map(|s| s.to_string()).collect(),
+        team_reviewers: team_reviewers.iter().map(|s| s.to_string()).collect(),
+    };
+
+    let params = serde_json::to_string(&params).unwrap();
+    let res = unsafe {
+        github_pull_request_request_reviewers(params.as_bytes().as_ptr(), params.as_bytes().len())
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}

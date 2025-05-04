@@ -6,6 +6,7 @@ mod environments;
 mod graphql;
 mod members;
 mod pats;
+mod pull_requests;
 mod repos;
 mod secrets;
 mod teams;
