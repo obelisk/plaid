@@ -119,7 +119,7 @@ impl DataGenerator for &mut SQS {
                                 })?
                     } else {
                         // default to the timestamp the message was recieved
-                        OffsetDateTime::from(UtcDateTime::now())
+                        OffsetDateTime::now_utc()
                     };
 
                     // send to rules
