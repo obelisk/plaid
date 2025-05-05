@@ -105,10 +105,10 @@ impl DataGenerator for &mut SQS {
         if let Some(messages) = res.messages {
             for message in messages {
                 // Print message body if present
-                if let Some(payload) = message.body {
+                if let Some(body) = message.body {
                     // parse the payload to extract timestamp
-                    let value = serde_json::from_str::<serde_json::Value>(&payload)
-                        .map_err(|e| error!("failed to decode SQS message payload. error: {e}"))?;
+                    let value = serde_json::from_str::<serde_json::Value>(&body)
+                        .map_err(|e| error!("failed to decode SQS message body. error: {e}"))?;
                     let timestamp = if let Some(serde_json::Value::String(t)) =
                         value.pointer("/time")
                     {
@@ -130,7 +130,7 @@ impl DataGenerator for &mut SQS {
                     logs.push(DataGeneratorLog {
                         id,
                         timestamp,
-                        payload: payload.as_bytes().to_vec(),
+                        payload: body.as_bytes().to_vec(),
                     });
 
                     // Delete the message from the queue to prevent re-processing
