@@ -19,7 +19,7 @@ pub struct SQSConfig {
     pub queue_url: String,
     /// Polling interval for this SQS queue
     pub wait_time_seconds: i32,
-    /// Polling interval for this SQS queue
+    /// Max number of messsages to get 1 - 10
     pub max_number_of_messages: i32,
     /// How to authenticate to AWS
     pub authentication: AwsAuthentication,
