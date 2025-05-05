@@ -101,11 +101,12 @@ impl SQS {
                             if self.seen_messages.contains(id) {
                                 debug!("sqs/{} detected duplicate message {id}", self.config.name);
                                 if let Some(receipt_handle) = message.receipt_handle {
-                                    let _ = self.delete_message(receipt_handle).await;
-                                    debug!(
-                                        "sqs/{} deleted_message {:?}",
-                                        self.config.name, message.message_id,
-                                    );
+                                    if let Ok(_) = self.delete_message(receipt_handle).await {
+                                        debug!(
+                                            "sqs/{} deleted_message {:?}",
+                                            self.config.name, message.message_id,
+                                        );
+                                    }
                                 }
                                 continue;
                             } else {
@@ -118,11 +119,12 @@ impl SQS {
                             self.send_for_processing(body.as_bytes().to_vec());
                             // delete the message from the queue to prevent re-processing
                             if let Some(receipt_handle) = message.receipt_handle {
-                                let _ = self.delete_message(receipt_handle).await;
-                                debug!(
-                                    "sqs/{} deleted_message {:?}",
-                                    self.config.name, message.message_id,
-                                );
+                                if let Ok(_) = self.delete_message(receipt_handle).await {
+                                    debug!(
+                                        "sqs/{} deleted_message {:?}",
+                                        self.config.name, message.message_id,
+                                    );
+                                }
                             }
                         }
                     }
