@@ -101,6 +101,13 @@ impl SQS {
                         if let Some(id) = message.message_id() {
                             if self.seen_messages.contains(id) {
                                 debug!("sqs/{} detected duplicate message {id}", self.config.name);
+                                if let Some(receipt_handle) = message.receipt_handle {
+                                    let _ = self.delete_message(receipt_handle).await;
+                                    debug!(
+                                        "sqs/{} deleted_message {:?}",
+                                        self.config.name, message.message_id,
+                                    );
+                                }
                                 continue;
                             } else {
                                 self.seen_messages.put(id.to_string(), 0u32);
@@ -112,18 +119,7 @@ impl SQS {
                             self.send_for_processing(body.as_bytes().to_vec());
                             // delete the message from the queue to prevent re-processing
                             if let Some(receipt_handle) = message.receipt_handle {
-                                self.client
-                                    .delete_message()
-                                    .queue_url(&self.config.queue_url)
-                                    .receipt_handle(receipt_handle)
-                                    .send()
-                                    .await
-                                    .map_err(|e| {
-                                        error!(
-                                            "sqs/{} delete_message failed: [{e}]",
-                                            self.config.name,
-                                        );
-                                    })?;
+                                let _ = self.delete_message(receipt_handle).await;
                                 debug!(
                                     "sqs/{} deleted_message {:?}",
                                     self.config.name, message.message_id,
@@ -134,6 +130,19 @@ impl SQS {
                 }
             }
         }
+    }
+
+    async fn delete_message(&self, receipt_handle: String) -> Result<(), ()> {
+        self.client
+            .delete_message()
+            .queue_url(&self.config.queue_url)
+            .receipt_handle(receipt_handle)
+            .send()
+            .await
+            .map_err(|e| {
+                error!("sqs/{} delete_message failed: [{e}]", self.config.name);
+            })?;
+        Ok(())
     }
 
     fn send_for_processing(&self, payload: Vec<u8>) {
