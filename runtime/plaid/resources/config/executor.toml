@@ -1,2 +1,6 @@
 [executor]
 execution_threads = 2
+
+[executor.dedicated_threads]
+"test_db" = 1
+"my_other_logtype" = 2

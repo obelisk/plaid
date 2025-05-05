@@ -110,6 +110,9 @@ pub struct ExecutorConfig {
     /// The maximum number of logs in the queue to be processed at once
     #[serde(default = "default_log_queue_size")]
     pub log_queue_size: usize,
+    /// Number of threads dedicated to specific log types.
+    /// This is a mapping {log type --> num threads}.
+    pub dedicated_threads: Option<HashMap<String, u8>>,
 }
 
 /// The full configuration of Plaid

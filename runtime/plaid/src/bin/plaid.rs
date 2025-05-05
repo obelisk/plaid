@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
-use crossbeam_channel::{bounded, TrySendError};
+use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use warp::{hyper::body::Bytes, path, Filter, http::HeaderMap};
 
 #[tokio::main]
@@ -25,6 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Reading configuration");
     let config = config::configure()?;
     let (log_sender, log_receiver) = bounded(config.executor.log_queue_size);
+
+    // If we are dedicating threads to specific log types, create their channels here
+    // The mapping is {log_type --> (thread_num, (channel_sender, channel_receiver))}
+    let dedicated_channels: Option<HashMap<String, (u8, (Sender<Message>, Receiver<Message>))>> = config.executor.dedicated_threads.map(|dt| dt.iter().map(|(log_type, threads)| (log_type.to_string(), (*threads, bounded(config.executor.log_queue_size)))).collect());
 
     info!("Starting logging subsystem");
     let (els, _logging_handler) = Logger::start(config.logging);
@@ -93,15 +97,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let modules = Arc::new(loader::load(config.loading, storage.clone()).await.unwrap());
     let modules_by_name = Arc::new(modules.get_modules());
 
-    info!(
-        "Starting the execution threads of which {} were requested",
-        config.executor.execution_threads
-    );
+    // Print information about the threads we are starting
+    match &dedicated_channels {
+        None => {
+            info!(
+                "Starting {} execution threads",
+                config.executor.execution_threads
+            );
+        }
+        Some(dc) => {
+            info!(
+                "Starting {} execution threads for generic execution, plus the following for specific log types: {:?}",
+                config.executor.execution_threads, dc.iter().map(|(log_type, (threads, _))| (log_type.clone(), *threads)).collect::<HashMap<String, u8>>()
+            );
+        }
+    }
 
     // Create the executor that will handle all the logs that come in and immediate
     // requests for handling some configured get requests.
+    let dedicated_receivers: Option<HashMap<String, (u8, Receiver<Message>)>> = dedicated_channels.clone().map(|dc| dc.iter().map(|(log_type, (threads, (_sender, receiver)))| (log_type.to_string(), (*threads, receiver.clone()))).collect());
     let executor = Executor::new(
         log_receiver,
+        dedicated_receivers,
         modules.get_channels(),
         api,
         storage,
@@ -114,11 +131,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Configured Webhook Servers");
     let webhook_server_post_log_sender = log_sender.clone();
+    // If we have dedicated threads for specific log types, we also prepare the corresponding senders: those log types will _only_ be sent to dedicated threads.
+    let dedicated_senders: Option<HashMap<String, Sender<Message>>> = dedicated_channels.map(|dc| dc.iter().map(|(log_type, (_threads, (sender, _receiver)))| (log_type.to_string(), sender.clone())).collect());
     let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
         .webhooks
         .into_iter()
         .map(|(server_name, config)| {
             let webhook_server_post_log_sender = webhook_server_post_log_sender.clone();
+            let dedicated_senders = dedicated_senders.clone();
             let server_address: SocketAddr = config
                 .listen_address
                 .parse()
@@ -154,12 +174,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
 
-                        // Webhook exists, buffer log
-                        if let Err(e) = webhook_server_post_log_sender.try_send(message) {
-                            match e {
-                                TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
-                                // TODO: Have this actually cause Plaid to exit
-                                TrySendError::Disconnected(_) => panic!("The execution system is no longer accepting messages. Nothing can continue."),
+                        let dedicated_senders = dedicated_senders.clone();
+
+                        // Webhook exists, buffer log: first we check if we have a dedicated sender. If not, we send to the generic channel.
+                        if dedicated_senders.is_none() || dedicated_senders.clone().unwrap().get(&message.type_).is_none() { // unwrap OK for short-circuiting
+                            // We have no dedicated sender for this log type: just send to the generic channel
+                            if let Err(e) = webhook_server_post_log_sender.try_send(message) {
+                                match e {
+                                    TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
+                                    // TODO: Have this actually cause Plaid to exit
+                                    TrySendError::Disconnected(_) => panic!("The execution system is no longer accepting messages. Nothing can continue."),
+                                }
+                            }
+                        } else {
+                            // If we are here, then we do have a dedicated sender: send the log to that channel
+                            let dedicated_sender = dedicated_senders.unwrap().get(&message.type_).unwrap().clone(); // unwraps OK: checked above
+                            if let Err(e) = dedicated_sender.try_send(message) {
+                                match e {
+                                    TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
+                                    // TODO: Have this actually cause Plaid to exit
+                                    TrySendError::Disconnected(_) => panic!("The execution system is no longer accepting messages. Nothing can continue."),
+                                }
                             }
                         }
                     }
