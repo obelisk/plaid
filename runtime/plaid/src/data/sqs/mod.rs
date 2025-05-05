@@ -184,7 +184,7 @@ impl DataGenerator for &mut SQS {
     fn send_for_processing(&self, payload: Vec<u8>) {
         self.logger
             .send(Message::new(
-                format!("sqs/"),
+                format!("sqs/{}", self.config.name),
                 payload,
                 LogSource::Generator(Generator::SQS(self.config.name.clone())),
                 self.config.logbacks_allowed.clone(),
