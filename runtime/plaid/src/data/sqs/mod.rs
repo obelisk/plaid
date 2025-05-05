@@ -5,7 +5,7 @@ use crossbeam_channel::Sender;
 use lru::LruCache;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use serde::Deserialize;
-use time::{OffsetDateTime, UtcDateTime};
+use time::OffsetDateTime;
 
 use crate::{executor::Message, get_aws_sdk_config, AwsAuthentication};
 
@@ -39,7 +39,7 @@ pub struct SQSConfig {
 /// It is used as the default value for deserialization of the `sleep_duration` field,
 /// of `SQSConfig` in the event that no value is provided.
 fn default_sleep_milliseconds() -> u64 {
-    10000
+    1000
 }
 
 fn default_canon_time() -> u64 {
