@@ -191,11 +191,9 @@ impl Data {
         if let Some(mut ct) = di.sqs {
             handle.spawn(async move {
                 loop {
-                    if let Err(_) = get_and_process_dg_logs(&mut ct).await {
-                        error!("sqs Data Fetch Error")
-                    }
+                    let _ = ct.drain_queue().await;
 
-                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    tokio::time::sleep(Duration::from_secs(ct.config.sleep_duration)).await;
                 }
             });
         }

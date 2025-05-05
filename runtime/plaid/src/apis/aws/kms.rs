@@ -157,7 +157,7 @@ pub struct Kms {
 impl Kms {
     /// Creates a new instance of `Kms`
     pub async fn new(config: KmsConfig) -> Self {
-        let sdk_config = get_aws_sdk_config(config.authentication).await;
+        let sdk_config = get_aws_sdk_config(&config.authentication).await;
         let client = aws_sdk_kms::Client::new(&sdk_config);
 
         Self {
