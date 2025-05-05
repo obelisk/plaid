@@ -1,13 +1,13 @@
 [package]
 name = "plaid"
-version = "0.23.2"
+version = "0.24.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
 default = ["aws", "sled", "cranelift"]
-aws = ["dep:aws-sdk-kms", "dep:aws-sdk-dynamodb"]
+aws = ["dep:aws-sdk-kms", "dep:aws-sdk-dynamodb", "dep:aws-sdk-sqs"]
 cranelift = ["wasmer/cranelift"]
 llvm = ["wasmer/llvm"]
 
@@ -18,6 +18,7 @@ aws-config = "1.5.5"
 aws-sdk-dynamodb = { version = "1.69.0", optional = true }
 aws-sdk-kms = { version = "1.41.0", optional = true }
 aws-sdk-secretsmanager = "1.57.0"
+aws-sdk-sqs = { version = "1.65.0", optional = true }
 base64 = "0.13"
 clap = { version = "4", default-features = false, features = [
     "std",

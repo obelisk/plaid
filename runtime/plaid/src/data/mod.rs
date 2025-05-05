@@ -1,3 +1,6 @@
+#[cfg(feature = "aws")]
+mod sqs;
+
 pub mod github;
 pub mod internal;
 mod interval;
@@ -31,6 +34,8 @@ pub struct DataConfig {
     okta: Option<okta::OktaConfig>,
     internal: Option<internal::InternalConfig>,
     interval: Option<interval::IntervalConfig>,
+    #[cfg(feature = "aws")]
+    sqs: Option<sqs::SQSConfig>,
     websocket: Option<websocket::WebSocketDataGenerator>,
 }
 
@@ -43,6 +48,9 @@ struct DataInternal {
     internal: Option<internal::Internal>,
     /// Interval manages tracking and execution of jobs that are executed on a defined interval
     interval: Option<interval::Interval>,
+    /// SQS pulls messages from AWS SQS queue
+    #[cfg(feature = "aws")]
+    sqs: Option<sqs::SQS>,
     /// Websocket manages the creation and maintenance of WebSockets that provide data to the executor
     websocket_external: Option<websocket::WebsocketGenerator>,
 }
@@ -91,11 +99,20 @@ impl DataInternal {
             .websocket
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
+        #[cfg(feature = "aws")]
+        let sqs = if let Some(ct) = config.sqs {
+            Some(sqs::SQS::new(ct, logger.clone()).await)
+        } else {
+            None
+        };
+
         Ok(Self {
             github,
             okta,
             internal: Some(internal?),
             interval,
+            #[cfg(feature = "aws")]
+            sqs,
             websocket_external,
         })
     }
@@ -162,6 +179,20 @@ impl Data {
                 loop {
                     if let Err(e) = internal.fetch_internal_logs().await {
                         error!("Internal Data Fetch Error: {:?}", e)
+                    }
+
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            });
+        }
+
+        // Start the SQS task if there is one
+        #[cfg(feature = "aws")]
+        if let Some(mut ct) = di.sqs {
+            handle.spawn(async move {
+                loop {
+                    if let Err(_) = get_and_process_dg_logs(&mut ct).await {
+                        error!("sqs Data Fetch Error")
                     }
 
                     tokio::time::sleep(Duration::from_secs(10)).await;
