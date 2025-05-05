@@ -42,9 +42,8 @@ pub struct SQS {
     /// Timestamp of the last seen log we have processed
     /// The logger used to send logs to the execution system for processing
     logger: Sender<Message>,
-    /// An LRU where we store the UUIDs of logs that we have already seen and sent into the logging system.
-    /// This, together with some overlapping queries to the API, helps us ensure that all logs are processed
-    /// exactly once.
+    /// SQS sends messages 'atleast once' so we use this cache to dedup messages
+    /// An LRU where we store the UUIDs of messages that we have already seen and sent into the logging system.
     /// This LRU has a limited capacity: when this is reached, the least-recently-used item is removed to make space for a new insertion.
     /// Note: we only use the "key" part to keep track of the UUIDs we have seen. The "value" part is not used and always set to 0u32.
     seen_messages: LruCache<String, u32>,
