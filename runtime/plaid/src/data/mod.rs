@@ -191,7 +191,9 @@ impl Data {
         if let Some(mut ct) = di.sqs {
             handle.spawn(async move {
                 loop {
-                    let _ = ct.drain_queue().await;
+                    if let Err(err) = ct.drain_queue().await {
+                        error!("{err}");
+                    };
 
                     tokio::time::sleep(Duration::from_secs(ct.config.sleep_duration)).await;
                 }
