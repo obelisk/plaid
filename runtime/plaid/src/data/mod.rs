@@ -205,7 +205,7 @@ pub trait DataGenerator {
     fn get_name(&self) -> String;
 
     /// Get the duration (in milliseconds) the thread will sleep for, after fetching a page of logs
-    fn get_sleep_duration(&self) -> u64; // TODO remove?
+    fn get_sleep_duration(&self) -> u64;
 
     /// Get the number of seconds after which we assume the external API we are querying for logs
     /// reaches stability. This means that we assume all events that have happened at least these many
