@@ -64,7 +64,7 @@ impl SQS {
 }
 
 impl SQS {
-    pub async fn drain_queue(&mut self) -> Result<(), ()> {
+    pub async fn drain_queue(&mut self) -> Result<(), String> {
         debug!("sqs/{} draining queue", self.config.name);
 
         loop {
@@ -78,10 +78,10 @@ impl SQS {
                 .send()
                 .await
                 .map_err(|e| {
-                    error!(
+                    format!(
                         "sqs/{} receive_messages failed. error: [{e}]",
                         self.config.name
-                    );
+                    )
                 })?;
 
             match res.messages {
@@ -116,7 +116,7 @@ impl SQS {
                         // consume this message
                         if let Some(body) = message.body {
                             // send event to rules
-                            self.send_for_processing(body.as_bytes().to_vec());
+                            self.send_for_processing(body.as_bytes().to_vec())?;
                             // delete the message from the queue to prevent re-processing
                             if let Some(receipt_handle) = message.receipt_handle {
                                 if let Ok(_) = self.delete_message(receipt_handle).await {
@@ -133,20 +133,19 @@ impl SQS {
         }
     }
 
-    async fn delete_message(&self, receipt_handle: String) -> Result<(), ()> {
-        self.client
+    async fn delete_message(&self, receipt_handle: String) -> Result<(), String> {
+        let _ = self
+            .client
             .delete_message()
             .queue_url(&self.config.queue_url)
             .receipt_handle(receipt_handle)
             .send()
             .await
-            .map_err(|e| {
-                error!("sqs/{} delete_message failed: [{e}]", self.config.name);
-            })?;
+            .map_err(|e| format!("sqs/{} delete_message failed: [{e}]", self.config.name))?;
         Ok(())
     }
 
-    fn send_for_processing(&self, payload: Vec<u8>) {
+    fn send_for_processing(&self, payload: Vec<u8>) -> Result<(), String> {
         let _ = self
             .logger
             .send(Message::new(
@@ -156,10 +155,12 @@ impl SQS {
                 self.config.logbacks_allowed.clone(),
             ))
             .map_err(|e| {
-                error!(
+                format!(
                     "sqs/{} send_for_processing failed. error: {e}",
                     self.config.name
                 )
-            });
+            })?;
+
+        Ok(())
     }
 }
