@@ -335,17 +335,6 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
                 dg.get_name(),
                 dg.get_last_seen()
             );
-
-            // Important: we have to move the window forward. Otherwise, on the next call nothing will
-            // change: with the same `since`, we will get the same logs and we will discard them all because
-            // they will all be in the cache. I.e., the system will enter a deadlock.
-            // To prevent this, we move `since` forward by a portion of the lookback window.
-            // This ensures that, eventually, we will get some new logs.
-            dg.set_last_seen(
-                dg.get_last_seen()
-                    .saturating_add(time::Duration::milliseconds(500)),
-            );
-
             return Ok(());
         }
         info!(
