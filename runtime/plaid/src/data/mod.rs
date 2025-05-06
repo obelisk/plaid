@@ -88,8 +88,8 @@ impl DataInternal {
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
         #[cfg(feature = "aws")]
-        let sqs = if let Some(ct) = config.sqs {
-            Some(sqs::SQS::new(ct, logger.clone()).await)
+        let sqs = if let Some(cfg) = config.sqs {
+            Some(sqs::SQS::new(cfg, logger.clone()).await)
         } else {
             None
         };
