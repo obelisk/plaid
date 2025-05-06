@@ -188,14 +188,14 @@ impl Data {
 
         // Start the SQS task if there is one
         #[cfg(feature = "aws")]
-        if let Some(mut ct) = di.sqs {
+        if let Some(mut sqs) = di.sqs {
             handle.spawn(async move {
                 loop {
-                    if let Err(err) = ct.drain_queue().await {
+                    if let Err(err) = sqs.drain_queue().await {
                         error!("{err}");
                     };
 
-                    tokio::time::sleep(Duration::from_secs(ct.config.sleep_duration)).await;
+                    tokio::time::sleep(Duration::from_secs(sqs.config.sleep_duration)).await;
                 }
             });
         }
