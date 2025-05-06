@@ -193,10 +193,8 @@ pub struct DataGeneratorLog {
 /// This is what data generators have in common
 #[allow(async_fn_in_trait)]
 pub trait DataGenerator {
-    /// Fetch from the source some logs that were produced between `since` and `until`.
-    ///
-    /// Note: this function does not necessarily return _all_ logs that were produced in that time frame,
-    /// so one might need to call this multiple times across different pages returned by the source.
+    /// Fetch from the source all the logs that were produced between `since` and `until`.
+    /// If handling pagination is needed, this is done inside this function.
     async fn fetch_logs(
         &self,
         since: OffsetDateTime,
@@ -207,7 +205,7 @@ pub trait DataGenerator {
     fn get_name(&self) -> String;
 
     /// Get the duration (in milliseconds) the thread will sleep for, after fetching a page of logs
-    fn get_sleep_duration(&self) -> u64;
+    fn get_sleep_duration(&self) -> u64; // TODO remove?
 
     /// Get the number of seconds after which we assume the external API we are querying for logs
     /// reaches stability. This means that we assume all events that have happened at least these many
@@ -268,7 +266,7 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
             return Ok(());
         }
 
-        // Get some logs that happened between `last_seen` and `until`.
+        // Get logs that happened between `last_seen` and `until`.
         // Walk back a second from the actual value of last_seen, to account for problems
         // with time granularity. E.g., events happening in the same second could be missed.
         // Overlapping queries will prevent this problem from happening.
@@ -359,4 +357,22 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
         // Wait for the specified period before making another request
         tokio::time::sleep(sleep_duration).await
     }
+}
+
+/// Parse the `link` header returned by GitHub or Okta and extract the URL for `next` page.
+/// More info: https://docs.github.com/en/enterprise-cloud@latest/rest/using-the-rest-api/using-pagination-in-the-rest-api?apiVersion=2022-11-28#using-link-headers
+/// https://developer.okta.com/docs/api/#link-header
+fn get_next_from_link_header(hv: &http::HeaderValue) -> Option<String> {
+    let header = hv.to_str().ok()?.to_string();
+    for part in header.split(',') {
+        let part = part.trim();
+        if part.ends_with("rel=\"next\"") {
+            if let Some(start) = part.find('<') {
+                if let Some(end) = part.find('>') {
+                    return Some(part[start + 1..end].to_string());
+                }
+            }
+        }
+    }
+    None
 }

@@ -180,61 +180,73 @@ impl DataGenerator for &mut Github {
             self.config.org, self.config.log_type
         );
 
-        let response = self.client._get(&address).await.map_err(|e| {
-            error!("{}", format!("Could not get logs from GitHub: {}", e));
-        })?;
+        let mut output_logs: Vec<DataGeneratorLog> = Vec::new();
+        let mut next: Option<String> = Some(address);
 
-        if !response.status().is_success() {
-            error!(
-                "{}",
-                format!(
+        loop {
+            // At this point we know `next` is Some. Either because this is the first request, or
+            // because we are here after checking it's not None (which would have stopped the loop).
+            let response = self
+                .client
+                ._get(&next.clone().unwrap())
+                .await
+                .map_err(|e| {
+                    let err_str = format!("Could not get logs from GitHub: {}", e);
+                    error!("{}", err_str);
+                })?;
+
+            if !response.status().is_success() {
+                let err_str = format!(
                     "Call to get GitHub logs failed with code: {}",
                     response.status()
-                )
-            );
-            return Err(());
-        }
+                );
+                error!("{}", err_str);
+                return Err(());
+            }
 
-        let body = self.client.body_to_string(response).await.map_err(|e| {
-            error!(
-                "{}",
-                format!("Failed to read body of GitHub response. Error: {e}")
-            );
-        })?;
+            // See if there is another page of logs after this by looking at the `link` header
+            // https://docs.github.com/en/enterprise-cloud@latest/rest/using-the-rest-api/using-pagination-in-the-rest-api?apiVersion=2022-11-28#using-link-headers
+            next = response
+                .headers()
+                .get("link")
+                .and_then(|v| super::get_next_from_link_header(v));
 
-        let logs: Vec<Value> = serde_json::from_str(body.as_str()).map_err(|e| {
-            error!("{}", format!("Could not parse data from Github: {e}"));
-        })?;
+            // Parse the response's body
+            let body = self.client.body_to_string(response).await.map_err(|e| {
+                let err_str = format!("Failed to read body of GitHub response. Error: {e}");
+                error!("{}", err_str);
+            })?;
 
-        // If there have been no new logs since we last polled, we can exit the loop early
-        // Exiting here will result in a 10 second wait between restarts
-        if logs.is_empty() {
-            debug!("No new GitHub logs since: {}", self.last_seen);
-            return Ok(vec![]);
-        }
+            let logs: Vec<Value> = serde_json::from_str(body.as_str()).map_err(|e| {
+                let err_str = format!("Could not parse data from Github: {}\n\n{}", e, body);
+                error!("{}", err_str);
+            })?;
 
-        // Loop over the logs we did get from GitHub, attempt to parse their timestamps, and return a vector of such logs
-        let mut output_logs: Vec<DataGeneratorLog> = Vec::with_capacity(logs.len());
+            if logs.is_empty() {
+                return Ok(output_logs);
+            }
 
-        for log in &logs {
-            let timestamp = match log.get("@timestamp") {
-                Some(v) => {
-                    let Some(v) = v.as_u64() else {
-                        error!("Got a log from Github without numerical @timestamp field");
+            // Loop over the logs we got from GitHub, parse them and add them to the growing vector
+            for log in &logs {
+                let timestamp = match log.get("@timestamp") {
+                    Some(v) => {
+                        let Some(v) = v.as_u64() else {
+                            error!("Got a log from Github without numerical @timestamp field");
+                            continue;
+                        };
+
+                        v
+                    }
+                    None => {
+                        error!("Got a log from Github without @timestamp field");
                         continue;
-                    };
+                    }
+                };
 
-                    v
-                }
-                None => {
-                    error!("Got a log from Github without @timestamp field");
-                    continue;
-                }
-            };
-
-            // The timestamp from GitHub is in milliseconds
-            let log_timestamp =
-                match OffsetDateTime::from_unix_timestamp_nanos(timestamp as i128 * 1_000_000) {
+                // The timestamp from GitHub is in milliseconds
+                let log_timestamp = match OffsetDateTime::from_unix_timestamp_nanos(
+                    timestamp as i128 * 1_000_000,
+                ) {
                     Ok(t) => t,
                     Err(_) => {
                         error!("Couldn't parse timestamp into datetime");
@@ -242,22 +254,29 @@ impl DataGenerator for &mut Github {
                     }
                 };
 
-            let uuid = match log.get("_document_id").and_then(|v| v.as_str()) {
-                Some(id) => id,
-                None => {
-                    error!("Got a GH log without ID");
-                    continue;
-                }
-            };
+                let uuid = match log.get("_document_id").and_then(|v| v.as_str()) {
+                    Some(id) => id,
+                    None => {
+                        error!("Got a GH log without ID");
+                        continue;
+                    }
+                };
 
-            // We parsed from JSON so serialization back should be safe
-            let log_bytes = serde_json::to_vec(&log).unwrap();
+                // We parsed from JSON so serialization back should be safe
+                let log_bytes = serde_json::to_vec(&log).unwrap();
 
-            output_logs.push(DataGeneratorLog {
-                id: uuid.to_string(),
-                timestamp: log_timestamp,
-                payload: log_bytes,
-            });
+                output_logs.push(DataGeneratorLog {
+                    id: uuid.to_string(),
+                    timestamp: log_timestamp,
+                    payload: log_bytes,
+                });
+            }
+
+            // Exit the loop if there is no next page
+            if next.is_none() {
+                break;
+            }
+            // Otherwise we are ready for the next request
         }
 
         Ok(output_logs)
