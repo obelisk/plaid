@@ -5,7 +5,6 @@ use crossbeam_channel::Sender;
 use lru::LruCache;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use serde::Deserialize;
-use time::OffsetDateTime;
 
 use crate::{executor::Message, get_aws_sdk_config, AwsAuthentication};
 
