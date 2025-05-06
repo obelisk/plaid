@@ -133,8 +133,7 @@ impl SQS {
     }
 
     fn send_for_processing(&self, payload: Vec<u8>) -> Result<(), String> {
-        let _ = self
-            .logger
+        self.logger
             .send(Message::new(
                 format!("sqs/{}", self.config.name),
                 payload,
@@ -146,8 +145,6 @@ impl SQS {
                     "sqs/{} send_for_processing failed. error: {e}",
                     self.config.name
                 )
-            })?;
-
-        Ok(())
+            })
     }
 }
