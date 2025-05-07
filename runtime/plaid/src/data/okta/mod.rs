@@ -43,6 +43,9 @@ pub struct OktaConfig {
     /// Canonicalization time, i.e., after how many seconds we can consider logs as "stable"
     #[serde(default = "default_canon_time")]
     canon_time: u64,
+    /// Size of the LRU cache that we use to deduplicate logs
+    #[serde(default = "default_lru_cache_size")]
+    lru_cache_size: usize,
 }
 
 /// Custom parser for limit. Returns an error if a limit = 0 or limit > 1000 is given
@@ -70,6 +73,11 @@ fn default_sleep_milliseconds() -> u64 {
     1000
 }
 
+/// This function provides the default size of the LRU cache.
+fn default_lru_cache_size() -> usize {
+    4096
+}
+
 fn default_canon_time() -> u64 {
     60
 }
@@ -78,7 +86,7 @@ fn default_canon_time() -> u64 {
 /// It is used as the default value for deserialization of the `limit` field,
 /// of `OktaConfig` in the event that no value is provided.
 fn default_okta_limit() -> u16 {
-    100
+    1000
 }
 
 /// This function provides the default log sorting direction.
@@ -111,13 +119,14 @@ impl Okta {
             .timeout(Duration::from_secs(5))
             .build()
             .unwrap();
+        let lru_cache_size = config.lru_cache_size;
 
         Self {
             client,
             config,
             last_seen: OffsetDateTime::now_utc(),
             logger,
-            seen_logs_uuid: LruCache::new(NonZeroUsize::new(4096).unwrap()),
+            seen_logs_uuid: LruCache::new(NonZeroUsize::new(lru_cache_size).unwrap()),
         }
     }
 }

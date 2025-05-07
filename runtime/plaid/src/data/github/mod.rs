@@ -76,6 +76,9 @@ pub struct GithubConfig {
     /// If no value is provided here, we will use a default value (1 second).
     #[serde(default = "default_sleep_milliseconds")]
     sleep_duration: u64,
+    /// Size of the LRU cache that we use to deduplicate logs
+    #[serde(default = "default_lru_cache_size")]
+    lru_cache_size: usize,
 }
 
 impl GithubConfig {
@@ -88,6 +91,7 @@ impl GithubConfig {
             logbacks_allowed: LogbacksAllowed::default(),
             canon_time: 20,
             sleep_duration: 1000,
+            lru_cache_size: default_lru_cache_size(),
         }
     }
 }
@@ -97,6 +101,11 @@ impl GithubConfig {
 /// of `GithubConfig` in the event that no value is provided.
 fn default_sleep_milliseconds() -> u64 {
     1000
+}
+
+/// This function provides the default size of the LRU cache.
+fn default_lru_cache_size() -> usize {
+    4096
 }
 
 fn default_canon_time() -> u64 {
@@ -141,12 +150,13 @@ pub struct Github {
 impl Github {
     pub fn new(config: GithubConfig, logger: Sender<Message>) -> Self {
         let client = build_github_client(&config.authentication);
+        let lru_cache_size = config.lru_cache_size;
 
         Self {
             config,
             client,
             last_seen: OffsetDateTime::now_utc(),
-            seen_logs_uuid: LruCache::new(NonZeroUsize::new(4096).unwrap()),
+            seen_logs_uuid: LruCache::new(NonZeroUsize::new(lru_cache_size).unwrap()),
             logger,
         }
     }
