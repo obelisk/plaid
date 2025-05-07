@@ -96,7 +96,10 @@ impl SQS {
                         if let Some(id) = message.message_id() {
                             if self.seen_messages.contains(id) {
                                 debug!("sqs/{} detected duplicate message {id}", self.config.name);
-                                self.delete_message(message.receipt_handle).await?;
+                                if let Err(err) = self.delete_message(message.receipt_handle).await
+                                {
+                                    error!("sqs/{} delete_message error {err}", self.config.name)
+                                };
                                 continue;
                             } else {
                                 self.seen_messages.put(id.to_string(), 0u32);
@@ -105,9 +108,13 @@ impl SQS {
                         // consume this message
                         if let Some(body) = message.body {
                             // send event to rules
-                            self.send_for_processing(body.as_bytes().to_vec())?;
+                            if let Err(err) = self.send_for_processing(body.as_bytes().to_vec()) {
+                                error!("sqs/{} send_for_processing error {err}", self.config.name)
+                            };
                             // delete the message from the queue to prevent re-processing
-                            self.delete_message(message.receipt_handle).await?;
+                            if let Err(err) = self.delete_message(message.receipt_handle).await {
+                                error!("sqs/{} delete_message error {err}", self.config.name)
+                            };
                         }
                     }
                 }
