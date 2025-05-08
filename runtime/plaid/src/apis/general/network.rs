@@ -18,7 +18,7 @@ pub struct Config {
 struct MakeRequestRequest {
     /// Body of the request
     body: String,
-    /// Name of the request - defined in plaid.toml
+    /// Name of the request - defined in the configuration
     request_name: String,
     /// Variables to include in the request. Variables take the place of an idenfitifer in the request URI
     variables: HashMap<String, String>,

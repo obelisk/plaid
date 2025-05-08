@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Reading configuration");
     let config = config::configure()?;
-    let (log_sender, log_receiver) = bounded(config.log_queue_size);
+    let (log_sender, log_receiver) = bounded(config.executor.log_queue_size);
 
     info!("Starting logging subsystem");
     let (els, _logging_handler) = Logger::start(config.logging);
@@ -95,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(
         "Starting the execution threads of which {} were requested",
-        config.execution_threads
+        config.executor.execution_threads
     );
 
     // Create the executor that will handle all the logs that come in and immediate
@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         modules.get_channels(),
         api,
         storage,
-        config.execution_threads,
+        config.executor.execution_threads,
         els.clone(),
         performance_sender.clone()
     );
