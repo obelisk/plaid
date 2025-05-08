@@ -8,6 +8,7 @@ use crate::{
     executor::Message,
     logging::Logger,
     storage::{Storage, StorageError},
+    InstanceRoles,
 };
 
 use std::{
@@ -94,34 +95,55 @@ impl Data {
         sender: Sender<Message>,
         storage: Arc<Storage>,
         els: Logger,
+        roles: &InstanceRoles,
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
         let di = DataInternal::new(config, sender, storage, els).await?;
         let handle = tokio::runtime::Handle::current();
 
-        // Start the Github Audit task if there is one
-        if let Some(mut gh) = di.github {
-            handle.spawn(async move {
-                loop {
-                    if let Err(_) = get_and_process_dg_logs(&mut gh).await {
-                        error!("GitHub Data Fetch Error")
-                    }
+        if roles.data_generators {
+            // Start the Github Audit task if there is one
+            if let Some(mut gh) = di.github {
+                handle.spawn(async move {
+                    loop {
+                        if let Err(_) = get_and_process_dg_logs(&mut gh).await {
+                            error!("GitHub Data Fetch Error")
+                        }
 
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                }
-            });
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    }
+                });
+            }
+
+            // Start the Okta System Logs task if there is one
+            if let Some(mut okta) = di.okta {
+                handle.spawn(async move {
+                    loop {
+                        if let Err(_) = get_and_process_dg_logs(&mut okta).await {
+                            error!("Okta Data Fetch Error")
+                        }
+
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    }
+                });
+            }
+
+            if let Some(websocket) = di.websocket_external {
+                handle.spawn(async move {
+                    websocket.start().await;
+                });
+            }
         }
 
-        // Start the Okta System Logs task if there is one
-        if let Some(mut okta) = di.okta {
-            handle.spawn(async move {
-                loop {
-                    if let Err(_) = get_and_process_dg_logs(&mut okta).await {
-                        error!("Okta Data Fetch Error")
+        if roles.interval_jobs {
+            // Start the interval job processor
+            if let Some(mut interval) = di.interval {
+                handle.spawn(async move {
+                    loop {
+                        let time_until_next_execution = interval.fetch_interval_jobs().await;
+                        tokio::time::sleep(Duration::from_secs(time_until_next_execution)).await;
                     }
-
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                }
-            });
+                });
+            }
         }
 
         let internal_sender = if let Some(internal) = &di.internal {
@@ -130,35 +152,20 @@ impl Data {
             None
         };
 
-        // Start the interval job processor
-        if let Some(mut interval) = di.interval {
-            handle.spawn(async move {
-                loop {
-                    let time_until_next_execution = interval.fetch_interval_jobs().await;
-                    tokio::time::sleep(Duration::from_secs(time_until_next_execution)).await;
-                }
-            });
-        }
-
         // Start the internal log processor. This doesn't need to be a tokio task,
         // but we make it one incase we need the runtime in the future. Perhaps it
         // will make sense to convert it to a standard thread but I don't see a benefit
         // to that now. As long as we don't block.
+        let running_logbacks = roles.logbacks;
         if let Some(mut internal) = di.internal {
             handle.spawn(async move {
                 loop {
-                    if let Err(e) = internal.fetch_internal_logs().await {
+                    if let Err(e) = internal.fetch_internal_logs(running_logbacks).await {
                         error!("Internal Data Fetch Error: {:?}", e)
                     }
 
                     tokio::time::sleep(Duration::from_secs(10)).await;
                 }
-            });
-        }
-
-        if let Some(websocket) = di.websocket_external {
-            handle.spawn(async move {
-                websocket.start().await;
             });
         }
 
