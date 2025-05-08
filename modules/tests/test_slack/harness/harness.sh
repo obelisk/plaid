@@ -7,6 +7,11 @@ if [ -z "$GITHUB_ACTIONS" ]; then
   exit 0
 fi
 
+if [ -z "$SLACK_TEST_WEBHOOK" ] || [ -z "$SLACK_TEST_BOT_TOKEN" ]; then
+  echo "Slack secrets are not available, skipping Slack tests"
+  exit 0
+fi
+
 URL="testslack"
 FILE="received_data.$URL.txt"
 
