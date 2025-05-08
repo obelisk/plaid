@@ -178,7 +178,7 @@ impl Slack {
         }
     }
 
-    /// Get a user's presence status from their ID
+    /// Get a user's info from their ID
     pub async fn user_info(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
         let p: UserInfo = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         match self
@@ -186,11 +186,11 @@ impl Slack {
             .await
         {
             Ok((200, response)) => {
-                let gp_response: UserInfoResponse =
+                let up_response: UserInfoResponse =
                     serde_json::from_str(&response).map_err(|e| {
                         ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
                     })?;
-                if !gp_response.ok {
+                if !up_response.ok {
                     return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
                         response,
                     )));

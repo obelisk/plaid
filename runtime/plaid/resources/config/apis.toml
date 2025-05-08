@@ -1,0 +1,147 @@
+[apis."general"]
+[apis."general".network.web_requests]
+[apis."general"."network"."web_requests"."test-response"]
+verb = "post"
+uri = "http://localhost:8998/response"
+return_body = true
+return_code = true
+allowed_rules = [
+    "test_time.wasm",
+    "test_logback.wasm",
+    "test_db.wasm",
+    "test_fileopen.wasm",
+    "test_random.wasm",
+    "test_mnr.wasm",
+    "test_get_everything.wasm",
+    "test_shared_db_rule_1.wasm",
+    "test_shared_db_rule_2.wasm",
+    "test_slack.wasm",
+]
+[apis."general"."network"."web_requests"."test-response"."headers"]
+testheader = "Some data here"
+
+[apis."general"."network"."web_requests"."test-response-mnr"]
+verb = "post"
+uri = "http://localhost:8998/testmnr"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr"."headers"]
+
+[apis."general"."network"."web_requests"."test-response-mnr-headers"]
+verb = "post"
+uri = "http://localhost:8998/testmnr/headers"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr-headers"."headers"]
+first_header = "first_value"
+
+[apis."general"."network"."web_requests"."test-response-mnr-vars"]
+verb = "post"
+uri = "http://localhost:8998/testmnr/{variable}"
+return_body = true
+return_code = true
+allowed_rules = ["test_mnr.wasm"]
+[apis."general"."network"."web_requests"."test-response-mnr-vars"."headers"]
+
+[apis."general"."network"."web_requests"."google_test"]
+verb = "get"
+uri = "https://www.google.com/"
+return_body = true
+return_code = true
+allowed_rules = ["testing_test.wasm"]
+[apis."general"."network"."web_requests"."google_test"."headers"]
+
+[apis."general"."network"."web_requests"."testmode_allow"]
+verb = "get"
+uri = "https://captive.apple.com/"
+return_body = true
+return_code = true
+allowed_rules = ["test_testmode.wasm"]
+available_in_test_mode = true
+[apis."general"."network"."web_requests"."testmode_allow"."headers"]
+
+[apis."general"."network"."web_requests"."testmode_deny"]
+verb = "get"
+uri = "https://captive.apple.com/"
+return_body = true
+return_code = true
+allowed_rules = ["test_testmode.wasm"]
+available_in_test_mode = false
+[apis."general"."network"."web_requests"."testmode_deny"."headers"]
+
+# [apis."general"."network"."web_requests"."list_deploy_keys"]
+# verb = "get"
+# uri = "https://api.github.com/repos/{owner}/{repo}/keys"
+# return_body = true
+# return_code = true
+# allowed_rules = ["testing_test.wasm"]
+# [apis."general"."network"."web_requests"."list_deploy_keys"."headers"]
+# Authorization = "Bearer github_pat_11AAS..."
+# "X-GitHub-Api-Version" = "2022-11-28"
+# "Accept" = "application/vnd.github+json"
+# "User-Agent" = "Plaid/0.10"
+
+# [apis."general"."network"."web_requests"."create_deploy_key"]
+# verb = "post"
+# uri = "https://api.github.com/repos/{owner}/{repo}/keys"
+# return_body = false
+# return_code = true
+# allowed_rules = ["testing_test.wasm"]
+# [apis."general"."network"."web_requests"."create_deploy_key"."headers"]
+# Authorization = "Bearer github_pat_11AAS..."
+# "X-GitHub-Api-Version" = "2022-11-28"
+# "Accept" = "application/vnd.github+json"
+# "User-Agent" = "Plaid/0.10"
+
+# [apis."github"]
+# token = ""
+# [apis."github".graphql_queries]
+
+[apis."slack"]
+[apis."slack"."webhooks"]
+test_webhook = "{plaid-secret{test-webhook-secret}}"
+[apis."slack"."bot_tokens"]
+"plaid-testing" = "{plaid-secret{test-slack-bot-token}}"
+
+[apis."web"]
+[apis."web".keys]
+[apis."web".keys."5d313aea523d41569469e4abd72028d2"]
+# To generate the ECDSA256 key PEM, run the following commands:
+# openssl ecparam -genkey -name prime256v1 -out ec-params.key
+# openssl pkcs8 -topk8 -nocrypt -in ec-params.key -out private-key.pem
+# openssl ec -in ec-params.pem -pubout
+
+# This is the example private key from JWT.io. Do not use it in production.
+private_key = """
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
+OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
+1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
+-----END PRIVATE KEY-----
+"""
+
+allowed_rules = ["testing_test.wasm"]
+
+[apis."yubikey"]
+client_id = 99999
+secret_key = ""
+
+# KMS USING IAM
+
+# [apis."aws"]
+# [apis."aws"."kms".authentication]
+# [apis."aws"."kms".key_configuration]
+# "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
+
+# KMS USING API KEY
+
+# [apis."aws"]
+# [apis."aws"."kms"]
+# [apis."aws"."kms".authentication]
+# access_key_id = "asdf"
+# secret_access_key = "asdf"
+# region = "asdf"
+# [apis."aws"."kms".key_configuration]
+# "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
