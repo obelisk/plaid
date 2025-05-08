@@ -7,6 +7,7 @@ use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
 use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
+use crate::GENERIC_LOG_CHANNEL;
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::oneshot::Sender as OneShotSender;
@@ -606,46 +607,32 @@ fn determine_error(
 
 impl Executor {
     pub fn new(
-        receiver: Receiver<Message>,
-        dedicated_receivers: Option<HashMap<String, (u8, Receiver<Message>)>>,
+        receivers: HashMap<String, (u8, Receiver<Message>)>,
         modules: HashMap<String, Vec<Arc<PlaidModule>>>,
         api: Arc<Api>,
         storage: Option<Arc<Storage>>,
-        execution_threads: u8,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
     ) -> Self {
         let mut _handles = vec![];
-        // Create threads dedicated to given log types
-        if let Some(dedicated_receivers) = dedicated_receivers {
-            for (log_type, (thread_num, receiver)) in dedicated_receivers {
-                for i in 0..thread_num {
-                    info!("Starting Execution Thread {i} Dedicated to Log Type {log_type}");
-                    let receiver = receiver.clone();
-                    let api = api.clone();
-                    let storage = storage.clone();
-                    let modules = modules.clone();
-                    let els = els.clone();
-                    let performance_sender = performance_monitoring_mode.clone();
-                    _handles.push(thread::spawn(move || {
-                        execution_loop(receiver, modules, api, storage, els, performance_sender)
-                    }));
-                }
-            }
-        }
 
-        // Create threads for generic execution
-        for i in 0..execution_threads {
-            info!("Starting Execution Thread {i} For Generic Log Execution");
-            let receiver = receiver.clone();
-            let api = api.clone();
-            let storage = storage.clone();
-            let modules = modules.clone();
-            let els = els.clone();
-            let performance_sender = performance_monitoring_mode.clone();
-            _handles.push(thread::spawn(move || {
-                execution_loop(receiver, modules, api, storage, els, performance_sender)
-            }));
+        for (log_type, (thread_num, receiver)) in receivers {
+            let msg_final_part = match log_type.as_str() {
+                GENERIC_LOG_CHANNEL => "Generic Execution".to_string(),
+                l => format!("Log Type [{l}]"),
+            };
+            for i in 0..thread_num {
+                info!("Starting Execution Thread {i} Dedicated to {msg_final_part}");
+                let receiver = receiver.clone();
+                let api = api.clone();
+                let storage = storage.clone();
+                let modules = modules.clone();
+                let els = els.clone();
+                let performance_sender = performance_monitoring_mode.clone();
+                _handles.push(thread::spawn(move || {
+                    execution_loop(receiver, modules, api, storage, els, performance_sender)
+                }));
+            }
         }
 
         Self { _handles }

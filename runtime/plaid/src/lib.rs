@@ -16,6 +16,10 @@ pub mod logging;
 pub mod performance;
 pub mod storage;
 
+/// We use this constant to identify the channel for a generic log type, i.e.,
+/// one which has not been configured in a special way in the config.
+pub const GENERIC_LOG_CHANNEL: &str = "__PLAID_GENERIC_LOG_TYPE";
+
 /// Defines methods to authenticate to AWS with
 #[cfg(feature = "aws")]
 #[derive(serde::Deserialize)]
