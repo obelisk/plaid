@@ -69,6 +69,8 @@ impl DynamoDb {
             if !write_access.contains(&module.to_string()) {
                 return Err(format!("{module} no write access for {table_name}"));
             }
+        } else {
+            return Err(format!("{module} no write access for {table_name}"));
         };
         // map item
         let item_map: HashMap<String, Value> = serde_json::from_value(item_json)
@@ -172,8 +174,10 @@ impl DynamoDb {
         if let Some(write_access) = self.write.get(table_name) {
             // check if this module has write access to this table
             if !write_access.contains(&module.to_string()) {
-                return Err(format!("{module} no write access for {table_name}",));
+                return Err(format!("{module} no write access for {table_name}"));
             }
+        } else {
+            return Err(format!("{module} no write access for {table_name}"));
         };
         // expression attribute names
         let dynamo_expression_attribute_names =
@@ -284,6 +288,8 @@ impl DynamoDb {
             if !read_access.contains(&module.to_string()) {
                 return Err(format!("{module} no write access for {table_name}",));
             }
+        } else {
+            return Err(format!("{module} no read access for {table_name}"));
         };
         // expression attribute names
         let dynamo_expression_attribute_names =
