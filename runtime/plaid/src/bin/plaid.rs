@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
-use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
+use crossbeam_channel::{bounded, TrySendError};
 use warp::{hyper::body::Bytes, path, Filter, http::HeaderMap};
 
 #[tokio::main]
@@ -26,20 +26,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::configure()?;
     
     // Create channels for logs.
-    // The mapping is {log_type --> (thread_num, (channel_sender, channel_receiver))}
-    let mut channels: HashMap<String, (u8, (Sender<Message>, Receiver<Message>))> = HashMap::new();
-    // At least, we always have one channel for "all log types".
-    channels.insert(GENERIC_LOG_CHANNEL.to_string(), (config.executor.execution_threads, bounded(config.executor.log_queue_size)));
+    let (sender, receiver) = bounded(config.executor.log_queue_size);
+    let mut exec_thread_pools = ExecutionThreadPools::new(config.executor.execution_threads, sender, receiver);
     
     // If we are dedicating threads to specific log types, create their channels and add them to the map
     if let Some(dedicated_threads) = config.executor.dedicated_threads {
-        for (logtype, thread_num) in dedicated_threads {
-            channels.insert(logtype, (thread_num, bounded(config.executor.log_queue_size)));
+        for (logtype, num_threads) in dedicated_threads {
+            let (s, r) = bounded(config.executor.log_queue_size);
+            exec_thread_pools.dedicated_pools.insert(logtype, ThreadPool { num_threads, sender: s, receiver: r });
         }
     }
 
-    // For convenience, keep a reference to the log_sender for the generic channel, so that we can quickly clone it around
-    let log_sender = &channels.get(GENERIC_LOG_CHANNEL).unwrap().1.0;
+    // For convenience, keep a reference to the log_sender for the general channel, so that we can quickly clone it around
+    let log_sender = &exec_thread_pools.general_pool.sender;
 
     info!("Starting logging subsystem");
     let (els, _logging_handler) = Logger::start(config.logging);
@@ -64,9 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // This sender provides an internal route to sending logs. This is what
-    // powers the logback functions.
-
+    // This sender provides an internal route to sending logs. This is what powers the logback functions.
     let delayed_log_sender = Data::start(config.data, log_sender.clone(), storage.clone(), els.clone())
         .await
         .expect("The data system failed to start")
@@ -109,26 +106,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let modules_by_name = Arc::new(modules.get_modules());
 
     // Print information about the threads we are starting
-    info!("Starting {} execution threads for generic execution", config.executor.execution_threads);
-    if channels.len() > 1 {
+    info!("Starting {} execution threads for general execution", exec_thread_pools.general_pool.num_threads);
+    if !exec_thread_pools.dedicated_pools.is_empty() {
         // We have at least one dedicated channel
-        info!("Additionally, starting the following threads: {:?}", channels.iter().filter_map(|(log_type, (threads, _))| {
-            if log_type != GENERIC_LOG_CHANNEL {
-                Some((log_type.clone(), *threads))
-            } else {
-                None
-            }
+        info!("Additionally, starting the following threads: {:?}", exec_thread_pools.dedicated_pools.iter().map(|(log_type, tp)| {
+            (log_type.to_string(), tp.num_threads)
         }).collect::<HashMap<String, u8>>());
     }
 
-    // Take senders and receivers for all our channels
-    let senders: HashMap<String, Sender<Message>> = channels.iter().map(|(logtype, (_threads, (sender, _receiver)))| (logtype.to_string(), sender.clone())).collect();
-    let receivers: HashMap<String, (u8, Receiver<Message>)> = channels.iter().map(|(logtype, (threads, (_sender, receiver)))| (logtype.to_string(), (*threads, receiver.clone()))).collect();
-    
     // Create the executor that will handle all the logs that come in and immediate
     // requests for handling some configured get requests.
     let executor = Executor::new(
-        receivers,
+        exec_thread_pools.clone(),
         modules.get_channels(),
         api,
         storage,
@@ -150,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("A server had an invalid address");
 
             let webhooks = config.webhooks.clone();
-            let senders = senders.clone();
+            let exec_thread_pools = exec_thread_pools.clone();
             let post_route = warp::post()
                 .and(warp::body::content_length_limit(1024 * 256))
                 .and(path!("webhook" / String))
@@ -181,10 +170,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
 
                         // Webhook exists, buffer log: first we check if we have a dedicated sender. If not, we send to the generic channel.
-                        match senders.get(&message.type_) {
-                            Some(sender) => {
-                                // We have a dedicated sender for this type: send the log to that channel
-                                if let Err(e) = sender.try_send(message) {
+                        match exec_thread_pools.dedicated_pools.get(&message.type_) {
+                            Some(tp) => {
+                                // We have a dedicated thread pool for this type: send the log to that channel
+                                if let Err(e) = tp.sender.try_send(message) {
                                     match e {
                                         TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
                                         // TODO: Have this actually cause Plaid to exit
@@ -193,9 +182,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             None => {
-                                // We have no dedicated sender for this type: just send to the generic channel.
-                                // The unwrap is OK because we always have this channel / sender.
-                                if let Err(e) = senders.get(GENERIC_LOG_CHANNEL).unwrap().try_send(message) {
+                                // We have no dedicated thread pool for this type: just send to the general one.
+                                if let Err(e) = exec_thread_pools.general_pool.sender.try_send(message) {
                                     match e {
                                         TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
                                         // TODO: Have this actually cause Plaid to exit

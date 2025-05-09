@@ -1,7 +1,11 @@
+use std::collections::HashMap;
+
 #[cfg(feature = "aws")]
 use aws_config::{BehaviorVersion, Region, SdkConfig};
 #[cfg(feature = "aws")]
 use aws_sdk_kms::config::Credentials;
+use crossbeam_channel::{Receiver, Sender};
+use executor::Message;
 
 #[macro_use]
 extern crate log;
@@ -16,9 +20,40 @@ pub mod logging;
 pub mod performance;
 pub mod storage;
 
-/// We use this constant to identify the channel for a generic log type, i.e.,
-/// one which has not been configured in a special way in the config.
-pub const GENERIC_LOG_CHANNEL: &str = "__PLAID_GENERIC_LOG_TYPE";
+/// A pool of threads to process logs
+#[derive(Clone)]
+pub struct ThreadPool {
+    pub num_threads: u8,
+    pub sender: Sender<Message>,
+    pub receiver: Receiver<Message>,
+}
+
+/// A struct that keeps track of all Plaid's thread pools
+#[derive(Clone)]
+pub struct ExecutionThreadPools {
+    /// Thread pool for general processing, i.e., for processing logs
+    /// which do not have a dedicated thread pool.
+    pub general_pool: ThreadPool,
+    /// Thread pools dedicated to specific log types.
+    /// Mapping { log_type --> thread_pool }
+    pub dedicated_pools: HashMap<String, ThreadPool>,
+}
+
+impl ExecutionThreadPools {
+    /// Create a new ExecutionThreadPools object by initializing only the thread
+    /// pool for general processing. Other thread pools, if present, must be
+    /// added separately by inserting into the `dedicated_pools` map.
+    pub fn new(num_threads: u8, sender: Sender<Message>, receiver: Receiver<Message>) -> Self {
+        ExecutionThreadPools {
+            general_pool: ThreadPool {
+                num_threads,
+                sender,
+                receiver,
+            },
+            dedicated_pools: HashMap::new(),
+        }
+    }
+}
 
 /// Defines methods to authenticate to AWS with
 #[cfg(feature = "aws")]

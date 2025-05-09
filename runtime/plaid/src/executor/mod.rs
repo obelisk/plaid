@@ -7,7 +7,7 @@ use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
 use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
-use crate::GENERIC_LOG_CHANNEL;
+use crate::ExecutionThreadPools;
 
 use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::oneshot::Sender as OneShotSender;
@@ -607,7 +607,7 @@ fn determine_error(
 
 impl Executor {
     pub fn new(
-        receivers: HashMap<String, (u8, Receiver<Message>)>,
+        thread_pools: ExecutionThreadPools,
         modules: HashMap<String, Vec<Arc<PlaidModule>>>,
         api: Arc<Api>,
         storage: Option<Arc<Storage>>,
@@ -616,14 +616,25 @@ impl Executor {
     ) -> Self {
         let mut _handles = vec![];
 
-        for (log_type, (thread_num, receiver)) in receivers {
-            let msg_final_part = match log_type.as_str() {
-                GENERIC_LOG_CHANNEL => "Generic Execution".to_string(),
-                l => format!("Log Type [{l}]"),
-            };
-            for i in 0..thread_num {
-                info!("Starting Execution Thread {i} Dedicated to {msg_final_part}");
-                let receiver = receiver.clone();
+        // General processing
+        for i in 0..thread_pools.general_pool.num_threads {
+            info!("Starting Execution Thread {i} Dedicated to General Processing");
+            let receiver = thread_pools.general_pool.receiver.clone();
+            let api = api.clone();
+            let storage = storage.clone();
+            let modules = modules.clone();
+            let els = els.clone();
+            let performance_sender = performance_monitoring_mode.clone();
+            _handles.push(thread::spawn(move || {
+                execution_loop(receiver, modules, api, storage, els, performance_sender)
+            }));
+        }
+
+        // Dedicated processing
+        for (log_type, thread_pool) in thread_pools.dedicated_pools {
+            for i in 0..thread_pool.num_threads {
+                info!("Starting Execution Thread {i} Dedicated to {log_type}");
+                let receiver = thread_pool.receiver.clone();
                 let api = api.clone();
                 let storage = storage.clone();
                 let modules = modules.clone();
@@ -634,7 +645,6 @@ impl Executor {
                 }));
             }
         }
-
         Self { _handles }
     }
 }
