@@ -128,7 +128,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _executor = Arc::new(executor);
 
     info!("Configured Webhook Servers");
-    // If we have dedicated threads for specific log types, we also prepare the corresponding senders: those log types will _only_ be sent to dedicated threads.
     let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
         .webhooks
         .into_iter()
