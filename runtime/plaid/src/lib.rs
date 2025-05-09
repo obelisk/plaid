@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use aws_config::{BehaviorVersion, Region, SdkConfig};
 #[cfg(feature = "aws")]
 use aws_sdk_kms::config::Credentials;
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{bounded, Receiver, Sender};
 use executor::Message;
 
 #[macro_use]
@@ -28,6 +28,19 @@ pub struct ThreadPool {
     pub receiver: Receiver<Message>,
 }
 
+impl ThreadPool {
+    /// Create a new thread pool with the given number of threads, operating
+    /// on a channel with the given size limit.
+    pub fn new(num_threads: u8, queue_size: usize) -> Self {
+        let (sender, receiver) = bounded(queue_size);
+        ThreadPool {
+            num_threads,
+            sender,
+            receiver,
+        }
+    }
+}
+
 /// A struct that keeps track of all Plaid's thread pools
 #[derive(Clone)]
 pub struct ExecutionThreadPools {
@@ -43,13 +56,9 @@ impl ExecutionThreadPools {
     /// Create a new ExecutionThreadPools object by initializing only the thread
     /// pool for general processing. Other thread pools, if present, must be
     /// added separately by inserting into the `dedicated_pools` map.
-    pub fn new(num_threads: u8, sender: Sender<Message>, receiver: Receiver<Message>) -> Self {
+    pub fn new(num_threads: u8, queue_size: usize) -> Self {
         ExecutionThreadPools {
-            general_pool: ThreadPool {
-                num_threads,
-                sender,
-                receiver,
-            },
+            general_pool: ThreadPool::new(num_threads, queue_size),
             dedicated_pools: HashMap::new(),
         }
     }

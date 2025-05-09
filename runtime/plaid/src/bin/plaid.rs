@@ -14,8 +14,8 @@ use tokio_util::sync::CancellationToken;
 
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
-use crossbeam_channel::{bounded, TrySendError};
-use warp::{hyper::body::Bytes, path, Filter, http::HeaderMap};
+use crossbeam_channel::TrySendError;
+use warp::{http::HeaderMap, hyper::body::Bytes, path, Filter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,14 +26,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::configure()?;
     
     // Create channels for logs.
-    let (sender, receiver) = bounded(config.executor.log_queue_size);
-    let mut exec_thread_pools = ExecutionThreadPools::new(config.executor.execution_threads, sender, receiver);
-    
+    let mut exec_thread_pools = ExecutionThreadPools::new(
+        config.executor.execution_threads,
+        config.executor.log_queue_size,
+    );
+
     // If we are dedicating threads to specific log types, create their channels and add them to the map
     if let Some(dedicated_threads) = config.executor.dedicated_threads {
         for (logtype, num_threads) in dedicated_threads {
-            let (s, r) = bounded(config.executor.log_queue_size);
-            exec_thread_pools.dedicated_pools.insert(logtype, ThreadPool { num_threads, sender: s, receiver: r });
+            exec_thread_pools.dedicated_pools.insert(
+                logtype,
+                ThreadPool::new(num_threads, config.executor.log_queue_size),
+            );
         }
     }
 
