@@ -1,8 +1,7 @@
 use std::ptr::NonNull;
 
 use wasmer::{
-    vm::{self, MemoryError, MemoryStyle, TableStyle, VMMemoryDefinition, VMTableDefinition},
-    MemoryType, Pages, TableType, Tunables,
+    sys::{vm::{VMMemory, VMMemoryDefinition, VMTable, VMTableDefinition}, Tunables}, MemoryError, MemoryStyle, MemoryType, Pages, TableStyle, TableType
 };
 
 // This is to be able to set the tunables
@@ -84,7 +83,7 @@ impl<T: Tunables> Tunables for LimitingTunables<T> {
         &self,
         ty: &MemoryType,
         style: &MemoryStyle,
-    ) -> Result<vm::VMMemory, MemoryError> {
+    ) -> Result<VMMemory, MemoryError> {
         let adjusted = self.adjust_memory(ty);
         self.validate_memory(&adjusted)?;
         self.base.create_host_memory(&adjusted, style)
@@ -98,7 +97,7 @@ impl<T: Tunables> Tunables for LimitingTunables<T> {
         ty: &MemoryType,
         style: &MemoryStyle,
         vm_definition_location: NonNull<VMMemoryDefinition>,
-    ) -> Result<vm::VMMemory, MemoryError> {
+    ) -> Result<VMMemory, MemoryError> {
         let adjusted = self.adjust_memory(ty);
         self.validate_memory(&adjusted)?;
         self.base
@@ -108,7 +107,7 @@ impl<T: Tunables> Tunables for LimitingTunables<T> {
     /// Create a table owned by the host given a [`TableType`] and a [`TableStyle`].
     ///
     /// Delegated to base.
-    fn create_host_table(&self, ty: &TableType, style: &TableStyle) -> Result<vm::VMTable, String> {
+    fn create_host_table(&self, ty: &TableType, style: &TableStyle) -> Result<VMTable, String> {
         self.base.create_host_table(ty, style)
     }
 
@@ -120,7 +119,7 @@ impl<T: Tunables> Tunables for LimitingTunables<T> {
         ty: &TableType,
         style: &TableStyle,
         vm_definition_location: NonNull<VMTableDefinition>,
-    ) -> Result<vm::VMTable, String> {
+    ) -> Result<VMTable, String> {
         self.base.create_vm_table(ty, style, vm_definition_location)
     }
 }
