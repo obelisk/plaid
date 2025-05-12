@@ -1,8 +1,10 @@
 use aws_sdk_dynamodb::primitives::Blob;
 use aws_sdk_dynamodb::types::{AttributeValue, ReturnValue};
 use aws_sdk_dynamodb::Client;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Map, Value};
 
+use std::hash::Hash;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -12,22 +14,23 @@ use serde::Deserialize;
 
 use crate::{get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
 
-/// Defines configuration for the KMS API
+/// Defines configuration for the DynamoDB API
 #[derive(Deserialize)]
 pub struct DynamoDbConfig {
     /// This can either be:
     /// - `IAM`: Uses the IAM role assigned to the instance or environment.
     /// - `ApiKey`: Uses explicit credentials, including an access key ID, secret access key, and region.
     authentication: AwsAuthentication,
-    /// Configured writers - maps a table name to a list of rules that are allowed to write it
+    /// Configured writers - maps a table name to a list of rules that are allowed to READ or WRITE it
     write: HashMap<String, HashSet<String>>,
     /// Configured readers - maps a table name to a list of rules that are allowed to read it
     read: HashMap<String, HashSet<String>>,
 }
 
-/// Represents the KMS API that handles all requests to KMS
+/// Represents the DynamoDB API that handles all requests to KMS
 pub struct DynamoDb {
     /// The underlying KMS client used to interact with the KMS API.
+    /// NOTE: if Plaid is configured with the DynamoDB database backend, sharing tables here will lead to undefined behaviour
     client: Client,
     /// Configured writers - maps a table name to a list of rules that are allowed to write it
     write: HashMap<String, HashSet<String>>,
@@ -35,8 +38,18 @@ pub struct DynamoDb {
     read: HashMap<String, HashSet<String>>,
 }
 
+// TODO move to STL
+pub struct PutItemInput {
+    pub table_name: String,
+    pub item: Value,
+    pub expression_attribute_names_json: Option<Value>,
+    pub expression_attribute_values_json: Option<Value>,
+    pub condition_expression: Option<String>,
+    pub return_values: Option<String>,
+}
+
 impl DynamoDb {
-    /// Creates a new instance of `Kms`
+    /// Creates a new instance of `DynamoDb`
     pub async fn new(config: DynamoDbConfig) -> Self {
         let DynamoDbConfig {
             authentication,
@@ -59,7 +72,7 @@ impl DynamoDb {
         module: Arc<PlaidModule>,
         table_name: &str,
         item_json: Value,
-        expression_attribute_names_json: Option<Value>,
+        expression_attribute_names_json: Option<HashMap<String, String>>,
         expression_attribute_values_json: Option<Value>,
         condition_expression: Option<&str>,
         return_values: Option<&str>,
@@ -67,79 +80,23 @@ impl DynamoDb {
         if let Some(write_access) = self.write.get(table_name) {
             // check if this module has write access to this table
             if !write_access.contains(&module.to_string()) {
-                return Err(format!("{module} no write access for {table_name}"));
+                return Err(format!("unknown table {table_name}"));
             }
         } else {
-            return Err(format!("{module} no write access for {table_name}"));
+            return Err(format!("unknown table {table_name}"));
         };
-        // map item
-        let item_map: HashMap<String, Value> = serde_json::from_value(item_json)
-            .map_err(|e| format!("Failed to deserialize item JSON: {}", e))?;
-
-        let mut dynamo_item = HashMap::<String, AttributeValue>::new();
-        for (key, value) in item_map {
-            let attr_value = json_to_attribute_value(value)?;
-            dynamo_item.insert(key, attr_value);
-        }
-
-        // expression attribute names
-        let dynamo_expression_attribute_names =
-            if let Some(expr_names_json) = expression_attribute_names_json {
-                let expression_names_map: HashMap<String, String> =
-                    serde_json::from_value(expr_names_json).map_err(|e| {
-                        format!(
-                            "Failed to deserialize expression_attribute_values_json JSON: {}",
-                            e
-                        )
-                    })?;
-
-                Some(expression_names_map)
-            } else {
-                None
-            };
-
-        // expression attribute values
-        let dynamo_expression_attribute_values =
-            if let Some(expr_vals_json) = expression_attribute_values_json {
-                let expression_vals_map: HashMap<String, Value> =
-                    serde_json::from_value(expr_vals_json).map_err(|e| {
-                        format!(
-                            "Failed to deserialize expression_attribute_values_json JSON: {}",
-                            e
-                        )
-                    })?;
-
-                let mut express_attribute_values = HashMap::<String, AttributeValue>::new();
-                for (key, value) in expression_vals_map {
-                    let attr_value = json_to_attribute_value(value)?;
-                    express_attribute_values.insert(key, attr_value);
-                }
-                Some(express_attribute_values)
-            } else {
-                None
-            };
-
-        // Parse return_values (if provided)
-        let return_values = return_values
-            .as_ref()
-            .map(|rv| match *rv {
-                "ALL_OLD" => Ok(ReturnValue::AllOld),
-                "NONE" | "" => Ok(ReturnValue::None),
-                _ => Err(format!(
-                    "Invalid return_values: {}. Expected 'ALL_OLD' or 'NONE'",
-                    rv
-                )),
-            })
-            .transpose()?;
+        let item = map_json_to_attributes(Some(item_json))?;
+        let expression_attribute_values = map_json_to_attributes(expression_attribute_values_json)?;
+        let return_values = map_return_values(return_values)?;
 
         // Execute PutItem
         let output = self
             .client
             .put_item()
             .table_name(table_name)
-            .set_item(Some(dynamo_item))
-            .set_expression_attribute_names(dynamo_expression_attribute_names)
-            .set_expression_attribute_values(dynamo_expression_attribute_values)
+            .set_item(item)
+            .set_expression_attribute_names(expression_attribute_names_json)
+            .set_expression_attribute_values(expression_attribute_values)
             .set_condition_expression(condition_expression.map(|x| x.to_string()))
             .set_return_values(return_values)
             .send()
@@ -149,14 +106,8 @@ impl DynamoDb {
         match output.attributes() {
             None => Ok(None),
             Some(attrs) => {
-                // convert to json
-                let mut result = Map::new();
-                for (k, v) in attrs.iter() {
-                    let new_val = attribute_value_to_json(v)?;
-                    result.insert(k.clone(), new_val);
-                }
-
-                Ok(Some(Value::Object(result)))
+                let result = map_attributes_to_json(attrs)?;
+                Ok(Some(result))
             }
         }
     }
@@ -166,8 +117,8 @@ impl DynamoDb {
         module: Arc<PlaidModule>,
         table_name: &str,
         key_json: Option<Value>,
-        key_condition_expression: Option<&str>,
-        expression_attribute_names_json: Option<Value>,
+        key_condition_expression: Option<String>,
+        expression_attribute_names_json: Option<HashMap<String, String>>,
         expression_attribute_values_json: Option<Value>,
         return_values: Option<&str>,
     ) -> Result<Option<Value>, String> {
@@ -179,70 +130,10 @@ impl DynamoDb {
         } else {
             return Err(format!("{module} no write access for {table_name}"));
         };
-        // expression attribute names
-        let dynamo_expression_attribute_names =
-            if let Some(expr_names_json) = expression_attribute_names_json {
-                let expression_names_map: HashMap<String, String> =
-                    serde_json::from_value(expr_names_json).map_err(|e| {
-                        format!(
-                            "Failed to deserialize expression_attribute_names_json JSON: {}",
-                            e
-                        )
-                    })?;
 
-                Some(expression_names_map)
-            } else {
-                None
-            };
-
-        // expression attribute values
-        let dynamo_expression_attribute_values =
-            if let Some(expr_vals_json) = expression_attribute_values_json {
-                let expression_vals_map: HashMap<String, Value> =
-                    serde_json::from_value(expr_vals_json).map_err(|e| {
-                        format!(
-                            "Failed to deserialize expression_attribute_values_json JSON: {}",
-                            e
-                        )
-                    })?;
-
-                let mut express_attribute_values = HashMap::<String, AttributeValue>::new();
-                for (key, value) in expression_vals_map {
-                    let attr_value = json_to_attribute_value(value)?;
-                    express_attribute_values.insert(key, attr_value);
-                }
-                Some(express_attribute_values)
-            } else {
-                None
-            };
-
-        // expression attribute values
-        let dynamo_key = if let Some(inner_key_json) = key_json {
-            let key_map: HashMap<String, Value> = serde_json::from_value(inner_key_json)
-                .map_err(|e| format!("Failed to deserialize key_json JSON: {}", e))?;
-
-            let mut key_attrs = HashMap::<String, AttributeValue>::new();
-            for (key, value) in key_map {
-                let attr_value = json_to_attribute_value(value)?;
-                key_attrs.insert(key, attr_value);
-            }
-            Some(key_attrs)
-        } else {
-            None
-        };
-
-        // Parse return_values (if provided)
-        let return_values = return_values
-            .as_ref()
-            .map(|rv| match *rv {
-                "ALL_OLD" => Ok(ReturnValue::AllOld),
-                "NONE" | "" => Ok(ReturnValue::None),
-                _ => Err(format!(
-                    "Invalid return_values: {}. Expected 'ALL_OLD' or 'NONE'",
-                    rv
-                )),
-            })
-            .transpose()?;
+        let expression_attribute_values = map_json_to_attributes(expression_attribute_values_json)?;
+        let dynamo_key = map_json_to_attributes(key_json)?;
+        let return_values = map_return_values(return_values)?;
 
         // Execute Query
         let output = self
@@ -250,9 +141,9 @@ impl DynamoDb {
             .delete_item()
             .table_name(table_name)
             .set_key(dynamo_key)
-            .set_condition_expression(key_condition_expression.map(|x| x.to_string()))
-            .set_expression_attribute_names(dynamo_expression_attribute_names)
-            .set_expression_attribute_values(dynamo_expression_attribute_values)
+            .set_condition_expression(key_condition_expression)
+            .set_expression_attribute_names(expression_attribute_names_json)
+            .set_expression_attribute_values(expression_attribute_values)
             .set_return_values(return_values)
             .send()
             .await
@@ -262,14 +153,8 @@ impl DynamoDb {
         match output.attributes() {
             None => Ok(None),
             Some(attrs) => {
-                // convert to json
-                let mut result = Map::new();
-                for (k, v) in attrs.iter() {
-                    let new_val = attribute_value_to_json(v)?;
-                    result.insert(k.clone(), new_val);
-                }
-
-                Ok(Some(Value::Object(result)))
+                let result = map_attributes_to_json(attrs)?;
+                Ok(Some(result))
             }
         }
     }
@@ -280,7 +165,7 @@ impl DynamoDb {
         table_name: &str,
         index_name: Option<&str>,
         key_condition_expression: &str,
-        expression_attribute_names_json: Option<Value>,
+        expression_attribute_names_json: Option<HashMap<String, String>>,
         expression_attribute_values_json: Option<Value>,
     ) -> Result<Vec<Value>, String> {
         if let Some(read_access) = self.read.get(table_name) {
@@ -291,42 +176,8 @@ impl DynamoDb {
         } else {
             return Err(format!("{module} no read access for {table_name}"));
         };
-        // expression attribute names
-        let dynamo_expression_attribute_names =
-            if let Some(expr_names_json) = expression_attribute_names_json {
-                let expression_names_map: HashMap<String, String> =
-                    serde_json::from_value(expr_names_json).map_err(|e| {
-                        format!(
-                            "Failed to deserialize expression_attribute_values_json JSON: {}",
-                            e
-                        )
-                    })?;
 
-                Some(expression_names_map)
-            } else {
-                None
-            };
-
-        // expression attribute values
-        let dynamo_expression_attribute_values =
-            if let Some(expr_vals_json) = expression_attribute_values_json {
-                let expression_vals_map: HashMap<String, Value> =
-                    serde_json::from_value(expr_vals_json).map_err(|e| {
-                        format!(
-                            "Failed to deserialize expression_attribute_values_json JSON: {}",
-                            e
-                        )
-                    })?;
-
-                let mut express_attribute_values = HashMap::<String, AttributeValue>::new();
-                for (key, value) in expression_vals_map {
-                    let attr_value = json_to_attribute_value(value)?;
-                    express_attribute_values.insert(key, attr_value);
-                }
-                Some(express_attribute_values)
-            } else {
-                None
-            };
+        let expression_attribute_values = map_json_to_attributes(expression_attribute_values_json)?;
 
         // Execute Query
         let output = self
@@ -335,8 +186,8 @@ impl DynamoDb {
             .table_name(table_name)
             .set_index_name(index_name.map(|x| x.to_string()))
             .key_condition_expression(key_condition_expression)
-            .set_expression_attribute_names(dynamo_expression_attribute_names)
-            .set_expression_attribute_values(dynamo_expression_attribute_values)
+            .set_expression_attribute_names(expression_attribute_names_json)
+            .set_expression_attribute_values(expression_attribute_values)
             .send()
             .await
             .map_err(|e| format!("Query failed: {:?}", e))?;
@@ -344,16 +195,53 @@ impl DynamoDb {
         // convert to json
         let mut out: Vec<Value> = vec![];
         for item in output.items() {
-            let mut result = Map::new();
-            for (k, v) in item.iter() {
-                let new_val = attribute_value_to_json(v)?;
-                result.insert(k.clone(), new_val);
-            }
-            out.push(Value::Object(result))
+            let result = map_attributes_to_json(item)?;
+            out.push(result)
         }
 
         Ok(out)
     }
+}
+
+fn map_attributes_to_json(attrs: &HashMap<String, AttributeValue>) -> Result<Value, String> {
+    let mut result = Map::new();
+    for (k, v) in attrs.iter() {
+        let new_val = attribute_value_to_json(v)?;
+        result.insert(k.to_string(), new_val);
+    }
+    Ok(Value::Object(result))
+}
+
+fn map_json_to_attributes(
+    value: Option<Value>,
+) -> Result<Option<HashMap<String, AttributeValue>>, String> {
+    if let Some(expr_vals_json) = value {
+        let expression_vals_map: HashMap<String, Value> = serde_json::from_value(expr_vals_json)
+            .map_err(|e| format!("Failed to map JSON to attributes: {}", e))?;
+
+        let mut express_attribute_values = HashMap::<String, AttributeValue>::new();
+        for (key, value) in expression_vals_map {
+            let attr_value = json_to_attribute_value(value)?;
+            express_attribute_values.insert(key, attr_value);
+        }
+        Ok(Some(express_attribute_values))
+    } else {
+        Ok(None)
+    }
+}
+
+fn map_return_values(value: Option<&str>) -> Result<Option<ReturnValue>, String> {
+    value
+        .as_ref()
+        .map(|rv| match *rv {
+            "ALL_OLD" => Ok(ReturnValue::AllOld),
+            "NONE" | "" => Ok(ReturnValue::None),
+            _ => Err(format!(
+                "Invalid return_values: {}. Expected 'ALL_OLD' or 'NONE'",
+                rv
+            )),
+        })
+        .transpose()
 }
 
 // helper function to convert JSON Value to DynamoDB AttributeValue, supporting all types
