@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use aws_config::{BehaviorVersion, Region, SdkConfig};
 #[cfg(feature = "aws")]
 use aws_sdk_kms::config::Credentials;
+use config::ExecutorConfig;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use executor::Message;
 
@@ -56,10 +57,27 @@ impl ExecutionThreadPools {
     /// Create a new ExecutionThreadPools object by initializing only the thread
     /// pool for general processing. Other thread pools, if present, must be
     /// added separately by inserting into the `dedicated_pools` map.
-    pub fn new(num_threads: u8, queue_size: usize) -> Self {
+    pub fn new(executor_config: &ExecutorConfig) -> Self {
+        // If we are dedicating threads to specific log types, create their channels and add them to the map
+        let dedicated_pools: HashMap<String, ThreadPool> =
+            if let Some(dedicated_threads) = &executor_config.dedicated_threads {
+                dedicated_threads
+                    .iter()
+                    .map(|(logtype, num_threads)| {
+                        let tp = ThreadPool::new(*num_threads, executor_config.log_queue_size);
+                        (logtype.clone(), tp)
+                    })
+                    .collect()
+            } else {
+                HashMap::new()
+            };
+
         ExecutionThreadPools {
-            general_pool: ThreadPool::new(num_threads, queue_size),
-            dedicated_pools: HashMap::new(),
+            general_pool: ThreadPool::new(
+                executor_config.execution_threads,
+                executor_config.log_queue_size,
+            ),
+            dedicated_pools,
         }
     }
 }

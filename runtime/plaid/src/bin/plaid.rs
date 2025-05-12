@@ -25,21 +25,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Reading configuration");
     let config = config::configure()?;
     
-    // Create channels for logs.
-    let mut exec_thread_pools = ExecutionThreadPools::new(
-        config.executor.execution_threads,
-        config.executor.log_queue_size,
-    );
-
-    // If we are dedicating threads to specific log types, create their channels and add them to the map
-    if let Some(dedicated_threads) = config.executor.dedicated_threads {
-        for (logtype, num_threads) in dedicated_threads {
-            exec_thread_pools.dedicated_pools.insert(
-                logtype,
-                ThreadPool::new(num_threads, config.executor.log_queue_size),
-            );
-        }
-    }
+    // Create thread pools for log execution
+    let exec_thread_pools = ExecutionThreadPools::new(&config.executor);
 
     // For convenience, keep a reference to the log_sender for the general channel, so that we can quickly clone it around
     let log_sender = &exec_thread_pools.general_pool.sender;
