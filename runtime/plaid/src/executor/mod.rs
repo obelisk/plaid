@@ -410,24 +410,6 @@ fn process_message_with_module(
     els: Logger,
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
-    // For every module that operates on that log type
-    // Mark this rule as currently being processed by locking the mutex
-    // This lock will be dropped at the end of the iteration so we don't
-    // need to handle unlocking it
-    let _lock = match module.concurrency_unsafe {
-        Some(ref mutex) => match mutex.lock() {
-            Ok(guard) => Some(guard),
-            Err(p_err) => {
-                error!(
-                    "Lock was poisoned on [{}]. Clearing and continuing: {p_err}.",
-                    module.name
-                );
-                mutex.clear_poison();
-                mutex.lock().ok()
-            }
-        },
-        None => None,
-    };
     // TODO @obelisk: This will quietly swallow locking errors on the persistent response
     // This will eventually be caught if something tries to update the response but I don't
     // know if that's good enough.

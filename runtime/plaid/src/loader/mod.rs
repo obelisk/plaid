@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs::{self};
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use utils::{
     cost_function, get_module_computation_limit, get_module_page_count,
     get_module_persistent_storage_limit, read_and_configure_secrets, read_and_parse_modules,
@@ -101,10 +101,6 @@ pub enum CompilerBackend {
 pub struct Configuration {
     /// Where to load modules from
     pub module_dir: String,
-    /// A list of case-insensitive rule names that **cannot** be executed in parallel. We assume that rules can be executed
-    /// in parallel unless otherwise noted. Rules that cannot execute in parallel wait until the
-    /// executor is finished processing a rule before beginning their own execution.
-    pub single_threaded_rules: Option<Vec<String>>,
     /// What the log type of a module should be if it's not the first part of the filename
     pub log_type_overrides: HashMap<String, String>,
     /// How much computation a module is allowed to do
@@ -267,12 +263,6 @@ pub struct PlaidModule {
     pub cache: Option<Arc<RwLock<LruCache<String, String>>>>,
     /// See the PersistentResponse type.
     pub persistent_response: Option<PersistentResponse>,
-    /// Indicates whether the module is safe for concurrent execution.
-    ///
-    /// - If `None`, the module can be executed concurrently without any restrictions.
-    /// - If `Some`, the module is marked as unsafe for concurrent execution, and the `Mutex<()>`
-    ///   is used to ensure mutual exclusion, preventing multiple threads from executing it simultaneously.
-    pub concurrency_unsafe: Option<Mutex<()>>,
     /// If the module is in test mode, meaning it should not be allowed to cause side effects
     pub test_mode: bool,
 }
@@ -306,7 +296,6 @@ impl PlaidModule {
         storage: Option<Arc<Storage>>,
         module_bytes: Vec<u8>,
         log_type: &str,
-        concurrency_unsafe: Option<Mutex<()>>,
         test_mode: bool,
         compiler_backend: &CompilerBackend,
     ) -> Result<Self, Errors> {
@@ -360,7 +349,7 @@ impl PlaidModule {
         };
         let storage_current = Arc::new(RwLock::new(storage_current_bytes));
 
-        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Storage: [{storage_current_bytes}/{storage_limit} bytes used] Log Type: [{log_type}]. Concurrency Safe: [{}] Test Mode: [{test_mode}]", concurrency_unsafe.is_none());
+        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Storage: [{storage_current_bytes}/{storage_limit} bytes used] Log Type: [{log_type}]. Test Mode: [{test_mode}]");
         for import in module.imports() {
             info!("\tImport: {}", import.name());
         }
@@ -377,7 +366,6 @@ impl PlaidModule {
             secrets: None,
             cache: None,
             persistent_response: None,
-            concurrency_unsafe,
             test_mode,
         })
     }
@@ -468,18 +456,6 @@ pub async fn load(
             type_[0].to_string()
         };
 
-        // Check if this rule can be executed in parallel
-        let concurrency_safe = config.single_threaded_rules.as_ref().map_or(None, |rules| {
-            if rules
-                .iter()
-                .any(|rule| rule.eq_ignore_ascii_case(&filename))
-            {
-                Some(Mutex::new(()))
-            } else {
-                None
-            }
-        });
-
         // Default is the global test mode. Then if the module is in the exemptions specification
         // we will disable test mode for that module.
         let test_mode = config.test_mode && !config.test_mode_exemptions.contains(&filename);
@@ -493,7 +469,6 @@ pub async fn load(
             storage.clone(),
             module_bytes,
             &type_,
-            concurrency_safe,
             test_mode,
             &config.compiler_backend,
         )
