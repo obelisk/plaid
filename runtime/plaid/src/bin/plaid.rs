@@ -98,11 +98,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Print information about the threads we are starting
     info!("Starting {} execution threads for general execution", exec_thread_pools.general_pool.num_threads);
-    if !exec_thread_pools.dedicated_pools.is_empty() {
-        // We have at least one dedicated channel
-        info!("Additionally, starting the following threads: {:?}", exec_thread_pools.dedicated_pools.iter().map(|(log_type, tp)| {
-            (log_type.to_string(), tp.num_threads)
-        }).collect::<HashMap<String, u8>>());
+    for (log_type, tp) in &exec_thread_pools.dedicated_pools {
+        let thread_or_threads = if tp.num_threads == 1 {"thread"} else {"threads"};
+        info!("Starting {} {thread_or_threads} dedicated to log type [{log_type}]", tp.num_threads);
     }
 
     // Create the executor that will handle all the logs that come in and immediate
