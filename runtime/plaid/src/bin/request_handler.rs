@@ -16,6 +16,15 @@ async fn main() {
             warp::reply::with_status("", warp::http::StatusCode::OK)
         });
 
+    let cron_route = warp::post()
+        .and(warp::path("testcron"))
+        .and(warp::body::bytes())
+        .map(|body: warp::hyper::body::Bytes| {
+            let body_str = String::from_utf8(body.to_vec()).unwrap();
+            println!("{body_str}");
+            warp::reply::with_status("", warp::http::StatusCode::OK)
+        });
+
     let mnr_route = warp::post()
         .and(warp::path("testmnr"))
         .and(warp::body::bytes())
@@ -59,6 +68,7 @@ async fn main() {
 
     // Start the server on 127.0.0.1:8998
     let routes = post_route
+        .or(cron_route)
         .or(mnr_vars_route)
         .or(mnr_headers_route)
         .or(mnr_route);
