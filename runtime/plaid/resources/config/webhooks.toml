@@ -93,10 +93,6 @@ headers = []
 log_type = "test_slack"
 headers = []
 
-[webhooks."internal".webhooks."crontest"]
-log_type = "test_cron"
-headers = []
-
 # End webhooks for tests
 
 # Additional webhook examples
