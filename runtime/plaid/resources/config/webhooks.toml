@@ -90,6 +90,18 @@ headers = ["x-forwarded-for"]
 [webhooks."internal".webhooks."FFFFA".get_mode]
 response_mode = "static:this is just static data to return to the caller"
 
+[webhooks."internal".webhooks."LOADTEST1"]
+log_type = "testing"
+headers = ["notalegitheader", "reallynotlegit"]
+
+[webhooks."internal".webhooks."LOADTEST2"]
+log_type = "testing2"
+headers = ["notalegitheader", "reallynotlegit"]
+
+[webhooks."internal".webhooks."LOADTEST4"]
+log_type = "testing4"
+headers = ["notalegitheader", "reallynotlegit"]
+
 [webhooks."internal".webhooks."FFFFB"]
 log_type = "testing"
 headers = ["x-forwarded-for"]
