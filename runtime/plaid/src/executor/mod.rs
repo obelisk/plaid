@@ -9,7 +9,7 @@ use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
 use crate::ExecutionThreadPools;
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, TrySendError};
 use tokio::sync::oneshot::Sender as OneShotSender;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
@@ -147,6 +147,7 @@ pub struct Env {
 /// The executor that processes messages
 pub struct Executor {
     _handles: Vec<JoinHandle<Result<(), ExecutorError>>>,
+    thread_pools: ExecutionThreadPools,
 }
 
 /// Errors encountered by the executor while trying to execute a module
@@ -613,7 +614,7 @@ impl Executor {
         }
 
         // Dedicated processing
-        for (log_type, thread_pool) in thread_pools.dedicated_pools {
+        for (log_type, thread_pool) in &thread_pools.dedicated_pools {
             for i in 0..thread_pool.num_threads {
                 info!("Starting Execution Thread {i} Dedicated to {log_type}");
                 let receiver = thread_pool.receiver.clone();
@@ -627,6 +628,29 @@ impl Executor {
                 }));
             }
         }
-        Self { _handles }
+        Self {
+            _handles,
+            thread_pools,
+        }
+    }
+
+    /// Execute a message coming from a webhook, by sending it to the appropriate thread pool.
+    /// That will be the thread pool dedicated to the message's type, if one exists, or the
+    /// default thread pool for general execution.
+    pub fn execute_webhook_message(
+        self: &Self,
+        message: Message,
+    ) -> Result<(), TrySendError<Message>> {
+        let sender = match self.thread_pools.dedicated_pools.get(&message.type_) {
+            Some(tp) => {
+                // We have a dedicated thread pool for this type: send the log to that channel
+                &tp.sender
+            }
+            None => {
+                // We have no dedicated thread pool for this type: just send to the general one.
+                &self.thread_pools.general_pool.sender
+            }
+        };
+        sender.try_send(message)
     }
 }

@@ -127,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("A server had an invalid address");
 
             let webhooks = config.webhooks.clone();
-            let exec_thread_pools = exec_thread_pools.clone();
+            let exec = _executor.clone();
             let post_route = warp::post()
                 .and(warp::body::content_length_limit(1024 * 256))
                 .and(path!("webhook" / String))
@@ -158,26 +158,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
 
                         // Webhook exists, buffer log: first we check if we have a dedicated sender. If not, we send to the generic channel.
-                        match exec_thread_pools.dedicated_pools.get(&message.type_) {
-                            Some(tp) => {
-                                // We have a dedicated thread pool for this type: send the log to that channel
-                                if let Err(e) = tp.sender.try_send(message) {
-                                    match e {
-                                        TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
-                                        // TODO: Have this actually cause Plaid to exit
-                                        TrySendError::Disconnected(_) => panic!("The execution system is no longer accepting messages. Nothing can continue."),
-                                    }
-                                }
-                            }
-                            None => {
-                                // We have no dedicated thread pool for this type: just send to the general one.
-                                if let Err(e) = exec_thread_pools.general_pool.sender.try_send(message) {
-                                    match e {
-                                        TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
-                                        // TODO: Have this actually cause Plaid to exit
-                                        TrySendError::Disconnected(_) => panic!("The execution system is no longer accepting messages. Nothing can continue."),
-                                    }
-                                }
+                        if let Err(e) = exec.execute_webhook_message(message) {
+                            match e {
+                                TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
+                                // TODO: Have this actually cause Plaid to exit
+                                TrySendError::Disconnected(_) => panic!("The execution system is no longer accepting messages. Nothing can continue."),
                             }
                         }
                     }
