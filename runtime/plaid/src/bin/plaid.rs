@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         performance_sender.clone()
     );
 
-    let _executor = Arc::new(executor);
+    let executor = Arc::new(executor);
 
     info!("Configured Webhook Servers");
     let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
@@ -127,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("A server had an invalid address");
 
             let webhooks = config.webhooks.clone();
-            let exec = _executor.clone();
+            let exec = executor.clone();
             let post_route = warp::post()
                 .and(warp::body::content_length_limit(1024 * 256))
                 .and(path!("webhook" / String))
