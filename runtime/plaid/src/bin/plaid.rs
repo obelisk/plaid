@@ -97,10 +97,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let modules_by_name = Arc::new(modules.get_modules());
 
     // Print information about the threads we are starting
-    info!("Starting {} execution threads for general execution", exec_thread_pools.general_pool.num_threads);
+    info!("Starting {} execution threads for general execution. Log queue size = {}", exec_thread_pools.general_pool.num_threads, exec_thread_pools.general_pool.sender.capacity().unwrap_or_default());
     for (log_type, tp) in &exec_thread_pools.dedicated_pools {
         let thread_or_threads = if tp.num_threads == 1 {"thread"} else {"threads"};
-        info!("Starting {} {thread_or_threads} dedicated to log type [{log_type}]", tp.num_threads);
+        info!("Starting {} {thread_or_threads} dedicated to log type [{log_type}]. Log queue size = {}", tp.num_threads, tp.sender.capacity().unwrap_or_default());
     }
 
     // Create the executor that will handle all the logs that come in and immediate

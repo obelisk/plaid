@@ -47,8 +47,8 @@ impl ExecutionThreadPools {
         let dedicated_pools: HashMap<String, ThreadPool> = executor_config
             .dedicated_threads
             .iter()
-            .map(|(logtype, num_threads)| {
-                let tp = ThreadPool::new(*num_threads, executor_config.log_queue_size);
+            .map(|(logtype, config)| {
+                let tp = ThreadPool::new(config.num_threads, config.log_queue_size);
                 (logtype.clone(), tp)
             })
             .collect();

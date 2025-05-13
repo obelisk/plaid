@@ -99,6 +99,14 @@ pub struct WebhookServerConfiguration {
     pub webhooks: HashMap<String, WebhookConfig>,
 }
 
+/// Configuration for a thread pool / channel dedicated to a log type
+#[derive(Deserialize)]
+pub struct DedicatedThreadsConfig {
+    pub num_threads: u8,
+    #[serde(default = "default_log_queue_size")]
+    pub log_queue_size: usize,
+}
+
 /// The configuration for the executor system
 #[derive(Deserialize)]
 pub struct ExecutorConfig {
@@ -113,7 +121,7 @@ pub struct ExecutorConfig {
     /// Number of threads dedicated to specific log types.
     /// This is a mapping {log type --> num threads}.
     #[serde(default)]
-    pub dedicated_threads: HashMap<String, u8>,
+    pub dedicated_threads: HashMap<String, DedicatedThreadsConfig>,
 }
 
 /// The full configuration of Plaid

@@ -1,6 +1,9 @@
 [executor]
 execution_threads = 2
 
-[executor.dedicated_threads]
-"test_db" = 1
-"my_other_logtype" = 2
+[executor.dedicated_threads."test_db"]
+num_threads = 1
+
+[executor.dedicated_threads."my_other_logtype"]
+num_threads = 2
+log_queue_size = 1024
