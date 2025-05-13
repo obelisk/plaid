@@ -16,12 +16,13 @@ async fn main() {
             warp::reply::with_status("", warp::http::StatusCode::OK)
         });
 
+    // The cron route writes to stderr so as to not interfere with other tests.
     let cron_route = warp::post()
         .and(warp::path("testcron"))
         .and(warp::body::bytes())
         .map(|body: warp::hyper::body::Bytes| {
             let body_str = String::from_utf8(body.to_vec()).unwrap();
-            println!("{body_str}");
+            eprintln!("{body_str}");
             warp::reply::with_status("", warp::http::StatusCode::OK)
         });
 

@@ -7,7 +7,7 @@ URL="crontest"
 FILE="received_data.$URL.txt"
 
 # Start the webhook
-$REQUEST_HANDLER > $FILE &
+$REQUEST_HANDLER 2> $FILE &
 if [ $? -ne 0 ]; then
   echo "Failed to start request handler"
   rm $FILE
