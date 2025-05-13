@@ -9,6 +9,7 @@ use lru::LruCache;
 use serde::{de, Deserialize, Serialize};
 use signing::check_module_signatures;
 use sshcerts::PublicKey;
+use wasmer::sys::{NativeEngineExt, Target};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs::{self};
@@ -18,13 +19,16 @@ use utils::{
     cost_function, get_module_computation_limit, get_module_page_count,
     get_module_persistent_storage_limit, read_and_configure_secrets, read_and_parse_modules,
 };
+
+use wasmer::sys::CompilerConfig;
+
 #[cfg(feature = "llvm")]
-use wasmer::LLVM;
+use wasmer::sys::LLVM;
 
 #[cfg(feature = "cranelift")]
-use wasmer::Cranelift;
+use wasmer::sys::Cranelift;
 
-use wasmer::{sys::BaseTunables, CompilerConfig, Engine, Module, NativeEngineExt, Pages, Target};
+use wasmer::{sys::BaseTunables, Engine, Module, Pages};
 use wasmer_middlewares::Metering;
 
 use crate::storage::Storage;
