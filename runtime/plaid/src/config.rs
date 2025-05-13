@@ -112,7 +112,8 @@ pub struct ExecutorConfig {
     pub log_queue_size: usize,
     /// Number of threads dedicated to specific log types.
     /// This is a mapping {log type --> num threads}.
-    pub dedicated_threads: Option<HashMap<String, u8>>,
+    #[serde(default)]
+    pub dedicated_threads: HashMap<String, u8>,
 }
 
 /// The full configuration of Plaid

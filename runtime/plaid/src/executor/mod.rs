@@ -1,3 +1,5 @@
+pub mod thread_pools;
+
 use crate::apis::Api;
 
 use crate::functions::{
@@ -7,9 +9,9 @@ use crate::loader::PlaidModule;
 use crate::logging::{Logger, LoggingError};
 use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
-use crate::ExecutionThreadPools;
 
 use crossbeam_channel::{Receiver, Sender, TrySendError};
+use thread_pools::ExecutionThreadPools;
 use tokio::sync::oneshot::Sender as OneShotSender;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};

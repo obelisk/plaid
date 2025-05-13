@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = config::configure()?;
     
     // Create thread pools for log execution
-    let exec_thread_pools = ExecutionThreadPools::new(&config.executor);
+    let exec_thread_pools = thread_pools::ExecutionThreadPools::new(&config.executor);
 
     // For convenience, keep a reference to the log_sender for the general channel, so that we can quickly clone it around
     let log_sender = &exec_thread_pools.general_pool.sender;
