@@ -1,5 +1,12 @@
 [data]
 
+# This will run on the 5th, 11th, 36th, 41st, and 57th second of every minute
+[data.interval]
+[data.interval.jobs]
+[data.interval.jobs."test_cron"]
+schedule = "5,11,36,41,57 * * * * * *"
+log_type = "test_cron"
+
 # [data.websocket]
 # [data.websocket.websockets]
 # [data.websocket."websockets"."demo_rpc_call"]
