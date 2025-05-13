@@ -2,7 +2,6 @@
 .DS_Store
 
 # Artefacts
-/modules
 /compiled_modules
 /runtime/performance-monitoring/*
 /module_signatures
