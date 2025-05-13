@@ -157,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
 
-                        // Webhook exists, buffer log: first we check if we have a dedicated sender. If not, we send to the generic channel.
+                        // Webhook exists, buffer log
                         if let Err(e) = exec.execute_webhook_message(message) {
                             match e {
                                 TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
