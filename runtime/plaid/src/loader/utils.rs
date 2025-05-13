@@ -1,9 +1,10 @@
+use wasmer::sys::wasmparser::Operator;
+
 use super::errors::Errors;
 use super::{LimitValue, LimitableAmount, LimitedAmount};
 
 use std::collections::HashMap;
 use std::fs::DirEntry;
-use wasmer::wasmparser::Operator;
 
 const CALL_COST: u64 = 10;
 
