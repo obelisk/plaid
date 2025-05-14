@@ -1,10 +1,9 @@
 use aws_sdk_dynamodb::primitives::Blob;
 use aws_sdk_dynamodb::types::{AttributeValue, ReturnValue};
 use aws_sdk_dynamodb::Client;
-use serde::de::DeserializeOwned;
+use plaid_stl::aws::dynamodb::{DeleteItemInput, PutItemInput, QueryInput};
 use serde_json::{json, Map, Value};
 
-use std::hash::Hash;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -12,6 +11,7 @@ use std::{
 
 use serde::Deserialize;
 
+use crate::apis::ApiError;
 use crate::{get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
 
 /// Defines configuration for the DynamoDB API
@@ -38,14 +38,9 @@ pub struct DynamoDb {
     read: HashMap<String, HashSet<String>>,
 }
 
-// TODO move to STL
-pub struct PutItemInput {
-    pub table_name: String,
-    pub item: Value,
-    pub expression_attribute_names_json: Option<Value>,
-    pub expression_attribute_values_json: Option<Value>,
-    pub condition_expression: Option<String>,
-    pub return_values: Option<String>,
+enum AccessScope {
+    Read,
+    Write,
 }
 
 impl DynamoDb {
@@ -66,27 +61,60 @@ impl DynamoDb {
         }
     }
 
-    // PutItem function with direct deserialization
+    fn allow_operation(
+        &self,
+        access_scope: AccessScope,
+        module: Arc<PlaidModule>,
+        table_name: &str,
+    ) -> Result<(), ApiError> {
+        match access_scope {
+            AccessScope::Read => {
+                if let Some(read_access) = self.read.get(table_name) {
+                    // check if this module has read access to this table
+                    if !read_access.contains(&module.to_string()) {
+                        return Err(ApiError::BadRequest);
+                    }
+                    Ok(())
+                } else if let Some(write_access) = self.write.get(table_name) {
+                    // check if this module has write access to this table
+                    if !write_access.contains(&module.to_string()) {
+                        return Err(ApiError::BadRequest);
+                    }
+                    Ok(())
+                } else {
+                    Err(ApiError::BadRequest)
+                }
+            }
+            AccessScope::Write => {
+                if let Some(write_access) = self.write.get(table_name) {
+                    // check if this module has write access to this table
+                    if !write_access.contains(&module.to_string()) {
+                        return Err(ApiError::BadRequest);
+                    }
+                    Ok(())
+                } else {
+                    Err(ApiError::BadRequest)
+                }
+            }
+        }
+    }
+
     pub async fn put_item(
         &self,
         module: Arc<PlaidModule>,
-        table_name: &str,
-        item_json: Value,
-        expression_attribute_names_json: Option<HashMap<String, String>>,
-        expression_attribute_values_json: Option<Value>,
-        condition_expression: Option<&str>,
-        return_values: Option<&str>,
-    ) -> Result<Option<Value>, String> {
-        if let Some(write_access) = self.write.get(table_name) {
-            // check if this module has write access to this table
-            if !write_access.contains(&module.to_string()) {
-                return Err(format!("unknown table {table_name}"));
-            }
-        } else {
-            return Err(format!("unknown table {table_name}"));
-        };
-        let item = map_json_to_attributes(Some(item_json))?;
-        let expression_attribute_values = map_json_to_attributes(expression_attribute_values_json)?;
+        params: &str,
+    ) -> Result<Option<String>, ApiError> {
+        let PutItemInput {
+            table_name,
+            item,
+            expression_attribute_names,
+            expression_attribute_values,
+            condition_expression,
+            return_values,
+        } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
+        self.allow_operation(AccessScope::Write, module, &table_name)?;
+        let item = map_json_to_attributes(Some(item))?;
+        let expression_attribute_values = map_json_to_attributes(expression_attribute_values)?;
         let return_values = map_return_values(return_values)?;
 
         // Execute PutItem
@@ -95,19 +123,21 @@ impl DynamoDb {
             .put_item()
             .table_name(table_name)
             .set_item(item)
-            .set_expression_attribute_names(expression_attribute_names_json)
+            .set_expression_attribute_names(expression_attribute_names)
             .set_expression_attribute_values(expression_attribute_values)
             .set_condition_expression(condition_expression.map(|x| x.to_string()))
             .set_return_values(return_values)
             .send()
             .await
-            .map_err(|e| format!("PutItem failed: {:?}", e))?;
+            .map_err(|e| ApiError::DynamoDbPutItemError(e))?;
 
         match output.attributes() {
             None => Ok(None),
             Some(attrs) => {
                 let result = map_attributes_to_json(attrs)?;
-                Ok(Some(result))
+                let s = serde_json::to_string(&result)
+                    .map_err(|err| ApiError::SerdeError(err.to_string()))?;
+                Ok(Some(s))
             }
         }
     }
@@ -115,82 +145,73 @@ impl DynamoDb {
     pub async fn delete(
         &self,
         module: Arc<PlaidModule>,
-        table_name: &str,
-        key_json: Option<Value>,
-        key_condition_expression: Option<String>,
-        expression_attribute_names_json: Option<HashMap<String, String>>,
-        expression_attribute_values_json: Option<Value>,
-        return_values: Option<&str>,
-    ) -> Result<Option<Value>, String> {
-        if let Some(write_access) = self.write.get(table_name) {
-            // check if this module has write access to this table
-            if !write_access.contains(&module.to_string()) {
-                return Err(format!("{module} no write access for {table_name}"));
-            }
-        } else {
-            return Err(format!("{module} no write access for {table_name}"));
-        };
+        params: &str,
+    ) -> Result<Option<String>, ApiError> {
+        let DeleteItemInput {
+            table_name,
+            key,
+            key_condition_expression,
+            expression_attribute_names,
+            expression_attribute_values,
+            return_values,
+        } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
-        let expression_attribute_values = map_json_to_attributes(expression_attribute_values_json)?;
-        let dynamo_key = map_json_to_attributes(key_json)?;
+        self.allow_operation(AccessScope::Write, module, &table_name)?;
+        let expression_attribute_values = map_json_to_attributes(expression_attribute_values)?;
+        let dynamo_key = map_json_to_attributes(Some(key))?;
         let return_values = map_return_values(return_values)?;
 
-        // Execute Query
         let output = self
             .client
             .delete_item()
             .table_name(table_name)
             .set_key(dynamo_key)
             .set_condition_expression(key_condition_expression)
-            .set_expression_attribute_names(expression_attribute_names_json)
+            .set_expression_attribute_names(expression_attribute_names)
             .set_expression_attribute_values(expression_attribute_values)
             .set_return_values(return_values)
             .send()
             .await
-            .map_err(|e| format!("Query failed: {:?}", e))?;
+            .map_err(|e| ApiError::DynamoDbDeleteItemError(e))?;
 
         // convert to json
         match output.attributes() {
             None => Ok(None),
             Some(attrs) => {
                 let result = map_attributes_to_json(attrs)?;
-                Ok(Some(result))
+                let s = serde_json::to_string(&result)
+                    .map_err(|err| ApiError::SerdeError(err.to_string()))?;
+                Ok(Some(s))
             }
         }
     }
-
     pub async fn query(
         &self,
         module: Arc<PlaidModule>,
-        table_name: &str,
-        index_name: Option<&str>,
-        key_condition_expression: &str,
-        expression_attribute_names_json: Option<HashMap<String, String>>,
-        expression_attribute_values_json: Option<Value>,
-    ) -> Result<Vec<Value>, String> {
-        if let Some(read_access) = self.read.get(table_name) {
-            // check if this module has read access to this table
-            if !read_access.contains(&module.to_string()) {
-                return Err(format!("{module} no write access for {table_name}",));
-            }
-        } else {
-            return Err(format!("{module} no read access for {table_name}"));
-        };
+        params: &str,
+    ) -> Result<Vec<Value>, ApiError> {
+        let QueryInput {
+            table_name,
+            index_name,
+            key_condition_expression,
+            expression_attribute_names,
+            expression_attribute_values,
+        } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
-        let expression_attribute_values = map_json_to_attributes(expression_attribute_values_json)?;
+        self.allow_operation(AccessScope::Read, module, &table_name)?;
+        let expression_attribute_values = map_json_to_attributes(expression_attribute_values)?;
 
-        // Execute Query
         let output = self
             .client
             .query()
             .table_name(table_name)
             .set_index_name(index_name.map(|x| x.to_string()))
             .key_condition_expression(key_condition_expression)
-            .set_expression_attribute_names(expression_attribute_names_json)
+            .set_expression_attribute_names(expression_attribute_names)
             .set_expression_attribute_values(expression_attribute_values)
             .send()
             .await
-            .map_err(|e| format!("Query failed: {:?}", e))?;
+            .map_err(|e| ApiError::DynamoDbQueryError(e))?;
 
         // convert to json
         let mut out: Vec<Value> = vec![];
@@ -203,7 +224,7 @@ impl DynamoDb {
     }
 }
 
-fn map_attributes_to_json(attrs: &HashMap<String, AttributeValue>) -> Result<Value, String> {
+fn map_attributes_to_json(attrs: &HashMap<String, AttributeValue>) -> Result<Value, ApiError> {
     let mut result = Map::new();
     for (k, v) in attrs.iter() {
         let new_val = attribute_value_to_json(v)?;
@@ -213,14 +234,11 @@ fn map_attributes_to_json(attrs: &HashMap<String, AttributeValue>) -> Result<Val
 }
 
 fn map_json_to_attributes(
-    value: Option<Value>,
-) -> Result<Option<HashMap<String, AttributeValue>>, String> {
-    if let Some(expr_vals_json) = value {
-        let expression_vals_map: HashMap<String, Value> = serde_json::from_value(expr_vals_json)
-            .map_err(|e| format!("Failed to map JSON to attributes: {}", e))?;
-
+    value: Option<HashMap<String, Value>>,
+) -> Result<Option<HashMap<String, AttributeValue>>, ApiError> {
+    if let Some(expr_vals) = value {
         let mut express_attribute_values = HashMap::<String, AttributeValue>::new();
-        for (key, value) in expression_vals_map {
+        for (key, value) in expr_vals {
             let attr_value = json_to_attribute_value(value)?;
             express_attribute_values.insert(key, attr_value);
         }
@@ -230,22 +248,25 @@ fn map_json_to_attributes(
     }
 }
 
-fn map_return_values(value: Option<&str>) -> Result<Option<ReturnValue>, String> {
+fn map_return_values(value: Option<String>) -> Result<Option<ReturnValue>, ApiError> {
     value
         .as_ref()
-        .map(|rv| match *rv {
+        .map(|rv| match rv.as_str() {
+            "ALL_NEW" => Ok(ReturnValue::AllNew),
             "ALL_OLD" => Ok(ReturnValue::AllOld),
+            "UPDATED_NEW" => Ok(ReturnValue::UpdatedNew),
+            "UPDATED_OLD" => Ok(ReturnValue::UpdatedOld),
             "NONE" | "" => Ok(ReturnValue::None),
-            _ => Err(format!(
-                "Invalid return_values: {}. Expected 'ALL_OLD' or 'NONE'",
+            _ => Err(ApiError::SerdeError(format!(
+                "Invalid return_values: {}.",
                 rv
-            )),
+            ))),
         })
         .transpose()
 }
 
 // helper function to convert JSON Value to DynamoDB AttributeValue, supporting all types
-fn json_to_attribute_value(value: Value) -> Result<AttributeValue, String> {
+fn json_to_attribute_value(value: Value) -> Result<AttributeValue, ApiError> {
     match value {
         // String: Direct string value
         Value::String(s) => Ok(AttributeValue::S(s)),
@@ -257,7 +278,9 @@ fn json_to_attribute_value(value: Value) -> Result<AttributeValue, String> {
             } else if let Some(f) = n.as_f64() {
                 Ok(AttributeValue::N(f.to_string()))
             } else {
-                Err("Unsupported number format".to_string())
+                Err(ApiError::SerdeError(String::from(
+                    "Unsupported number format",
+                )))
             }
         }
 
@@ -270,7 +293,9 @@ fn json_to_attribute_value(value: Value) -> Result<AttributeValue, String> {
         // Array: Handle lists and sets
         Value::Array(arr) => {
             if arr.is_empty() {
-                return Err("Lists and sets cannot be empty".to_string());
+                return Err(ApiError::SerdeError(String::from(
+                    "Lists and sets cannot be empty",
+                )));
             }
             // Check if all elements are strings (for SS)
             let all_strings = arr.iter().all(|v| v.is_string());
@@ -292,7 +317,7 @@ fn json_to_attribute_value(value: Value) -> Result<AttributeValue, String> {
                 Ok(AttributeValue::Ss(strings))
             } else if all_numbers {
                 // Number Set (NS)
-                let numbers: Result<Vec<String>, String> = arr
+                let numbers: Result<Vec<String>, ApiError> = arr
                     .into_iter()
                     .map(|v| {
                         if let Some(i) = v.as_i64() {
@@ -300,26 +325,31 @@ fn json_to_attribute_value(value: Value) -> Result<AttributeValue, String> {
                         } else if let Some(f) = v.as_f64() {
                             Ok(f.to_string())
                         } else {
-                            Err("Invalid number in number set".to_string())
+                            Err(ApiError::SerdeError(String::from(
+                                "Invalid number in number set",
+                            )))
                         }
                     })
                     .collect();
                 Ok(AttributeValue::Ns(numbers?))
             } else if all_binary {
                 // Binary Set (BS)
-                let binaries: Result<Vec<Blob>, String> = arr
+                let binaries: Result<Vec<Blob>, ApiError> = arr
                     .into_iter()
                     .map(|v| {
-                        let s = v.as_str().ok_or("Invalid binary value".to_string())?;
-                        let decoded = base64::decode(s)
-                            .map_err(|e| format!("Failed to decode base64: {}", e))?;
+                        let s = v
+                            .as_str()
+                            .ok_or(ApiError::SerdeError(String::from("Invalid binary value")))?;
+                        let decoded = base64::decode(s).map_err(|e| {
+                            ApiError::SerdeError(format!("Failed to decode base64: {}", e))
+                        })?;
                         Ok(Blob::new(decoded))
                     })
                     .collect();
                 Ok(AttributeValue::Bs(binaries?))
             } else {
                 // List (L)
-                let items: Result<Vec<AttributeValue>, String> =
+                let items: Result<Vec<AttributeValue>, ApiError> =
                     arr.into_iter().map(json_to_attribute_value).collect();
                 Ok(AttributeValue::L(items?))
             }
@@ -330,11 +360,14 @@ fn json_to_attribute_value(value: Value) -> Result<AttributeValue, String> {
             // Check if the object represents a binary value (e.g., {"_binary": "base64string"})
             if obj.len() == 1 && obj.contains_key("_binary") {
                 if let Some(Value::String(base64_str)) = obj.get("_binary") {
-                    let decoded = base64::decode(base64_str)
-                        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+                    let decoded = base64::decode(base64_str).map_err(|e| {
+                        ApiError::SerdeError(format!("Failed to decode base64: {}", e))
+                    })?;
                     return Ok(AttributeValue::B(Blob::new(decoded)));
                 } else {
-                    return Err("_binary must be a base64-encoded string".to_string());
+                    return Err(ApiError::SerdeError(String::from(
+                        "_binary must be a base64-encoded string",
+                    )));
                 }
             }
 
@@ -349,7 +382,7 @@ fn json_to_attribute_value(value: Value) -> Result<AttributeValue, String> {
 }
 
 // helper function to convert DynamoDB AttributeValue to JSON Value
-fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, String> {
+fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, ApiError> {
     match attr_value {
         AttributeValue::S(s) => Ok(Value::String(s.clone())),
         AttributeValue::N(n) => {
@@ -359,7 +392,10 @@ fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, String>
             } else if let Ok(float_val) = n.parse::<f64>() {
                 Ok(json!(float_val))
             } else {
-                Err(format!("Invalid number format: {}", n))
+                Err(ApiError::SerdeError(format!(
+                    "Invalid number format: {}",
+                    n
+                )))
             }
         }
         AttributeValue::B(blob) => {
@@ -369,7 +405,7 @@ fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, String>
         AttributeValue::Bool(b) => Ok(Value::Bool(*b)),
         AttributeValue::Null(_) => Ok(Value::Null),
         AttributeValue::L(list) => {
-            let json_list: Result<Vec<Value>, String> =
+            let json_list: Result<Vec<Value>, ApiError> =
                 list.iter().map(attribute_value_to_json).collect();
             Ok(Value::Array(json_list?))
         }
@@ -383,7 +419,9 @@ fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, String>
         }
         AttributeValue::Ss(strings) => {
             if strings.is_empty() {
-                return Err("String set cannot be empty".to_string());
+                return Err(ApiError::SerdeError(
+                    "String set cannot be empty".to_string(),
+                ));
             }
             Ok(Value::Array(
                 strings.iter().map(|s| Value::String(s.clone())).collect(),
@@ -391,9 +429,11 @@ fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, String>
         }
         AttributeValue::Ns(numbers) => {
             if numbers.is_empty() {
-                return Err("Number set cannot be empty".to_string());
+                return Err(ApiError::SerdeError(
+                    "Number set cannot be empty".to_string(),
+                ));
             }
-            let json_numbers: Result<Vec<Value>, String> = numbers
+            let json_numbers: Result<Vec<Value>, ApiError> = numbers
                 .iter()
                 .map(|n| {
                     if let Ok(int_val) = n.parse::<i64>() {
@@ -401,7 +441,10 @@ fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, String>
                     } else if let Ok(float_val) = n.parse::<f64>() {
                         Ok(json!(float_val))
                     } else {
-                        Err(format!("Invalid number in number set: {}", n))
+                        Err(ApiError::SerdeError(format!(
+                            "Invalid number in number set: {}",
+                            n
+                        )))
                     }
                 })
                 .collect();
@@ -409,7 +452,9 @@ fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, String>
         }
         AttributeValue::Bs(blobs) => {
             if blobs.is_empty() {
-                return Err("Binary set cannot be empty".to_string());
+                return Err(ApiError::SerdeError(
+                    "Binary set cannot be empty".to_string(),
+                ));
             }
             let json_binaries: Vec<Value> = blobs
                 .iter()
@@ -418,9 +463,9 @@ fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, String>
             Ok(Value::Array(json_binaries))
         }
         // Handle any unexpected variants
-        _ => Err(format!(
+        _ => Err(ApiError::SerdeError(format!(
             "Unsupported AttributeValue variant: {:?}",
             attr_value
-        )),
+        ))),
     }
 }
