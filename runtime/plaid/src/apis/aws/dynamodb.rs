@@ -86,6 +86,9 @@ impl DynamoDb {
                 }
             }
             AccessScope::Write => {
+                if module.test_mode {
+                    return Err(ApiError::TestMode);
+                }
                 if let Some(write_access) = self.write.get(table_name) {
                     // check if this module has write access to this table
                     if !write_access.contains(&module.to_string()) {
@@ -101,9 +104,9 @@ impl DynamoDb {
 
     pub async fn put_item(
         &self,
-        module: Arc<PlaidModule>,
         params: &str,
-    ) -> Result<Option<String>, ApiError> {
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let PutItemInput {
             table_name,
             item,
@@ -132,21 +135,21 @@ impl DynamoDb {
             .map_err(|e| ApiError::DynamoDbPutItemError(e))?;
 
         match output.attributes() {
-            None => Ok(None),
+            None => Ok(String::default()),
             Some(attrs) => {
                 let result = map_attributes_to_json(attrs)?;
                 let s = serde_json::to_string(&result)
                     .map_err(|err| ApiError::SerdeError(err.to_string()))?;
-                Ok(Some(s))
+                Ok(s)
             }
         }
     }
 
-    pub async fn delete(
+    pub async fn delete_item(
         &self,
-        module: Arc<PlaidModule>,
         params: &str,
-    ) -> Result<Option<String>, ApiError> {
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         let DeleteItemInput {
             table_name,
             key,
@@ -155,7 +158,6 @@ impl DynamoDb {
             expression_attribute_values,
             return_values,
         } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
-
         self.allow_operation(AccessScope::Write, module, &table_name)?;
         let expression_attribute_values = map_json_to_attributes(expression_attribute_values)?;
         let dynamo_key = map_json_to_attributes(Some(key))?;
@@ -176,20 +178,17 @@ impl DynamoDb {
 
         // convert to json
         match output.attributes() {
-            None => Ok(None),
+            None => Ok(String::default()),
             Some(attrs) => {
                 let result = map_attributes_to_json(attrs)?;
                 let s = serde_json::to_string(&result)
                     .map_err(|err| ApiError::SerdeError(err.to_string()))?;
-                Ok(Some(s))
+                Ok(s)
             }
         }
     }
-    pub async fn query(
-        &self,
-        module: Arc<PlaidModule>,
-        params: &str,
-    ) -> Result<Vec<Value>, ApiError> {
+
+    pub async fn query(&self, params: &str, module: Arc<PlaidModule>) -> Result<String, ApiError> {
         let QueryInput {
             table_name,
             index_name,
@@ -197,7 +196,6 @@ impl DynamoDb {
             expression_attribute_names,
             expression_attribute_values,
         } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
-
         self.allow_operation(AccessScope::Read, module, &table_name)?;
         let expression_attribute_values = map_json_to_attributes(expression_attribute_values)?;
 
@@ -219,6 +217,9 @@ impl DynamoDb {
             let result = map_attributes_to_json(item)?;
             out.push(result)
         }
+
+        let out =
+            serde_json::to_string(&out).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
         Ok(out)
     }
