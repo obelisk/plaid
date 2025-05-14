@@ -43,12 +43,12 @@ pub struct Request {
     return_code: bool,
     /// Optional root TLS certificate to use for this request.  
     /// When set, the request will be sent via a special HTTP client configured with this certificate.
-    #[serde(deserialize_with = "certificate_deserializer")]
+    #[serde(default, deserialize_with = "certificate_deserializer")]
     pub root_certificate: Option<Certificate>,
     /// Optional per‐request timeout.  
     /// When set, the request will be sent via a special HTTP client configured with this timeout;  
     /// if unset, the default timeout from the API config is used.
-    #[serde(deserialize_with = "duration_deserializer")]
+    #[serde(default, deserialize_with = "duration_deserializer")]
     pub timeout: Option<Duration>,
     /// Rules allowed to use this request
     allowed_rules: Vec<String>,
@@ -65,14 +65,14 @@ fn duration_deserializer<'de, D>(deserializer: D) -> Result<Option<Duration>, D:
 where
     D: de::Deserializer<'de>,
 {
-    let duration = u8::deserialize(deserializer)?;
-    if duration == 0 {
-        return Err(serde::de::Error::custom(format!(
-            "Invalid timeout duration provided. Acceptable values are between 1 and 255 seconds"
-        )));
+    let duration = Option::<u8>::deserialize(deserializer)?;
+    match duration {
+        None => Ok(None),
+        Some(0) => Err(de::Error::custom(
+            "Invalid timeout duration provided. Acceptable values are between 1 and 255 seconds",
+        )),
+        Some(secs) => Ok(Some(Duration::from_secs(secs as u64))),
     }
-
-    Ok(Some(Duration::from_secs(duration as u64)))
 }
 
 /// Deserialize a PEM‐encoded string into a `Certificate`, erroring on parse failure.
@@ -80,12 +80,17 @@ fn certificate_deserializer<'de, D>(deserializer: D) -> Result<Option<Certificat
 where
     D: de::Deserializer<'de>,
 {
-    let pem = String::deserialize(deserializer)?;
-    let cert = Certificate::from_pem(pem.as_bytes()).map_err(|e| {
-        serde::de::Error::custom(format!("Invalid certificate provided. Error: {e}"))
-    })?;
+    let pem = Option::<String>::deserialize(deserializer)?;
+    match pem {
+        None => Ok(None),
+        Some(pem) => {
+            let cert = Certificate::from_pem(pem.as_bytes()).map_err(|e| {
+                serde::de::Error::custom(format!("Invalid certificate provided. Error: {e}"))
+            })?;
 
-    Ok(Some(cert))
+            Ok(Some(cert))
+        }
+    }
 }
 
 /// Data returned by a request.
