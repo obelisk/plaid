@@ -36,7 +36,7 @@ pub struct QueryInput {
     pub expression_attribute_values: Option<HashMap<String, Value>>,
 }
 
-/// Put item in dynamodb table
+/// Put item in dynamodb table. Returns JSON string.
 pub fn put_item(input: PutItemInput) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_dynamodb, put_item);
@@ -69,7 +69,7 @@ pub fn put_item(input: PutItemInput) -> Result<String, PlaidFunctionError> {
     }
 }
 
-/// Delete item in dynamodb table
+/// Delete item in dynamodb table. Returns JSON string.
 pub fn delete_item(input: DeleteItemInput) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_dynamodb, delete_item);
@@ -102,7 +102,7 @@ pub fn delete_item(input: DeleteItemInput) -> Result<String, PlaidFunctionError>
     }
 }
 
-/// Query dynamodb table
+/// Query dynamodb table. Returns JSON string.
 pub fn query(input: QueryInput) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_dynamodb, query);
