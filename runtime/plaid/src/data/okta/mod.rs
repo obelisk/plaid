@@ -26,7 +26,6 @@ pub struct OktaConfig {
     limit: u16,
     /// Number of milliseconds to wait in between calls to the Okta API.
     /// Okta enforces a rate limit of 50 calls/sec for the `/logs` endpoint.
-    /// If no value is provided here, we will default to 1 milliseconds between calls
     #[serde(default = "default_sleep_milliseconds")]
     sleep_duration: u64,
     /// How we ask the Okta API to sort logs. This can be "ASCENDING" (from oldest to newest)
@@ -68,7 +67,7 @@ where
 /// It is used as the default value for deserialization of the `sleep_duration` field,
 /// of `OktaConfig` in the event that no value is provided.
 fn default_sleep_milliseconds() -> u64 {
-    1
+    1000
 }
 
 fn default_canon_time() -> u64 {
