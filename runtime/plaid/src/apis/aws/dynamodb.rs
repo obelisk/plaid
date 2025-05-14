@@ -28,9 +28,9 @@ pub struct DynamoDbConfig {
 }
 
 /// Represents the DynamoDB API that handles all requests to KMS
+/// NOTE: if Plaid is configured with the DynamoDB database backend, sharing tables here will lead to undefined behaviour
 pub struct DynamoDb {
     /// The underlying KMS client used to interact with the KMS API.
-    /// NOTE: if Plaid is configured with the DynamoDB database backend, sharing tables here will lead to undefined behaviour
     client: Client,
     /// Configured writers - maps a table name to a list of rules that are allowed to write it
     write: HashMap<String, HashSet<String>>,
