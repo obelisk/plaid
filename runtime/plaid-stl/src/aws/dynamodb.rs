@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::PlaidFunctionError;
+
+const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
+
 #[derive(Serialize, Deserialize, Default)]
 pub struct PutItemInput {
     pub table_name: String,
@@ -30,4 +34,103 @@ pub struct QueryInput {
     pub key_condition_expression: String,
     pub expression_attribute_names: Option<HashMap<String, String>>,
     pub expression_attribute_values: Option<HashMap<String, Value>>,
+}
+
+/// Put item in dynamodb table
+pub fn put_item(input: PutItemInput) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(aws_dynamodb, put_item);
+    }
+
+    let input = serde_json::to_string(&input).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        aws_dynamodb_put_item(
+            input.as_ptr(),
+            input.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match String::from_utf8(return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
+/// Delete item in dynamodb table
+pub fn delete_item(input: DeleteItemInput) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(aws_dynamodb, delete_item);
+    }
+
+    let input = serde_json::to_string(&input).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        aws_dynamodb_delete_item(
+            input.as_ptr(),
+            input.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match String::from_utf8(return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
+/// Query dynamodb table
+pub fn query(input: QueryInput) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(aws_dynamodb, query);
+    }
+
+    let input = serde_json::to_string(&input).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        aws_dynamodb_query(
+            input.as_ptr(),
+            input.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match String::from_utf8(return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
 }
