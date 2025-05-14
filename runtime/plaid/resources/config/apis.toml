@@ -2,7 +2,7 @@
 [apis."general".network.web_requests]
 [apis."general"."network"."web_requests"."test-response"]
 verb = "post"
-uri = "http://localhost:8998/response"
+uri = "https://localhost:8998/response"
 return_body = true
 return_code = true
 allowed_rules = [
@@ -17,32 +17,44 @@ allowed_rules = [
     "test_shared_db_rule_2.wasm",
     "test_slack.wasm",
 ]
+root_certificate = """
+{plaid-secret{integration-test-root-ca}}
+"""
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 
 [apis."general"."network"."web_requests"."test-response-mnr"]
 verb = "post"
-uri = "http://localhost:8998/testmnr"
+uri = "https://localhost:8998/testmnr"
 return_body = true
 return_code = true
 allowed_rules = ["test_mnr.wasm"]
+root_certificate = """
+{plaid-secret{integration-test-root-ca}}
+"""
 [apis."general"."network"."web_requests"."test-response-mnr"."headers"]
 
 [apis."general"."network"."web_requests"."test-response-mnr-headers"]
 verb = "post"
-uri = "http://localhost:8998/testmnr/headers"
+uri = "https://localhost:8998/testmnr/headers"
 return_body = true
 return_code = true
 allowed_rules = ["test_mnr.wasm"]
+root_certificate = """
+{plaid-secret{integration-test-root-ca}}
+"""
 [apis."general"."network"."web_requests"."test-response-mnr-headers"."headers"]
 first_header = "first_value"
 
 [apis."general"."network"."web_requests"."test-response-mnr-vars"]
 verb = "post"
-uri = "http://localhost:8998/testmnr/{variable}"
+uri = "https://localhost:8998/testmnr/{variable}"
 return_body = true
 return_code = true
 allowed_rules = ["test_mnr.wasm"]
+root_certificate = """
+{plaid-secret{integration-test-root-ca}}
+"""
 [apis."general"."network"."web_requests"."test-response-mnr-vars"."headers"]
 
 [apis."general"."network"."web_requests"."google_test"]

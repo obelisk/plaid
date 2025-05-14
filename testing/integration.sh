@@ -32,8 +32,6 @@ if uname | grep -q Darwin; then
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
 
-
-
 echo "Building All Plaid Modules"
 cd modules
 cargo build --all --release
@@ -47,17 +45,62 @@ cp -r modules/target/wasm32-unknown-unknown/release/test_*.wasm compiled_modules
 ssh-keygen -t ed25519 -f plaidrules_key_ed25519 -N ""
 public_key=$(cat plaidrules_key_ed25519.pub | awk '{printf "%s %s %s", $1, $2, $3}')
 
+# Generate a self-signed cert to test MNRs with
+openssl genrsa -out ca.key 4096
+
+# Generate a self-signed CA cert with CA:TRUE
+openssl req -x509 -new -nodes \
+  -key ca.key \
+  -days 1 \
+  -subj "/CN=My Test CA" \
+  -addext "basicConstraints = CA:TRUE,pathlen:1" \
+  -out ca.pem
+
+# Generate a server key + CSR
+openssl genrsa -out server.key 4096
+openssl req -new -key server.key \
+  -subj "/CN=localhost" \
+  -out server.csr
+
+# Create extfile for leaf cert
+cat > san.cnf <<EOF
+basicConstraints=CA:FALSE
+subjectAltName=DNS:localhost
+EOF
+
+# Sign the server CSR with CA
+openssl x509 -req \
+  -in server.csr \
+  -CA ca.pem -CAkey ca.key -CAcreateserial \
+  -days 1 \
+  -sha256 \
+  -extfile san.cnf \
+  -out server.pem
+
+escaped_cert=$(
+  awk 'BEGIN { ORS="\\n" }
+       {
+         gsub(/\\/,"\\\\");  # escape backslashes
+         gsub(/&/,"\\\&");   # escape ampersands
+         print
+       }' ca.pem
+)
+rm ca.* *.csr san.cnf
+mv server.pem server.key /tmp/plaid_config
+
 # Do any needed replacements within the secrets file
 if uname | grep -q Darwin; then
     # macOS (BSD sed)
     sed -i '' "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" $SECRET_WORKING_PATH
     sed -i '' "s|{CI_SLACK_TEST_WEBHOOK}|$SLACK_TEST_WEBHOOK|g" $SECRET_WORKING_PATH
     sed -i '' "s|{CI_SLACK_TEST_BOT_TOKEN}|$SLACK_TEST_BOT_TOKEN|g" $SECRET_WORKING_PATH
+    sed -i '' "s|{CI_CERTIFICATE_PLACEHOLDER}|$escaped_cert|g" $SECRET_WORKING_PATH
 else
     # Linux (GNU sed)
     sed -i "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" $SECRET_WORKING_PATH
     sed -i "s|{CI_SLACK_TEST_WEBHOOK}|$SLACK_TEST_WEBHOOK|g" $SECRET_WORKING_PATH
     sed -i "s|{CI_SLACK_TEST_BOT_TOKEN}|$SLACK_TEST_BOT_TOKEN|g" $SECRET_WORKING_PATH
+    sed -i "s|{CI_CERTIFICATE_PLACEHOLDER}|$escaped_cert|g" $SECRET_WORKING_PATH
 fi
 
 # Clear out the module_signatures directory
@@ -95,7 +138,7 @@ if [ "$1" == "llvm" ]; then
   # If the compiler is llvm, modify the config to use the llvm backend
   sed -i 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' ${CONFIG_WORKING_PATH}/loading.toml
   # If macOS
-  if  uname | grep -q Darwin; then
+  if uname | grep -q Darwin; then
     export RUSTFLAGS="-L /opt/homebrew/lib/"
     export LLVM_SYS_180_PREFIX="/opt/homebrew/Cellar/llvm@18/18.1.8"
   fi
