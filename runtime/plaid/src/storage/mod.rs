@@ -11,7 +11,10 @@ pub mod dynamodb;
 #[cfg(feature = "sled")]
 pub mod sled;
 
+pub mod in_memory;
+
 use futures_util::future::join_all;
+use in_memory::InMemoryDb;
 use serde::Deserialize;
 
 use crate::loader::LimitValue;
@@ -137,6 +140,13 @@ pub trait StorageProvider {
 }
 
 impl Storage {
+    pub fn new_in_memory() -> Self {
+        Self {
+            database: Box::new(InMemoryDb::new().unwrap()),
+            shared_dbs: None,
+        }
+    }
+
     pub async fn new(config: Config) -> Result<Self, StorageError> {
         // Try building a database from the values in the config
         let database: Box<dyn StorageProvider + Send + Sync> = match config.db {

@@ -57,7 +57,7 @@ impl DataInternal {
     async fn new(
         config: DataConfig,
         logger: Sender<Message>,
-        storage: Option<Arc<Storage>>,
+        storage: Arc<Storage>,
         els: Logger,
     ) -> Result<Self, DataError> {
         let github = config
@@ -92,7 +92,7 @@ impl Data {
     pub async fn start(
         config: DataConfig,
         sender: Sender<Message>,
-        storage: Option<Arc<Storage>>,
+        storage: Arc<Storage>,
         els: Logger,
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
         let di = DataInternal::new(config, sender, storage, els).await?;
