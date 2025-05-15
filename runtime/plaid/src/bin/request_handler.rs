@@ -53,6 +53,9 @@ async fn main() {
         );
 
     // Start the server on 127.0.0.1:8998
-    let routes = post_route.or(mnr_vars_route).or(mnr_headers_route).or(mnr_route);
+    let routes = post_route
+        .or(mnr_vars_route)
+        .or(mnr_headers_route)
+        .or(mnr_route);
     warp::serve(routes).run(([127, 0, 0, 1], 8998)).await;
 }

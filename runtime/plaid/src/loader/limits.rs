@@ -1,11 +1,14 @@
 use std::ptr::NonNull;
 
 use wasmer::{
-    sys::{vm::{VMMemory, VMMemoryDefinition, VMTable, VMTableDefinition}, Tunables}, MemoryError, MemoryStyle, MemoryType, Pages, TableStyle, TableType
+    sys::{
+        vm::{VMMemory, VMMemoryDefinition, VMTable, VMTableDefinition},
+        Tunables,
+    },
+    MemoryError, MemoryStyle, MemoryType, Pages, TableStyle, TableType,
 };
 
 // This is to be able to set the tunables
-
 
 /// A custom tunables that allows you to set a memory limit.
 ///
