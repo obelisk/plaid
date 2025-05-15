@@ -44,11 +44,7 @@ impl std::cmp::PartialOrd for DelayedMessage {
 
 impl std::cmp::Ord for DelayedMessage {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if self.delay < other.delay {
-            std::cmp::Ordering::Less
-        } else {
-            std::cmp::Ordering::Greater
-        }
+        self.delay.cmp(&other.delay)
     }
 }
 
