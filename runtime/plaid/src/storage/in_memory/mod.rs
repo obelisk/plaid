@@ -19,6 +19,10 @@ impl InMemoryDb {
 
 #[async_trait]
 impl StorageProvider for InMemoryDb {
+    fn is_persistent(&self) -> bool {
+        false
+    }
+
     async fn insert(
         &self,
         namespace: String,

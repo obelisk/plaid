@@ -96,6 +96,9 @@ impl std::error::Error for StorageError {}
 /// Defines the basic methods that all storage providers must offer.
 #[async_trait]
 pub trait StorageProvider {
+    /// Return whether this storage provider is backed by persistent storage.
+    /// If not, it means the data only lives in memory and is lost in case of a reboot.
+    fn is_persistent(&self) -> bool;
     /// Insert a new key pair into the storage provider
     async fn insert(
         &self,
