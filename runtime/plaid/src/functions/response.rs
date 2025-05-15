@@ -4,7 +4,6 @@ use crate::{executor::Env, functions::FunctionErrors};
 
 use super::{get_memory, safely_get_string, safely_write_data_back};
 
-
 /// Implement a way for a module to get the existing response. This would have been
 /// set by previous invocations of the module and allows an additional basic form of state.
 pub fn get_response(

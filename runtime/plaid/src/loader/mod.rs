@@ -9,7 +9,6 @@ use lru::LruCache;
 use serde::{de, Deserialize, Serialize};
 use signing::check_module_signatures;
 use sshcerts::PublicKey;
-use wasmer::sys::{NativeEngineExt, Target};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs::{self};
@@ -19,6 +18,7 @@ use utils::{
     cost_function, get_module_computation_limit, get_module_page_count,
     get_module_persistent_storage_limit, read_and_configure_secrets, read_and_parse_modules,
 };
+use wasmer::sys::{NativeEngineExt, Target};
 
 use wasmer::sys::CompilerConfig;
 
