@@ -8,7 +8,14 @@ impl General {
     /// type. You need to be very careful when allowing modules to use this
     /// because it can be used to trigger other rules with greater access than
     /// the calling module has.
-    pub fn log_back(&self, type_: &str, log: &[u8], module: &str, delay: u64, logbacks_allowed: LogbacksAllowed) -> bool {
+    pub fn log_back(
+        &self,
+        type_: &str,
+        log: &[u8],
+        module: &str,
+        delay: u64,
+        logbacks_allowed: LogbacksAllowed,
+    ) -> bool {
         let msg = Message::new(
             type_.to_string(),
             log.to_vec(),
