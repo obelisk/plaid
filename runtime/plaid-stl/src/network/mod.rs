@@ -58,14 +58,14 @@ pub fn make_named_request_with_buf_size(
         request_name: String,
         body: String,
         variables: HashMap<String, String>,
-        headers: Option<HashMap<String, String>>
+        headers: Option<HashMap<String, String>>,
     }
 
     let request = MakeRequestRequest {
         request_name: name.to_owned(),
         body: body.to_owned(),
         variables,
-        headers
+        headers,
     };
 
     let request = serde_json::to_string(&request).unwrap();
@@ -112,5 +112,11 @@ pub fn make_named_request_with_headers(
     variables: HashMap<String, String>,
     headers: HashMap<String, String>,
 ) -> Result<WebRequestResponse, PlaidFunctionError> {
-    return make_named_request_with_buf_size(name, body, variables, Some(headers), RETURN_BUFFER_SIZE);
+    return make_named_request_with_buf_size(
+        name,
+        body,
+        variables,
+        Some(headers),
+        RETURN_BUFFER_SIZE,
+    );
 }

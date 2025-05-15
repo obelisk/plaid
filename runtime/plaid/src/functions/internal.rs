@@ -28,7 +28,11 @@ pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log
     let message = match safely_get_string(&memory_view, log_buffer, log_buffer_size) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Error in print_debug_string: {:?}", env.data().module.name, e);
+            error!(
+                "{}: Error in print_debug_string: {:?}",
+                env.data().module.name,
+                e
+            );
             return;
         }
     };
@@ -59,7 +63,11 @@ pub fn set_error_context(
     let message = match safely_get_string(&memory_view, context_buffer, context_buffer_size) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Error in set_error_context: {:?}", env.data().module.name, e);
+            error!(
+                "{}: Error in set_error_context: {:?}",
+                env.data().module.name,
+                e
+            );
             return;
         }
     };
@@ -178,7 +186,10 @@ pub fn log_back_detailed(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in log_back: {:?}", env_data.module.name, e);
+            error!(
+                "{}: Memory error in log_back: {:?}",
+                env_data.module.name, e
+            );
             return 1;
         }
     };
@@ -204,7 +215,13 @@ pub fn log_back_detailed(
     api.clone().runtime.block_on(async move {
         match api.general.as_ref() {
             Some(general) => {
-                if general.log_back(&type_, &log, &env_data.module.name, delay as u64, assigned_budget) {
+                if general.log_back(
+                    &type_,
+                    &log,
+                    &env_data.module.name,
+                    delay as u64,
+                    assigned_budget,
+                ) {
                     0
                 } else {
                     1
