@@ -16,9 +16,6 @@ use super::DataError;
 
 const LOGBACK_NS: &str = "logback_internal";
 
-#[derive(Deserialize, Default)]
-pub struct InternalConfig {}
-
 #[derive(Serialize, Deserialize)]
 pub struct DelayedMessage {
     pub delay: u64,
@@ -56,8 +53,6 @@ impl std::cmp::Ord for DelayedMessage {
 }
 
 pub struct Internal {
-    #[allow(dead_code)]
-    config: InternalConfig,
     log_heap: BinaryHeap<Reverse<DelayedMessage>>,
     sender: Sender<Message>,
     receiver: Receiver<DelayedMessage>,
@@ -67,7 +62,6 @@ pub struct Internal {
 
 impl Internal {
     pub async fn new(
-        config: InternalConfig,
         log_sender: Sender<Message>,
         storage: Option<Arc<Storage>>,
     ) -> Result<Self, DataError> {
@@ -102,7 +96,6 @@ impl Internal {
         }
 
         Ok(Self {
-            config,
             log_heap,
             sender: log_sender,
             receiver,

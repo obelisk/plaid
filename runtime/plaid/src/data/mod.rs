@@ -29,7 +29,6 @@ pub use self::internal::DelayedMessage;
 pub struct DataConfig {
     github: Option<github::GithubConfig>,
     okta: Option<okta::OktaConfig>,
-    internal: Option<internal::InternalConfig>,
     interval: Option<interval::IntervalConfig>,
     websocket: Option<websocket::WebSocketDataGenerator>,
 }
@@ -69,19 +68,7 @@ impl DataInternal {
             .okta
             .map(|okta| okta::Okta::new(okta, logger.clone()));
 
-        let internal = match config.internal {
-            Some(internal) => {
-                internal::Internal::new(internal, logger.clone(), storage.clone()).await
-            }
-            None => {
-                internal::Internal::new(
-                    internal::InternalConfig::default(),
-                    logger.clone(),
-                    storage.clone(),
-                )
-                .await
-            }
-        };
+        let internal = internal::Internal::new(logger.clone(), storage.clone()).await;
 
         let interval = config
             .interval
