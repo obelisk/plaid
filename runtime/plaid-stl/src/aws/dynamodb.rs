@@ -18,6 +18,11 @@ pub struct PutItemInput {
 }
 
 #[derive(Serialize, Deserialize, Default)]
+pub struct PutItemOutput {
+    pub attributes: Option<Value>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
 pub struct DeleteItemInput {
     pub table_name: String,
     pub key: HashMap<String, Value>,
@@ -25,6 +30,11 @@ pub struct DeleteItemInput {
     pub expression_attribute_names: Option<HashMap<String, String>>,
     pub expression_attribute_values: Option<HashMap<String, Value>>,
     pub return_values: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct DeleteItemOutput {
+    pub attributes: Option<Value>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -36,8 +46,13 @@ pub struct QueryInput {
     pub expression_attribute_values: Option<HashMap<String, Value>>,
 }
 
+#[derive(Serialize, Deserialize, Default)]
+pub struct QueryOutput {
+    pub items: Vec<Value>,
+}
+
 /// Put item in dynamodb table. Returns JSON string.
-pub fn put_item(input: PutItemInput) -> Result<String, PlaidFunctionError> {
+pub fn put_item(input: PutItemInput) -> Result<PutItemOutput, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_dynamodb, put_item);
     }
@@ -63,14 +78,12 @@ pub fn put_item(input: PutItemInput) -> Result<String, PlaidFunctionError> {
 
     return_buffer.truncate(res as usize);
 
-    match String::from_utf8(return_buffer) {
-        Ok(x) => Ok(x),
-        Err(_) => Err(PlaidFunctionError::InternalApiError),
-    }
+    serde_json::from_slice::<PutItemOutput>(&return_buffer)
+        .map_err(|_| PlaidFunctionError::InternalApiError)
 }
 
 /// Delete item in dynamodb table. Returns JSON string.
-pub fn delete_item(input: DeleteItemInput) -> Result<String, PlaidFunctionError> {
+pub fn delete_item(input: DeleteItemInput) -> Result<DeleteItemOutput, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_dynamodb, delete_item);
     }
@@ -96,14 +109,12 @@ pub fn delete_item(input: DeleteItemInput) -> Result<String, PlaidFunctionError>
 
     return_buffer.truncate(res as usize);
 
-    match String::from_utf8(return_buffer) {
-        Ok(x) => Ok(x),
-        Err(_) => Err(PlaidFunctionError::InternalApiError),
-    }
+    serde_json::from_slice::<DeleteItemOutput>(&return_buffer)
+        .map_err(|_| PlaidFunctionError::InternalApiError)
 }
 
 /// Query dynamodb table. Returns JSON string.
-pub fn query(input: QueryInput) -> Result<String, PlaidFunctionError> {
+pub fn query(input: QueryInput) -> Result<QueryOutput, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_dynamodb, query);
     }
@@ -129,8 +140,6 @@ pub fn query(input: QueryInput) -> Result<String, PlaidFunctionError> {
 
     return_buffer.truncate(res as usize);
 
-    match String::from_utf8(return_buffer) {
-        Ok(x) => Ok(x),
-        Err(_) => Err(PlaidFunctionError::InternalApiError),
-    }
+    serde_json::from_slice::<QueryOutput>(&return_buffer)
+        .map_err(|_| PlaidFunctionError::InternalApiError)
 }
