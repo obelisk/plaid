@@ -1,7 +1,9 @@
 use aws_sdk_dynamodb::primitives::Blob;
 use aws_sdk_dynamodb::types::{AttributeValue, ReturnValue};
 use aws_sdk_dynamodb::Client;
-use plaid_stl::aws::dynamodb::{DeleteItemInput, PutItemInput, QueryInput};
+use plaid_stl::aws::dynamodb::{
+    DeleteItemInput, DeleteItemOutput, PutItemInput, PutItemOutput, QueryInput, QueryOutput,
+};
 use serde_json::{json, Map, Value};
 
 use std::{
@@ -134,15 +136,16 @@ impl DynamoDb {
             .await
             .map_err(|e| ApiError::DynamoDbPutItemError(e))?;
 
-        match output.attributes() {
-            None => Ok(String::default()),
+        let attributes = match output.attributes() {
+            None => None,
             Some(attrs) => {
                 let result = map_attributes_to_json(attrs)?;
-                let s = serde_json::to_string(&result)
-                    .map_err(|err| ApiError::SerdeError(err.to_string()))?;
-                Ok(s)
+                Some(result)
             }
-        }
+        };
+
+        let out = PutItemOutput { attributes };
+        serde_json::to_string(&out).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 
     pub async fn delete_item(
@@ -176,16 +179,16 @@ impl DynamoDb {
             .await
             .map_err(|e| ApiError::DynamoDbDeleteItemError(e))?;
 
-        // convert to json
-        match output.attributes() {
-            None => Ok(String::default()),
+        let attributes = match output.attributes() {
+            None => None,
             Some(attrs) => {
                 let result = map_attributes_to_json(attrs)?;
-                let s = serde_json::to_string(&result)
-                    .map_err(|err| ApiError::SerdeError(err.to_string()))?;
-                Ok(s)
+                Some(result)
             }
-        }
+        };
+
+        let out = DeleteItemOutput { attributes };
+        serde_json::to_string(&out).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 
     pub async fn query(&self, params: &str, module: Arc<PlaidModule>) -> Result<String, ApiError> {
@@ -212,16 +215,13 @@ impl DynamoDb {
             .map_err(|e| ApiError::DynamoDbQueryError(e))?;
 
         // convert to json
-        let mut out: Vec<Value> = vec![];
+        let mut out: QueryOutput = QueryOutput::default();
         for item in output.items() {
             let result = map_attributes_to_json(item)?;
-            out.push(result)
+            out.items.push(result)
         }
 
-        let out =
-            serde_json::to_string(&out).map_err(|err| ApiError::SerdeError(err.to_string()))?;
-
-        Ok(out)
+        serde_json::to_string(&out).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 }
 
