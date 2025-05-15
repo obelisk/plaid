@@ -14,8 +14,8 @@ use tokio_util::sync::CancellationToken;
 
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
-use crossbeam_channel::{bounded, TrySendError};
-use warp::{hyper::body::Bytes, path, Filter, http::HeaderMap};
+use crossbeam_channel::TrySendError;
+use warp::{http::HeaderMap, hyper::body::Bytes, path, Filter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,7 +24,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Reading configuration");
     let config = config::configure()?;
-    let (log_sender, log_receiver) = bounded(config.executor.log_queue_size);
+    
+    // Create thread pools for log execution
+    let exec_thread_pools = thread_pools::ExecutionThreadPools::new(&config.executor);
+
+    // For convenience, keep a reference to the log_sender for the general channel, so that we can quickly clone it around
+    let log_sender = &exec_thread_pools.general_pool.sender;
 
     info!("Starting logging subsystem");
     let (els, _logging_handler) = Logger::start(config.logging);
@@ -49,9 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // This sender provides an internal route to sending logs. This is what
-    // powers the logback functions.
-
+    // This sender provides an internal route to sending logs. This is what powers the logback functions.
     let delayed_log_sender = Data::start(config.data, log_sender.clone(), storage.clone(), els.clone())
         .await
         .expect("The data system failed to start")
@@ -93,38 +96,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let modules = Arc::new(loader::load(config.loading, storage.clone()).await.unwrap());
     let modules_by_name = Arc::new(modules.get_modules());
 
-    info!(
-        "Starting the execution threads of which {} were requested",
-        config.executor.execution_threads
-    );
+    // Print information about the threads we are starting
+    info!("Starting {} execution threads for general execution. Log queue size = {}", exec_thread_pools.general_pool.num_threads, exec_thread_pools.general_pool.sender.capacity().unwrap_or_default());
+    for (log_type, tp) in &exec_thread_pools.dedicated_pools {
+        let thread_or_threads = if tp.num_threads == 1 {"thread"} else {"threads"};
+        info!("Starting {} {thread_or_threads} dedicated to log type [{log_type}]. Log queue size = {}", tp.num_threads, tp.sender.capacity().unwrap_or_default());
+    }
 
     // Create the executor that will handle all the logs that come in and immediate
     // requests for handling some configured get requests.
     let executor = Executor::new(
-        log_receiver,
+        exec_thread_pools.clone(),
         modules.get_channels(),
         api,
         storage,
-        config.executor.execution_threads,
         els.clone(),
         performance_sender.clone()
     );
 
-    let _executor = Arc::new(executor);
+    let executor = Arc::new(executor);
 
     info!("Configured Webhook Servers");
-    let webhook_server_post_log_sender = log_sender.clone();
     let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
         .webhooks
         .into_iter()
         .map(|(server_name, config)| {
-            let webhook_server_post_log_sender = webhook_server_post_log_sender.clone();
             let server_address: SocketAddr = config
                 .listen_address
                 .parse()
                 .expect("A server had an invalid address");
 
             let webhooks = config.webhooks.clone();
+            let exec = executor.clone();
             let post_route = warp::post()
                 .and(warp::body::content_length_limit(1024 * 256))
                 .and(path!("webhook" / String))
@@ -155,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
 
                         // Webhook exists, buffer log
-                        if let Err(e) = webhook_server_post_log_sender.try_send(message) {
+                        if let Err(e) = exec.execute_webhook_message(message) {
                             match e {
                                 TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
                                 // TODO: Have this actually cause Plaid to exit
