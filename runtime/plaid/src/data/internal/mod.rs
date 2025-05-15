@@ -77,12 +77,8 @@ impl Internal {
 
             for (key, value) in previous_logs {
                 // We want to extract from the DB a message and a delay.
-                // First, we try deserializing the new format, where the DB key is a message ID, and the value is the serialized DelayedMessage
                 let (message, delay) = match serde_json::from_slice::<DelayedMessage>(&value) {
-                    Ok(item) => {
-                        // Everything OK, we were deserializing a logback in the "new" format
-                        (item.message, item.delay)
-                    }
+                    Ok(item) => (item.message, item.delay),
                     Err(e) => {
                         warn!(
                             "Skipping log in storage system which could not be deserialized [{e}]: {:X?}",
