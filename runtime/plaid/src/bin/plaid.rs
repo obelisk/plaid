@@ -210,11 +210,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .and(path!("webhook" / String))
                 .and(warp::query::<HashMap<String, String>>())
                 .and(warp::body::bytes())
+                .and(warp::header::headers_cloned())
                 .and(with(webhook_config.clone()))
                 .and(with(modules_by_name.clone()))
                 .and(with(get_cache.clone()))
                 .and(with(webhook_server_get_log_sender.clone()))
-                .and_then(|webhook: String, query: HashMap<String, String>, body: Bytes,webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: crossbeam_channel::Sender<Message>| async move {
+                .and_then(|webhook: String, query: HashMap<String, String>, body: Bytes, headers: HeaderMap, webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: crossbeam_channel::Sender<Message>| async move {
                     if let Some(webhook_configuration) = webhook_config.webhooks.get(&webhook) {
                         match &webhook_configuration.get_mode {
                             // Note that CacheMode is elided here as there is no caching for static data
@@ -297,15 +298,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let (response_send, response_recv) = tokio::sync::oneshot::channel();
 
                                 // Construct a message to send to the rule
-                                let message = Message::new_detailed(
+                                let mut message = Message::new_detailed(
                                     name.to_string(),
                                     body.to_vec(),
                                     source,
                                     logbacks_allowed,
-                                    HashMap::new(),
                                     query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
                                     Some(response_send),
                                     Some(rule.clone()));
+
+                                // Configure headers
+                                for requested_header in webhook_configuration.headers.iter() {
+                                    if let Some(value) = headers.get(requested_header) {
+                                        message.headers.insert(requested_header.to_string(), value.as_bytes().to_vec());
+                                    }
+                                }
 
                                 // Put the message into the standard message queue
                                 if let Err(e) = log_sender.try_send(message) {
