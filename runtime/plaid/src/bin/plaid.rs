@@ -209,7 +209,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let get_route = warp::get()
                 .and(path!("webhook" / String))
                 .and(warp::query::<HashMap<String, String>>())
-                .and(warp::body::content_length_limit(256 * 1024))
                 .and(warp::body::bytes())
                 .and(with(webhook_config.clone()))
                 .and(with(modules_by_name.clone()))
