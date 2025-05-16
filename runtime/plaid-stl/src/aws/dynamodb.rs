@@ -51,7 +51,7 @@ pub struct QueryOutput {
     pub items: Vec<Value>,
 }
 
-/// Put item in dynamodb table. Returns JSON string.
+/// Put item in dynamodb table.
 pub fn put_item(input: PutItemInput) -> Result<PutItemOutput, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_dynamodb, put_item);
@@ -82,7 +82,7 @@ pub fn put_item(input: PutItemInput) -> Result<PutItemOutput, PlaidFunctionError
         .map_err(|_| PlaidFunctionError::InternalApiError)
 }
 
-/// Delete item in dynamodb table. Returns JSON string.
+/// Delete item in dynamodb table.
 pub fn delete_item(input: DeleteItemInput) -> Result<DeleteItemOutput, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_dynamodb, delete_item);
@@ -113,7 +113,7 @@ pub fn delete_item(input: DeleteItemInput) -> Result<DeleteItemOutput, PlaidFunc
         .map_err(|_| PlaidFunctionError::InternalApiError)
 }
 
-/// Query dynamodb table. Returns JSON string.
+/// Query dynamodb table.
 pub fn query(input: QueryInput) -> Result<QueryOutput, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_dynamodb, query);
