@@ -4,7 +4,10 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 
-use aws_sdk_dynamodb::{types::AttributeValue, Client};
+use aws_sdk_dynamodb::{
+    types::{AttributeValue, KeyType},
+    Client,
+};
 use serde::Deserialize;
 
 use crate::{get_aws_sdk_config, AwsAuthentication};
@@ -31,14 +34,46 @@ pub struct DynamoDb {
 }
 
 impl DynamoDb {
-    pub async fn new(config: Config) -> Self {
+    pub async fn new(config: Config) -> Result<Self, String> {
         let sdk_config = get_aws_sdk_config(config.authentication).await;
         let client = aws_sdk_dynamodb::Client::new(&sdk_config);
 
-        Self {
+        // Perform schema validation
+        Self::validate_schema(&client, &config.table_name).await?;
+
+        Ok(Self {
             client,
             table_name: config.table_name,
+        })
+    }
+
+    /// Validate the DynamoDB table's schema to ensure it is the expected one.
+    /// The configured table must have
+    /// * A partition key called "namespace"
+    /// * A sort key called "key"
+    async fn validate_schema(client: &Client, table_name: &str) -> Result<(), String> {
+        let resp = client
+            .describe_table()
+            .table_name(table_name)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let table = resp.table().ok_or("Missing table metadata".to_string())?;
+
+        let key_schema = table.key_schema();
+        let partition_key = key_schema.iter().find(|k| k.key_type() == &KeyType::Hash);
+        let sort_key = key_schema.iter().find(|k| k.key_type() == &KeyType::Range);
+
+        if partition_key.map(|k| k.attribute_name()) != Some(NAMESPACE) {
+            return Err("Invalid name for partition key".to_string());
         }
+
+        if sort_key.map(|k| k.attribute_name()) != Some(KEY) {
+            return Err("Invalid name for sort key".to_string());
+        }
+
+        Ok(())
     }
 }
 
