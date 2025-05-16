@@ -209,11 +209,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let get_route = warp::get()
                 .and(path!("webhook" / String))
                 .and(warp::query::<HashMap<String, String>>())
+                .and(warp::body::content_length_limit(256 * 1024))
+                .and(warp::body::bytes())
                 .and(with(webhook_config.clone()))
                 .and(with(modules_by_name.clone()))
                 .and(with(get_cache.clone()))
                 .and(with(webhook_server_get_log_sender.clone()))
-                .and_then(|webhook: String, query: HashMap<String, String>, webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: crossbeam_channel::Sender<Message>| async move {
+                .and_then(|webhook: String, query: HashMap<String, String>, body: Bytes,webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: crossbeam_channel::Sender<Message>| async move {
                     if let Some(webhook_configuration) = webhook_config.webhooks.get(&webhook) {
                         match &webhook_configuration.get_mode {
                             // Note that CacheMode is elided here as there is no caching for static data
@@ -298,7 +300,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 // Construct a message to send to the rule
                                 let message = Message::new_detailed(
                                     name.to_string(),
-                                    String::new().into_bytes(),
+                                    body.to_vec(),
                                     source,
                                     logbacks_allowed,
                                     HashMap::new(),
