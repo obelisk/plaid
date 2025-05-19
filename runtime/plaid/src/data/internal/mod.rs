@@ -136,6 +136,8 @@ impl Internal {
             }
         }
 
+        // TODO the following part will be executed only by the instance that processes logbacks
+
         // Then, overwrite the current heap with the content read from the DB
         self.log_heap = fill_heap_from_db(self.storage.clone())
             .await
