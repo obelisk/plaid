@@ -106,7 +106,7 @@ impl UriSelector {
         let now = Instant::now();
 
         // If the next attempt hasn't passed, sleep until the socket is ready
-        if uri.next_attempt < now {
+        if uri.next_attempt > now {
             sleep_until((uri.next_attempt).into()).await;
         }
 
