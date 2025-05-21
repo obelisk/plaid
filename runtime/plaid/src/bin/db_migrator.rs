@@ -197,7 +197,9 @@ async fn apply_dynamodb_migration(
         authentication: plaid::AwsAuthentication::Iam {},
         table_name: table_name.to_string(),
     };
-    let dynamodb = plaid::storage::dynamodb::DynamoDb::new(config).await;
+    let dynamodb = plaid::storage::dynamodb::DynamoDb::new(config)
+        .await
+        .unwrap();
     dynamodb
         .apply_migration(
             namespace,

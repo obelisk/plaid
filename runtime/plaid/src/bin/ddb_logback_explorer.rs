@@ -59,7 +59,9 @@ async fn fetch_all(table_name: &str, namespace: &str) -> Result<Vec<(String, Vec
         authentication: plaid::AwsAuthentication::Iam {},
         table_name: table_name.to_string(),
     };
-    let dynamodb = plaid::storage::dynamodb::DynamoDb::new(config).await;
+    let dynamodb = plaid::storage::dynamodb::DynamoDb::new(config)
+        .await
+        .unwrap();
     dynamodb
         .fetch_all(namespace, None)
         .await

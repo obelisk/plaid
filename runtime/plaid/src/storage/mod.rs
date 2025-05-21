@@ -65,6 +65,7 @@ pub struct Storage {
 /// Errors encountered while trying to use Plaid's persistent storage.
 #[derive(Debug)]
 pub enum StorageError {
+    StorageInitError(String),
     NoStorageConfigured,
     CouldNotAccessStorage(String),
     Access(String),
@@ -74,6 +75,7 @@ pub enum StorageError {
 impl std::fmt::Display for StorageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::StorageInitError(ref e) => write!(f, "Error while initializing storage: {e}"),
             Self::NoStorageConfigured => {
                 write!(f, "No storage system configuration could be found")
             }
@@ -143,9 +145,11 @@ impl Storage {
             #[cfg(feature = "sled")]
             Some(DatabaseConfig::Sled(sled)) => Box::new(sled::Sled::new(sled)?),
             #[cfg(feature = "aws")]
-            Some(DatabaseConfig::DynamoDb(dynamodb)) => {
-                Box::new(dynamodb::DynamoDb::new(dynamodb).await)
-            }
+            Some(DatabaseConfig::DynamoDb(dynamodb)) => Box::new(
+                dynamodb::DynamoDb::new(dynamodb)
+                    .await
+                    .map_err(|e| StorageError::StorageInitError(e))?,
+            ),
             _ => {
                 return Err(StorageError::NoStorageConfigured);
             }
