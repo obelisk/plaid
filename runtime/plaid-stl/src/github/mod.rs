@@ -688,7 +688,7 @@ pub fn make_advanced_graphql_query(
     extern "C" {
         new_host_function_with_error_buffer!(github, make_advanced_graphql_query);
     }
-    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
     #[derive(Serialize)]
     struct Request {
