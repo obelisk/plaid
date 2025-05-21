@@ -187,7 +187,7 @@ impl DataGenerator for &mut Okta {
 
         // Attempt to deserialize the response from Okta
         let logs: Vec<Value> = serde_json::from_str(body.as_str())
-            .map_err(|e| error!("Could not parse data from Okta: {e}\n\n{body}"))?;
+            .map_err(|e| error!("Could not parse data from Okta: {e}"))?;
 
         // If there have been no new logs since we last polled, we can exit the loop early
         // Exiting here will result in a 10 second wait between restarts
@@ -207,7 +207,7 @@ impl DataGenerator for &mut Okta {
             {
                 Some(published) => published,
                 None => {
-                    error!("Missing or invalid 'published' field in Okta log: {log:?}",);
+                    error!("Missing or invalid 'published' field in Okta log",);
                     continue;
                 }
             };
@@ -227,7 +227,7 @@ impl DataGenerator for &mut Okta {
             {
                 Some(uuid) => uuid,
                 None => {
-                    error!("Missing or invalid 'uuid' field in Okta log: {log:?}",);
+                    error!("Missing or invalid 'uuid' field in Okta log",);
                     continue;
                 }
             };
