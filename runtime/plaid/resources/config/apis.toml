@@ -23,6 +23,14 @@ root_certificate = """
 [apis."general"."network"."web_requests"."test-response"."headers"]
 testheader = "Some data here"
 
+[apis."general"."network"."web_requests"."test-cron"]
+verb = "post"
+uri = "http://localhost:8998/testcron"
+return_body = true
+return_code = true
+allowed_rules = ["test_cron.wasm"]
+[apis."general"."network"."web_requests"."test-cron"."headers"]
+
 [apis."general"."network"."web_requests"."test-response-mnr"]
 verb = "post"
 uri = "https://localhost:8998/testmnr"
