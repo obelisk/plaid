@@ -1,3 +1,5 @@
+use std::fs;
+
 use warp::Filter;
 
 #[tokio::main]
@@ -52,10 +54,18 @@ async fn main() {
             },
         );
 
+    let cert = fs::read("/tmp/plaid_config/server.pem").expect("failed to read server.pem");
+    let key = fs::read("/tmp/plaid_config/server.key").expect("failed to read server.key");
+
     // Start the server on 127.0.0.1:8998
     let routes = post_route
         .or(mnr_vars_route)
         .or(mnr_headers_route)
         .or(mnr_route);
-    warp::serve(routes).run(([127, 0, 0, 1], 8998)).await;
+    warp::serve(routes)
+        .tls()
+        .cert(cert)
+        .key(key)
+        .run(([127, 0, 0, 1], 8998))
+        .await;
 }
