@@ -61,3 +61,35 @@ pub async fn get_aws_sdk_config(authentication: AwsAuthentication) -> SdkConfig 
         }
     }
 }
+
+/// The roles that this instance has, i.e., what this instance is running
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct InstanceRoles {
+    /// Whether this instance is running webhooks
+    pub webhooks: bool,
+    /// Whether this instance is running data generators
+    pub data_generators: bool,
+    /// Whether this instance is running interval jobs defined in the config
+    pub interval_jobs: bool,
+    /// Whether this instance is running logbacks stored in Plaid's persistent storage.
+    /// Note - All instances can send logbacks. This setting is just controlling which
+    /// instance is _executing_ the logbacks that were queued.
+    pub logbacks: bool,
+    /// Whether this instance is running special log types that are marked as non-concurrent.
+    /// It is the responsibility of the admin to make sure that, in a multi-instance deployment,
+    /// this is set to true on exactly one instance.
+    pub non_concurrent_rules: bool,
+}
+
+impl Default for InstanceRoles {
+    /// By default, run everything
+    fn default() -> Self {
+        Self {
+            webhooks: true,
+            data_generators: true,
+            interval_jobs: true,
+            logbacks: true,
+            non_concurrent_rules: true,
+        }
+    }
+}

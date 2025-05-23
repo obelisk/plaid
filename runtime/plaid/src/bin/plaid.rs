@@ -3,7 +3,9 @@ extern crate log;
 
 use performance::ModulePerformanceMetadata;
 use plaid::{
-    config::{CachingMode, GetMode, ResponseMode, WebhookServerConfiguration},
+    config::{
+        CachingMode, ConfigurationWithRoles, GetMode, ResponseMode, WebhookServerConfiguration,
+    },
     loader::PlaidModule,
     logging::Logger,
     *,
@@ -35,7 +37,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Plaid is booting up, please standby...");
 
     info!("Reading configuration");
-    let config = config::configure()?;
+    let ConfigurationWithRoles { config, roles } = config::configure()?;
+    info!("This is what this instance is running: {roles:?}");
 
     // Create thread pools for log execution
     let exec_thread_pools = thread_pools::ExecutionThreadPools::new(&config.executor);
@@ -82,6 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         log_sender.clone(),
         internal_storage.clone(),
         els.clone(),
+        &roles,
     )
     .await
     .expect("The data system failed to start")
@@ -157,8 +161,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let executor = Arc::new(executor);
 
-    info!("Configured Webhook Servers");
-    let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
+    if roles.webhooks {
+        info!("Configured Webhook Servers");
+        let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
         .webhooks
         .into_iter()
         .map(|(server_name, config)| {
@@ -367,20 +372,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    info!("Starting servers, boot up complete");
+        info!("Starting servers, boot up complete");
 
-    let mut join_set = JoinSet::from_iter(webhook_servers);
+        let mut join_set = JoinSet::from_iter(webhook_servers);
 
-    // Listen for a shutdown signal or if any task in join_set finishes
-    tokio::select! {
-        _ = join_set.join_next() => {
-            info!("A webserver task finished unexpectedly, triggering shutdown.");
-            // Send a shutdown signal
-            cancellation_token.cancel()
-        },
-        _ = cancellation_token.cancelled() => {
-            info!("Shutdown signal received.");
+        // Listen for a shutdown signal or if any task in join_set finishes
+        tokio::select! {
+            _ = join_set.join_next() => {
+                info!("A webserver task finished unexpectedly, triggering shutdown.");
+                // Send a shutdown signal
+                cancellation_token.cancel()
+            },
+            _ = cancellation_token.cancelled() => {
+                info!("Shutdown signal received.");
+            }
         }
+    } else {
+        info!("This instance is NOT running webhooks");
     }
 
     // Ensure that the performance monitoring loop exits before finishing shutdown.
