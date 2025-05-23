@@ -23,15 +23,10 @@ impl General {
             logbacks_allowed,
         );
 
-        // If the delay is zero, we can get the log through much faster without
-        // waiting for the data collector to find it, buffer it, and finally
-        // enqueue it on the Message channel by doing it ourselves.
-        if delay == 0 {
-            self.log_sender.send(msg).is_ok()
-        } else {
-            self.delayed_log_sender
-                .send(DelayedMessage::new(delay, msg))
-                .is_ok()
-        }
+        // Send the message to the dedicated channel, from where it will
+        // be picked up by the dedicated data generator.
+        self.delayed_log_sender
+            .send(DelayedMessage::new(delay, msg))
+            .is_ok()
     }
 }
