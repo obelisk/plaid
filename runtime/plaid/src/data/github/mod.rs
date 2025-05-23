@@ -201,16 +201,17 @@ impl DataGenerator for &mut Github {
                 ._get(&next.clone().unwrap())
                 .await
                 .map_err(|e| {
-                    let err_str = format!("Could not get logs from GitHub: {}", e);
-                    error!("{}", err_str);
+                    error!("{}", format!("Could not get logs from GitHub: {}", e));
                 })?;
 
             if !response.status().is_success() {
-                let err_str = format!(
-                    "Call to get GitHub logs failed with code: {}",
-                    response.status()
+                error!(
+                    "{}",
+                    format!(
+                        "Call to get GitHub logs failed with code: {}",
+                        response.status()
+                    )
                 );
-                error!("{}", err_str);
                 return Err(());
             }
 
@@ -223,13 +224,14 @@ impl DataGenerator for &mut Github {
 
             // Parse the response's body
             let body = self.client.body_to_string(response).await.map_err(|e| {
-                let err_str = format!("Failed to read body of GitHub response. Error: {e}");
-                error!("{}", err_str);
+                error!(
+                    "{}",
+                    format!("Failed to read body of GitHub response. Error: {e}")
+                );
             })?;
 
             let logs: Vec<Value> = serde_json::from_str(body.as_str()).map_err(|e| {
-                let err_str = format!("Could not parse data from Github: {}\n\n{}", e, body);
-                error!("{}", err_str);
+                error!("{}", format!("Could not parse data from Github: {}", e));
             })?;
 
             if logs.is_empty() {

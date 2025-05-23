@@ -156,8 +156,6 @@ impl DataGenerator for &mut Okta {
             }
         };
 
-        // TODO Maybe remove configurability for sortOrder. With this new system, only ASCENDING
-        // really makes sense. Otherwise we are most likely going to miss older logs.
         let address = format!(
             "https://{}/api/v1/logs?sortOrder={}&since={since}&until={until}&limit={}",
             self.config.domain, self.config.log_sorting, self.config.limit
@@ -208,7 +206,7 @@ impl DataGenerator for &mut Okta {
 
             // Attempt to deserialize the response from Okta
             let logs: Vec<Value> = serde_json::from_str(body.as_str())
-                .map_err(|e| error!("Could not parse data from Okta: {e}\n\n{body}"))?;
+                .map_err(|e| error!("Could not parse data from Okta: {e}"))?;
 
             if logs.is_empty() {
                 return Ok(output_logs);
@@ -223,7 +221,7 @@ impl DataGenerator for &mut Okta {
                 {
                     Some(published) => published,
                     None => {
-                        error!("Missing or invalid 'published' field in Okta log: {log:?}",);
+                        error!("Missing or invalid 'published' field in Okta log",);
                         continue;
                     }
                 };
@@ -243,7 +241,7 @@ impl DataGenerator for &mut Okta {
                 {
                     Some(uuid) => uuid,
                     None => {
-                        error!("Missing or invalid 'uuid' field in Okta log: {log:?}",);
+                        error!("Missing or invalid 'uuid' field in Okta log",);
                         continue;
                     }
                 };
