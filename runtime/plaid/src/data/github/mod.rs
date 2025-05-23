@@ -190,8 +190,8 @@ impl DataGenerator for &mut Github {
             self.config.org, self.config.log_type
         );
 
-        let mut output_logs: Vec<DataGeneratorLog> = Vec::new();
-        let mut next: Option<String> = Some(address);
+        let mut output_logs = vec![];
+        let mut next = Some(address);
 
         loop {
             // At this point we know `next` is Some. Either because this is the first request, or

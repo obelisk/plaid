@@ -161,8 +161,8 @@ impl DataGenerator for &mut Okta {
             self.config.domain, self.config.log_sorting, self.config.limit
         );
 
-        let mut output_logs: Vec<DataGeneratorLog> = Vec::new();
-        let mut next: Option<String> = Some(address);
+        let mut output_logs = vec![];
+        let mut next = Some(address);
 
         loop {
             // At this point we know `next` is Some. Either because this is the first request, or
