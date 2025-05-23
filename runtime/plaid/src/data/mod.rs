@@ -193,10 +193,8 @@ pub struct DataGeneratorLog {
 /// This is what data generators have in common
 #[allow(async_fn_in_trait)]
 pub trait DataGenerator {
-    /// Fetch from the source some logs that were produced between `since` and `until`.
-    ///
-    /// Note: this function does not necessarily return _all_ logs that were produced in that time frame,
-    /// so one might need to call this multiple times across different pages returned by the source.
+    /// Fetch from the source all the logs that were produced between `since` and `until`.
+    /// If handling pagination is needed, this is done inside this function.
     async fn fetch_logs(
         &self,
         since: OffsetDateTime,
@@ -268,7 +266,7 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
             return Ok(());
         }
 
-        // Get some logs that happened between `last_seen` and `until`.
+        // Get logs that happened between `last_seen` and `until`.
         // Walk back a second from the actual value of last_seen, to account for problems
         // with time granularity. E.g., events happening in the same second could be missed.
         // Overlapping queries will prevent this problem from happening.
@@ -337,17 +335,6 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
                 dg.get_name(),
                 dg.get_last_seen()
             );
-
-            // Important: we have to move the window forward. Otherwise, on the next call nothing will
-            // change: with the same `since`, we will get the same logs and we will discard them all because
-            // they will all be in the cache. I.e., the system will enter a deadlock.
-            // To prevent this, we move `since` forward by a portion of the lookback window.
-            // This ensures that, eventually, we will get some new logs.
-            dg.set_last_seen(
-                dg.get_last_seen()
-                    .saturating_add(time::Duration::milliseconds(500)),
-            );
-
             return Ok(());
         }
         info!(
@@ -359,4 +346,22 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
         // Wait for the specified period before making another request
         tokio::time::sleep(sleep_duration).await
     }
+}
+
+/// Parse the `link` header returned by GitHub or Okta and extract the URL for `next` page.
+/// More info: https://docs.github.com/en/enterprise-cloud@latest/rest/using-the-rest-api/using-pagination-in-the-rest-api?apiVersion=2022-11-28#using-link-headers
+/// https://developer.okta.com/docs/api/#link-header
+fn get_next_from_link_header(hv: &http::HeaderValue) -> Option<String> {
+    let header = hv.to_str().ok()?.to_string();
+    for part in header.split(',') {
+        let part = part.trim();
+        if part.ends_with("rel=\"next\"") {
+            if let Some(start) = part.find('<') {
+                if let Some(end) = part.find('>') {
+                    return Some(part[start + 1..end].to_string());
+                }
+            }
+        }
+    }
+    None
 }
