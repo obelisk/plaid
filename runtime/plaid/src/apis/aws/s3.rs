@@ -2,7 +2,8 @@ use std::{collections::HashMap, fmt::Display, sync::Arc, time::Duration};
 
 use aws_sdk_kms::error::SdkError;
 use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client};
-use serde::{Deserialize, Serialize};
+use plaid_stl::aws::s3::{GetObjectReponse, GetObjectRequest, PutObjectRequest};
+use serde::Deserialize;
 
 use crate::{apis::ApiError, get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
 
@@ -58,37 +59,6 @@ pub struct S3 {
     client: Client,
     /// Configured buckets and their associated access rules.
     bucket_configuration: HashMap<String, Vec<BucketConfiguration>>,
-}
-
-/// Request payload for uploading an object to S3.
-#[derive(Deserialize)]
-struct PutObjectRequest {
-    /// Target bucket ID.
-    bucket_id: String,
-    /// Object data as a byte vector.
-    object: Vec<u8>,
-    /// Key to store the object under.
-    object_key: String,
-}
-
-/// Request payload for retrieving an object from S3.
-#[derive(Deserialize)]
-struct GetObjectRequest {
-    /// Bucket ID to fetch the object from.
-    bucket_id: String,
-    /// Key of the object to fetch.
-    object_key: String,
-    /// Optional duration in seconds for generating a presigned URL.
-    expires_in: Option<u64>,
-}
-
-/// Response returned from `get_object`.
-#[derive(Serialize)]
-enum GetObjectReponse {
-    /// Raw object data.
-    Object(Vec<u8>),
-    /// Presigned URL to access the object.
-    PresignedUri(String),
 }
 
 impl S3 {
