@@ -2,19 +2,37 @@ use serde::{Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
 
+/// The maximum size for return buffers used when fetching full objects from S3.
+/// Set to 4 MiB.
 const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
 
+/// Specifies how an object should be fetched from S3.
 pub enum ObjectFetchMode {
+    /// Fetch a presigned URL that is valid for the specified number of seconds.
     Presigned(u64),
+    /// Fetch the full object contents.
     FullObject,
 }
 
+/// Represents the response returned from the `get_object` function.
 #[derive(Deserialize, Debug)]
 pub enum GetObjectReponse {
+    /// The full object data.
     Object(Vec<u8>),
+    /// A presigned URI for accessing the object.
     PresignedUri(String),
 }
 
+/// Uploads an object to S3
+///
+/// # Arguments
+///
+/// * `bucket_id` - The name of the bucket to upload the object to.
+/// * `object_key` - The key to identify the object within the bucket.
+/// * `object` - The binary data of the object to upload.
+///
+/// Returns `PlaidFunctionError` if the serialization fails or the host function
+/// reports an error (e.g., if the API is not properly configured).
 pub fn put_object(
     bucket_id: &str,
     object_key: &str,
@@ -36,7 +54,7 @@ pub fn put_object(
 
     let request = PutObjectRequest {
         bucket_id: bucket_id.to_string(),
-        object: object,
+        object,
         object_key: object_key.to_string(),
     };
 
@@ -54,8 +72,6 @@ pub fn put_object(
         )
     };
 
-    // There was an error with the Plaid system. Maybe the API is not
-    // configured.
     if res < 0 {
         Err(res.into())
     } else {
@@ -63,6 +79,22 @@ pub fn put_object(
     }
 }
 
+/// Fetches an object from S3
+///
+/// # Arguments
+///
+/// * `bucket_id` - The name of the bucket from which to fetch the object.
+/// * `object_key` - The key identifying the object to fetch.
+/// * `fetch_mode` - Specifies whether to fetch the full object or a presigned URL.
+///
+/// # Returns
+///
+/// A `GetObjectReponse` indicating either the full object data or a presigned URL.
+///
+/// # Errors
+///
+/// Returns `PlaidFunctionError` if serialization fails, the host function reports
+/// an error, or if the response cannot be deserialized.
 pub fn get_object(
     bucket_id: &str,
     object_key: &str,
@@ -74,8 +106,11 @@ pub fn get_object(
 
     #[derive(Serialize)]
     struct GetObjectRequest {
+        /// The bucket name from which the object is requested.
         bucket_id: String,
+        /// The key identifying the object to fetch.
         object_key: String,
+        /// Optional expiration time for the presigned URL (in seconds).
         expires_in: Option<u64>,
     }
 
@@ -104,8 +139,6 @@ pub fn get_object(
         )
     };
 
-    // There was an error with the Plaid system. Maybe the API is not
-    // configured.
     if res < 0 {
         return Err(res.into());
     }
