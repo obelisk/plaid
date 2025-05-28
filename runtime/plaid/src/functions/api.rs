@@ -240,7 +240,7 @@ macro_rules! impl_new_sub_module_function_with_error_buffer {
 
                 // Check that AWS API is configured
                 let aws = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
-                let sub_module = &aws.$sub_module;
+                let sub_module = &aws.$sub_module.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
 
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
@@ -334,6 +334,8 @@ impl_new_function_with_error_buffer!(github, list_fpat_requests_for_org, ALLOW_I
 impl_new_function_with_error_buffer!(github, get_repos_for_fpat, ALLOW_IN_TEST_MODE);
 
 // AWS functions
+
+// KMS
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(
     aws,
@@ -343,6 +345,12 @@ impl_new_sub_module_function_with_error_buffer!(
 );
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key, ALLOW_IN_TEST_MODE);
+
+// S3
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, s3, get_object, ALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, s3, put_object, DISALLOW_IN_TEST_MODE);
 
 // Npm Functions
 impl_new_function_with_error_buffer!(npm, publish_empty_stub, DISALLOW_IN_TEST_MODE);
@@ -655,6 +663,13 @@ pub fn to_api_function(
 
         // Yubikey Calls
         "yubikey_verify_otp" => Function::new_typed_with_env(&mut store, &env, yubikey_verify_otp),
+
+        // S3 Calls
+        #[cfg(feature = "aws")]
+        "aws_s3_put_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_put_object),
+
+        #[cfg(feature = "aws")]
+        "aws_s3_get_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_get_object),
 
         // Splunk Calls
         "splunk_post_hec" => Function::new_typed_with_env(&mut store, &env, splunk_post_hec),
