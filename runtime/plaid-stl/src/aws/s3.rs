@@ -15,12 +15,34 @@ pub enum ObjectFetchMode {
 }
 
 /// Represents the response returned from the `get_object` function.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum GetObjectReponse {
     /// The full object data.
     Object(Vec<u8>),
     /// A presigned URI for accessing the object.
     PresignedUri(String),
+}
+
+/// Request payload for retrieving an object from S3.
+#[derive(Deserialize, Serialize)]
+pub struct GetObjectRequest {
+    /// The bucket name from which the object is requested.
+    pub bucket_id: String,
+    /// The key identifying the object to fetch.
+    pub object_key: String,
+    /// Optional expiration time for the presigned URL (in seconds).
+    pub expires_in: Option<u64>,
+}
+
+/// Request payload for uploading an object to S3.
+#[derive(Deserialize, Serialize)]
+pub struct PutObjectRequest {
+    /// The bucket name to which the `PUT` action was initiated.
+    pub bucket_id: String,
+    /// Object data.
+    pub object: Vec<u8>,
+    /// Object key for which the `PUT` action was initiated.
+    pub object_key: String,
 }
 
 /// Uploads an object to S3
@@ -40,16 +62,6 @@ pub fn put_object(
 ) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_s3, put_object);
-    }
-
-    #[derive(Serialize)]
-    struct PutObjectRequest {
-        /// The bucket name to which the `PUT` action was initiated.
-        bucket_id: String,
-        /// Object data.
-        object: Vec<u8>,
-        /// Object key for which the `PUT` action was initiated.
-        object_key: String,
     }
 
     let request = PutObjectRequest {
@@ -102,16 +114,6 @@ pub fn get_object(
 ) -> Result<GetObjectReponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_s3, get_object);
-    }
-
-    #[derive(Serialize)]
-    struct GetObjectRequest {
-        /// The bucket name from which the object is requested.
-        bucket_id: String,
-        /// The key identifying the object to fetch.
-        object_key: String,
-        /// Optional expiration time for the presigned URL (in seconds).
-        expires_in: Option<u64>,
     }
 
     let (expires_in, return_buffer_size) = match fetch_mode {
