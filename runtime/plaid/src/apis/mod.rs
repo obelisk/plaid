@@ -11,6 +11,7 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
+#[cfg(feature = "aws")]
 use aws::s3::S3Errors;
 #[cfg(feature = "aws")]
 use aws::{Aws, AwsConfig};
@@ -95,6 +96,7 @@ pub enum ApiError {
     TestMode,
 }
 
+#[cfg(feature = "aws")]
 impl From<S3Errors> for ApiError {
     fn from(e: S3Errors) -> Self {
         Self::S3Error(e)
