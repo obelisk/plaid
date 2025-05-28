@@ -61,14 +61,14 @@ pub fn put_object(
     let request =
         serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
 
-    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+    let mut return_buffer = vec![0; 0];
 
     let res = unsafe {
         aws_s3_put_object(
             request.as_ptr(),
             request.len(),
             return_buffer.as_mut_ptr(),
-            RETURN_BUFFER_SIZE,
+            0,
         )
     };
 
