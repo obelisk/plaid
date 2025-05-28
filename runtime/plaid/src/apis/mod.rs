@@ -12,6 +12,7 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
+use aws::s3::S3Errors;
 #[cfg(feature = "aws")]
 use aws::{Aws, AwsConfig};
 #[cfg(feature = "aws")]
@@ -86,6 +87,8 @@ pub enum ApiError {
     KmsSignError(SdkError<SignError>),
     #[cfg(feature = "aws")]
     KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
+    #[cfg(feature = "aws")]
+    S3Error(aws::s3::S3Errors),
     NetworkError(reqwest::Error),
     NpmError(NpmError),
     OktaError(okta::OktaError),
@@ -96,6 +99,12 @@ pub enum ApiError {
     YubikeyError(yubikey::YubikeyError),
     WebError(web::WebError),
     TestMode,
+}
+
+impl From<S3Errors> for ApiError {
+    fn from(e: S3Errors) -> Self {
+        Self::S3Error(e)
+    }
 }
 
 impl Api {

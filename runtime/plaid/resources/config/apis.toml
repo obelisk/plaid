@@ -187,6 +187,17 @@ secret_key = ""
 # [apis."aws"."kms".key_configuration]
 # "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
 
+
+# S3 (using IAM)
+# top‐level bucket_configuration map
+# [bucket_configuration]
+# [apis."aws"."s3".authentication]
+# [apis."aws"."s3".bucket_configuration]
+# # for bucket named "my-bucket"
+# [[apis."aws"."s3".bucket_configuration."my-bucket"]]
+# r = ["some_rule.wasm"]
+# rw = ["another_rule.wasm"]
+
 #[apis."github"]
 #[apis."github".authentication]
 #logbacks_allowed = "Unlimited"
