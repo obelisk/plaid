@@ -37,11 +37,10 @@ impl Default for BucketPermission {
 /// Configuration for a single S3 bucket, including permissions and the allowed rule.
 #[derive(Deserialize)]
 struct BucketConfiguration {
-    /// Access permission (Read or Write). Defaults to `Read` if a value isn't provided
     #[serde(default)]
-    permission: BucketPermission,
-    /// Rule name that is allowed to access this bucket.
-    rule: String,
+    r: Vec<String>,
+    #[serde(default)]
+    rw: Vec<String>,
 }
 
 /// Configuration for initializing the S3 API wrapper.
@@ -50,7 +49,7 @@ pub struct S3Config {
     /// Authentication method used to access S3.
     authentication: AwsAuthentication,
     /// Maps S3 bucket names to their associated configuration rules.
-    bucket_configuration: HashMap<String, Vec<BucketConfiguration>>,
+    bucket_configuration: HashMap<String, BucketConfiguration>,
 }
 
 /// S3 wrapper for interacting with the AWS S3 service based on bucket/rule configuration.
@@ -58,7 +57,7 @@ pub struct S3 {
     /// AWS SDK S3 client.
     client: Client,
     /// Configured buckets and their associated access rules.
-    bucket_configuration: HashMap<String, Vec<BucketConfiguration>>,
+    bucket_configuration: HashMap<String, BucketConfiguration>,
 }
 
 impl S3 {
@@ -82,7 +81,15 @@ impl S3 {
         let request =
             serde_json::from_str::<GetObjectRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
+        let module = module.to_string();
+        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
+        if !bucket_config.r.contains(&module) && !bucket_config.rw.contains(&module) {
+            error!(
+                "{module} tried to use an S3 bucket which it's not allowed to: {}",
+                request.bucket_id
+            );
+            return Err(ApiError::BadRequest);
+        }
 
         let request_builder = self
             .client
@@ -133,7 +140,7 @@ impl S3 {
 
         // Check that caller is allowed to write to this bucket
         let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
-        if bucket_config.permission != BucketPermission::Write {
+        if !bucket_config.rw.contains(&module.to_string()) {
             error!("{module} tried to write to a bucket but is not permitted to");
             return Err(ApiError::BadRequest);
         }
@@ -157,16 +164,7 @@ impl S3 {
         bucket: &str,
     ) -> Result<&BucketConfiguration, ApiError> {
         match self.bucket_configuration.get(bucket) {
-            Some(config) => {
-                if let Some(bucket) = config.iter().find(|conf| conf.rule == module.to_string()) {
-                    Ok(bucket)
-                } else {
-                    error!(
-                        "{module} tried to use an S3 bucket which it's not allowed to: {bucket}"
-                    );
-                    Err(ApiError::BadRequest)
-                }
-            }
+            Some(config) => Ok(config),
             None => {
                 error!("{module} tried to use a S3 bucket that is not configured: {bucket}");
                 Err(ApiError::BadRequest)
