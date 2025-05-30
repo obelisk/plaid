@@ -44,6 +44,10 @@ impl DynamoDb {
 
 #[async_trait]
 impl StorageProvider for DynamoDb {
+    fn is_persistent(&self) -> bool {
+        true
+    }
+
     async fn insert(
         &self,
         namespace: String,
