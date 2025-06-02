@@ -1,8 +1,9 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc, time::Duration};
 
 use aws_sdk_kms::error::SdkError;
+use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesError;
 use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client};
-use plaid_stl::aws::s3::{GetObjectReponse, GetObjectRequest, PutObjectRequest};
+use plaid_stl::aws::s3::{GetObjectReponse, GetObjectRequest, ObjectAttributes, PutObjectRequest};
 use serde::Deserialize;
 
 use crate::{apis::ApiError, get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
@@ -15,6 +16,7 @@ use aws_sdk_s3::operation::put_object::PutObjectError;
 pub enum S3Errors {
     S3PutObjectError(SdkError<PutObjectError>),
     S3GetObjectError(SdkError<GetObjectError>),
+    S3GetObjectAttributesError(SdkError<GetObjectAttributesError>),
     BytesStreamError(aws_sdk_s3::primitives::ByteStreamError),
     PresignError(aws_sdk_s3::presigning::PresigningConfigError),
 }
@@ -70,6 +72,44 @@ impl S3 {
             client,
             bucket_configuration: config.bucket_configuration,
         }
+    }
+
+    /// Retrieves all of the metadata from an object without returning the object itself
+    pub async fn get_object_attributes(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request =
+            serde_json::from_str::<GetObjectRequest>(params).map_err(|_| ApiError::BadRequest)?;
+
+        let module = module.to_string();
+        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
+        if !bucket_config.r.contains(&module) && !bucket_config.rw.contains(&module) {
+            error!(
+                "{module} tried to use an S3 bucket which it's not allowed to: {}",
+                request.bucket_id
+            );
+            return Err(ApiError::BadRequest);
+        }
+
+        let object_attributes = self
+            .client
+            .get_object_attributes()
+            .bucket(request.bucket_id)
+            .key(request.object_key)
+            .send()
+            .await
+            .map_err(S3Errors::S3GetObjectAttributesError)?;
+
+        let response = ObjectAttributes {
+            object_size: object_attributes.object_size,
+            last_modified: object_attributes.last_modified.map(|lm| lm.secs()),
+        };
+
+        let serialized = serde_json::to_string(&response).map_err(|_| ApiError::BadRequest)?;
+
+        Ok(serialized)
     }
 
     /// Handles a request to retrieve an object from S3 or generate a presigned URL.
