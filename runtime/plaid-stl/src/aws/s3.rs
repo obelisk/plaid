@@ -2,9 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
 
-/// The maximum size for return buffers used when fetching full objects from S3.
-/// Set to 4 MiB.
-const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
+const RETURN_BUFFER_SIZE: usize = 1024;
 
 /// Specifies how an object should be fetched from S3.
 pub enum ObjectFetchMode {
@@ -45,6 +43,15 @@ pub struct PutObjectRequest {
     pub object_key: String,
 }
 
+/// Represents an S3 object's metadata
+#[derive(Deserialize, Serialize)]
+pub struct ObjectAttributes {
+    /// The size of the object in bytes.
+    pub object_size: Option<i64>,
+    /// Unix timestamp of when the object was last modified.
+    pub last_modified: Option<i64>,
+}
+
 /// Uploads an object to S3
 ///
 /// # Arguments
@@ -82,6 +89,61 @@ pub fn put_object(
     }
 }
 
+/// Fetches an object's metadata from S3
+///
+/// # Arguments
+///
+/// * `bucket_id` - The name of the bucket from which to fetch the object.
+/// * `object_key` - The key identifying the object to fetch.
+///
+/// # Returns
+///
+/// A `ObjectAttributes` struct containing relevant metadata about the object.
+///
+/// # Errors
+///
+/// Returns `PlaidFunctionError` if serialization fails, the host function reports
+/// an error, or if the response cannot be deserialized.
+pub fn get_object_attributes(
+    bucket_id: &str,
+    object_key: &str,
+) -> Result<ObjectAttributes, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(aws_s3, get_object_attributes);
+    }
+
+    let request = GetObjectRequest {
+        bucket_id: bucket_id.to_string(),
+        object_key: object_key.to_string(),
+        expires_in: None,
+    };
+
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        aws_s3_get_object_attributes(
+            request.as_ptr(),
+            request.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match serde_json::from_slice(&return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
 /// Fetches an object from S3
 ///
 /// # Arguments
@@ -108,8 +170,16 @@ pub fn get_object(
     }
 
     let (expires_in, return_buffer_size) = match fetch_mode {
-        ObjectFetchMode::Presigned(duration) => (Some(duration), 1024),
-        _ => (None, RETURN_BUFFER_SIZE),
+        ObjectFetchMode::Presigned(duration) => (Some(duration), RETURN_BUFFER_SIZE),
+        _ => {
+            // We need to figure out how big our return buffer should be based on the response from get_object_attributes
+            let attributes = get_object_attributes(bucket_id, object_key)?;
+            let Some(ret_buffer_size) = attributes.object_size else {
+                return Err(PlaidFunctionError::InternalApiError);
+            };
+
+            (None, ret_buffer_size as usize)
+        }
     };
 
     let request = GetObjectRequest {
