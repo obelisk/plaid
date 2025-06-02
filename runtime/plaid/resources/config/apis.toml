@@ -157,3 +157,18 @@ secret_key = ""
 # region = "asdf"
 # [apis."aws"."kms".key_configuration]
 # "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
+
+# S3 (using IAM)
+# top‐level bucket_configuration map
+# [bucket_configuration]
+# [apis."aws"."s3".authentication]
+# [apis."aws"."s3".bucket_configuration]
+
+# # for bucket named "my-bucket"
+# [[apis."aws"."s3".bucket_configuration."my-bucket"]]
+# # permission = "Read"
+# rule = "testing_test.wasm"
+
+# [[apis."aws"."s3".bucket_configuration."my-bucket"]]
+# permission = "Write"
+# rule = "another_rule.wasm"

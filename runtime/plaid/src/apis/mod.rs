@@ -12,6 +12,8 @@ pub mod web;
 pub mod yubikey;
 
 #[cfg(feature = "aws")]
+use aws::s3::S3Errors;
+#[cfg(feature = "aws")]
 use aws::{Aws, AwsConfig};
 #[cfg(feature = "aws")]
 use aws_sdk_kms::operation::get_public_key::GetPublicKeyError;
@@ -80,6 +82,8 @@ pub enum ApiError {
     KmsSignError(SdkError<SignError>),
     #[cfg(feature = "aws")]
     KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
+    #[cfg(feature = "aws")]
+    S3Error(aws::s3::S3Errors),
     NetworkError(reqwest::Error),
     NpmError(NpmError),
     OktaError(okta::OktaError),
@@ -90,6 +94,13 @@ pub enum ApiError {
     YubikeyError(yubikey::YubikeyError),
     WebError(web::WebError),
     TestMode,
+}
+
+#[cfg(feature = "aws")]
+impl From<S3Errors> for ApiError {
+    fn from(e: S3Errors) -> Self {
+        Self::S3Error(e)
+    }
 }
 
 impl Api {
