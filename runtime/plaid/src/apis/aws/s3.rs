@@ -14,9 +14,9 @@ use aws_sdk_s3::operation::put_object::PutObjectError;
 /// Errors that may occur while interacting with S3.
 #[derive(Debug)]
 pub enum S3Errors {
-    S3PutObjectError(SdkError<PutObjectError>),
-    S3GetObjectError(SdkError<GetObjectError>),
-    S3GetObjectAttributesError(SdkError<GetObjectAttributesError>),
+    PutObjectError(SdkError<PutObjectError>),
+    GetObjectError(SdkError<GetObjectError>),
+    GetObjectAttributesError(SdkError<GetObjectAttributesError>),
     BytesStreamError(aws_sdk_s3::primitives::ByteStreamError),
     PresignError(aws_sdk_s3::presigning::PresigningConfigError),
 }
@@ -100,7 +100,7 @@ impl S3 {
             .key(request.object_key)
             .send()
             .await
-            .map_err(S3Errors::S3GetObjectAttributesError)?;
+            .map_err(S3Errors::GetObjectAttributesError)?;
 
         let response = ObjectAttributes {
             object_size: object_attributes.object_size,
@@ -144,14 +144,14 @@ impl S3 {
             let response = request_builder
                 .presigned(presigned)
                 .await
-                .map_err(S3Errors::S3GetObjectError)?;
+                .map_err(S3Errors::GetObjectError)?;
 
             GetObjectReponse::PresignedUri(response.uri().to_string())
         } else {
             let response = request_builder
                 .send()
                 .await
-                .map_err(S3Errors::S3GetObjectError)?;
+                .map_err(S3Errors::GetObjectError)?;
 
             let object_bytes = response
                 .body
@@ -192,7 +192,7 @@ impl S3 {
             .key(request.object_key)
             .send()
             .await
-            .map_err(S3Errors::S3PutObjectError)?;
+            .map_err(S3Errors::PutObjectError)?;
 
         Ok(String::new())
     }
