@@ -61,7 +61,7 @@ pub fn put_object(
     object: Vec<u8>,
 ) -> Result<(), PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(aws_s3, put_object);
+        new_host_function!(aws_s3, put_object);
     }
 
     let request = PutObjectRequest {
@@ -73,16 +73,7 @@ pub fn put_object(
     let request =
         serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
 
-    let mut return_buffer = vec![0; 0];
-
-    let res = unsafe {
-        aws_s3_put_object(
-            request.as_ptr(),
-            request.len(),
-            return_buffer.as_mut_ptr(),
-            0,
-        )
-    };
+    let res = unsafe { aws_s3_put_object(request.as_ptr(), request.len()) };
 
     if res < 0 {
         Err(res.into())
