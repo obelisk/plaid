@@ -19,21 +19,8 @@ pub enum S3Errors {
     GetObjectAttributesError(SdkError<GetObjectAttributesError>),
     BytesStreamError(aws_sdk_s3::primitives::ByteStreamError),
     PresignError(aws_sdk_s3::presigning::PresigningConfigError),
-}
-
-/// Permissions for an S3 bucket.
-#[derive(Deserialize, PartialEq)]
-enum BucketPermission {
-    /// Read-only access.
-    Read,
-    /// Write access.
-    Write,
-}
-
-impl Default for BucketPermission {
-    fn default() -> Self {
-        Self::Read
-    }
+    NoContentLengthReturned,
+    ObjectTooLarge,
 }
 
 /// Configuration for a single S3 bucket, including permissions and the allowed rule.
@@ -50,8 +37,16 @@ struct BucketConfiguration {
 pub struct S3Config {
     /// Authentication method used to access S3.
     authentication: AwsAuthentication,
+    /// The maximum object size that we'll read into memory. Defaults to 4 MiB
+    /// if no value is provided
+    #[serde(default = "default_max_object_size")]
+    max_object_fetch_size: usize,
     /// Maps S3 bucket names to their associated configuration rules.
     bucket_configuration: HashMap<String, BucketConfiguration>,
+}
+
+fn default_max_object_size() -> usize {
+    1024 * 1024 * 4
 }
 
 /// S3 wrapper for interacting with the AWS S3 service based on bucket/rule configuration.
@@ -60,6 +55,9 @@ pub struct S3 {
     client: Client,
     /// Configured buckets and their associated access rules.
     bucket_configuration: HashMap<String, BucketConfiguration>,
+    /// The maximum object size that we'll read into memory. Defaults to 4 MiB
+    /// if no value is provided
+    max_object_fetch_size: usize,
 }
 
 impl S3 {
@@ -71,6 +69,7 @@ impl S3 {
         Self {
             client,
             bucket_configuration: config.bucket_configuration,
+            max_object_fetch_size: config.max_object_fetch_size,
         }
     }
 
@@ -152,6 +151,15 @@ impl S3 {
                 .send()
                 .await
                 .map_err(S3Errors::GetObjectError)?;
+
+            // Check that the object's length is less than our configured max before reading into memory.
+            let length = response
+                .content_length
+                .ok_or(S3Errors::NoContentLengthReturned)?;
+
+            if length as usize > self.max_object_fetch_size {
+                return Err(S3Errors::ObjectTooLarge)?;
+            }
 
             let object_bytes = response
                 .body
