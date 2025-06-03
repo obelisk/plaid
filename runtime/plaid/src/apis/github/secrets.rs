@@ -37,6 +37,14 @@ impl Github {
             self.validate_secret_name(request.get("secret_name").ok_or(ApiError::BadRequest)?)?;
         let secret = request.get("secret").ok_or(ApiError::BadRequest)?;
 
+        // Validate secret length against GitHub's 48KiB limit
+        const GITHUB_SECRET_MAX_BYTES: usize = 48 * 1024; // 49,152 bytes
+        if secret.len() > GITHUB_SECRET_MAX_BYTES {
+            return Err(ApiError::GitHubError(GitHubError::InvalidInput(
+                format!("Secret exceeds GitHub's 48KiB limit: {} bytes", secret.len()),
+            )));
+        }
+
         match env_name {
             Some(name) => info!("Configuring secret with name [{secret_name}] on environment [{name}] for repository [{owner}/{repo}] on behalf of [{module}]"),
             None => info!("Configuring secret with name [{secret_name}] on repository [{owner}/{repo}] on behalf of [{module}]"),
