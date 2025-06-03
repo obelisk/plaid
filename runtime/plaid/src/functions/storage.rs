@@ -4,7 +4,7 @@ use wasmer::{AsStoreRef, FunctionEnvMut, MemoryView, WasmPtr};
 
 use crate::{executor::Env, functions::FunctionErrors, loader::LimitValue, storage::Storage};
 
-use super::{get_memory, safely_get_memory, safely_get_string, safely_write_data_back};
+use super::{get_memory, safely_get_memory, safely_get_string, safely_write_data_back, calculate_max_buffer_size};
 
 macro_rules! safely_get_guest_string {
     ($variable:ident, $memory_view:expr, $buf:expr, $buf_len:expr, $env_data:expr) => {
@@ -23,7 +23,8 @@ macro_rules! safely_get_guest_string {
 
 macro_rules! safely_get_guest_memory {
     ($variable:ident, $memory_view:expr, $buf:expr, $buf_len:expr, $env_data:expr) => {
-        let $variable = match safely_get_memory(&$memory_view, $buf, $buf_len) {
+        let max_buffer_size = calculate_max_buffer_size($env_data.module.page_limit);
+        let $variable = match safely_get_memory(&$memory_view, $buf, $buf_len, max_buffer_size) {
             Ok(d) => d,
             Err(e) => {
                 error!(

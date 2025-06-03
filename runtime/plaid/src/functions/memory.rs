@@ -4,6 +4,14 @@ use crate::executor::Env;
 
 use super::FunctionErrors;
 
+/// WebAssembly page size in bytes (64 KiB)
+const WASM_PAGE_SIZE: u32 = 65536;
+
+/// Calculate the maximum buffer size for a module based on its page limit
+pub fn calculate_max_buffer_size(page_limit: u32) -> u32 {
+    page_limit.saturating_mul(WASM_PAGE_SIZE)
+}
+
 /// When a host function is executing we need to be able to access the guest's memory
 /// for read and write operations. This safely gets those from the environment and
 /// handles all failure cases.
@@ -38,8 +46,14 @@ pub fn safely_get_string(memory_view: &MemoryView, data_buffer: WasmPtr<u8>, buf
 }
 
 /// Safely get a Vec<u8> from the guest's memory. This function will take a pointer provided by the
-/// guest, then do a bounds checked read.
-pub fn safely_get_memory(memory_view: &MemoryView, data_buffer: WasmPtr<u8>, buffer_size: u32) -> Result<Vec<u8>, FunctionErrors> {
+/// guest, then do a bounds checked read. The buffer_size is validated against max_buffer_size
+/// to prevent malicious modules from requesting excessive memory allocations.
+pub fn safely_get_memory(memory_view: &MemoryView, data_buffer: WasmPtr<u8>, buffer_size: u32, max_buffer_size: u32) -> Result<Vec<u8>, FunctionErrors> {
+    // Validate buffer size against the maximum allowed for this module
+    if buffer_size > max_buffer_size {
+        return Err(FunctionErrors::CouldNotGetAdequateMemory);
+    }
+
     let mut buffer = vec![0; buffer_size as usize];
     memory_view
         .read(data_buffer.offset().into(), &mut buffer)
@@ -72,4 +86,26 @@ pub fn safely_write_data_back(memory_view: &MemoryView, data: &[u8], data_buffer
     }
 
     Ok(data.len() as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_max_buffer_size() {
+        // Test normal cases
+        assert_eq!(calculate_max_buffer_size(1), 65536); // 1 page = 64KiB
+        assert_eq!(calculate_max_buffer_size(2), 131072); // 2 pages = 128KiB
+        assert_eq!(calculate_max_buffer_size(10), 655360); // 10 pages = 640KiB
+
+        // Test edge cases
+        assert_eq!(calculate_max_buffer_size(0), 0); // 0 pages = 0 bytes
+
+        // Test overflow protection (saturating_mul should handle this)
+        let max_pages = u32::MAX / WASM_PAGE_SIZE;
+        let result = calculate_max_buffer_size(max_pages + 1);
+        // Should saturate at u32::MAX
+        assert_eq!(result, u32::MAX);
+    }
 }
