@@ -157,3 +157,34 @@ secret_key = ""
 # region = "asdf"
 # [apis."aws"."kms".key_configuration]
 # "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
+
+#[apis."github"]
+#[apis."github".authentication]
+#logbacks_allowed = "Unlimited"
+#app_id = 0
+#installation_id = 0
+#private_key = """{plaid-secret{plaid-github-app-private-key}}"""
+
+# [apis."github"."graphql_queries"]
+# saml_identities = """
+# query($organization: String!, $cursor: String) {
+#   organization(login: $organization) {
+#     samlIdentityProvider {
+#       externalIdentities(first: 100, after: $cursor) {
+#         pageInfo {
+#           hasNextPage
+#           endCursor
+#         }
+#         nodes {
+#           user {
+#             login
+#           }
+#           samlIdentity {
+#             nameId
+#           }
+#         }
+#       }
+#     }
+#   }
+# }
+# """
