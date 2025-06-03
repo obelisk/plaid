@@ -8,7 +8,7 @@ use crate::{
     functions::{get_memory, safely_get_string},
 };
 
-use super::{safely_get_memory, safely_write_data_back, FunctionErrors};
+use super::{safely_get_memory, safely_write_data_back, calculate_max_buffer_size, FunctionErrors};
 
 /// Implement a way for a module to print to env_logger
 pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log_buffer_size: u32) {
@@ -192,7 +192,8 @@ pub fn log_back_detailed(
     };
 
     // Safely get the data from the guest's memory
-    let log = match safely_get_memory(&memory_view, log_buf, log_buf_len) {
+    let max_buffer_size = calculate_max_buffer_size(env_data.module.page_limit);
+    let log = match safely_get_memory(&memory_view, log_buf, log_buf_len, max_buffer_size) {
         Ok(d) => d,
         Err(e) => {
             error!("{}: Error in log_back: {:?}", env_data.module.name, e);
