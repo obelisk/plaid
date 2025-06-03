@@ -9,6 +9,9 @@ use serde::Serialize;
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc};
 
+/// GitHub's maximum secret size limit in bytes (48KiB)
+const GITHUB_SECRET_MAX_BYTES: usize = 48 * 1024; // 49,152 bytes
+
 #[derive(Serialize)]
 struct UploadEnvironmentSecretPayload {
     encrypted_value: String,
@@ -38,7 +41,6 @@ impl Github {
         let secret = request.get("secret").ok_or(ApiError::BadRequest)?;
 
         // Validate secret length against GitHub's 48KiB limit
-        const GITHUB_SECRET_MAX_BYTES: usize = 48 * 1024; // 49,152 bytes
         if secret.len() > GITHUB_SECRET_MAX_BYTES {
             return Err(ApiError::GitHubError(GitHubError::InvalidInput(
                 format!("Secret exceeds GitHub's 48KiB limit: {} bytes", secret.len()),
