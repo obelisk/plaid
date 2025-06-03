@@ -3,6 +3,8 @@ resolver = "2"
 
 
 members = [
+    "examples/example_github_graphql",
+
     "tests/test_crashtest",
     "tests/test_db",
     "tests/test_fileopen",
