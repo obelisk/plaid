@@ -65,6 +65,18 @@ log_type = "test_regex"
 headers = []
 
 
+[webhooks."internal".webhooks."examplegithub_graphql"]
+log_type = "none"
+headers = ["Authorization"]
+[webhooks."internal".webhooks."examplegithub_graphql".get_mode]
+response_mode = "rule:example_github_graphql.wasm"
+[webhooks."internal".webhooks."examplegithub_graphql".get_mode.caching_mode]
+# Note that this needs to be none as any other value will cause a security issue. This is because
+# caching is handled at the runtime level, thus not giving the rule a chance to deny returning
+# the cached data.
+type = "None"
+
+
 [webhooks."internal".webhooks."testgeteverything"]
 log_type = "test_geteverything"
 headers = ["Authorization", "my_secret"]

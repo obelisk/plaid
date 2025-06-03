@@ -32,6 +32,7 @@ test_mode_exemptions = [
 "test_logback.wasm" = 1024
 "test_mnr.wasm" = 1024
 "test_get_everything.wasm" = 1024
+"example_github_graphql.wasm" = 100_000
 
 [loading.universal_accessory_data]
 "key_1" = "value_1"
@@ -53,6 +54,9 @@ test_mode_exemptions = [
 [loading.secrets."test_geteverything"]
 "my_secret" = "verySecureSecret"
 
+[loading.secrets."example_github_graphql"]
+"organization_fetch_auth_token" = "{plaid-secret{example-auth-token}}"
+
 [loading.log_type_overrides]
 "test_crashtest.wasm" = "crashtest"
 "test_db.wasm" = "test_db"
@@ -69,6 +73,7 @@ test_mode_exemptions = [
 "test_shared_db_rule_1.wasm" = "test_shareddb_1"
 "test_shared_db_rule_2.wasm" = "test_shareddb_2"
 "test_slack.wasm" = "test_slack"
+"example_github_graphql.wasm" = "example_github_graphql"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
