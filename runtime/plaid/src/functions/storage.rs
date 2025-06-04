@@ -4,7 +4,10 @@ use wasmer::{AsStoreRef, FunctionEnvMut, MemoryView, WasmPtr};
 
 use crate::{executor::Env, functions::FunctionErrors, loader::LimitValue, storage::Storage};
 
-use super::{get_memory, safely_get_memory, safely_get_string, safely_write_data_back, calculate_max_buffer_size};
+use super::{
+    calculate_max_buffer_size, get_memory, safely_get_memory, safely_get_string,
+    safely_write_data_back,
+};
 
 macro_rules! safely_get_guest_string {
     ($variable:ident, $memory_view:expr, $buf:expr, $buf_len:expr, $env_data:expr) => {
@@ -330,7 +333,7 @@ fn get_common(
             }
         }
         Ok(None) => 0,
-        Err(_) => 0,
+        Err(_) => FunctionErrors::InternalApiError as i32,
     }
 }
 
@@ -585,7 +588,7 @@ pub fn list_keys_common(
                         "Could not serialize keys for namespaces {}: {e}",
                         env_data.module.name
                     );
-                    return 0;
+                    return FunctionErrors::ErrorCouldNotSerialize as i32;
                 }
             };
 
@@ -610,7 +613,7 @@ pub fn list_keys_common(
                 "Could not list keys for namespace {}: {e}",
                 &env_data.module.name
             );
-            return 0;
+            return FunctionErrors::InternalApiError as i32;
         }
     }
 }
@@ -694,7 +697,7 @@ pub fn delete_common(
             }
             None => 0,
         },
-        Err(_) => 0,
+        Err(_) => FunctionErrors::InternalApiError as i32,
     }
 }
 
