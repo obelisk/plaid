@@ -21,6 +21,22 @@ pub struct IntervalConfig {
 }
 
 /// Custom parser for splay. Returns an error if a splay > 100 is given
+fn parse_jobs<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let splay = u32::deserialize(deserializer)?;
+
+    if splay > 100 {
+        Err(serde::de::Error::custom(
+            "Invalid splay value provided. Max splay is 100",
+        ))
+    } else {
+        Ok(splay)
+    }
+}
+
+/// Custom parser for splay. Returns an error if a splay > 100 is given
 fn parse_splay<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: serde::Deserializer<'de>,
