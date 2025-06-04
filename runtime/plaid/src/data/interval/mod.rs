@@ -117,11 +117,7 @@ impl std::cmp::PartialOrd for ScheduledJob {
 
 impl std::cmp::Ord for ScheduledJob {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if self.execution_time < other.execution_time {
-            std::cmp::Ordering::Less
-        } else {
-            std::cmp::Ordering::Greater
-        }
+        self.execution_time.cmp(&other.execution_time)
     }
 }
 
