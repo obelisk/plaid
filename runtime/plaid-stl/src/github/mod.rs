@@ -1262,7 +1262,7 @@ pub fn update_branch_protection_rule(
     body: impl Display,
 ) -> Result<(), PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(github, update_branch_protection_rule);
+        new_host_function!(github, update_branch_protection_rule);
     }
     let mut params: HashMap<&str, String> = HashMap::new();
     params.insert("owner", owner.to_string());
@@ -1272,16 +1272,8 @@ pub fn update_branch_protection_rule(
 
     let request = serde_json::to_string(&params).unwrap();
 
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
-    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
-
     let res = unsafe {
-        github_update_branch_protection_rule(
-            request.as_bytes().as_ptr(),
-            request.as_bytes().len(),
-            return_buffer.as_mut_ptr(),
-            RETURN_BUFFER_SIZE,
-        )
+        github_update_branch_protection_rule(request.as_bytes().as_ptr(), request.as_bytes().len())
     };
 
     // There was an error with the Plaid system. Maybe the API is not
