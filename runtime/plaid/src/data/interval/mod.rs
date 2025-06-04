@@ -40,6 +40,7 @@ where
 /// Defines a interval job to be scheduled and executed
 struct IntervalJob {
     /// Time (in seconds) between each execution
+    #[serde(deserialize_with = "parse_interval")]
     interval: u64,
     /// The log type the generated message will be sent to
     log_type: String,
@@ -48,6 +49,22 @@ struct IntervalJob {
     /// The number of Logbacks this interval is allowed to trigger
     #[serde(default)]
     pub logbacks_allowed: LogbacksAllowed,
+}
+
+/// Custom parser for interval. Returns an error if an interval of 0 is provided
+fn parse_interval<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let interval = u64::deserialize(deserializer)?;
+
+    if interval == 0 {
+        Err(serde::de::Error::custom(
+            "Invalid interval value provided. Minimum interval is 1",
+        ))
+    } else {
+        Ok(interval)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
