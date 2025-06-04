@@ -14,26 +14,23 @@ use crate::executor::Message;
 /// Defines the list of interval jobs to be processed
 pub struct IntervalConfig {
     /// A HashMap of job name to job config.
+    #[serde(deserialize_with = "parse_jobs")]
     jobs: HashMap<String, IntervalJob>,
     /// Maximum percentage of internal time to shift all jobs for better work distribution    
     #[serde(deserialize_with = "parse_splay")]
     splay: u32,
 }
 
-/// Custom parser for splay. Returns an error if a splay > 100 is given
-fn parse_jobs<'de, D>(deserializer: D) -> Result<u32, D::Error>
+/// Custom parser for `jobs`. Returns an error if an empty jobs map is provided
+fn parse_jobs<'de, D>(deserializer: D) -> Result<HashMap<String, IntervalJob>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let splay = u32::deserialize(deserializer)?;
-
-    if splay > 100 {
-        Err(serde::de::Error::custom(
-            "Invalid splay value provided. Max splay is 100",
-        ))
-    } else {
-        Ok(splay)
+    let map = HashMap::<String, IntervalJob>::deserialize(deserializer)?;
+    if map.is_empty() {
+        return Err(serde::de::Error::custom("`jobs` map must not be empty"));
     }
+    Ok(map)
 }
 
 /// Custom parser for splay. Returns an error if a splay > 100 is given
