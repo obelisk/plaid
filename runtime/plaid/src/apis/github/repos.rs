@@ -82,7 +82,9 @@ impl Github {
             .await
         {
             Ok((status, _)) => {
-                if status == 204 {
+                // https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2022-11-28#add-a-repository-collaborator--status-codes
+                // The response is 204 when the collaborator is added, and 201 when a new invitation is created
+                if status == 204 || status == 201 {
                     Ok(0)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
@@ -148,7 +150,9 @@ impl Github {
         let page = self.validate_pint(request.get("page").ok_or(ApiError::BadRequest)?)?;
 
         info!("Fetching files for Pull Request Nr {pull_request} from [{organization}/{repository_name}] on behalf of {module}");
-        let address = format!("/repos/{organization}/{repository_name}/pulls/{pull_request}/files?page={page}");
+        let address = format!(
+            "/repos/{organization}/{repository_name}/pulls/{pull_request}/files?page={page}"
+        );
 
         match self.make_generic_get_request(address, module).await {
             Ok((status, Ok(body))) => {
@@ -386,10 +390,13 @@ impl Github {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let username = self.validate_username(request.get("usename").ok_or(ApiError::BadRequest)?)?;
-        let repository_name =
-            self.validate_repository_name(request.get("repository_name").ok_or(ApiError::BadRequest)?)?;
-        let pull_request = self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
+        let username =
+            self.validate_username(request.get("usename").ok_or(ApiError::BadRequest)?)?;
+        let repository_name = self.validate_repository_name(
+            request.get("repository_name").ok_or(ApiError::BadRequest)?,
+        )?;
+        let pull_request =
+            self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
         let comment = request.get("comment").ok_or(ApiError::BadRequest)?;
 
         info!("Commenting on Pull Request [{pull_request}] in repo [{repository_name}] on behalf of {module}");
@@ -397,7 +404,7 @@ impl Github {
 
         #[derive(Serialize)]
         struct Body<'a> {
-            body: &'a str
+            body: &'a str,
         }
 
         match self
