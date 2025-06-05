@@ -1,6 +1,5 @@
 use crate::{apis::ApiError, get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
 use aws_sdk_ecr::{
-    operation::{describe_images::DescribeImagesOutput, describe_repositories::DescribeRepositoriesOutput},
     types::{ImageDetail, Repository},
     Client,
 };
@@ -358,5 +357,77 @@ impl ImageInfo {
             image_size_in_bytes: detail.image_size_in_bytes,
             image_pushed_at: detail.image_pushed_at.map(|dt| dt.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_check_repository_access_allowed() {
+        let mut repo_config = HashMap::new();
+        repo_config.insert("test-repo".to_string(), vec!["test-module".to_string()]);
+        
+        let ecr = Ecr {
+            client: aws_sdk_ecr::Client::from_conf(aws_sdk_ecr::Config::new(&aws_config::SdkConfig::builder().build())),
+            repository_configuration: repo_config,
+        };
+
+        assert!(ecr.check_repository_access(&"test-module", "test-repo").is_ok());
+    }
+
+    #[test]
+    fn test_check_repository_access_denied() {
+        let mut repo_config = HashMap::new();
+        repo_config.insert("test-repo".to_string(), vec!["allowed-module".to_string()]);
+        
+        let ecr = Ecr {
+            client: aws_sdk_ecr::Client::from_conf(aws_sdk_ecr::Config::new(&aws_config::SdkConfig::builder().build())),
+            repository_configuration: repo_config,
+        };
+
+        assert!(ecr.check_repository_access(&"denied-module", "test-repo").is_err());
+    }
+
+    #[test]
+    fn test_check_repository_access_wildcard() {
+        let mut repo_config = HashMap::new();
+        repo_config.insert("*".to_string(), vec!["test-module".to_string()]);
+        
+        let ecr = Ecr {
+            client: aws_sdk_ecr::Client::from_conf(aws_sdk_ecr::Config::new(&aws_config::SdkConfig::builder().build())),
+            repository_configuration: repo_config,
+        };
+
+        assert!(ecr.check_repository_access(&"test-module", "any-repo").is_ok());
+    }
+
+    #[test]
+    fn test_list_repositories_request_deserialize() {
+        let json = r#"{
+            "registry_id": "123456789012",
+            "max_results": 10,
+            "next_token": "token123"
+        }"#;
+
+        let request: ListRepositoriesRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.registry_id, Some("123456789012".to_string()));
+        assert_eq!(request.max_results, Some(10));
+        assert_eq!(request.next_token, Some("token123".to_string()));
+    }
+
+    #[test]
+    fn test_list_images_request_deserialize() {
+        let json = r#"{
+            "repository_name": "my-repo",
+            "max_results": 5
+        }"#;
+
+        let request: ListImagesRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.repository_name, "my-repo");
+        assert_eq!(request.max_results, Some(5));
+        assert_eq!(request.registry_id, None);
     }
 }
