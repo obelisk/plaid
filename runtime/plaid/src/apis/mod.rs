@@ -80,6 +80,8 @@ pub enum ApiError {
     KmsSignError(SdkError<SignError>),
     #[cfg(feature = "aws")]
     KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
+    #[cfg(feature = "aws")]
+    AwsEcrError(String),
     NetworkError(reqwest::Error),
     NpmError(NpmError),
     OktaError(okta::OktaError),
