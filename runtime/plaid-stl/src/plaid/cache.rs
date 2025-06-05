@@ -16,7 +16,7 @@ pub fn insert(key: &str, value: &str) -> Result<String, PlaidFunctionError> {
             value_len: usize,
             data: *const u8,
             data_len: usize,
-        ) -> u32;
+        ) -> i32;
 
         fn cache_get(key: *const u8, key_len: usize, data: *const u8, data_len: usize) -> i32;
     }
@@ -43,7 +43,7 @@ pub fn insert(key: &str, value: &str) -> Result<String, PlaidFunctionError> {
         )
     };
 
-    if copied_size == buffer_size as u32 {
+    if copied_size == buffer_size {
         data_buffer.truncate(copied_size as usize);
         Ok(String::from_utf8(data_buffer).unwrap())
     } else {
