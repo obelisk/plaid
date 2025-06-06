@@ -18,7 +18,7 @@ pub fn insert(key: &str, value: &[u8]) -> Result<Vec<u8>, PlaidFunctionError> {
             value_len: usize,
             data: *const u8,
             data_len: usize,
-        ) -> u32;
+        ) -> i32;
 
         fn storage_get(key: *const u8, key_len: usize, data: *const u8, data_len: usize) -> i32;
     }
@@ -44,7 +44,7 @@ pub fn insert(key: &str, value: &[u8]) -> Result<Vec<u8>, PlaidFunctionError> {
         )
     };
 
-    if copied_size == buffer_size as u32 {
+    if copied_size == buffer_size {
         data_buffer.truncate(copied_size as usize);
         Ok(data_buffer)
     } else {
@@ -70,7 +70,7 @@ pub fn insert_shared(
             value_len: usize,
             data: *const u8,
             data_len: usize,
-        ) -> u32;
+        ) -> i32;
 
         fn storage_get_shared(
             namespace: *const u8,
@@ -114,7 +114,7 @@ pub fn insert_shared(
         )
     };
 
-    if copied_size == buffer_size as u32 {
+    if copied_size == buffer_size {
         data_buffer.truncate(copied_size as usize);
         Ok(data_buffer)
     } else {
