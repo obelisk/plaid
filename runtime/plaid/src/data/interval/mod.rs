@@ -153,8 +153,13 @@ impl Interval {
 
             // Generate a random number between 0 and splay
             let mut bytes = [0u8; 8];
-            // We assume we will always be able to generate randomness
-            srand.fill(&mut bytes).unwrap();
+            // In the very rare case that we cannot pull randomness, default to 42.
+            // This is just for calculating a timing offset and not a security critical
+            // operation, so using a hard coded number is not an issue.
+            if let Err(_) = srand.fill(&mut bytes) {
+                bytes = 42u64.to_ne_bytes(); // Encode 42 using native endian format
+            }
+
             // Yes there is a slight randomness bias here but we're just calculating a splay
             // so this is not a security critical operation.
             let job_splay = u64::from_be_bytes(bytes) % splay;
