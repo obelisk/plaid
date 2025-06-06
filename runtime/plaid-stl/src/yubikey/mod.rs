@@ -33,9 +33,11 @@ pub fn verify_otp(otp: &str) -> bool {
     }
 
     return_buffer.truncate(res as usize);
-    // This should be safe because unless the Plaid runtime is expressly trying
-    // to mess with us, this came from a String in the API module.
-    let return_string = String::from_utf8(return_buffer).unwrap();
+    // Handle potential UTF-8 decoding errors from the host runtime
+    let return_string = match String::from_utf8(return_buffer) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
 
     match return_string.as_str() {
         "OK" => true,
@@ -68,9 +70,11 @@ pub fn verify_otp_detailed(otp: &str) -> Result<OtpStatus, PlaidFunctionError> {
     }
 
     return_buffer.truncate(res as usize);
-    // This should be safe because unless the Plaid runtime is expressly trying
-    // to mess with us, this came from a String in the API module.
-    let return_string = String::from_utf8(return_buffer).unwrap();
+    // Handle potential UTF-8 decoding errors from the host runtime
+    let return_string = match String::from_utf8(return_buffer) {
+        Ok(s) => s,
+        Err(_) => return Err(PlaidFunctionError::ParametersNotUtf8),
+    };
 
     match return_string.as_str() {
         "OK" => Ok(OtpStatus::Ok),
