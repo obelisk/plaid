@@ -339,6 +339,14 @@ impl_new_sub_module_function_with_error_buffer!(
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key, ALLOW_IN_TEST_MODE);
 
+// AWS ECR functions
+#[cfg(feature = "aws")]
+impl_new_function_with_error_buffer!(aws, ecr_list_repositories, ALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_function_with_error_buffer!(aws, ecr_list_images, ALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_function_with_error_buffer!(aws, ecr_describe_images, ALLOW_IN_TEST_MODE);
+
 // Npm Functions
 impl_new_function_with_error_buffer!(npm, publish_empty_stub, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(npm, set_team_permission_on_package, DISALLOW_IN_TEST_MODE);
