@@ -49,28 +49,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create the storage system if one is configured
     let storage = match config.storage {
-        Some(config) => Some(Arc::new(Storage::new(config).await?)),
-        None => None,
-    };
-
-    match storage {
-        None => info!("No persistent storage system configured; unexecuted log backs will be lost on shutdown"),
-        Some(ref storage) => {
+        Some(config) => {
             info!("Storage system configured");
-            match &storage.shared_dbs {
+            let s = Arc::new(Storage::new(config).await?);
+            match &s.shared_dbs {
                 None => info!("No shared DBs configured"),
                 Some(dbs) => {
-                    info!("Configured shared DBs: {:?}", dbs.keys().collect::<Vec<&String>>());
+                    info!(
+                        "Configured shared DBs: {:?}",
+                        dbs.keys().collect::<Vec<&String>>()
+                    );
                 }
             }
+            Some(s)
         }
-    }
+        None => {
+            info!("No persistent storage system configured; unexecuted log backs will be lost on shutdown");
+            None
+        }
+    };
 
-    // This sender provides an internal route to sending logs. This is what powers the logback functions.
+    // The internal system always gets a storage: if we don't have a persistent one, we create an in-memory one
+    let internal_storage = match &storage {
+        Some(s) => s.clone(),
+        None => Arc::new(Storage::new_in_memory()),
+    };
+
+    // This sender provides an internal route to sending logs. This is what
+    // powers the logback functions.
     let delayed_log_sender = Data::start(
         config.data,
         log_sender.clone(),
-        storage.clone(),
+        internal_storage.clone(),
         els.clone(),
     )
     .await
@@ -79,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Configurating APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender).await;
+    let api = Api::new(config.apis, delayed_log_sender).await;
 
     // Create an Arc so all the handlers have access to our API object
     let api = Arc::new(api);
