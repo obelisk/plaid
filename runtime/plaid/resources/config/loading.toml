@@ -23,6 +23,7 @@ test_mode_exemptions = [
     "test_shared_db_rule_1.wasm",
     "test_shared_db_rule_2.wasm",
     "test_slack.wasm",
+    "test_cron.wasm",
 ]
 
 
@@ -74,6 +75,7 @@ test_mode_exemptions = [
 "test_shared_db_rule_2.wasm" = "test_shareddb_2"
 "test_slack.wasm" = "test_slack"
 "example_github_graphql.wasm" = "example_github_graphql"
+"test_cron.wasm" = "test_cron"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
