@@ -2,8 +2,12 @@ use std::{collections::HashMap, fmt::Display, sync::Arc, time::Duration};
 
 use aws_sdk_kms::error::SdkError;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesError;
+use aws_sdk_s3::operation::put_object_tagging::PutObjectTaggingError;
+use aws_sdk_s3::types::{Tag, Tagging};
 use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client};
-use plaid_stl::aws::s3::{GetObjectReponse, GetObjectRequest, ObjectAttributes, PutObjectRequest};
+use plaid_stl::aws::s3::{
+    GetObjectReponse, GetObjectRequest, ObjectAttributes, PutObjectRequest, PutObjectTagRequest,
+};
 use serde::Deserialize;
 
 use crate::{apis::ApiError, get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
@@ -14,6 +18,9 @@ use aws_sdk_s3::operation::put_object::PutObjectError;
 /// Errors that may occur while interacting with S3.
 #[derive(Debug)]
 pub enum S3Errors {
+    TooManyTagsProvided,
+    BuildError(aws_sdk_s3::error::BuildError),
+    TagObjectError(SdkError<PutObjectTaggingError>),
     PutObjectError(SdkError<PutObjectError>),
     GetObjectError(SdkError<GetObjectError>),
     GetObjectAttributesError(SdkError<GetObjectAttributesError>),
@@ -205,6 +212,72 @@ impl S3 {
         Ok(String::new())
     }
 
+    /// Sets the supplied tag-set to an object that already exists in a bucket. A tag is a key-value pair.
+    pub async fn put_object_tag(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        // Parse the information needed to make the request
+        let request = serde_json::from_str::<PutObjectTagRequest>(params)
+            .map_err(|_| ApiError::BadRequest)?;
+
+        // Check that caller is allowed to write to this bucket
+        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
+        if !bucket_config.rw.contains(&module.to_string()) {
+            error!("{module} tried to write to a bucket but is not permitted to");
+            return Err(ApiError::BadRequest);
+        }
+
+        // S3 allows up to 10 tags per object
+        if request.tags.len() > 10 {
+            return Err(S3Errors::TooManyTagsProvided)?;
+        }
+
+        // Parse and filter tags
+        let tags = request
+            .tags
+            .into_iter()
+            .filter_map(|(key, value)| {
+                let key_len = key.len();
+                let val_len = value.len();
+
+                // Length checks (key: 1–128; value: 0–256)
+                if key_len < 1 || key_len > 128 || val_len > 256 {
+                    return None;
+                }
+
+                // Reserved prefix
+                if key.starts_with("aws:") || value.starts_with("aws:") {
+                    return None;
+                }
+
+                // Restricted characters
+                if !key.chars().all(is_safe_tag_char) || !value.chars().all(is_safe_tag_char) {
+                    return None;
+                }
+
+                Tag::builder().key(key).value(value).build().ok()
+            })
+            .collect::<Vec<_>>();
+
+        let tag_set = Tagging::builder()
+            .set_tag_set(Some(tags))
+            .build()
+            .map_err(S3Errors::BuildError)?;
+
+        self.client
+            .put_object_tagging()
+            .bucket(request.bucket_id)
+            .key(request.object_key)
+            .tagging(tag_set)
+            .send()
+            .await
+            .map_err(S3Errors::TagObjectError)?;
+
+        Ok(String::new())
+    }
+
     /// Verifies that the module is authorized to access the specified bucket
     fn fetch_bucket_configuration<T: Display>(
         &self,
@@ -219,4 +292,11 @@ impl S3 {
             }
         }
     }
+}
+
+// Define the "safe" character predicate
+fn is_safe_tag_char(c: char) -> bool {
+    c.is_alphanumeric()
+        || c.is_whitespace()
+        || matches!(c, '+' | '-' | '=' | '.' | '_' | ':' | '/' | '@')
 }
