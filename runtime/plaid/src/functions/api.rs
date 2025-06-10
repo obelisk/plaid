@@ -353,6 +353,8 @@ impl_new_sub_module_function_with_error_buffer!(aws, s3, get_object_attributes, 
 impl_new_sub_module_function_with_error_buffer!(aws, s3, get_object, ALLOW_IN_TEST_MODE);
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, s3, put_object, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, s3, put_object_tag, DISALLOW_IN_TEST_MODE);
 
 // Npm Functions
 impl_new_function_with_error_buffer!(npm, publish_empty_stub, DISALLOW_IN_TEST_MODE);
@@ -669,6 +671,11 @@ pub fn to_api_function(
         // S3 Calls
         #[cfg(feature = "aws")]
         "aws_s3_put_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_put_object),
+
+        #[cfg(feature = "aws")]
+        "aws_s3_put_object_tag" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_put_object_tag)
+        }
 
         #[cfg(feature = "aws")]
         "aws_s3_get_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_get_object),
