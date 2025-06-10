@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
@@ -43,6 +45,17 @@ pub struct PutObjectRequest {
     pub object_key: String,
 }
 
+/// Request payload for tagging an object in S3.
+#[derive(Deserialize, Serialize)]
+pub struct PutObjectTagRequest {
+    /// The bucket name containing the object.
+    pub bucket_id: String,
+    /// Name of the object key.
+    pub object_key: String,
+    /// Tags to apply to the object
+    pub tags: HashMap<String, String>,
+}
+
 /// Represents an S3 object's metadata
 #[derive(Deserialize, Serialize)]
 pub struct ObjectAttributes {
@@ -81,6 +94,56 @@ pub fn put_object(
         serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
 
     let res = unsafe { aws_s3_put_object(request.as_ptr(), request.len()) };
+
+    if res < 0 {
+        Err(res.into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Replaces the entire tag set for an S3 object using the AWS S3 `PutObjectTagging` API.
+///
+/// This operation **overwrites** any existing tags on the specified object. If you wish to
+/// modify or remove individual tags, you must supply the complete set of desired tags—any
+/// tags omitted from `tags` will be deleted. AWS enforces a maximum of **10 tags** per object,
+/// and tag keys **may not** begin with the reserved prefix `aws:`. By default, this function
+/// applies to the **current/latest version** of the object; tagging a specific prior version
+/// is not supported by this variant.
+///
+/// # Arguments
+///
+/// * `bucket_id` – The name of the S3 bucket containing the object.
+/// * `object_key` – The key (path/name) of the object to apply tags to.
+/// * `tags` – A `HashMap` of tag keys and values to apply.  
+///   - A tag key can be up to 128 Unicode characters in length, and tag values can be up to 256 Unicode characters in length.
+///   - Neither keys nor values may begin with `aws:`. The set of allowed characters are
+///     letters (`a-z`, `A-Z`), numbers (`0-9`), and spaces representable in UTF-8, and the following characters: `+ - = . _ : / @`
+///   - At most 10 entries are allowed.
+///
+/// For full details on the S3 tagging model—including character limits, reserved prefixes,
+/// replication behavior, and how tags interact with bucket versioning—see the AWS S3
+/// Object Tagging documentation:
+/// <https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html>
+pub fn put_object_tag(
+    bucket_id: &str,
+    object_key: &str,
+    tags: HashMap<String, String>,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(aws_s3, put_object_tag);
+    }
+
+    let request = PutObjectTagRequest {
+        bucket_id: bucket_id.to_string(),
+        object_key: object_key.to_string(),
+        tags,
+    };
+
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    let res = unsafe { aws_s3_put_object_tag(request.as_ptr(), request.len()) };
 
     if res < 0 {
         Err(res.into())
