@@ -7,7 +7,7 @@ In short, one needs to install the dependencies, run `locust` and target a runni
 1. `python3 -m venv venv`
 2. `. ./venv/bin/activate`
 3. `pip install -U pip locust`
-4. (From the folder where `locustfile.py` is located) `locust`
+4. (From the folder where `locustfile.py` is located) `locust --processes <NUM>` (or `locust --processes -1` to let it figure out the number of parallel processes)
 5. Press `Enter` or navigate to the provided URL to access Locust's web UI
 6. Change the host if needed, to point it to Plaid's base URL (i.e., without `/webhook/...`). Ensure Plaid is running and reachable at this URL
 7. Fill in the max number of "users" that will hit Plaid simultaneously, and the ramp-up rate
