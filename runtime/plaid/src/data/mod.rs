@@ -19,6 +19,7 @@ use std::{
 
 use crossbeam_channel::Sender;
 
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use time::OffsetDateTime;
 
@@ -243,6 +244,49 @@ fn get_time() -> u64 {
         .as_secs()
 }
 
+async fn read_from_storage<T: DeserializeOwned>(
+    storage: &Option<Arc<Storage>>,
+    namespace: &str,
+    key: &str,
+    parse_utf8: bool,
+    dg_name: &str,
+) -> Option<T> {
+    let storage = match storage {
+        None => return None,
+        Some(s) => s,
+    };
+
+    match storage.get(namespace, key).await {
+        Err(e) => {
+            error!("Could not read {key} for {dg_name} from storage: {e}");
+            None
+        }
+        Ok(Some(res)) => {
+            if parse_utf8 {
+                match String::from_utf8(res.clone()) {
+                    Ok(s) => serde_json::from_str(&s).ok(),
+                    Err(e) => {
+                        error!("Could not parse {key} (UTF-8) for {dg_name}: {e}");
+                        None
+                    }
+                }
+            } else {
+                match serde_json::from_slice(&res) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        error!("Could not parse {key} for {dg_name} from storage: {e}");
+                        None
+                    }
+                }
+            }
+        }
+        Ok(None) => {
+            info!("Could not find {key} for {dg_name} in storage");
+            None
+        }
+    }
+}
+
 /// Get logs from a data generator, one page at a time, and send them to rules for processing.
 /// Internally, this method handles making overlapping queries and logs de-duplication.
 pub async fn get_and_process_dg_logs(
@@ -258,65 +302,18 @@ pub async fn get_and_process_dg_logs(
     // _a lot_ of logs, which can result in memory exhaustion or other undesirable effects.
 
     let storage_namespace = &format!("{DATA_GENERATOR_STORAGE_PREFIX}_{}", dg.get_name());
-    let last_seen: Option<String> = match storage {
-        None => None,
-        Some(storage) => match storage.get(storage_namespace, LAST_SEEN).await {
-            Err(e) => {
-                error!(
-                    "Could not read {LAST_SEEN} for {} from storage: {e}",
-                    dg.get_name()
-                );
-                None
-            }
-            Ok(Some(res)) => match String::from_utf8(res) {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    error!(
-                        "Could not parse {LAST_SEEN} for {} from storage: {e}",
-                        dg.get_name()
-                    );
-                    None
-                }
-            },
-            Ok(None) => {
-                info!(
-                    "Could not find {LAST_SEEN} for {} in storage",
-                    dg.get_name()
-                );
-                None
-            }
-        },
-    };
+    let last_seen: Option<String> =
+        read_from_storage::<String>(storage, storage_namespace, LAST_SEEN, true, &dg.get_name())
+            .await;
 
-    let seen_logs_uuids: Option<Vec<String>> = match storage {
-        None => None,
-        Some(storage) => match storage.get(&storage_namespace, ALREADY_SEEN_UUIDS).await {
-            Err(e) => {
-                error!(
-                    "Could not read {ALREADY_SEEN_UUIDS} for {} from storage: {e}",
-                    dg.get_name()
-                );
-                None
-            }
-            Ok(Some(res)) => match serde_json::from_slice(&res) {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    error!(
-                        "Could not parse {ALREADY_SEEN_UUIDS} for {} from storage: {e}",
-                        dg.get_name()
-                    );
-                    None
-                }
-            },
-            Ok(None) => {
-                info!(
-                    "Could not find {ALREADY_SEEN_UUIDS} for {} in storage",
-                    dg.get_name()
-                );
-                None
-            }
-        },
-    };
+    let seen_logs_uuids: Option<Vec<String>> = read_from_storage::<Vec<String>>(
+        storage,
+        storage_namespace,
+        ALREADY_SEEN_UUIDS,
+        false,
+        &dg.get_name(),
+    )
+    .await;
 
     // See what we got from the storage
     match (last_seen, seen_logs_uuids) {
