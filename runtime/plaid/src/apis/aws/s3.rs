@@ -2,11 +2,13 @@ use std::{collections::HashMap, fmt::Display, sync::Arc, time::Duration};
 
 use aws_sdk_kms::error::SdkError;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesError;
+use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
 use aws_sdk_s3::operation::put_object_tagging::PutObjectTaggingError;
 use aws_sdk_s3::types::{Tag, Tagging};
 use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client};
 use plaid_stl::aws::s3::{
-    GetObjectReponse, GetObjectRequest, ObjectAttributes, PutObjectRequest, PutObjectTagRequest,
+    GetObjectReponse, GetObjectRequest, ListObjectsRequest, ListObjectsResponse, ObjectAttributes,
+    PutObjectRequest, PutObjectTagRequest,
 };
 use serde::Deserialize;
 
@@ -23,6 +25,7 @@ pub enum S3Errors {
     TagObjectError(SdkError<PutObjectTaggingError>),
     PutObjectError(SdkError<PutObjectError>),
     GetObjectError(SdkError<GetObjectError>),
+    ListObjectsError(SdkError<ListObjectsV2Error>),
     GetObjectAttributesError(SdkError<GetObjectAttributesError>),
     BytesStreamError(aws_sdk_s3::primitives::ByteStreamError),
     PresignError(aws_sdk_s3::presigning::PresigningConfigError),
@@ -111,6 +114,53 @@ impl S3 {
         let response = ObjectAttributes {
             object_size: object_attributes.object_size,
             last_modified: object_attributes.last_modified.map(|lm| lm.secs()),
+        };
+
+        let serialized = serde_json::to_string(&response).map_err(|_| ApiError::BadRequest)?;
+
+        Ok(serialized)
+    }
+
+    /// Lists objects in the specified S3 bucket up to 1,000 per request.
+    pub async fn list_objects(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request =
+            serde_json::from_str::<ListObjectsRequest>(params).map_err(|_| ApiError::BadRequest)?;
+
+        let module = module.to_string();
+        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
+        if !bucket_config.r.contains(&module) && !bucket_config.rw.contains(&module) {
+            error!(
+                "{module} tried to use an S3 bucket which it's not allowed to: {}",
+                request.bucket_id
+            );
+            return Err(ApiError::BadRequest);
+        }
+
+        let mut list = self
+            .client
+            .list_objects_v2()
+            .bucket(request.bucket_id)
+            .prefix(request.prefix);
+
+        if let Some(token) = request.continuation_key {
+            list = list.continuation_token(token);
+        }
+
+        let response = list.send().await.map_err(S3Errors::ListObjectsError)?;
+        let keys = response.contents.map(|contents| {
+            contents
+                .into_iter()
+                .filter_map(|obj| obj.key)
+                .collect::<Vec<_>>()
+        });
+
+        let response = ListObjectsResponse {
+            continuation_token: response.next_continuation_token,
+            keys,
         };
 
         let serialized = serde_json::to_string(&response).map_err(|_| ApiError::BadRequest)?;

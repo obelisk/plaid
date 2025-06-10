@@ -34,6 +34,25 @@ pub struct GetObjectRequest {
     pub expires_in: Option<u64>,
 }
 
+/// Request payload for retrieving an object from S3.
+#[derive(Deserialize, Serialize)]
+pub struct ListObjectsRequest {
+    /// The bucket name from which the object is requested.
+    pub bucket_id: String,
+    /// The key identifying the object to fetch.
+    pub prefix: String,
+    pub continuation_key: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct ListObjectsResponse {
+    /// `continuation_token` is sent when `isTruncated` is true, which means there are more keys in the bucket
+    /// that can be listed. The next list requests to Amazon S3 can be continued with this token
+    pub continuation_token: Option<String>,
+    /// List of keys matching the provided prefix
+    pub keys: Option<Vec<String>>,
+}
+
 /// Request payload for uploading an object to S3.
 #[derive(Deserialize, Serialize)]
 pub struct PutObjectRequest {
@@ -207,7 +226,7 @@ pub fn get_object_attributes(
     }
 }
 
-/// Fetches an object from S3
+/// Retrieves an object from S3.
 ///
 /// # Arguments
 ///
@@ -262,6 +281,56 @@ pub fn get_object(
             request.len(),
             return_buffer.as_mut_ptr(),
             return_buffer_size,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match serde_json::from_slice(&return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
+/// Returns some or all (up to 1,000) of the objects in a bucket with each request.
+/// You can use the request parameters as selection criteria to return a subset of the objects in a bucket.
+/// See https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html for full documentation.
+///
+/// # Arguments
+///
+/// * `bucket_id` - The S3 bucket name or ARN where objects are stored.
+/// * `prefix` - Filters the listed objects to those with keys that begin with this prefix.
+/// * `continuation_key` - An optional token to continue pagination from a previous response.
+pub fn list_objects(
+    bucket_id: &str,
+    prefix: &str,
+    continuation_key: Option<String>,
+) -> Result<ListObjectsResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(aws_s3, list_objects);
+    }
+
+    let request = ListObjectsRequest {
+        bucket_id: bucket_id.to_string(),
+        prefix: prefix.to_string(),
+        continuation_key,
+    };
+
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        aws_s3_list_objects(
+            request.as_ptr(),
+            request.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
         )
     };
 
