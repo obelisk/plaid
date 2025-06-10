@@ -298,8 +298,6 @@ pub async fn get_and_process_dg_logs(
     // Retrieve from storage information about the previous run, if present.
     // This way, we can remember what was the last log we had seen, and we can backfill
     // if Plaid was not running for some period of time.
-    // Warning - If Plaid has been down for a long time, this will result in fetching potentially
-    // _a lot_ of logs, which can result in memory exhaustion or other undesirable effects.
 
     let storage_namespace = &format!("{DATA_GENERATOR_STORAGE_PREFIX}_{}", dg.get_name());
     let last_seen: Option<String> =
