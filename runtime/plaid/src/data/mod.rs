@@ -356,9 +356,23 @@ pub async fn get_and_process_dg_logs(
     // Now that the data generator has been (potentially) updated with the state we had in storage, the loop can begin.
 
     loop {
+        // Get logs that happened since `last_seen`.
+        // Walk back a second from the actual value of `last_seen`, to account for problems
+        // with time granularity. E.g., events happening in the same second could be missed.
+        // Overlapping queries will prevent this problem from happening.
+        // We would introduce the issue of seeing the same log multiple times, but this is handled later.
+        let since = dg
+            .get_last_seen()
+            .saturating_sub(time::Duration::seconds(1));
+
         // Get the logs until canon_time seconds ago
-        let now = get_time();
-        let until = now - dg.get_canon_time();
+        let mut until = get_time() - dg.get_canon_time();
+
+        // We don't want to pull more than 1 minute of logs at a time, so we cap
+        // the since..until time span to 60 seconds.
+        // TODO probably make this value configurable and update the comment above
+        until = std::cmp::min(until, since.unix_timestamp() as u64 + 60);
+
         let until = match OffsetDateTime::from_unix_timestamp(until as i64) {
             Ok(u) => u,
             Err(_) => {
@@ -379,15 +393,6 @@ pub async fn get_and_process_dg_logs(
             );
             return Ok(());
         }
-
-        // Get logs that happened between `last_seen` and `until`.
-        // Walk back a second from the actual value of last_seen, to account for problems
-        // with time granularity. E.g., events happening in the same second could be missed.
-        // Overlapping queries will prevent this problem from happening.
-        // We would introduce the issue of seeing the same log multiple times, but this is handled later.
-        let since = dg
-            .get_last_seen()
-            .saturating_sub(time::Duration::seconds(1));
 
         let logs = match dg.fetch_logs(since, until).await {
             Ok(logs) => logs,
