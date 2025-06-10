@@ -352,6 +352,8 @@ impl_new_sub_module_function_with_error_buffer!(aws, s3, get_object_attributes, 
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, s3, get_object, ALLOW_IN_TEST_MODE);
 #[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, s3, list_objects, ALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, s3, put_object, DISALLOW_IN_TEST_MODE);
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, s3, put_object_tag, DISALLOW_IN_TEST_MODE);
@@ -675,6 +677,11 @@ pub fn to_api_function(
         #[cfg(feature = "aws")]
         "aws_s3_put_object_tag" => {
             Function::new_typed_with_env(&mut store, &env, aws_s3_put_object_tag)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_s3_list_objects" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_list_objects)
         }
 
         #[cfg(feature = "aws")]
