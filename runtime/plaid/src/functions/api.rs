@@ -348,6 +348,8 @@ impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key, ALLOW_
 
 // S3
 #[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, s3, delete_object, ALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, s3, get_object_attributes, ALLOW_IN_TEST_MODE);
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, s3, get_object, ALLOW_IN_TEST_MODE);
@@ -674,11 +676,16 @@ pub fn to_api_function(
 
         // S3 Calls
         #[cfg(feature = "aws")]
-        "aws_s3_put_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_put_object),
+        "aws_s3_delete_object" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_delete_object)
+        }
 
         #[cfg(feature = "aws")]
-        "aws_s3_put_object_tag" => {
-            Function::new_typed_with_env(&mut store, &env, aws_s3_put_object_tag)
+        "aws_s3_get_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_get_object),
+
+        #[cfg(feature = "aws")]
+        "aws_s3_get_object_attributes" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_get_object_attributes)
         }
 
         #[cfg(feature = "aws")]
@@ -692,11 +699,11 @@ pub fn to_api_function(
         }
 
         #[cfg(feature = "aws")]
-        "aws_s3_get_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_get_object),
+        "aws_s3_put_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_put_object),
 
         #[cfg(feature = "aws")]
-        "aws_s3_get_object_attributes" => {
-            Function::new_typed_with_env(&mut store, &env, aws_s3_get_object_attributes)
+        "aws_s3_put_object_tag" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_put_object_tag)
         }
 
         // Splunk Calls
