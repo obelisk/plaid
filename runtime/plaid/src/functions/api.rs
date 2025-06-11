@@ -518,6 +518,16 @@ impl_new_sub_module_function!(aws, s3, put_object, DISALLOW_IN_TEST_MODE);
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, s3, put_object_tags, DISALLOW_IN_TEST_MODE);
 
+// Identity Store
+#[cfg(feature = "aws")]
+impl_new_sub_module_function!(aws, identity_store, create_user, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function!(aws, identity_store, delete_user, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function!(aws, identity_store, add_user_to_group, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function!(aws, identity_store, remove_user_from_group, DISALLOW_IN_TEST_MODE);
+
 // GCP
 #[cfg(feature = "gcp")]
 impl_new_sub_module_function_with_error_buffer!(
@@ -952,6 +962,12 @@ define_api_functions! {
         #[cfg(feature = "aws")] "aws_s3_list_object_versions"  => aws_s3_list_object_versions,
         #[cfg(feature = "aws")] "aws_s3_put_object"            => aws_s3_put_object,
         #[cfg(feature = "aws")] "aws_s3_put_object_tags"       => aws_s3_put_object_tags,
+
+        // Identity Store calls
+        #[cfg(feature = "aws")] "aws_identity_store_create_user"            => aws_identity_store_create_user,
+        #[cfg(feature = "aws")] "aws_identity_store_delete_user"            => aws_identity_store_delete_user,
+        #[cfg(feature = "aws")] "aws_identity_store_add_user_to_group"      => aws_identity_store_add_user_to_group,
+        #[cfg(feature = "aws")] "aws_identity_store_remove_user_from_group" => aws_identity_store_remove_user_from_group,
 
         // GCP
         #[cfg(feature = "gcp")] "gcp_google_docs_upload_file"              => gcp_google_docs_upload_file,
