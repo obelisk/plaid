@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fmt::Display, sync::Arc, time::Duration};
 
 use aws_sdk_kms::error::SdkError;
+use aws_sdk_s3::operation::delete_object::DeleteObjectError;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesError;
 use aws_sdk_s3::operation::list_object_versions::ListObjectVersionsError;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
@@ -8,9 +9,9 @@ use aws_sdk_s3::operation::put_object_tagging::PutObjectTaggingError;
 use aws_sdk_s3::types::{Tag, Tagging};
 use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client};
 use plaid_stl::aws::s3::{
-    GetObjectReponse, GetObjectRequest, ListObjectVersionsRequest, ListObjectVersionsResponse,
-    ListObjectsRequest, ListObjectsResponse, ObjectAttributes, ObjectVersion, PutObjectRequest,
-    PutObjectTagRequest,
+    DeleteObjectRequest, GetObjectReponse, GetObjectRequest, ListObjectVersionsRequest,
+    ListObjectVersionsResponse, ListObjectsRequest, ListObjectsResponse, ObjectAttributes,
+    ObjectVersion, PutObjectRequest, PutObjectTagRequest,
 };
 use serde::Deserialize;
 
@@ -28,6 +29,7 @@ pub enum S3Errors {
     PutObjectError(SdkError<PutObjectError>),
     GetObjectError(SdkError<GetObjectError>),
     ListObjectsError(SdkError<ListObjectsV2Error>),
+    DeleteObjectError(SdkError<DeleteObjectError>),
     ListObjectVersionsError(SdkError<ListObjectVersionsError>),
     GetObjectAttributesError(SdkError<GetObjectAttributesError>),
     BytesStreamError(aws_sdk_s3::primitives::ByteStreamError),
@@ -84,6 +86,43 @@ impl S3 {
             bucket_configuration: config.bucket_configuration,
             max_object_fetch_size: config.max_object_fetch_size,
         }
+    }
+
+    /// Removes an object from a bucket.
+    pub async fn delete_object(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request = serde_json::from_str::<DeleteObjectRequest>(params)
+            .map_err(|_| ApiError::BadRequest)?;
+
+        let module = module.to_string();
+        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
+        if !bucket_config.rw.contains(&module) {
+            error!(
+                "{module} tried to use an S3 bucket which it's not allowed to: {}",
+                request.bucket_id
+            );
+            return Err(ApiError::BadRequest);
+        }
+
+        let mut delete_request = self
+            .client
+            .delete_object()
+            .bucket(request.bucket_id)
+            .key(request.object_key);
+
+        if let Some(version) = request.version_id {
+            delete_request = delete_request.version_id(version)
+        }
+
+        delete_request
+            .send()
+            .await
+            .map_err(S3Errors::DeleteObjectError)?;
+
+        Ok(String::default())
     }
 
     /// Retrieves all of the metadata from an object without returning the object itself
