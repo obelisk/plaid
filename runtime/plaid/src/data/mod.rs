@@ -287,33 +287,12 @@ async fn read_from_storage<T: DeserializeOwned>(
     }
 }
 
-/// Get logs from a data generator, one page at a time, and send them to rules for processing.
-/// Internally, this method handles making overlapping queries and logs de-duplication.
-pub async fn get_and_process_dg_logs(
-    mut dg: impl DataGenerator,
-    storage: &Option<Arc<Storage>>,
-) -> Result<(), ()> {
-    let sleep_duration = Duration::from_millis(dg.get_sleep_duration());
-
-    // Retrieve from storage information about the previous run, if present.
-    // This way, we can remember what was the last log we had seen, and we can backfill
-    // if Plaid was not running for some period of time.
-
-    let storage_namespace = &format!("{DATA_GENERATOR_STORAGE_PREFIX}_{}", dg.get_name());
-    let last_seen: Option<String> =
-        read_from_storage::<String>(storage, storage_namespace, LAST_SEEN, true, &dg.get_name())
-            .await;
-
-    let seen_logs_uuids: Option<Vec<String>> = read_from_storage::<Vec<String>>(
-        storage,
-        storage_namespace,
-        ALREADY_SEEN_UUIDS,
-        false,
-        &dg.get_name(),
-    )
-    .await;
-
-    // See what we got from the storage
+/// Update a data generator with state information fetched from the storage.
+fn update_dg_from_storage<T: DataGenerator>(
+    dg: &mut T,
+    last_seen: Option<String>,
+    seen_logs_uuids: Option<Vec<String>>,
+) {
     match (last_seen, seen_logs_uuids) {
         (Some(last_seen), Some(seen_logs_uuids)) => {
             // We found state, so we update our data generator with it
@@ -350,6 +329,36 @@ pub async fn get_and_process_dg_logs(
             error!("Error while retrieving DG state from storage: the state is inconsistent and it will be ignored, but this is not normal.");
         }
     }
+}
+
+/// Get logs from a data generator, one page at a time, and send them to rules for processing.
+/// Internally, this method handles making overlapping queries and logs de-duplication.
+pub async fn get_and_process_dg_logs(
+    mut dg: impl DataGenerator,
+    storage: &Option<Arc<Storage>>,
+) -> Result<(), ()> {
+    let sleep_duration = Duration::from_millis(dg.get_sleep_duration());
+
+    // Retrieve from storage information about the previous run, if present.
+    // This way, we can remember what was the last log we had seen, and we can backfill
+    // if Plaid was not running for some period of time.
+
+    let storage_namespace = &format!("{DATA_GENERATOR_STORAGE_PREFIX}_{}", dg.get_name());
+
+    let last_seen: Option<String> =
+        read_from_storage::<String>(storage, storage_namespace, LAST_SEEN, true, &dg.get_name())
+            .await;
+
+    let seen_logs_uuids: Option<Vec<String>> = read_from_storage::<Vec<String>>(
+        storage,
+        storage_namespace,
+        ALREADY_SEEN_UUIDS,
+        false,
+        &dg.get_name(),
+    )
+    .await;
+
+    update_dg_from_storage(&mut dg, last_seen, seen_logs_uuids);
 
     // Now that the data generator has been (potentially) updated with the state we had in storage, the loop can begin.
 
@@ -457,7 +466,7 @@ pub async fn get_and_process_dg_logs(
         match storage {
             None => (),
             Some(storage) => {
-                let _ = storage
+                if let Err(e) = storage
                     .insert(
                         storage_namespace.to_string(),
                         LAST_SEEN.to_string(),
@@ -468,27 +477,27 @@ pub async fn get_and_process_dg_logs(
                             .to_vec(),
                     )
                     .await
-                    .inspect_err(|e| {
-                        error!(
-                            "Could not store {LAST_SEEN} for DG {}. Continuing anyway. Error: {e}",
-                            dg.get_name()
-                        );
-                    });
+                {
+                    error!(
+                        "Could not store {LAST_SEEN} for DG {}. Continuing anyway. Error: {e}",
+                        dg.get_name()
+                    );
+                }
                 let already_seen = dg.list_already_seen();
                 // Serialize this Vec<String>: this should never fail but, if it does,
                 // we serialize an empty vector and accept the consequences.
                 let already_seen = serde_json::to_vec(&already_seen)
                     .unwrap_or(serde_json::to_vec(&Vec::<String>::new()).unwrap());
-                let _ = storage
+                if let Err(e) = storage
                     .insert(
                         storage_namespace.to_string(),
                         ALREADY_SEEN_UUIDS.to_string(),
                         already_seen,
                     )
                     .await
-                    .inspect_err(|e| {
-                        error!("Could not store {ALREADY_SEEN_UUIDS} for DG {}. Continuing anyway. Error: {e}", dg.get_name());
-                    });
+                {
+                    error!("Could not store {ALREADY_SEEN_UUIDS} for DG {}. Continuing anyway. Error: {e}", dg.get_name());
+                }
             }
         }
 
