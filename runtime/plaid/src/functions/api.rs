@@ -441,6 +441,10 @@ impl_new_function_with_error_buffer!(cryptography, aes_128_cbc_decrypt, ALLOW_IN
 
 // KMS
 #[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, kms, generate_mac, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function!(aws, kms, verify_mac, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(
     aws,
     kms,
@@ -797,6 +801,14 @@ pub fn to_api_function(
         }
 
         // KMS calls
+        #[cfg(feature = "aws")]
+        "aws_kms_generate_mac" => {
+            Function::new_typed_with_env(&mut store, &env, aws_kms_generate_mac)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_kms_verify_mac" => Function::new_typed_with_env(&mut store, &env, aws_kms_verify_mac),
+
         #[cfg(feature = "aws")]
         "aws_kms_sign_arbitrary_message" => {
             Function::new_typed_with_env(&mut store, &env, aws_kms_sign_arbitrary_message)
