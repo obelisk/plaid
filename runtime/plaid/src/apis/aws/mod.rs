@@ -1,6 +1,7 @@
 use kms::{Kms, KmsConfig};
 use serde::Deserialize;
 
+pub mod iam;
 pub mod kms;
 
 /// The entire configuration of AWS APIs implemented in Plaid
