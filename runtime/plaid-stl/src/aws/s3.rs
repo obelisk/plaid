@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
 
-const RETURN_BUFFER_SIZE: usize = 1024;
+const RETURN_BUFFER_SIZE: usize = 1024 * 4;
 
 /// Specifies how an object should be fetched from S3.
 pub enum ObjectFetchMode {
@@ -367,7 +367,7 @@ pub fn get_object(
                 return Err(PlaidFunctionError::InternalApiError);
             };
 
-            (None, ret_buffer_size as usize)
+            (None, (ret_buffer_size * 5) as usize) // Bump the return buffer to account for how it will be serialized
         }
     };
 
