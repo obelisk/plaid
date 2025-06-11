@@ -113,6 +113,56 @@ pub struct ObjectVersion {
     pub version_id: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct DeleteObjectRequest {
+    /// The bucket name containing the object.
+    pub bucket_id: String,
+    /// Key name of the object to delete.
+    pub object_key: String,
+    /// Version ID used to reference a specific version of the object.
+    pub version_id: Option<String>,
+}
+
+/// Removes an object from a bucket. The behavior depends on the bucket's versioning state:
+///
+/// - If bucket versioning is not enabled, the operation permanently deletes the object.
+/// - If bucket versioning is enabled, the operation inserts a delete marker, which becomes the current version of the object.
+///   To permanently delete an object in a versioned bucket, you must include the object’s `versionId` in the request.
+///   For more information about versioning-enabled buckets, see [Deleting object versions from a versioning-enabled bucket](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeletingObjectVersions.html)
+/// - If bucket versioning is suspended, the operation removes the object that has a null `versionId`, if there is one, and
+///   inserts a delete marker that becomes the current version of the object. If there isn't an object with a null `versionId`,
+///   and all versions of the object have a `versionId`, Amazon S3 does not remove the object and only inserts a delete marker.
+///   To permanently delete an object that has a `versionId`, you must include the object’s `versionId` in the request.
+///   For more information about versioning-suspended buckets, see [Deleting objects from versioning-suspended buckets](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeletingObjectsfromVersioningSuspendedBuckets.html)
+///
+/// # Arguments
+pub fn delete_object(
+    bucket_id: &str,
+    object_key: &str,
+    version_id: Option<String>,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(aws_s3, delete_object);
+    }
+
+    let request = DeleteObjectRequest {
+        bucket_id: bucket_id.to_string(),
+        object_key: object_key.to_string(),
+        version_id,
+    };
+
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    let res = unsafe { aws_s3_delete_object(request.as_ptr(), request.len()) };
+
+    if res < 0 {
+        Err(res.into())
+    } else {
+        Ok(())
+    }
+}
+
 /// Returns metadata about all versions of the objects in a bucket.
 /// See https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html for full documentation
 ///
@@ -123,7 +173,7 @@ pub struct ObjectVersion {
 pub fn list_object_versions(
     bucket_id: &str,
     object_key: &str,
-) -> Result<ListObjectsResponse, PlaidFunctionError> {
+) -> Result<ListObjectVersionsResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_s3, list_object_versions);
     }
