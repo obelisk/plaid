@@ -332,4 +332,11 @@ impl DataGenerator for &mut Github {
             ))
             .unwrap();
     }
+
+    fn list_already_seen(&self) -> Vec<String> {
+        self.seen_logs_uuid
+            .iter()
+            .map(|(key, _val)| key.to_string())
+            .collect()
+    }
 }

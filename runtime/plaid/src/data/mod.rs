@@ -18,10 +18,15 @@ use std::{
 
 use crossbeam_channel::Sender;
 
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use time::OffsetDateTime;
 
 pub use self::internal::DelayedMessage;
+
+const DATA_GENERATOR_STORAGE_PREFIX: &str = "__DATA_GENERATOR";
+const LAST_SEEN: &str = "last_seen";
+const ALREADY_SEEN_UUIDS: &str = "already_seen_uuids";
 
 // Configure data sources that Plaid will use fetch data itself and
 // send to modules
@@ -108,14 +113,15 @@ impl Data {
         storage: Option<Arc<Storage>>,
         els: Logger,
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
-        let di = DataInternal::new(config, sender, storage, els).await?;
+        let di = DataInternal::new(config, sender, storage.clone(), els).await?;
         let handle = tokio::runtime::Handle::current();
 
         // Start the Github Audit task if there is one
         if let Some(mut gh) = di.github {
+            let storage = storage.clone();
             handle.spawn(async move {
                 loop {
-                    if let Err(_) = get_and_process_dg_logs(&mut gh).await {
+                    if let Err(_) = get_and_process_dg_logs(&mut gh, &storage).await {
                         error!("GitHub Data Fetch Error")
                     }
 
@@ -126,9 +132,10 @@ impl Data {
 
         // Start the Okta System Logs task if there is one
         if let Some(mut okta) = di.okta {
+            let storage = storage.clone();
             handle.spawn(async move {
                 loop {
-                    if let Err(_) = get_and_process_dg_logs(&mut okta).await {
+                    if let Err(_) = get_and_process_dg_logs(&mut okta, &storage).await {
                         error!("Okta Data Fetch Error")
                     }
 
@@ -224,6 +231,9 @@ pub trait DataGenerator {
     /// Mark a log with this ID as "already seen"
     fn mark_already_seen(&mut self, id: impl Display);
 
+    /// Return a list of IDs for logs that were already seen
+    fn list_already_seen(&self) -> Vec<String>;
+
     /// Forward the payload to the channels for processing
     fn send_for_processing(&self, payload: Vec<u8>);
 }
@@ -236,15 +246,142 @@ fn get_time() -> u64 {
         .as_secs()
 }
 
+async fn read_from_storage<T: DeserializeOwned>(
+    storage: &Option<Arc<Storage>>,
+    namespace: &str,
+    key: &str,
+    parse_utf8: bool,
+    dg_name: &str,
+) -> Option<T> {
+    let storage = match storage {
+        None => return None,
+        Some(s) => s,
+    };
+
+    match storage.get(namespace, key).await {
+        Err(e) => {
+            error!("Could not read {key} for {dg_name} from storage: {e}");
+            None
+        }
+        Ok(Some(res)) => {
+            if parse_utf8 {
+                match String::from_utf8(res.clone()) {
+                    Ok(s) => serde_json::from_str(&s).ok(),
+                    Err(e) => {
+                        error!("Could not parse {key} (UTF-8) for {dg_name}: {e}");
+                        None
+                    }
+                }
+            } else {
+                match serde_json::from_slice(&res) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        error!("Could not parse {key} for {dg_name} from storage: {e}");
+                        None
+                    }
+                }
+            }
+        }
+        Ok(None) => {
+            info!("Could not find {key} for {dg_name} in storage");
+            None
+        }
+    }
+}
+
+/// Update a data generator with state information fetched from the storage.
+fn update_dg_from_storage<T: DataGenerator>(
+    dg: &mut T,
+    last_seen: Option<String>,
+    seen_logs_uuids: Option<Vec<String>>,
+) {
+    match (last_seen, seen_logs_uuids) {
+        (Some(last_seen), Some(seen_logs_uuids)) => {
+            // We found state, so we update our data generator with it
+            let last_seen = match last_seen.parse::<i128>() {
+                Ok(x) => OffsetDateTime::from_unix_timestamp_nanos(x).unwrap_or_else(|e| {
+                    error!(
+                        "Could not create OffsetDateTime for {}, defaulting to now: {e}",
+                        dg.get_name()
+                    );
+                    OffsetDateTime::now_utc()
+                }),
+                Err(e) => {
+                    error!(
+                        "Could not create OffsetDateTime for {}, defaulting to now: {e}",
+                        dg.get_name()
+                    );
+                    OffsetDateTime::now_utc()
+                }
+            };
+            dg.set_last_seen(last_seen);
+
+            for already_seen in seen_logs_uuids {
+                dg.mark_already_seen(&already_seen);
+            }
+        }
+        (None, None) => {
+            // We did not find anything in the storage, so we just move on.
+            info!("No DG state found in storage: either this is the first run or the previous state was lost");
+        }
+        _ => {
+            // One is there and one is missing: this is not normal. There is not much we can do without
+            // risking to process some logs twice or encountering other strange behaviors. So we log this
+            // and move on as if we had not found anything.
+            error!("Error while retrieving DG state from storage: the state is inconsistent and it will be ignored, but this is not normal.");
+        }
+    }
+}
+
 /// Get logs from a data generator, one page at a time, and send them to rules for processing.
 /// Internally, this method handles making overlapping queries and logs de-duplication.
-pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), ()> {
+pub async fn get_and_process_dg_logs(
+    mut dg: impl DataGenerator,
+    storage: &Option<Arc<Storage>>,
+) -> Result<(), ()> {
     let sleep_duration = Duration::from_millis(dg.get_sleep_duration());
 
+    // Retrieve from storage information about the previous run, if present.
+    // This way, we can remember what was the last log we had seen, and we can backfill
+    // if Plaid was not running for some period of time.
+
+    let storage_namespace = &format!("{DATA_GENERATOR_STORAGE_PREFIX}_{}", dg.get_name());
+
+    let last_seen: Option<String> =
+        read_from_storage::<String>(storage, storage_namespace, LAST_SEEN, true, &dg.get_name())
+            .await;
+
+    let seen_logs_uuids: Option<Vec<String>> = read_from_storage::<Vec<String>>(
+        storage,
+        storage_namespace,
+        ALREADY_SEEN_UUIDS,
+        false,
+        &dg.get_name(),
+    )
+    .await;
+
+    update_dg_from_storage(&mut dg, last_seen, seen_logs_uuids);
+
+    // Now that the data generator has been (potentially) updated with the state we had in storage, the loop can begin.
+
     loop {
+        // Get logs that happened since `last_seen`.
+        // Walk back a second from the actual value of `last_seen`, to account for problems
+        // with time granularity. E.g., events happening in the same second could be missed.
+        // Overlapping queries will prevent this problem from happening.
+        // We would introduce the issue of seeing the same log multiple times, but this is handled later.
+        let since = dg
+            .get_last_seen()
+            .saturating_sub(time::Duration::seconds(1));
+
         // Get the logs until canon_time seconds ago
-        let now = get_time();
-        let until = now - dg.get_canon_time();
+        let mut until = get_time() - dg.get_canon_time();
+
+        // We don't want to pull more than 1 minute of logs at a time, so we cap
+        // the since..until time span to 60 seconds.
+        // TODO probably make this value configurable and update the comment above
+        until = std::cmp::min(until, since.unix_timestamp() as u64 + 60);
+
         let until = match OffsetDateTime::from_unix_timestamp(until as i64) {
             Ok(u) => u,
             Err(_) => {
@@ -265,15 +402,6 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
             );
             return Ok(());
         }
-
-        // Get logs that happened between `last_seen` and `until`.
-        // Walk back a second from the actual value of last_seen, to account for problems
-        // with time granularity. E.g., events happening in the same second could be missed.
-        // Overlapping queries will prevent this problem from happening.
-        // We would introduce the issue of seeing the same log multiple times, but this is handled later.
-        let since = dg
-            .get_last_seen()
-            .saturating_sub(time::Duration::seconds(1));
 
         let logs = match dg.fetch_logs(since, until).await {
             Ok(logs) => logs,
@@ -337,6 +465,46 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
             );
             return Ok(());
         }
+        // If we are here, then we sent something for processing: we update the DG's state in the storage so that,
+        // in case of a reboot, we can continue from where we had left off.
+        match storage {
+            None => (),
+            Some(storage) => {
+                if let Err(e) = storage
+                    .insert(
+                        storage_namespace.to_string(),
+                        LAST_SEEN.to_string(),
+                        dg.get_last_seen()
+                            .unix_timestamp_nanos()
+                            .to_string()
+                            .as_bytes()
+                            .to_vec(),
+                    )
+                    .await
+                {
+                    error!(
+                        "Could not store {LAST_SEEN} for DG {}. Continuing anyway. Error: {e}",
+                        dg.get_name()
+                    );
+                }
+                let already_seen = dg.list_already_seen();
+                // Serialize this Vec<String>: this should never fail but, if it does,
+                // we serialize an empty vector and accept the consequences.
+                let already_seen = serde_json::to_vec(&already_seen)
+                    .unwrap_or(serde_json::to_vec(&Vec::<String>::new()).unwrap());
+                if let Err(e) = storage
+                    .insert(
+                        storage_namespace.to_string(),
+                        ALREADY_SEEN_UUIDS.to_string(),
+                        already_seen,
+                    )
+                    .await
+                {
+                    error!("Could not store {ALREADY_SEEN_UUIDS} for DG {}. Continuing anyway. Error: {e}", dg.get_name());
+                }
+            }
+        }
+
         info!(
             "Sent {sent_for_processing} {} logs for processing. Newest time seen is: {}",
             dg.get_name(),
