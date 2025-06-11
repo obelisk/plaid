@@ -1,12 +1,28 @@
+use aws_sdk_kms::operation::get_public_key::GetPublicKeyError;
+use aws_sdk_kms::{
+    error::SdkError, operation::generate_mac::GenerateMacError, operation::sign::SignError,
+    operation::verify_mac::VerifyMacError,
+};
+
 use crate::{apis::ApiError, get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
 use aws_sdk_kms::{
     operation::{get_public_key::GetPublicKeyOutput, sign::SignOutput},
     primitives::Blob,
-    types::{MessageType, SigningAlgorithmSpec},
+    types::{MacAlgorithmSpec, MessageType, SigningAlgorithmSpec},
     Client,
 };
+use plaid_stl::aws::kms::{GenerateMacRequest, MacAlgorithm, VerifyMacRequest};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
+
+#[derive(Debug)]
+pub enum KmsErrors {
+    KmsSignError(SdkError<SignError>),
+    KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
+    GenerateMacError(SdkError<GenerateMacError>),
+    VerifyMacError(SdkError<VerifyMacError>),
+    NoMacReturned,
+}
 
 /// A request to sign a given message with a KMS key.
 #[derive(Deserialize)]
@@ -166,6 +182,89 @@ impl Kms {
         }
     }
 
+    /// Generates a hash-based message authentication code (HMAC) for a message using an HMAC KMS key and a MAC algorithm that the key supports.
+    pub async fn generate_mac(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request =
+            serde_json::from_str::<GenerateMacRequest>(params).map_err(|_| ApiError::BadRequest)?;
+
+        // Fetch rules that are allowd to use this key
+        let allowed_rules = self.fetch_key_configuration(module.to_string(), &request.key_id)?;
+
+        // Verify that caller is allowed to use this key
+        if !allowed_rules.contains(&module.to_string()) {
+            error!(
+                "{module} tried to use KMS key which it's not allowed to: {}",
+                request.key_id
+            );
+            return Err(ApiError::BadRequest);
+        }
+
+        let response = self
+            .client
+            .generate_mac()
+            .key_id(request.key_id)
+            .message(Blob::new(request.message))
+            .mac_algorithm(to_aws_algo(request.algorithm))
+            .send()
+            .await
+            .map_err(KmsErrors::GenerateMacError)?;
+
+        match response.mac {
+            Some(blob) => {
+                let blob = blob.into_inner();
+                let mac = base64::encode(blob);
+                Ok(mac)
+            }
+            None => Err(KmsErrors::NoMacReturned)?,
+        }
+    }
+
+    /// Verifies the hash-based message authentication code (HMAC) for a specified message, HMAC KMS key,
+    /// and MAC algorithm. To verify the HMAC, VerifyMac computes an HMAC using the message, HMAC KMS key,
+    /// and MAC algorithm that you specify, and compares the computed HMAC to the HMAC that you specify.
+    /// If the HMACs are identical, the verification succeeds; otherwise, it fails. Verification indicates
+    /// that the message hasn't changed since the HMAC was calculated, and the specified key was used to generate
+    /// and verify the HMAC.
+    pub async fn verify_mac(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<i32, ApiError> {
+        let request =
+            serde_json::from_str::<VerifyMacRequest>(params).map_err(|_| ApiError::BadRequest)?;
+
+        // Fetch rules that are allowd to use this key
+        let allowed_rules = self.fetch_key_configuration(module.to_string(), &request.key_id)?;
+
+        // Verify that caller is allowed to use this key
+        if !allowed_rules.contains(&module.to_string()) {
+            error!(
+                "{module} tried to use KMS key which it's not allowed to: {}",
+                request.key_id
+            );
+            return Err(ApiError::BadRequest);
+        }
+
+        // Parse MAC
+        let mac = base64::decode(request.mac).map_err(|_| ApiError::BadRequest)?;
+
+        self.client
+            .verify_mac()
+            .key_id(request.key_id)
+            .message(Blob::new(request.message))
+            .mac(Blob::new(mac))
+            .mac_algorithm(to_aws_algo(request.algorithm))
+            .send()
+            .await
+            .map_err(KmsErrors::VerifyMacError)?;
+
+        Ok(0)
+    }
+
     /// Signs an arbitrary message using the provided KMS key
     ///
     /// This function:
@@ -205,7 +304,7 @@ impl Kms {
             .message(Blob::new(request.message))
             .send()
             .await
-            .map_err(|e| ApiError::KmsSignError(e))?;
+            .map_err(KmsErrors::KmsSignError)?;
 
         let output = SignRequestResponse::from_sign_output(output);
 
@@ -243,7 +342,7 @@ impl Kms {
             .key_id(key_id)
             .send()
             .await
-            .map_err(|e| ApiError::KmsGetPublicKeyError(e))?;
+            .map_err(KmsErrors::KmsGetPublicKeyError)?;
 
         let output = PublicKey::from_aws_response(output);
 
@@ -262,5 +361,14 @@ impl Kms {
                 return Err(ApiError::BadRequest);
             }
         }
+    }
+}
+
+fn to_aws_algo(algorithm: MacAlgorithm) -> MacAlgorithmSpec {
+    match algorithm {
+        MacAlgorithm::HmacSha224 => MacAlgorithmSpec::HmacSha224,
+        MacAlgorithm::HmacSha256 => MacAlgorithmSpec::HmacSha256,
+        MacAlgorithm::HmacSha384 => MacAlgorithmSpec::HmacSha384,
+        MacAlgorithm::HmacSha512 => MacAlgorithmSpec::HmacSha512,
     }
 }
