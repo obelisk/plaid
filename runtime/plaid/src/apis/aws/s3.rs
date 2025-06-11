@@ -93,7 +93,7 @@ impl S3 {
         &self,
         params: &str,
         module: Arc<PlaidModule>,
-    ) -> Result<String, ApiError> {
+    ) -> Result<u32, ApiError> {
         let request = serde_json::from_str::<DeleteObjectRequest>(params)
             .map_err(|_| ApiError::BadRequest)?;
 
@@ -122,7 +122,7 @@ impl S3 {
             .await
             .map_err(S3Errors::DeleteObjectError)?;
 
-        Ok(String::default())
+        Ok(0)
     }
 
     /// Retrieves all of the metadata from an object without returning the object itself
@@ -149,6 +149,7 @@ impl S3 {
             .get_object_attributes()
             .bucket(request.bucket_id)
             .key(request.object_key)
+            .object_attributes(aws_sdk_s3::types::ObjectAttributes::ObjectSize)
             .send()
             .await
             .map_err(S3Errors::GetObjectAttributesError)?;
@@ -344,7 +345,7 @@ impl S3 {
         &self,
         params: &str,
         module: Arc<PlaidModule>,
-    ) -> Result<String, ApiError> {
+    ) -> Result<u32, ApiError> {
         // Parse the information needed to make the request
         let request =
             serde_json::from_str::<PutObjectRequest>(params).map_err(|_| ApiError::BadRequest)?;
@@ -365,7 +366,7 @@ impl S3 {
             .await
             .map_err(S3Errors::PutObjectError)?;
 
-        Ok(String::new())
+        Ok(0)
     }
 
     /// Sets the supplied tag-set to an object that already exists in a bucket. A tag is a key-value pair.
@@ -373,7 +374,7 @@ impl S3 {
         &self,
         params: &str,
         module: Arc<PlaidModule>,
-    ) -> Result<String, ApiError> {
+    ) -> Result<u32, ApiError> {
         // Parse the information needed to make the request
         let request = serde_json::from_str::<PutObjectTagRequest>(params)
             .map_err(|_| ApiError::BadRequest)?;
@@ -431,7 +432,7 @@ impl S3 {
             .await
             .map_err(S3Errors::TagObjectError)?;
 
-        Ok(String::new())
+        Ok(0)
     }
 
     /// Verifies that the module is authorized to access the specified bucket
