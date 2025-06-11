@@ -2,13 +2,15 @@ use std::{collections::HashMap, fmt::Display, sync::Arc, time::Duration};
 
 use aws_sdk_kms::error::SdkError;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesError;
+use aws_sdk_s3::operation::list_object_versions::ListObjectVersionsError;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
 use aws_sdk_s3::operation::put_object_tagging::PutObjectTaggingError;
 use aws_sdk_s3::types::{Tag, Tagging};
 use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client};
 use plaid_stl::aws::s3::{
-    GetObjectReponse, GetObjectRequest, ListObjectsRequest, ListObjectsResponse, ObjectAttributes,
-    PutObjectRequest, PutObjectTagRequest,
+    GetObjectReponse, GetObjectRequest, ListObjectVersionsRequest, ListObjectVersionsResponse,
+    ListObjectsRequest, ListObjectsResponse, ObjectAttributes, ObjectVersion, PutObjectRequest,
+    PutObjectTagRequest,
 };
 use serde::Deserialize;
 
@@ -26,6 +28,7 @@ pub enum S3Errors {
     PutObjectError(SdkError<PutObjectError>),
     GetObjectError(SdkError<GetObjectError>),
     ListObjectsError(SdkError<ListObjectsV2Error>),
+    ListObjectVersionsError(SdkError<ListObjectVersionsError>),
     GetObjectAttributesError(SdkError<GetObjectAttributesError>),
     BytesStreamError(aws_sdk_s3::primitives::ByteStreamError),
     PresignError(aws_sdk_s3::presigning::PresigningConfigError),
@@ -115,6 +118,70 @@ impl S3 {
             object_size: object_attributes.object_size,
             last_modified: object_attributes.last_modified.map(|lm| lm.secs()),
         };
+
+        let serialized = serde_json::to_string(&response).map_err(|_| ApiError::BadRequest)?;
+
+        Ok(serialized)
+    }
+
+    /// Returns metadata about all versions of the objects in a bucket.
+    pub async fn list_object_versions(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request = serde_json::from_str::<ListObjectVersionsRequest>(params)
+            .map_err(|_| ApiError::BadRequest)?;
+
+        let module = module.to_string();
+        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
+        if !bucket_config.r.contains(&module) && !bucket_config.rw.contains(&module) {
+            error!(
+                "{module} tried to use an S3 bucket which it's not allowed to: {}",
+                request.bucket_id
+            );
+            return Err(ApiError::BadRequest);
+        }
+
+        let object_versions = self
+            .client
+            .list_object_versions()
+            .bucket(request.bucket_id)
+            .prefix(request.object_key)
+            .send()
+            .await
+            .map_err(S3Errors::ListObjectVersionsError)?;
+
+        let versions = object_versions
+            .versions()
+            .iter()
+            .filter_map(|ver| {
+                let Some(version_id) = ver.version_id.clone() else {
+                    return None;
+                };
+
+                let Some(key) = ver.key.clone() else {
+                    return None;
+                };
+
+                let Some(is_latest) = ver.is_latest else {
+                    return None;
+                };
+
+                let Some(last_modified) = ver.last_modified else {
+                    return None;
+                };
+
+                Some(ObjectVersion {
+                    key,
+                    is_latest,
+                    last_modified: last_modified.secs(),
+                    version_id,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let response = ListObjectVersionsResponse { versions };
 
         let serialized = serde_json::to_string(&response).map_err(|_| ApiError::BadRequest)?;
 
