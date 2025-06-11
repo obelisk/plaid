@@ -84,16 +84,89 @@ pub struct ObjectAttributes {
     pub last_modified: Option<i64>,
 }
 
+/// Request payload for listing an object's versions in S3
+#[derive(Serialize, Deserialize)]
+pub struct ListObjectVersionsRequest {
+    /// The bucket name containing the object.
+    pub bucket_id: String,
+    /// Name of the object key.
+    pub object_key: String,
+}
+
+/// Represents the versions of an S3 object
+#[derive(Serialize, Deserialize)]
+pub struct ListObjectVersionsResponse {
+    /// Container for version information.
+    pub versions: Vec<ObjectVersion>,
+}
+
+/// Metadata about an object's version
+#[derive(Serialize, Deserialize)]
+pub struct ObjectVersion {
+    /// The object key
+    pub key: String,
+    /// Specifies whether the object is (`true`) or is not (`false`) the latest version of an object.
+    pub is_latest: bool,
+    /// Date and time when the object was last modified.
+    pub last_modified: i64,
+    /// Version ID of an object.
+    pub version_id: String,
+}
+
+/// Returns metadata about all versions of the objects in a bucket.
+/// See https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html for full documentation
+///
+/// # Arguments
+///
+/// * `bucket_id` - The name of the bucket to upload the object to.
+/// * `object_key` - The key to identify the object within the bucket.
+pub fn list_object_versions(
+    bucket_id: &str,
+    object_key: &str,
+) -> Result<ListObjectsResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(aws_s3, list_object_versions);
+    }
+
+    let request = ListObjectVersionsRequest {
+        bucket_id: bucket_id.to_string(),
+        object_key: object_key.to_string(),
+    };
+
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        aws_s3_list_object_versions(
+            request.as_ptr(),
+            request.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match serde_json::from_slice(&return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
 /// Uploads an object to S3
+/// See https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html for full documentation
 ///
 /// # Arguments
 ///
 /// * `bucket_id` - The name of the bucket to upload the object to.
 /// * `object_key` - The key to identify the object within the bucket.
 /// * `object` - The binary data of the object to upload.
-///
-/// Returns `PlaidFunctionError` if the serialization fails or the host function
-/// reports an error (e.g., if the API is not properly configured).
 pub fn put_object(
     bucket_id: &str,
     object_key: &str,
@@ -172,20 +245,12 @@ pub fn put_object_tag(
 }
 
 /// Fetches an object's metadata from S3
+/// See https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAttributes.html for full documentation
 ///
 /// # Arguments
 ///
 /// * `bucket_id` - The name of the bucket from which to fetch the object.
 /// * `object_key` - The key identifying the object to fetch.
-///
-/// # Returns
-///
-/// A `ObjectAttributes` struct containing relevant metadata about the object.
-///
-/// # Errors
-///
-/// Returns `PlaidFunctionError` if serialization fails, the host function reports
-/// an error, or if the response cannot be deserialized.
 pub fn get_object_attributes(
     bucket_id: &str,
     object_key: &str,
@@ -227,21 +292,13 @@ pub fn get_object_attributes(
 }
 
 /// Retrieves an object from S3.
+/// See https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html for full documentation
 ///
 /// # Arguments
 ///
 /// * `bucket_id` - The name of the bucket from which to fetch the object.
 /// * `object_key` - The key identifying the object to fetch.
 /// * `fetch_mode` - Specifies whether to fetch the full object or a presigned URL.
-///
-/// # Returns
-///
-/// A `GetObjectReponse` indicating either the full object data or a presigned URL.
-///
-/// # Errors
-///
-/// Returns `PlaidFunctionError` if serialization fails, the host function reports
-/// an error, or if the response cannot be deserialized.
 pub fn get_object(
     bucket_id: &str,
     object_key: &str,
