@@ -161,11 +161,12 @@ secret_key = ""
 
 # S3 (using IAM)
 # top‐level bucket_configuration map
-# [bucket_configuration]
+# [apis."aws"]
+# [apis."aws"."s3"]
 # [apis."aws"."s3".authentication]
 # [apis."aws"."s3".bucket_configuration]
-# # for bucket named "my-bucket"
-# [[apis."aws"."s3".bucket_configuration."my-bucket"]]
+# for bucket named "my-bucket"
+# [apis."aws"."s3".bucket_configuration."my-bucket"]
 # r = ["some_rule.wasm"]
 # rw = ["another_rule.wasm"]
 
