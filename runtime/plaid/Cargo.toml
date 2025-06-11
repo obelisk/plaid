@@ -7,7 +7,7 @@ edition = "2021"
 
 [features]
 default = ["aws", "sled", "cranelift"]
-aws = ["dep:aws-sdk-kms", "dep:aws-sdk-dynamodb"]
+aws = ["dep:aws-sdk-kms", "dep:aws-sdk-dynamodb", "dep:aws-sdk-iam"]
 cranelift = ["wasmer/cranelift"]
 llvm = ["wasmer/llvm"]
 
@@ -16,6 +16,7 @@ alkali = "0.3.0"
 async-trait = "0.1.56"
 aws-config = "1.5.5"
 aws-sdk-dynamodb = { version = "1.69.0", optional = true }
+aws-sdk-iam = { version = "1.76.0", optional = true }
 aws-sdk-kms = { version = "1.41.0", optional = true }
 aws-sdk-secretsmanager = "1.57.0"
 base64 = "0.13"
