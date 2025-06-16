@@ -79,6 +79,9 @@ pub struct GithubConfig {
     /// Size of the LRU cache that we use to deduplicate logs
     #[serde(default = "default_lru_cache_size")]
     lru_cache_size: usize,
+    /// Max number of seconds in the since..until span for pulling logs from the source
+    #[serde(default = "default_since_until")]
+    max_since_until: u64,
 }
 
 impl GithubConfig {
@@ -92,6 +95,7 @@ impl GithubConfig {
             canon_time: 20,
             sleep_duration: 1000,
             lru_cache_size: default_lru_cache_size(),
+            max_since_until: default_since_until(),
         }
     }
 }
@@ -101,6 +105,13 @@ impl GithubConfig {
 /// of `GithubConfig` in the event that no value is provided.
 fn default_sleep_milliseconds() -> u64 {
     1000
+}
+
+/// This function provides the default max value for the since..until time span, in seconds.
+/// It is used as the default value for deserialization of the `max_since_until` field,
+/// of `GithubConfig` in the event that no value is provided.
+fn default_since_until() -> u64 {
+    60
 }
 
 /// This function provides the default size of the LRU cache.
@@ -338,5 +349,9 @@ impl DataGenerator for &mut Github {
             .iter()
             .map(|(key, _val)| key.to_string())
             .collect()
+    }
+
+    fn get_max_since_until_interval(&self) -> u64 {
+        self.config.max_since_until
     }
 }
