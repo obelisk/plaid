@@ -234,6 +234,14 @@ pub trait DataGenerator {
 
     /// Forward the payload to the channels for processing
     fn send_for_processing(&self, payload: Vec<u8>) -> Result<(), ()>;
+
+    /// Return the max number of seconds in the since..until interval for which we want to pull logs.
+    /// This helps ensure we never pull too many logs from the source, which could end up exhausting
+    /// Plaid's memory and bringing down the system.
+    fn get_max_since_until_interval(&self) -> u64 {
+        // Default value for all DGs: can be overwritten if individual DGs implement this method differently.
+        return 60;
+    }
 }
 
 /// Get the system time in seconds from the Epoch
@@ -375,10 +383,11 @@ pub async fn get_and_process_dg_logs(
         // Get the logs until canon_time seconds ago
         let mut until = get_time() - dg.get_canon_time();
 
-        // We don't want to pull more than 1 minute of logs at a time, so we cap
-        // the since..until time span to 60 seconds.
-        // TODO probably make this value configurable and update the comment above
-        until = std::cmp::min(until, since.unix_timestamp() as u64 + 60);
+        // We don't want to pull too many logs at a time, so we cap the since..until time span
+        until = std::cmp::min(
+            until,
+            since.unix_timestamp() as u64 + dg.get_max_since_until_interval(),
+        );
 
         let until = match OffsetDateTime::from_unix_timestamp(until as i64) {
             Ok(u) => u,
