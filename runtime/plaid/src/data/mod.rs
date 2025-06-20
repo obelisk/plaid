@@ -240,8 +240,14 @@ pub trait DataGenerator {
     /// Plaid's memory and bringing down the system.
     fn get_max_since_until_interval(&self) -> u64 {
         // Default value for all DGs: can be overwritten if individual DGs implement this method differently.
-        return 60;
+        60
     }
+
+    /// Return the max number of seconds that we will catch up missed logs for.
+    /// If Plaid has been down for less than this, then we will catch up all the logs. Otherwise,
+    /// we will catch up these many seconds and _lose_ older logs. This is to enforce an upper bound
+    /// and avoid unpleasant edge cases where Plaid would try to catch up months of missed logs.
+    fn get_max_catchup_time(&self) -> u64;
 }
 
 /// Get the system time in seconds from the Epoch
@@ -304,7 +310,7 @@ fn update_dg_from_storage<T: DataGenerator>(
     match (last_seen, seen_logs_uuids) {
         (Some(last_seen), Some(seen_logs_uuids)) => {
             // We found state, so we update our data generator with it
-            let last_seen = match last_seen.parse::<i128>() {
+            let mut last_seen = match last_seen.parse::<i128>() {
                 Ok(x) => OffsetDateTime::from_unix_timestamp_nanos(x).unwrap_or_else(|e| {
                     error!(
                         "Could not create OffsetDateTime for {}, defaulting to now: {e}",
@@ -320,6 +326,15 @@ fn update_dg_from_storage<T: DataGenerator>(
                     OffsetDateTime::now_utc()
                 }
             };
+
+            // Ensure we are not going too far back in time. If we are, warn and cap the look-back window.
+            let now = OffsetDateTime::now_utc();
+            if (now - last_seen).whole_seconds() as u64 > dg.get_max_catchup_time() {
+                warn!("Trying to catch up DG logs for {} seconds, which is higher than the limit ({} seconds). We are capping the look-back window. WARNING - This likely means we are going to miss logs!", (now - last_seen).whole_seconds() as u64, dg.get_max_catchup_time());
+                last_seen =
+                    now.saturating_sub(time::Duration::seconds(dg.get_max_catchup_time() as i64));
+            }
+
             dg.set_last_seen(last_seen);
 
             for already_seen in seen_logs_uuids {
