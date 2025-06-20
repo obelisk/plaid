@@ -21,6 +21,7 @@ use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 /// When a rule is used to generate a response to a GET request, this structure
@@ -605,20 +606,18 @@ impl Executor {
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
-            tokio::spawn(async move {
-                loop {
-                    if let Err(e) = execution_loop(
-                        receiver.clone(),
-                        modules.clone(),
-                        api.clone(),
-                        storage.clone(),
-                        els.clone(),
-                        performance_sender.clone(),
-                    ) {
-                        error!("Execution thread exited with error: {e}");
-                    }
-                    tokio::time::sleep(Duration::from_secs(10)).await;
+            thread::spawn(move || loop {
+                if let Err(e) = execution_loop(
+                    receiver.clone(),
+                    modules.clone(),
+                    api.clone(),
+                    storage.clone(),
+                    els.clone(),
+                    performance_sender.clone(),
+                ) {
+                    error!("Execution thread exited with error: {e}");
                 }
+                thread::sleep(Duration::from_secs(10));
             });
         }
 
@@ -632,20 +631,18 @@ impl Executor {
                 let modules = modules.clone();
                 let els = els.clone();
                 let performance_sender = performance_monitoring_mode.clone();
-                tokio::spawn(async move {
-                    loop {
-                        if let Err(e) = execution_loop(
-                            receiver.clone(),
-                            modules.clone(),
-                            api.clone(),
-                            storage.clone(),
-                            els.clone(),
-                            performance_sender.clone(),
-                        ) {
-                            error!("Execution thread exited with error: {e}");
-                        }
-                        tokio::time::sleep(Duration::from_secs(10)).await;
+                thread::spawn(move || loop {
+                    if let Err(e) = execution_loop(
+                        receiver.clone(),
+                        modules.clone(),
+                        api.clone(),
+                        storage.clone(),
+                        els.clone(),
+                        performance_sender.clone(),
+                    ) {
+                        error!("Execution thread exited with error: {e}");
                     }
+                    thread::sleep(Duration::from_secs(10));
                 });
             }
         }
