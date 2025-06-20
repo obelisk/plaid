@@ -61,6 +61,12 @@ impl Web {
         let mut request: HashMap<&str, serde_json::Value> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
+        if !request.contains_key("exp") {
+            return Err(ApiError::WebError(WebError::BadRequest(
+                "Missing exp in JWT claims".to_string(),
+            )));
+        }
+
         // Get the kid from the request params
         let kid = request
             .get("kid")
