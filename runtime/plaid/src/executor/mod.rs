@@ -21,8 +21,8 @@ use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// When a rule is used to generate a response to a GET request, this structure
 /// is what is passed from the executor to the async webhook runtime.
@@ -147,7 +147,6 @@ pub struct Env {
 
 /// The executor that processes messages
 pub struct Executor {
-    _handles: Vec<JoinHandle<Result<(), ExecutorError>>>,
     thread_pools: ExecutionThreadPools,
 }
 
@@ -598,8 +597,6 @@ impl Executor {
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
     ) -> Self {
-        let mut _handles = vec![];
-
         // General processing
         for i in 0..thread_pools.general_pool.num_threads {
             info!("Starting Execution Thread {i} Dedicated to General Processing");
@@ -609,9 +606,19 @@ impl Executor {
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
-            _handles.push(thread::spawn(move || {
-                execution_loop(receiver, modules, api, storage, els, performance_sender)
-            }));
+            thread::spawn(async move || loop {
+                if let Err(e) = execution_loop(
+                    receiver.clone(),
+                    modules.clone(),
+                    api.clone(),
+                    storage.clone(),
+                    els.clone(),
+                    performance_sender.clone(),
+                ) {
+                    error!("Execution thread exited with error: {e}");
+                }
+                tokio::time::sleep(Duration::from_secs(10)).await;
+            });
         }
 
         // Dedicated processing
@@ -624,15 +631,22 @@ impl Executor {
                 let modules = modules.clone();
                 let els = els.clone();
                 let performance_sender = performance_monitoring_mode.clone();
-                _handles.push(thread::spawn(move || {
-                    execution_loop(receiver, modules, api, storage, els, performance_sender)
-                }));
+                thread::spawn(async move || loop {
+                    if let Err(e) = execution_loop(
+                        receiver.clone(),
+                        modules.clone(),
+                        api.clone(),
+                        storage.clone(),
+                        els.clone(),
+                        performance_sender.clone(),
+                    ) {
+                        error!("Execution thread exited with error: {e}");
+                    }
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                });
             }
         }
-        Self {
-            _handles,
-            thread_pools,
-        }
+        Self { thread_pools }
     }
 
     /// Execute a message coming from a webhook, by sending it to the appropriate thread pool.
