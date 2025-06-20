@@ -153,17 +153,32 @@ impl Internal {
                 }
 
                 let log = log_heap.pop().unwrap();
-                // Delete the logback from the storage because we are about to send it for processing.
-                match self.storage.delete(LOGBACK_NS, &log.0.message.id).await {
-                    Ok(None) => {
-                        error!("We tried to delete a log back message that wasn't persisted")
+                let log_id = log.0.message.id.clone();
+                match self.sender.send(log.0.message) {
+                    Ok(_) => {
+                        // The log has been sent: now we can remove it from the storage
+                        match self.storage.delete(LOGBACK_NS, &log_id).await {
+                            Ok(None) => {
+                                error!(
+                                    "We tried to delete a log back message that wasn't persisted"
+                                )
+                            }
+                            Ok(Some(_)) => (),
+                            Err(e) => error!("Error removing persisted log: {e}"),
+                        }
                     }
-                    Ok(Some(_)) => (),
-                    Err(e) => error!("Error removing persisted log: {e}"),
+                    Err(e) => {
+                        // Something went wrong while sending the log, so we do this:
+                        // - We log an error
+                        // - We don't delete it from the storage
+                        // - We break the while loop
+                        // It's not necessary to re-add the log to the heap, because this will be
+                        // re-filled on the next iteration by reading from the storage.
+                        error!("Error while sending a logback for processing: {e}");
+                        break;
+                    }
                 }
-                self.sender.send(log.0.message).unwrap();
             }
-
             debug!("Heap Size: {}", log_heap.len());
         }
 
