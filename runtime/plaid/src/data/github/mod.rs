@@ -82,6 +82,9 @@ pub struct GithubConfig {
     /// Max number of seconds in the since..until span for pulling logs from the source
     #[serde(default = "default_since_until")]
     max_since_until: u64,
+    /// Max number of seconds for the look-back window
+    #[serde(default = "default_max_catchup")]
+    max_catchup: u64,
 }
 
 impl GithubConfig {
@@ -96,6 +99,7 @@ impl GithubConfig {
             sleep_duration: 1000,
             lru_cache_size: default_lru_cache_size(),
             max_since_until: default_since_until(),
+            max_catchup: default_max_catchup(),
         }
     }
 }
@@ -112,6 +116,11 @@ fn default_sleep_milliseconds() -> u64 {
 /// of `GithubConfig` in the event that no value is provided.
 fn default_since_until() -> u64 {
     60
+}
+
+/// This function provides the default max value for the max catch-up look-back window.
+fn default_max_catchup() -> u64 {
+    3 * 3600 // 3 hours
 }
 
 /// This function provides the default size of the LRU cache.
@@ -353,5 +362,9 @@ impl DataGenerator for &mut Github {
 
     fn get_max_since_until_interval(&self) -> u64 {
         self.config.max_since_until
+    }
+
+    fn get_max_catchup_time(&self) -> u64 {
+        self.config.max_catchup
     }
 }
