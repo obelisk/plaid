@@ -8,16 +8,16 @@ use reqwest::Client;
 use ring::rand::SystemRandom;
 use serde::Deserialize;
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
-use crate::{data::DelayedMessage, executor::Message};
+use crate::data::DelayedMessage;
 
 use super::default_timeout_seconds;
 
 #[derive(Deserialize)]
 pub struct GeneralConfig {
     /// Configuration for network requests
-    network: network::Config,
+    pub network: network::Config,
     /// The number of seconds until an external API request times out.
     /// If no value is provided, the result of `default_timeout_seconds()` will be used.
     #[serde(default = "default_timeout_seconds")]
@@ -28,32 +28,65 @@ pub struct General {
     /// General Plaid configuration
     config: GeneralConfig,
     /// Client to make requests with
-    client: Client,
-    /// Sender object for messages
-    log_sender: Sender<Message>,
+    clients: Clients,
     /// Sender object for messages that must be processed with a delay
     delayed_log_sender: Sender<DelayedMessage>,
     /// Secure random generator
     system_random: SystemRandom,
 }
 
-impl General {
-    pub fn new(
-        config: GeneralConfig,
-        log_sender: Sender<Message>,
-        delayed_log_sender: Sender<DelayedMessage>,
-    ) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(config.api_timeout_seconds))
+/// Holds the default HTTP client plus any named clients with per-request customizations.
+pub struct Clients {
+    /// The default `Client` used for requests without custom timeouts or certificates.
+    default: Client,
+    /// Named `Client` instances configured with custom timeouts or root certificates.
+    specialized: HashMap<String, Client>,
+}
+
+impl Clients {
+    fn new(config: &GeneralConfig) -> Self {
+        let default_timeout_duration = Duration::from_secs(config.api_timeout_seconds);
+        let default = reqwest::Client::builder()
+            .timeout(default_timeout_duration)
             .build()
             .unwrap();
 
+        let specialized = config
+            .network
+            .web_requests
+            .iter()
+            .filter_map(|(name, req)| {
+                if req.timeout.is_some() || req.root_certificate.is_some() {
+                    let mut builder = reqwest::Client::builder()
+                        .timeout(req.timeout.unwrap_or(default_timeout_duration));
+
+                    if let Some(ca) = req.root_certificate.clone() {
+                        builder = builder.add_root_certificate(ca);
+                    }
+
+                    let client = builder.build().unwrap();
+                    Some((name.clone(), client))
+                } else {
+                    None
+                }
+            })
+            .collect::<HashMap<String, Client>>();
+
+        Self {
+            default,
+            specialized,
+        }
+    }
+}
+
+impl General {
+    pub fn new(config: GeneralConfig, delayed_log_sender: Sender<DelayedMessage>) -> Self {
+        let clients = Clients::new(&config);
         let system_random = SystemRandom::new();
 
         Self {
             config,
-            client,
-            log_sender,
+            clients,
             delayed_log_sender,
             system_random,
         }

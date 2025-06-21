@@ -2,7 +2,14 @@
 extern crate log;
 
 use performance::ModulePerformanceMetadata;
-use plaid::{config::{CachingMode, GetMode, ResponseMode, WebhookServerConfiguration}, loader::PlaidModule, logging::Logger, *};
+use plaid::{
+    config::{
+        CachingMode, ConfigurationWithRoles, GetMode, ResponseMode, WebhookServerConfiguration,
+    },
+    loader::PlaidModule,
+    logging::Logger,
+    *,
+};
 
 use apis::Api;
 use data::Data;
@@ -12,10 +19,17 @@ use storage::Storage;
 use tokio::{signal, sync::RwLock, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
-use std::{collections::HashMap, convert::Infallible, net::SocketAddr, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    collections::HashMap,
+    convert::Infallible,
+    net::SocketAddr,
+    pin::Pin,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use crossbeam_channel::{bounded, TrySendError};
-use warp::{hyper::body::Bytes, path, Filter, http::HeaderMap};
+use crossbeam_channel::TrySendError;
+use warp::{http::HeaderMap, hyper::body::Bytes, path, Filter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,8 +37,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Plaid is booting up, please standby...");
 
     info!("Reading configuration");
-    let config = config::configure()?;
-    let (log_sender, log_receiver) = bounded(config.log_queue_size);
+    let ConfigurationWithRoles { config, roles } = config::configure()?;
+    info!("This is what this instance is running: {roles:?}");
+
+    // Create thread pools for log execution
+    let exec_thread_pools = thread_pools::ExecutionThreadPools::new(&config.executor);
+
+    // For convenience, keep a reference to the log_sender for the general channel, so that we can quickly clone it around
+    let log_sender = &exec_thread_pools.general_pool.sender;
 
     info!("Starting logging subsystem");
     let (els, _logging_handler) = Logger::start(config.logging);
@@ -32,34 +52,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create the storage system if one is configured
     let storage = match config.storage {
-        Some(config) => Some(Arc::new(Storage::new(config).await?)),
-        None => None,
-    };
-
-    match storage {
-        None => info!("No persistent storage system configured; unexecuted log backs will be lost on shutdown"),
-        Some(ref storage) => {
+        Some(config) => {
             info!("Storage system configured");
-            match &storage.shared_dbs {
+            let s = Arc::new(Storage::new(config).await?);
+            match &s.shared_dbs {
                 None => info!("No shared DBs configured"),
                 Some(dbs) => {
-                    info!("Configured shared DBs: {:?}", dbs.keys().collect::<Vec<&String>>());
+                    info!(
+                        "Configured shared DBs: {:?}",
+                        dbs.keys().collect::<Vec<&String>>()
+                    );
                 }
             }
+            Some(s)
         }
-    }
+        None => {
+            info!("No persistent storage system configured; unexecuted log backs will be lost on shutdown");
+            None
+        }
+    };
+
+    // The internal system always gets a storage: if we don't have a persistent one, we create an in-memory one
+    let internal_storage = match &storage {
+        Some(s) => s.clone(),
+        None => Arc::new(Storage::new_in_memory()),
+    };
 
     // This sender provides an internal route to sending logs. This is what
     // powers the logback functions.
+    let delayed_log_sender = Data::start(
+        config.data,
+        log_sender.clone(),
+        internal_storage.clone(),
+        els.clone(),
+        &roles,
+    )
+    .await
+    .expect("The data system failed to start")
+    .unwrap();
 
-    let delayed_log_sender = Data::start(config.data, log_sender.clone(), storage.clone(), els.clone())
-        .await
-        .expect("The data system failed to start")
-        .unwrap();
-
-    info!("Configurating APIs for Modules");
+    info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender).await;
+    let api = Api::new(config.apis, delayed_log_sender).await;
 
     // Create an Arc so all the handlers have access to our API object
     let api = Arc::new(api);
@@ -68,7 +102,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cancellation_token = CancellationToken::new();
     let ct = cancellation_token.clone();
     tokio::spawn(async move {
-        signal::ctrl_c().await.expect("Failed to listen for shutdown signal");
+        signal::ctrl_c()
+            .await
+            .expect("Failed to listen for shutdown signal");
         info!("Shutdown signal received, sending cancellation notice to all listening tasks.");
         ct.cancel();
     });
@@ -77,15 +113,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(perf) => {
             warn!("Plaid is running with performance monitoring enabled - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a channel that aggregates and reports metrics.");
             let (sender, rx) = crossbeam_channel::bounded::<ModulePerformanceMetadata>(4096);
-    
+
             let token = cancellation_token.clone();
             let handle = tokio::task::spawn(async move {
                 perf.start(rx, token).await;
-            });    
+            });
 
             (Some(sender), Some(handle))
-        },
-        None => (None, None)
+        }
+        None => (None, None),
     };
 
     info!("Loading all the modules");
@@ -93,38 +129,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let modules = Arc::new(loader::load(config.loading, storage.clone()).await.unwrap());
     let modules_by_name = Arc::new(modules.get_modules());
 
+    // Print information about the threads we are starting
     info!(
-        "Starting the execution threads of which {} were requested",
-        config.execution_threads
+        "Starting {} execution threads for general execution. Log queue size = {}",
+        exec_thread_pools.general_pool.num_threads,
+        exec_thread_pools
+            .general_pool
+            .sender
+            .capacity()
+            .unwrap_or_default()
     );
+    for (log_type, tp) in &exec_thread_pools.dedicated_pools {
+        let thread_or_threads = if tp.num_threads == 1 {
+            "thread"
+        } else {
+            "threads"
+        };
+        info!("Starting {} {thread_or_threads} dedicated to log type [{log_type}]. Log queue size = {}", tp.num_threads, tp.sender.capacity().unwrap_or_default());
+    }
 
     // Create the executor that will handle all the logs that come in and immediate
     // requests for handling some configured get requests.
     let executor = Executor::new(
-        log_receiver,
+        exec_thread_pools.clone(),
         modules.get_channels(),
         api,
         storage,
-        config.execution_threads,
         els.clone(),
-        performance_sender.clone()
+        performance_sender.clone(),
     );
 
-    let _executor = Arc::new(executor);
+    let executor = Arc::new(executor);
 
-    info!("Configured Webhook Servers");
-    let webhook_server_post_log_sender = log_sender.clone();
-    let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
+    if roles.webhooks {
+        info!("Configured Webhook Servers");
+        let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
         .webhooks
         .into_iter()
         .map(|(server_name, config)| {
-            let webhook_server_post_log_sender = webhook_server_post_log_sender.clone();
             let server_address: SocketAddr = config
                 .listen_address
                 .parse()
                 .expect("A server had an invalid address");
 
             let webhooks = config.webhooks.clone();
+            let exec = executor.clone();
             let post_route = warp::post()
                 .and(warp::body::content_length_limit(1024 * 256))
                 .and(path!("webhook" / String))
@@ -155,7 +204,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
 
                         // Webhook exists, buffer log
-                        if let Err(e) = webhook_server_post_log_sender.try_send(message) {
+                        if let Err(e) = exec.execute_webhook_message(message) {
                             match e {
                                 TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
                                 // TODO: Have this actually cause Plaid to exit
@@ -175,11 +224,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let get_route = warp::get()
                 .and(path!("webhook" / String))
                 .and(warp::query::<HashMap<String, String>>())
+                .and(warp::body::bytes())
+                .and(warp::header::headers_cloned())
                 .and(with(webhook_config.clone()))
                 .and(with(modules_by_name.clone()))
                 .and(with(get_cache.clone()))
                 .and(with(webhook_server_get_log_sender.clone()))
-                .and_then(|webhook: String, query: HashMap<String, String>, webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: crossbeam_channel::Sender<Message>| async move {
+                .and_then(|webhook: String, query: HashMap<String, String>, body: Bytes, headers: HeaderMap, webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: crossbeam_channel::Sender<Message>| async move {
                     if let Some(webhook_configuration) = webhook_config.webhooks.get(&webhook) {
                         match &webhook_configuration.get_mode {
                             // Note that CacheMode is elided here as there is no caching for static data
@@ -248,7 +299,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 false
                                             },
                                         }
-                                    }, 
+                                    }
                                 };
 
                                 // If the webhook has a label, use that as the source, otherwise use the webhook address
@@ -262,15 +313,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let (response_send, response_recv) = tokio::sync::oneshot::channel();
 
                                 // Construct a message to send to the rule
-                                let message = Message::new_detailed(
+                                let mut message = Message::new_detailed(
                                     name.to_string(),
-                                    String::new().into_bytes(),
+                                    body.to_vec(),
                                     source,
                                     logbacks_allowed,
-                                    HashMap::new(),
                                     query.into_iter().map(|(k, v)| (k, v.into_bytes())).collect(),
                                     Some(response_send),
                                     Some(rule.clone()));
+
+                                // Configure headers
+                                for requested_header in webhook_configuration.headers.iter() {
+                                    if let Some(value) = headers.get(requested_header) {
+                                        message.headers.insert(requested_header.to_string(), value.as_bytes().to_vec());
+                                    }
+                                }
 
                                 // Put the message into the standard message queue
                                 if let Err(e) = log_sender.try_send(message) {
@@ -323,20 +380,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    info!("Starting servers, boot up complete");
+        info!("Starting servers, boot up complete");
 
-    let mut join_set = JoinSet::from_iter(webhook_servers);
+        let mut join_set = JoinSet::from_iter(webhook_servers);
 
-    // Listen for a shutdown signal or if any task in join_set finishes
-    tokio::select! {
-        _ = join_set.join_next() => {
-            info!("A webserver task finished unexpectedly, triggering shutdown.");
-            // Send a shutdown signal
-            cancellation_token.cancel()
-        },
-        _ = cancellation_token.cancelled() => {
-            info!("Shutdown signal received.");
+        // Listen for a shutdown signal or if any task in join_set finishes
+        tokio::select! {
+            _ = join_set.join_next() => {
+                info!("A webserver task finished unexpectedly, triggering shutdown.");
+                // Send a shutdown signal
+                cancellation_token.cancel()
+            },
+            _ = cancellation_token.cancelled() => {
+                info!("Shutdown signal received.");
+            }
         }
+    } else {
+        info!("This instance is NOT running webhooks");
     }
 
     // Ensure that the performance monitoring loop exits before finishing shutdown.

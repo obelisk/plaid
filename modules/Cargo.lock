@@ -87,6 +87,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "example_github_graphql"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -180,7 +189,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "plaid_stl"
-version = "0.23.2"
+version = "0.25.0"
 dependencies = [
  "base64 0.13.1",
  "chrono",
@@ -417,6 +426,15 @@ dependencies = [
 
 [[package]]
 name = "test_shared_db_rule_2"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "test_slack"
 version = "0.1.0"
 dependencies = [
  "plaid_stl",

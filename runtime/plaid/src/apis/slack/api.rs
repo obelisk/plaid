@@ -1,6 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use plaid_stl::slack::{
+    GetIdFromEmail, GetPresence, GetPresenceResponse, PostMessage, UserInfo, UserInfoResponse,
+    ViewOpen,
+};
+use reqwest::{Client, RequestBuilder};
 
 use crate::{
     apis::{slack::SlackError, ApiError},
@@ -10,138 +14,193 @@ use crate::{
 use super::Slack;
 
 enum Apis {
-    PostMessage,
-    ViewsOpen,
-    LookupByEmail,
+    PostMessage(plaid_stl::slack::PostMessage),
+    ViewsOpen(plaid_stl::slack::ViewOpen),
+    LookupByEmail(plaid_stl::slack::GetIdFromEmail),
+    GetPresence(plaid_stl::slack::GetPresence),
+    UserInfo(plaid_stl::slack::UserInfo),
+}
+
+const SLACK_API_URL: &str = "https://slack.com/api/";
+type Result<T> = std::result::Result<T, ApiError>;
+
+impl Apis {
+    fn build_request(&self, client: &Client) -> RequestBuilder {
+        match self {
+            Self::PostMessage(p) => client
+                .post(format!("{SLACK_API_URL}{api}", api = "chat.postMessage"))
+                .body(p.body.clone())
+                .header("Content-Type", "application/json; charset=utf-8"),
+            Self::ViewsOpen(p) => client
+                .post(format!("{SLACK_API_URL}{api}", api = "view.open"))
+                .body(p.body.clone())
+                .header("Content-Type", "application/json; charset=utf-8"),
+            Self::LookupByEmail(p) => client.get(format!(
+                "{SLACK_API_URL}{api}?email={email}",
+                api = "users.lookupByEmail",
+                email = p.email,
+            )),
+            Self::GetPresence(p) => client.get(format!(
+                "{SLACK_API_URL}{api}?user={user}",
+                api = "users.getPresence",
+                user = p.id,
+            )),
+            Self::UserInfo(p) => client.get(format!(
+                "{SLACK_API_URL}{api}?user={user}",
+                api = "users.info",
+                user = p.id,
+            )),
+        }
+    }
 }
 
 impl std::fmt::Display for Apis {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self {
-            Self::PostMessage => write!(f, "chat.postMessage"),
-            Self::ViewsOpen => write!(f, "views.open"),
-            Self::LookupByEmail => write!(f, "users.lookupByEmail"),
+        match self {
+            Self::PostMessage(_) => write!(f, "PostMessage"),
+            Self::ViewsOpen(_) => write!(f, "ViewsOpen"),
+            Self::LookupByEmail(_) => write!(f, "LookupByEmail"),
+            Self::GetPresence(_) => write!(f, "GetPresence"),
+            Self::UserInfo(_) => write!(f, "UserInfo"),
         }
     }
-}
-
-/// Slack user profile as returned by https://api.slack.com/methods/users.lookupByEmail
-#[derive(Serialize, Deserialize)]
-struct SlackUserProfile {
-    user: SlackUser,
-}
-
-#[derive(Serialize, Deserialize)]
-struct SlackUser {
-    id: String,
 }
 
 impl Slack {
     /// Get token for a bot, if present
-    fn get_token(&self, bot: &str) -> Result<String, ()> {
-        let token = self.config.bot_tokens.get(bot).ok_or(())?;
-        Ok(format!("Bearer {token}"))
+    fn get_token(&self, bot: &str) -> Result<&String> {
+        self.config
+            .bot_tokens
+            .get(bot)
+            .ok_or(ApiError::SlackError(SlackError::UnknownBot(
+                bot.to_string(),
+            )))
     }
 
-    /// Make a call to the Slack API. Depending on which API we are calling, a GET or a POST are executed.
-    async fn call_slack(&self, params: &str, api: Apis) -> Result<String, ApiError> {
-        let request: HashMap<String, String> =
-            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+    /// Make a call to the Slack API
+    async fn call_slack(
+        &self,
+        bot: String,
+        api: Apis,
+        module: Arc<PlaidModule>,
+    ) -> Result<(u16, String)> {
+        let r = api
+            .build_request(&self.client)
+            .header("Authorization", format!("Bearer {}", self.get_token(&bot)?));
 
-        let bot = request
-            .get("bot")
-            .ok_or(ApiError::MissingParameter("bot".to_string()))?
-            .to_string();
-
-        let token = self.get_token(&bot).map_err(|_| {
-            error!("A module tried to call api {api} for a bot that didn't exist: {bot}");
-            ApiError::SlackError(SlackError::UnknownBot(bot.to_string()))
-        })?;
-
-        info!("Calling {api} for bot: {bot}");
-        match api {
-            Apis::PostMessage | Apis::ViewsOpen => {
-                // It's a POST call
-                let body = request
-                    .get("body")
-                    .ok_or(ApiError::MissingParameter("body".to_string()))?
-                    .to_string();
-                match self
-                    .client
-                    .post(format!("https://slack.com/api/{api}"))
-                    .header("Authorization", token)
-                    .header("Content-Type", "application/json; charset=utf-8")
-                    .body(body)
-                    .send()
-                    .await
-                {
-                    Ok(r) => {
-                        let status = r.status();
-                        if status == 200 {
-                            return Ok("".to_string());
-                        }
-                        let response = r.text().await;
-                        error!("Slack data returned: {}", response.unwrap_or_default());
-
-                        return Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
-                            status.as_u16(),
-                        )));
-                    }
-                    Err(e) => return Err(ApiError::NetworkError(e)),
-                }
-            }
-            Apis::LookupByEmail => {
-                // It's a GET call
-                let email = request
-                    .get("email")
-                    .ok_or(ApiError::MissingParameter("email".to_string()))?
-                    .to_string();
-                match self
-                    .client
-                    .get(format!("https://slack.com/api/{api}?email={email}"))
-                    .header("Authorization", token)
-                    .send()
-                    .await
-                {
-                    Ok(r) => {
-                        let status = r.status();
-                        if status == 200 {
-                            let response = r.json::<SlackUserProfile>().await.map_err(|_| {
-                                ApiError::SlackError(SlackError::UnexpectedPayload(
-                                    "could not deserialize to Slack user profile".to_string(),
-                                ))
-                            })?;
-                            return Ok(response.user.id);
-                        }
-                        error!("Failed to retrieve user's Slack ID");
-                        return Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
-                            status.as_u16(),
-                        )));
-                    }
-                    Err(e) => return Err(ApiError::NetworkError(e)),
-                }
-            }
-        }
+        info!("Calling [{api}] using bot: [{bot}] on behalf of: [{module}]");
+        let resp = r.send().await.map_err(|e| ApiError::NetworkError(e))?;
+        let status = resp.status();
+        let response = resp.text().await.unwrap_or_default();
+        trace!("Slack returned: {status}: {response}");
+        Ok((status.as_u16(), response))
     }
 
     /// Open an arbitrary view for a configured bot. The view contents is defined by the caller but the bot
     /// must be configured in Plaid.
-    pub async fn views_open(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32, ApiError> {
-        self.call_slack(params, Apis::ViewsOpen).await.map(|_| 0)
+    pub async fn views_open(&self, params: &str, module: Arc<PlaidModule>) -> Result<u32> {
+        let p: ViewOpen = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::ViewsOpen(p), module)
+            .await
+        {
+            Ok((200, _)) => Ok(0),
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
     }
 
     /// Call the Slack postMessage API. The message and location are defined by the module but the bot
     /// must be configured in Plaid.
-    pub async fn post_message(&self, params: &str, _: Arc<PlaidModule>) -> Result<u32, ApiError> {
-        self.call_slack(params, Apis::PostMessage).await.map(|_| 0)
+    pub async fn post_message(&self, params: &str, module: Arc<PlaidModule>) -> Result<u32> {
+        let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::PostMessage(p), module)
+            .await
+        {
+            Ok((200, _)) => Ok(0),
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
     }
 
     /// Calls the Slack API to retrieve a user's Slack ID from their email address
     pub async fn get_id_from_email(
         &self,
         params: &str,
-        _: Arc<PlaidModule>,
-    ) -> Result<String, ApiError> {
-        self.call_slack(params, Apis::LookupByEmail).await
+        module: Arc<PlaidModule>,
+    ) -> Result<String> {
+        let p: GetIdFromEmail = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::LookupByEmail(p), module)
+            .await
+        {
+            Ok((200, response)) => {
+                let response: UserInfoResponse = serde_json::from_str(&response).map_err(|e| {
+                    ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
+                })?;
+                Ok(response.user.id)
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get a user's presence status from their ID
+    pub async fn get_presence(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
+        let p: GetPresence = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::GetPresence(p), module)
+            .await
+        {
+            Ok((200, response)) => {
+                let gp_response: GetPresenceResponse =
+                    serde_json::from_str(&response).map_err(|e| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
+                    })?;
+                if !gp_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(response)
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get a user's info from their ID
+    pub async fn user_info(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
+        let p: UserInfo = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::UserInfo(p), module)
+            .await
+        {
+            Ok((200, response)) => {
+                let up_response: UserInfoResponse =
+                    serde_json::from_str(&response).map_err(|e| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
+                    })?;
+                if !up_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(response)
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
     }
 }

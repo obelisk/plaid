@@ -1,11 +1,13 @@
-use clap::{Arg, Command};
+use clap::{Arg, ArgAction, Command};
 
 use plaid_stl::messages::LogbacksAllowed;
 use ring::digest::{self, digest};
 use serde::{de, Deserialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crate::performance::PerformanceMonitoring;
+use crate::InstanceRoles;
 
 use super::apis::ApiConfigs;
 use super::data::DataConfig;
@@ -98,6 +100,31 @@ pub struct WebhookServerConfiguration {
     pub webhooks: HashMap<String, WebhookConfig>,
 }
 
+/// Configuration for a thread pool / channel dedicated to a log type
+#[derive(Deserialize)]
+pub struct DedicatedThreadsConfig {
+    pub num_threads: u8,
+    #[serde(default = "default_log_queue_size")]
+    pub log_queue_size: usize,
+}
+
+/// The configuration for the executor system
+#[derive(Deserialize)]
+pub struct ExecutorConfig {
+    /// How many threads should be used for executing modules when logs come in
+    ///
+    /// Modules do not get more than one thread, this just means that modules can
+    /// execute in parallel
+    pub execution_threads: u8,
+    /// The maximum number of logs in the queue to be processed at once
+    #[serde(default = "default_log_queue_size")]
+    pub log_queue_size: usize,
+    /// Number of threads dedicated to specific log types.
+    /// This is a mapping {log type --> num threads}.
+    #[serde(default)]
+    pub dedicated_threads: HashMap<String, DedicatedThreadsConfig>,
+}
+
 /// The full configuration of Plaid
 #[derive(Deserialize)]
 pub struct Configuration {
@@ -107,14 +134,8 @@ pub struct Configuration {
     /// Data generators. These are systems that pull data directly rather
     /// than waiting for data to come in via Webhook
     pub data: DataConfig,
-    /// How many threads should be used for executing modules when logs come in
-    ///
-    /// Modules do not get more than one thread, this just means that modules can
-    /// execute in parallel
-    pub execution_threads: u8,
-    /// The maximum number of logs in the queue to be processed at once
-    #[serde(default = "default_log_queue_size")]
-    pub log_queue_size: usize,
+    /// The executor subsystem.
+    pub executor: ExecutorConfig,
     /// Configuration for how Plaid monitors rule performance. When enabled,
     /// Plaid outputs a metrics file with performance metadata for all
     /// rules than have been run at least once.
@@ -130,6 +151,14 @@ pub struct Configuration {
     /// Set what modules will be loaded, what logging channels they're going to use
     /// and their computation and memory limits.
     pub loading: LoaderConfiguration,
+}
+
+/// Plaid's configuration augmented with the roles that this instance is playing.
+pub struct ConfigurationWithRoles {
+    /// Plaid's configuration
+    pub config: Configuration,
+    /// The roles that this instance has, i.e., what this instance is running
+    pub roles: InstanceRoles,
 }
 
 /// This function provides the default log queue size in the event that one isn't provided
@@ -201,45 +230,90 @@ where
 }
 
 /// Configure Plaid with config file and secrets read from arguments (or use default values).
-pub fn configure() -> Result<Configuration, ConfigurationError> {
+pub fn configure() -> Result<ConfigurationWithRoles, ConfigurationError> {
     let matches = Command::new("Plaid - A sandboxed automation engine")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Mitchell Grenier <mitchell@confurious.io>")
         .about("Write security rules in anything that compiles to WASM, run them with only the access they need.")
         .arg(
             Arg::new("config")
-                .help("Path to the configuration toml file")
+                .help("Path to the folder with configuration toml files")
                 .long("config")
-                .default_value("./plaid/resources/plaid.toml")
+                .default_value("./plaid/resources/config")
         )
         .arg(
             Arg::new("secrets")
                 .help("Path to the secrets file")
                 .long("secrets")
                 .default_value("./plaid/private-resources/secrets.toml")
-        ).get_matches();
+        )
+        .arg(Arg::new("no_wh").help("Do not run webhooks").long("no-webhooks").action(ArgAction::SetTrue))
+        .arg(Arg::new("no_dg").help("Do not run data generators").long("no-data-generators").action(ArgAction::SetTrue))
+        .arg(Arg::new("no_int").help("Do not run interval jobs").long("no-interval-jobs").action(ArgAction::SetTrue))
+        .arg(Arg::new("no_lb").help("Do not run logbacks").long("no-logbacks").action(ArgAction::SetTrue))
+        .arg(Arg::new("no_nonconc").help("Do not run non-concurrent log types").long("no-non-concurrent").action(ArgAction::SetTrue))
+        .get_matches();
 
-    let config_path = matches.get_one::<String>("config").unwrap();
+    let config_folder = matches.get_one::<String>("config").unwrap();
     let secrets_path = matches.get_one::<String>("secrets").unwrap();
 
-    read_and_interpolate(config_path, secrets_path, false)
+    let no_webhooks = matches.get_one::<bool>("no_wh").unwrap();
+    let no_data_generators = matches.get_one::<bool>("no_dg").unwrap();
+    let no_interval_jobs = matches.get_one::<bool>("no_int").unwrap();
+    let no_logbacks = matches.get_one::<bool>("no_lb").unwrap();
+    let no_nonconcurrent = matches.get_one::<bool>("no_nonconc").unwrap();
+
+    let config = read_and_interpolate(config_folder, secrets_path, false)?;
+
+    let roles = InstanceRoles {
+        webhooks: !*no_webhooks,
+        data_generators: !*no_data_generators,
+        interval_jobs: !*no_interval_jobs,
+        logbacks: !*no_logbacks,
+        non_concurrent_rules: !*no_nonconcurrent,
+    };
+
+    Ok(ConfigurationWithRoles { config, roles })
 }
 
-/// Reads a configuration file and a secrets file, interpolates the secrets into the configuration,
-/// and parses the result into a `Configuration` struct.
+/// Reads configuration files from a given folder and a secrets file, concatenates the config files into one,
+/// interpolates the secrets into the configuration, and parses the result into a `Configuration` struct.
 pub fn read_and_interpolate(
-    config_path: &str,
+    config_folder: &str,
     secrets_path: &str,
     show_config: bool,
 ) -> Result<Configuration, ConfigurationError> {
-    // Read the configuration file
-    let mut config = match std::fs::read_to_string(config_path) {
-        Ok(config) => config,
+    // Read the configuration files from a given folder, and concatenate them into one
+    let mut config = String::new();
+
+    let entries = match std::fs::read_dir(config_folder) {
+        Ok(x) => x,
         Err(e) => {
-            error!("Encountered file error when trying to read configuration!. Error: {e}");
+            error!("Encountered error when trying to read configuration folder! Error: {e}");
             return Err(ConfigurationError::FileError);
         }
     };
+
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|dir_entry| dir_entry.path())
+        .filter(|path| path.is_file())
+        .collect();
+    paths.sort_by(|a, b| {
+        a.file_name()
+            .and_then(|a_name| b.file_name().map(|b_name| a_name.cmp(b_name)))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    for path in paths {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => config.push_str(&content),
+            Err(e) => {
+                error!("Encountered error when trying to read configuration! Error: {e}");
+                return Err(ConfigurationError::FileError);
+            }
+        };
+    }
 
     // Read the secrets file and parse into a TOML object
     let secrets = std::fs::read_to_string(secrets_path)
@@ -278,12 +352,12 @@ pub fn read_and_interpolate(
     let config: Configuration = match toml::from_str(&config) {
         Ok(config) => config,
         Err(e) => {
-            error!("Encountered parsing error while reading configuration with interpolated secrets!. Error: {e}");
+            error!("Encountered parsing error while reading configuration with interpolated secrets! Error: {e}");
             return Err(ConfigurationError::ParsingError);
         }
     };
 
-    if config.execution_threads == 0 {
+    if config.executor.execution_threads == 0 {
         return Err(ConfigurationError::ExecutionThreadsInvalid);
     }
 

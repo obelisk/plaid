@@ -322,6 +322,11 @@ impl_new_function_with_error_buffer!(github, add_users_to_org_copilot, DISALLOW_
 impl_new_function_with_error_buffer!(github, remove_users_from_org_copilot, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_custom_properties_values, ALLOW_IN_TEST_MODE);
 impl_new_function!(github, comment_on_pull_request, DISALLOW_IN_TEST_MODE);
+impl_new_function!(
+    github,
+    pull_request_request_reviewers,
+    DISALLOW_IN_TEST_MODE
+);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
@@ -375,6 +380,8 @@ impl_new_function!(slack, post_message, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, get_id_from_email, ALLOW_IN_TEST_MODE);
 impl_new_function!(slack, post_to_arbitrary_webhook, ALLOW_IN_TEST_MODE);
 impl_new_function!(slack, post_to_named_webhook, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, get_presence, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, user_info, ALLOW_IN_TEST_MODE);
 
 // Splunk Functions
 impl_new_function!(splunk, post_hec, ALLOW_IN_TEST_MODE);
@@ -598,6 +605,9 @@ pub fn to_api_function(
         "github_delete_deploy_key" => {
             Function::new_typed_with_env(&mut store, &env, github_delete_deploy_key)
         }
+        "github_pull_request_request_reviewers" => {
+            Function::new_typed_with_env(&mut store, &env, github_pull_request_request_reviewers)
+        }
 
         // Slack Calls
         "slack_post_to_named_webhook" => {
@@ -611,6 +621,8 @@ pub fn to_api_function(
         "slack_get_id_from_email" => {
             Function::new_typed_with_env(&mut store, &env, slack_get_id_from_email)
         }
+        "slack_get_presence" => Function::new_typed_with_env(&mut store, &env, slack_get_presence),
+        "slack_user_info" => Function::new_typed_with_env(&mut store, &env, slack_user_info),
 
         // General Calls
         "general_simple_json_post_request" => {

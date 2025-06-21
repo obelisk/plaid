@@ -1,8 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::loader::PlaidModule;
-use reqwest::header::HeaderMap;
-use serde::{Deserialize, Serialize};
+use reqwest::{header::HeaderMap, Certificate, Client};
+use serde::{de, Deserialize, Serialize};
 
 use crate::apis::ApiError;
 
@@ -10,7 +10,7 @@ use super::General;
 
 #[derive(Deserialize)]
 pub struct Config {
-    web_requests: HashMap<String, Request>,
+    pub web_requests: HashMap<String, Request>,
 }
 
 /// Request to make a web request
@@ -18,7 +18,7 @@ pub struct Config {
 struct MakeRequestRequest {
     /// Body of the request
     body: String,
-    /// Name of the request - defined in plaid.toml
+    /// Name of the request - defined in the configuration
     request_name: String,
     /// Variables to include in the request. Variables take the place of an idenfitifer in the request URI
     variables: HashMap<String, String>,
@@ -41,6 +41,15 @@ pub struct Request {
     return_body: bool,
     /// Flag to return the code from the request
     return_code: bool,
+    /// Optional root TLS certificate to use for this request.  
+    /// When set, the request will be sent via a special HTTP client configured with this certificate.
+    #[serde(default, deserialize_with = "certificate_deserializer")]
+    pub root_certificate: Option<Certificate>,
+    /// Optional per‐request timeout.  
+    /// When set, the request will be sent via a special HTTP client configured with this timeout;  
+    /// if unset, the default timeout from the API config is used.
+    #[serde(default, deserialize_with = "duration_deserializer")]
+    pub timeout: Option<Duration>,
     /// Rules allowed to use this request
     allowed_rules: Vec<String>,
     /// Headers to include in the request
@@ -49,6 +58,39 @@ pub struct Request {
     /// if the call has side effects. If it is not set, this will default to false.
     #[serde(default)]
     available_in_test_mode: bool,
+}
+
+/// Deserialize a non‐zero timeout (1–255 seconds) into a `Duration`, erroring on 0.
+fn duration_deserializer<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let duration = Option::<u8>::deserialize(deserializer)?;
+    match duration {
+        None => Ok(None),
+        Some(0) => Err(de::Error::custom(
+            "Invalid timeout duration provided. Acceptable values are between 1 and 255 seconds",
+        )),
+        Some(secs) => Ok(Some(Duration::from_secs(secs as u64))),
+    }
+}
+
+/// Deserialize a PEM‐encoded string into a `Certificate`, erroring on parse failure.
+fn certificate_deserializer<'de, D>(deserializer: D) -> Result<Option<Certificate>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let pem = Option::<String>::deserialize(deserializer)?;
+    match pem {
+        None => Ok(None),
+        Some(pem) => {
+            let cert = Certificate::from_pem(pem.as_bytes()).map_err(|e| {
+                serde::de::Error::custom(format!("Invalid certificate provided. Error: {e}"))
+            })?;
+
+            Ok(Some(cert))
+        }
+    }
 }
 
 /// Data returned by a request.
@@ -82,7 +124,8 @@ impl General {
         let auth = request.get("auth");
 
         let request_builder = self
-            .client
+            .clients
+            .default
             .post(url)
             .header("Content-Type", "application/json; charset=utf-8");
 
@@ -159,12 +202,13 @@ impl General {
             uri = uri.replace(format!("{{{}}}", replacement.0).as_str(), replacement.1);
         }
 
+        let client = self.get_client(&request_name);
         let request_builder = match request_specification.verb.as_str() {
-            "delete" => self.client.delete(&uri),
-            "get" => self.client.get(&uri),
-            "patch" => self.client.patch(&uri),
-            "post" => self.client.post(&uri),
-            "put" => self.client.put(&uri),
+            "delete" => client.delete(&uri),
+            "get" => client.get(&uri),
+            "patch" => client.patch(&uri),
+            "post" => client.post(&uri),
+            "put" => client.put(&uri),
             // Not sure we want to support head
             //"head" => self.client.head(&request_specification.uri),
             _ => return Err(ApiError::BadRequest),
@@ -202,6 +246,14 @@ impl General {
                 }
             }
             Err(e) => Err(ApiError::NetworkError(e)),
+        }
+    }
+
+    fn get_client(&self, mnr: &str) -> &Client {
+        if let Some(client) = self.clients.specialized.get(mnr) {
+            client
+        } else {
+            &self.clients.default
         }
     }
 }

@@ -31,7 +31,7 @@ use tokio::runtime::Runtime;
 use web::{Web, WebConfig};
 use yubikey::{Yubikey, YubikeyConfig};
 
-use crate::{data::DelayedMessage, executor::Message};
+use crate::data::DelayedMessage;
 
 use self::rustica::{Rustica, RusticaConfig};
 
@@ -93,11 +93,7 @@ pub enum ApiError {
 }
 
 impl Api {
-    pub async fn new(
-        config: ApiConfigs,
-        log_sender: Sender<Message>,
-        delayed_log_sender: Sender<DelayedMessage>,
-    ) -> Self {
+    pub async fn new(config: ApiConfigs, delayed_log_sender: Sender<DelayedMessage>) -> Self {
         #[cfg(feature = "aws")]
         let aws = match config.aws {
             Some(aws) => Some(Aws::new(aws).await),
@@ -105,7 +101,7 @@ impl Api {
         };
 
         let general = match config.general {
-            Some(gc) => Some(General::new(gc, log_sender, delayed_log_sender)),
+            Some(gc) => Some(General::new(gc, delayed_log_sender)),
             _ => None,
         };
 
