@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub enum Generator {
     Github,
     Okta,
+    SQS(String),
     Interval(String),
     WebSocketExternal(String),
 }
@@ -14,6 +15,7 @@ impl std::fmt::Display for Generator {
             Generator::Github => write!(f, "github"),
             Generator::Okta => write!(f, "okta"),
             Generator::Interval(job) => write!(f, "interval/{job}"),
+            Generator::SQS(name) => write!(f, "sqs/{name}"),
             Generator::WebSocketExternal(ws) => write!(f, "websocket/{ws}"),
         }
     }

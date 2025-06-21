@@ -1,3 +1,6 @@
+#[cfg(feature = "aws")]
+mod sqs;
+
 pub mod github;
 pub mod internal;
 mod interval;
@@ -31,6 +34,8 @@ pub struct DataConfig {
     github: Option<github::GithubConfig>,
     okta: Option<okta::OktaConfig>,
     interval: Option<interval::IntervalConfig>,
+    #[cfg(feature = "aws")]
+    sqs: Option<sqs::SQSConfig>,
     websocket: Option<websocket::WebSocketDataGenerator>,
 }
 
@@ -43,6 +48,9 @@ struct DataInternal {
     internal: Option<internal::Internal>,
     /// Interval manages tracking and execution of jobs that are executed on a defined interval
     interval: Option<interval::Interval>,
+    /// SQS pulls messages from AWS SQS queue
+    #[cfg(feature = "aws")]
+    sqs: Option<sqs::SQS>,
     /// Websocket manages the creation and maintenance of WebSockets that provide data to the executor
     websocket_external: Option<websocket::WebsocketGenerator>,
 }
@@ -79,11 +87,20 @@ impl DataInternal {
             .websocket
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
+        #[cfg(feature = "aws")]
+        let sqs = if let Some(cfg) = config.sqs {
+            Some(sqs::SQS::new(cfg, logger.clone()).await)
+        } else {
+            None
+        };
+
         Ok(Self {
             github,
             okta,
             internal: Some(internal?),
             interval,
+            #[cfg(feature = "aws")]
+            sqs,
             websocket_external,
         })
     }
@@ -165,6 +182,20 @@ impl Data {
                     }
 
                     tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            });
+        }
+
+        // Start the SQS task if there is one
+        #[cfg(feature = "aws")]
+        if let Some(mut sqs) = di.sqs {
+            handle.spawn(async move {
+                loop {
+                    if let Err(err) = sqs.drain_queue().await {
+                        error!("{err}");
+                    };
+
+                    tokio::time::sleep(Duration::from_secs(sqs.config.sleep_duration)).await;
                 }
             });
         }
