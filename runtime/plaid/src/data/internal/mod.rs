@@ -49,7 +49,6 @@ impl std::cmp::Ord for DelayedMessage {
 }
 
 pub struct Internal {
-    log_heap: BinaryHeap<Reverse<DelayedMessage>>,
     sender: Sender<Message>,
     receiver: Receiver<DelayedMessage>,
     internal_sender: Sender<DelayedMessage>,
@@ -91,10 +90,8 @@ impl Internal {
         storage: Arc<Storage>,
     ) -> Result<Self, DataError> {
         let (internal_sender, receiver) = bounded(4096);
-        let log_heap = fill_heap_from_db(storage.clone()).await?;
 
         Ok(Self {
-            log_heap,
             sender: log_sender,
             receiver,
             internal_sender,
@@ -106,19 +103,12 @@ impl Internal {
         self.internal_sender.clone()
     }
 
-    pub async fn fetch_internal_logs(&mut self) -> Result<(), String> {
+    pub async fn fetch_internal_logs(&mut self, running_logbacks: bool) -> Result<(), String> {
         let start = SystemTime::now();
         let current_time = start
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
-
-        // Pull all logs off the channel, set their time, and store them in the DB.
-        // Then discard the current content of the heap, pull the content of the DB
-        // and use it to fill the heap.
-        //
-        // This ensures that modifications which are made out-of-band to the DB are
-        // reflected in the heap's content.
 
         // First, receive everything from the channel and write to DB
         while let Ok(mut log) = self.receiver.try_recv() {
@@ -136,40 +126,47 @@ impl Internal {
             }
         }
 
-        // TODO the following part will be executed only by the instance that processes logbacks
+        // If we are _not_ running logbacks, then we are done: we have sent the logbacks to the DB
+        // and someone else will pick them up.
+        // Instead, if we are running logbacks, then we continue by pulling from the DB and processing.
 
-        // Then, overwrite the current heap with the content read from the DB
-        self.log_heap = fill_heap_from_db(self.storage.clone())
-            .await
-            .map_err(|e| format!("{e:?}"))?;
+        if running_logbacks {
+            // Fill the heap with the content read from the DB.
+            // This ensures that modifications which are made out-of-band to the DB are
+            // reflected in the heap's content.
+            let mut log_heap = fill_heap_from_db(self.storage.clone())
+                .await
+                .map_err(|e| format!("{e:?}"))?;
 
-        // Now the heap is reflecting the content of the DB: we can look at it
-        // and see if something should be executed.
+            // Now the heap is reflecting the content of the DB: we can look at it
+            // and see if something should be executed.
 
-        while let Some(heap_top) = self.log_heap.peek() {
-            let heap_top = &heap_top.0;
+            while let Some(heap_top) = log_heap.peek() {
+                let heap_top = &heap_top.0;
 
-            if current_time < heap_top.delay {
-                info!(
+                if current_time < heap_top.delay {
+                    info!(
                     "There are no logs that have elapsed their delay. Next log is in: {} seconds",
                     heap_top.delay - current_time
                 );
-                break;
+                    break;
+                }
+
+                let log = log_heap.pop().unwrap();
+                // Delete the logback from the storage because we are about to send it for processing.
+                match self.storage.delete(LOGBACK_NS, &log.0.message.id).await {
+                    Ok(None) => {
+                        error!("We tried to delete a log back message that wasn't persisted")
+                    }
+                    Ok(Some(_)) => (),
+                    Err(e) => error!("Error removing persisted log: {e}"),
+                }
+                self.sender.send(log.0.message).unwrap();
             }
 
-            let log = self.log_heap.pop().unwrap();
-            // Delete the logback from the storage because we are about to send it for processing.
-            match self.storage.delete(LOGBACK_NS, &log.0.message.id).await {
-                Ok(None) => {
-                    error!("We tried to delete a log back message that wasn't persisted")
-                }
-                Ok(Some(_)) => (),
-                Err(e) => error!("Error removing persisted log: {e}"),
-            }
-            self.sender.send(log.0.message).unwrap();
+            debug!("Heap Size: {}", log_heap.len());
         }
 
-        debug!("Heap Size: {}", self.log_heap.len());
         Ok(())
     }
 }
