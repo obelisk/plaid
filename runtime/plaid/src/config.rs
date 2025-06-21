@@ -1,4 +1,4 @@
-use clap::{Arg, Command};
+use clap::{Arg, ArgAction, Command};
 
 use plaid_stl::messages::LogbacksAllowed;
 use ring::digest::{self, digest};
@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::performance::PerformanceMonitoring;
+use crate::InstanceRoles;
 
 use super::apis::ApiConfigs;
 use super::data::DataConfig;
@@ -152,6 +153,14 @@ pub struct Configuration {
     pub loading: LoaderConfiguration,
 }
 
+/// Plaid's configuration augmented with the roles that this instance is playing.
+pub struct ConfigurationWithRoles {
+    /// Plaid's configuration
+    pub config: Configuration,
+    /// The roles that this instance has, i.e., what this instance is running
+    pub roles: InstanceRoles,
+}
+
 /// This function provides the default log queue size in the event that one isn't provided
 fn default_log_queue_size() -> usize {
     2048
@@ -221,7 +230,7 @@ where
 }
 
 /// Configure Plaid with config file and secrets read from arguments (or use default values).
-pub fn configure() -> Result<Configuration, ConfigurationError> {
+pub fn configure() -> Result<ConfigurationWithRoles, ConfigurationError> {
     let matches = Command::new("Plaid - A sandboxed automation engine")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Mitchell Grenier <mitchell@confurious.io>")
@@ -237,12 +246,34 @@ pub fn configure() -> Result<Configuration, ConfigurationError> {
                 .help("Path to the secrets file")
                 .long("secrets")
                 .default_value("./plaid/private-resources/secrets.toml")
-        ).get_matches();
+        )
+        .arg(Arg::new("no_wh").help("Do not run webhooks").long("no-webhooks").action(ArgAction::SetTrue))
+        .arg(Arg::new("no_dg").help("Do not run data generators").long("no-data-generators").action(ArgAction::SetTrue))
+        .arg(Arg::new("no_int").help("Do not run interval jobs").long("no-interval-jobs").action(ArgAction::SetTrue))
+        .arg(Arg::new("no_lb").help("Do not run logbacks").long("no-logbacks").action(ArgAction::SetTrue))
+        .arg(Arg::new("no_nonconc").help("Do not run non-concurrent log types").long("no-non-concurrent").action(ArgAction::SetTrue))
+        .get_matches();
 
     let config_folder = matches.get_one::<String>("config").unwrap();
     let secrets_path = matches.get_one::<String>("secrets").unwrap();
 
-    read_and_interpolate(config_folder, secrets_path, false)
+    let no_webhooks = matches.get_one::<bool>("no_wh").unwrap();
+    let no_data_generators = matches.get_one::<bool>("no_dg").unwrap();
+    let no_interval_jobs = matches.get_one::<bool>("no_int").unwrap();
+    let no_logbacks = matches.get_one::<bool>("no_lb").unwrap();
+    let no_nonconcurrent = matches.get_one::<bool>("no_nonconc").unwrap();
+
+    let config = read_and_interpolate(config_folder, secrets_path, false)?;
+
+    let roles = InstanceRoles {
+        webhooks: !*no_webhooks,
+        data_generators: !*no_data_generators,
+        interval_jobs: !*no_interval_jobs,
+        logbacks: !*no_logbacks,
+        non_concurrent_rules: !*no_nonconcurrent,
+    };
+
+    Ok(ConfigurationWithRoles { config, roles })
 }
 
 /// Reads configuration files from a given folder and a secrets file, concatenates the config files into one,
