@@ -29,7 +29,7 @@ pub struct DynamoDbConfig {
     read: HashMap<String, HashSet<String>>,
 }
 
-/// Represents the DynamoDB API that handles all requests to KMS
+/// Represents the DynamoDB API client.
 /// NOTE: if Plaid is configured with the DynamoDB database backend, sharing tables here will lead to undefined behaviour
 pub struct DynamoDb {
     /// The underlying KMS client used to interact with the KMS API.
