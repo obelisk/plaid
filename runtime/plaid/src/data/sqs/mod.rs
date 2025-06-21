@@ -61,7 +61,7 @@ impl SQS {
     }
 
     pub async fn drain_queue(&mut self) -> Result<(), String> {
-        debug!("sqs/{} draining queue", self.config.name);
+        trace!("sqs/{} draining queue", self.config.name);
 
         loop {
             // poll the SQS queue
@@ -82,11 +82,11 @@ impl SQS {
 
             match res.messages {
                 None => {
-                    debug!("sqs/{} no messages found", self.config.name);
-                    break Ok(());
+                    trace!("sqs/{} no messages found", self.config.name);
+                    return Ok(());
                 }
                 Some(messages) => {
-                    debug!(
+                    trace!(
                         "sqs/{} received {} messages",
                         self.config.name,
                         messages.len()
@@ -95,7 +95,7 @@ impl SQS {
                         // dedup messages
                         if let Some(id) = message.message_id() {
                             if self.seen_messages.contains(id) {
-                                debug!("sqs/{} detected duplicate message {id}", self.config.name);
+                                trace!("sqs/{} detected duplicate message {id}", self.config.name);
                                 if let Err(err) = self.delete_message(message.receipt_handle).await
                                 {
                                     error!("sqs/{} delete_message error {err}", self.config.name)
@@ -133,7 +133,7 @@ impl SQS {
                 .await
                 .map_err(|e| format!("sqs/{} delete_message failed: [{e}]", self.config.name))?;
 
-            debug!("sqs/{} deleted_message", self.config.name,);
+            trace!("sqs/{} deleted_message", self.config.name,);
         }
         Ok(())
     }
