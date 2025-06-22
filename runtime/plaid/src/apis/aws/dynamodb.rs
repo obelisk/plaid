@@ -40,6 +40,7 @@ pub struct DynamoDb {
     read: HashMap<String, HashSet<String>>,
 }
 
+#[derive(PartialEq, PartialOrd)]
 enum AccessScope {
     Read,
     Write,
@@ -63,7 +64,7 @@ impl DynamoDb {
         }
     }
 
-    fn check_module_access_scope(
+    fn check_module_permissions(
         &self,
         access_scope: AccessScope,
         module: Arc<PlaidModule>,
@@ -71,35 +72,35 @@ impl DynamoDb {
     ) -> Result<(), ApiError> {
         match access_scope {
             AccessScope::Read => {
-                if let Some(read_access) = self.read.get(table_name) {
+                // check if read access is configured for this table
+                if let Some(table_readers) = self.read.get(table_name) {
                     // check if this module has read access to this table
-                    if !read_access.contains(&module.to_string()) {
-                        return Err(ApiError::BadRequest);
+                    if table_readers.contains(&module.to_string()) {
+                        return Ok(());
                     }
-                    Ok(())
-                } else if let Some(write_access) = self.write.get(table_name) {
-                    // check if this module has write access to this table
-                    if !write_access.contains(&module.to_string()) {
-                        return Err(ApiError::BadRequest);
-                    }
-                    Ok(())
-                } else {
-                    Err(ApiError::BadRequest)
                 }
+
+                // check if write access is configured for this table
+                // writers can also read
+                if let Some(table_writers) = self.write.get(table_name) {
+                    // check if this module has write access to this table
+                    if table_writers.contains(&module.to_string()) {
+                        return Ok(());
+                    }
+                }
+
+                Err(ApiError::BadRequest)
             }
             AccessScope::Write => {
-                if module.test_mode {
-                    return Err(ApiError::TestMode);
-                }
+                // check if write access is configured for this table
                 if let Some(write_access) = self.write.get(table_name) {
                     // check if this module has write access to this table
-                    if !write_access.contains(&module.to_string()) {
-                        return Err(ApiError::BadRequest);
-                    }
-                    Ok(())
-                } else {
-                    Err(ApiError::BadRequest)
+                    if write_access.contains(&module.to_string()) {
+                        return Ok(());
+                    };
                 }
+
+                Err(ApiError::BadRequest)
             }
         }
     }
@@ -117,7 +118,7 @@ impl DynamoDb {
             condition_expression,
             return_values,
         } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
-        self.check_module_access_scope(AccessScope::Write, module, &table_name)?;
+        self.check_module_permissions(AccessScope::Write, module, &table_name)?;
         let item = json_into_attributes(Some(item))?;
         let expression_attribute_values = json_into_attributes(expression_attribute_values)?;
         let return_values = return_value_from_string(return_values)?;
@@ -161,7 +162,7 @@ impl DynamoDb {
             expression_attribute_values,
             return_values,
         } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
-        self.check_module_access_scope(AccessScope::Write, module, &table_name)?;
+        self.check_module_permissions(AccessScope::Write, module, &table_name)?;
         let expression_attribute_values = json_into_attributes(expression_attribute_values)?;
         let dynamo_key = json_into_attributes(Some(key))?;
         let return_values = return_value_from_string(return_values)?;
@@ -199,7 +200,7 @@ impl DynamoDb {
             expression_attribute_names,
             expression_attribute_values,
         } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
-        self.check_module_access_scope(AccessScope::Read, module, &table_name)?;
+        self.check_module_permissions(AccessScope::Read, module, &table_name)?;
         let expression_attribute_values = json_into_attributes(expression_attribute_values)?;
 
         let output = self
