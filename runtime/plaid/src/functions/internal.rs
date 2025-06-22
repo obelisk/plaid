@@ -8,7 +8,7 @@ use crate::{
     functions::{get_memory, safely_get_string},
 };
 
-use super::{safely_get_memory, safely_write_data_back, calculate_max_buffer_size, FunctionErrors};
+use super::{safely_get_memory, safely_write_data_back, FunctionErrors};
 
 /// Implement a way for a module to print to env_logger
 pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log_buffer_size: u32) {
@@ -28,7 +28,11 @@ pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log
     let message = match safely_get_string(&memory_view, log_buffer, log_buffer_size) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Error in print_debug_string: {:?}", env.data().module.name, e);
+            error!(
+                "{}: Error in print_debug_string: {:?}",
+                env.data().module.name,
+                e
+            );
             return;
         }
     };
@@ -59,7 +63,11 @@ pub fn set_error_context(
     let message = match safely_get_string(&memory_view, context_buffer, context_buffer_size) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Error in set_error_context: {:?}", env.data().module.name, e);
+            error!(
+                "{}: Error in set_error_context: {:?}",
+                env.data().module.name,
+                e
+            );
             return;
         }
     };
@@ -178,7 +186,10 @@ pub fn log_back_detailed(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!("{}: Memory error in log_back: {:?}", env_data.module.name, e);
+            error!(
+                "{}: Memory error in log_back: {:?}",
+                env_data.module.name, e
+            );
             return 1;
         }
     };
@@ -192,8 +203,7 @@ pub fn log_back_detailed(
     };
 
     // Safely get the data from the guest's memory
-    let max_buffer_size = calculate_max_buffer_size(env_data.module.page_limit);
-    let log = match safely_get_memory(&memory_view, log_buf, log_buf_len, max_buffer_size) {
+    let log = match safely_get_memory(&memory_view, log_buf, log_buf_len) {
         Ok(d) => d,
         Err(e) => {
             error!("{}: Error in log_back: {:?}", env_data.module.name, e);
@@ -205,7 +215,13 @@ pub fn log_back_detailed(
     api.clone().runtime.block_on(async move {
         match api.general.as_ref() {
             Some(general) => {
-                if general.log_back(&type_, &log, &env_data.module.name, delay as u64, assigned_budget) {
+                if general.log_back(
+                    &type_,
+                    &log,
+                    &env_data.module.name,
+                    delay as u64,
+                    assigned_budget,
+                ) {
                     0
                 } else {
                     1

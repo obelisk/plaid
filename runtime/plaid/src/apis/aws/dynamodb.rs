@@ -215,7 +215,7 @@ impl DynamoDb {
             .map_err(|e| ApiError::DynamoDbQueryError(e))?;
 
         // convert to json
-        let mut out: QueryOutput = QueryOutput::default();
+        let mut out: QueryOutput = QueryOutput { items: vec![] };
         for item in output.items() {
             let result = map_attributes_to_json(item)?;
             out.items.push(result)
