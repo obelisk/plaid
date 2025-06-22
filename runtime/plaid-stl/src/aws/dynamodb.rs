@@ -57,7 +57,7 @@ pub fn put_item(input: PutItemInput) -> Result<PutItemOutput, PlaidFunctionError
         new_host_function_with_error_buffer!(aws_dynamodb, put_item);
     }
 
-    let input = serde_json::to_string(&input).unwrap();
+    let input = serde_json::to_string(&input).map_err(|_| PlaidFunctionError::InternalApiError)?;
 
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -88,7 +88,7 @@ pub fn delete_item(input: DeleteItemInput) -> Result<DeleteItemOutput, PlaidFunc
         new_host_function_with_error_buffer!(aws_dynamodb, delete_item);
     }
 
-    let input = serde_json::to_string(&input).unwrap();
+    let input = serde_json::to_string(&input).map_err(|_| PlaidFunctionError::InternalApiError)?;
 
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -119,7 +119,7 @@ pub fn query(input: QueryInput) -> Result<QueryOutput, PlaidFunctionError> {
         new_host_function_with_error_buffer!(aws_dynamodb, query);
     }
 
-    let input = serde_json::to_string(&input).unwrap();
+    let input = serde_json::to_string(&input).map_err(|_| PlaidFunctionError::InternalApiError)?;
 
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
