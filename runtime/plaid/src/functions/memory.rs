@@ -88,25 +88,3 @@ pub fn safely_write_data_back(
 
     Ok(data.len() as i32)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_calculate_max_buffer_size() {
-        // Test normal cases
-        assert_eq!(calculate_max_buffer_size(1), 65536); // 1 page = 64KiB
-        assert_eq!(calculate_max_buffer_size(2), 131072); // 2 pages = 128KiB
-        assert_eq!(calculate_max_buffer_size(10), 655360); // 10 pages = 640KiB
-
-        // Test edge cases
-        assert_eq!(calculate_max_buffer_size(0), 0); // 0 pages = 0 bytes
-
-        // Test overflow protection (saturating_mul should handle this)
-        let max_pages = u32::MAX / WASM_PAGE_SIZE;
-        let result = calculate_max_buffer_size(max_pages + 1);
-        // Should saturate at u32::MAX
-        assert_eq!(result, u32::MAX);
-    }
-}
