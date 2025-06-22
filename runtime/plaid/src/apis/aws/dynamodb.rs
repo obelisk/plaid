@@ -63,7 +63,7 @@ impl DynamoDb {
         }
     }
 
-    fn allow_operation(
+    fn check_module_access_scope(
         &self,
         access_scope: AccessScope,
         module: Arc<PlaidModule>,
@@ -117,10 +117,10 @@ impl DynamoDb {
             condition_expression,
             return_values,
         } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
-        self.allow_operation(AccessScope::Write, module, &table_name)?;
-        let item = map_json_to_attributes(Some(item))?;
-        let expression_attribute_values = map_json_to_attributes(expression_attribute_values)?;
-        let return_values = map_return_values(return_values)?;
+        self.check_module_access_scope(AccessScope::Write, module, &table_name)?;
+        let item = json_into_attributes(Some(item))?;
+        let expression_attribute_values = json_into_attributes(expression_attribute_values)?;
+        let return_values = return_value_from_string(return_values)?;
 
         // Execute PutItem
         let output = self
@@ -139,7 +139,7 @@ impl DynamoDb {
         let attributes = match output.attributes() {
             None => None,
             Some(attrs) => {
-                let result = map_attributes_to_json(attrs)?;
+                let result = attributes_into_json(attrs)?;
                 Some(result)
             }
         };
@@ -161,10 +161,10 @@ impl DynamoDb {
             expression_attribute_values,
             return_values,
         } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
-        self.allow_operation(AccessScope::Write, module, &table_name)?;
-        let expression_attribute_values = map_json_to_attributes(expression_attribute_values)?;
-        let dynamo_key = map_json_to_attributes(Some(key))?;
-        let return_values = map_return_values(return_values)?;
+        self.check_module_access_scope(AccessScope::Write, module, &table_name)?;
+        let expression_attribute_values = json_into_attributes(expression_attribute_values)?;
+        let dynamo_key = json_into_attributes(Some(key))?;
+        let return_values = return_value_from_string(return_values)?;
 
         let output = self
             .client
@@ -182,7 +182,7 @@ impl DynamoDb {
         let attributes = match output.attributes() {
             None => None,
             Some(attrs) => {
-                let result = map_attributes_to_json(attrs)?;
+                let result = attributes_into_json(attrs)?;
                 Some(result)
             }
         };
@@ -199,8 +199,8 @@ impl DynamoDb {
             expression_attribute_names,
             expression_attribute_values,
         } = serde_json::from_str(params).map_err(|err| ApiError::SerdeError(err.to_string()))?;
-        self.allow_operation(AccessScope::Read, module, &table_name)?;
-        let expression_attribute_values = map_json_to_attributes(expression_attribute_values)?;
+        self.check_module_access_scope(AccessScope::Read, module, &table_name)?;
+        let expression_attribute_values = json_into_attributes(expression_attribute_values)?;
 
         let output = self
             .client
@@ -217,7 +217,7 @@ impl DynamoDb {
         // convert to json
         let mut out: QueryOutput = QueryOutput { items: vec![] };
         for item in output.items() {
-            let result = map_attributes_to_json(item)?;
+            let result = attributes_into_json(item)?;
             out.items.push(result)
         }
 
@@ -225,22 +225,22 @@ impl DynamoDb {
     }
 }
 
-fn map_attributes_to_json(attrs: &HashMap<String, AttributeValue>) -> Result<Value, ApiError> {
+fn attributes_into_json(attrs: &HashMap<String, AttributeValue>) -> Result<Value, ApiError> {
     let mut result = Map::new();
     for (k, v) in attrs.iter() {
-        let new_val = attribute_value_to_json(v)?;
+        let new_val = to_json_value(v)?;
         result.insert(k.to_string(), new_val);
     }
     Ok(Value::Object(result))
 }
 
-fn map_json_to_attributes(
+fn json_into_attributes(
     value: Option<HashMap<String, Value>>,
 ) -> Result<Option<HashMap<String, AttributeValue>>, ApiError> {
     if let Some(expr_vals) = value {
         let mut express_attribute_values = HashMap::<String, AttributeValue>::new();
         for (key, value) in expr_vals {
-            let attr_value = json_to_attribute_value(value)?;
+            let attr_value = to_attribute_value(value)?;
             express_attribute_values.insert(key, attr_value);
         }
         Ok(Some(express_attribute_values))
@@ -249,7 +249,7 @@ fn map_json_to_attributes(
     }
 }
 
-fn map_return_values(value: Option<String>) -> Result<Option<ReturnValue>, ApiError> {
+fn return_value_from_string(value: Option<String>) -> Result<Option<ReturnValue>, ApiError> {
     value
         .as_ref()
         .map(|rv| match rv.as_str() {
@@ -267,7 +267,7 @@ fn map_return_values(value: Option<String>) -> Result<Option<ReturnValue>, ApiEr
 }
 
 // helper function to convert JSON Value to DynamoDB AttributeValue, supporting all types
-fn json_to_attribute_value(value: Value) -> Result<AttributeValue, ApiError> {
+fn to_attribute_value(value: Value) -> Result<AttributeValue, ApiError> {
     match value {
         // String: Direct string value
         Value::String(s) => Ok(AttributeValue::S(s)),
@@ -351,7 +351,7 @@ fn json_to_attribute_value(value: Value) -> Result<AttributeValue, ApiError> {
             } else {
                 // List (L)
                 let items: Result<Vec<AttributeValue>, ApiError> =
-                    arr.into_iter().map(json_to_attribute_value).collect();
+                    arr.into_iter().map(to_attribute_value).collect();
                 Ok(AttributeValue::L(items?))
             }
         }
@@ -375,7 +375,7 @@ fn json_to_attribute_value(value: Value) -> Result<AttributeValue, ApiError> {
             // Otherwise, treat as a map (M)
             let mut map = HashMap::new();
             for (k, v) in obj {
-                map.insert(k, json_to_attribute_value(v)?);
+                map.insert(k, to_attribute_value(v)?);
             }
             Ok(AttributeValue::M(map))
         }
@@ -383,7 +383,7 @@ fn json_to_attribute_value(value: Value) -> Result<AttributeValue, ApiError> {
 }
 
 // helper function to convert DynamoDB AttributeValue to JSON Value
-fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, ApiError> {
+fn to_json_value(attr_value: &AttributeValue) -> Result<Value, ApiError> {
     match attr_value {
         AttributeValue::S(s) => Ok(Value::String(s.clone())),
         AttributeValue::N(n) => {
@@ -406,14 +406,13 @@ fn attribute_value_to_json(attr_value: &AttributeValue) -> Result<Value, ApiErro
         AttributeValue::Bool(b) => Ok(Value::Bool(*b)),
         AttributeValue::Null(_) => Ok(Value::Null),
         AttributeValue::L(list) => {
-            let json_list: Result<Vec<Value>, ApiError> =
-                list.iter().map(attribute_value_to_json).collect();
+            let json_list: Result<Vec<Value>, ApiError> = list.iter().map(to_json_value).collect();
             Ok(Value::Array(json_list?))
         }
         AttributeValue::M(map) => {
             let mut json_map = serde_json::Map::new();
             for (key, value) in map {
-                let json_value = attribute_value_to_json(value)?;
+                let json_value = to_json_value(value)?;
                 json_map.insert(key.clone(), json_value);
             }
             Ok(Value::Object(json_map))
