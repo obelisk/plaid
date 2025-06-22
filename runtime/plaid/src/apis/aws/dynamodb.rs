@@ -266,6 +266,35 @@ fn return_value_from_string(value: Option<String>) -> Result<Option<ReturnValue>
         .transpose()
 }
 
+enum ArrayMembers {
+    AllStrings,
+    AllNumbers,
+    AllBinary,
+    NonUniform,
+}
+
+fn inspect_array_members(arr: &Vec<Value>) -> ArrayMembers {
+    // Check if all elements are strings (for SS)
+    if arr.iter().all(|v| v.is_string()) {
+        return ArrayMembers::AllStrings;
+    }
+    // Check if all elements are numbers (for NS)
+    if arr.iter().all(|v| v.is_number()) {
+        return ArrayMembers::AllNumbers;
+    }
+    // Check if all elements are binary (assuming base64-encoded strings for B)
+    let all_binary = arr.iter().all(|v| {
+        v.as_str()
+            .map(|s| base64::decode(s).is_ok())
+            .unwrap_or(false)
+    });
+
+    if all_binary {
+        return ArrayMembers::AllBinary;
+    }
+    ArrayMembers::NonUniform
+}
+
 // helper function to convert JSON Value to DynamoDB AttributeValue, supporting all types
 fn to_attribute_value(value: Value) -> Result<AttributeValue, ApiError> {
     match value {
@@ -298,61 +327,56 @@ fn to_attribute_value(value: Value) -> Result<AttributeValue, ApiError> {
                     "Lists and sets cannot be empty",
                 )));
             }
-            // Check if all elements are strings (for SS)
-            let all_strings = arr.iter().all(|v| v.is_string());
-            // Check if all elements are numbers (for NS)
-            let all_numbers = arr.iter().all(|v| v.is_number());
-            // Check if all elements are binary (assuming base64-encoded strings for B)
-            let all_binary = arr.iter().all(|v| {
-                v.as_str()
-                    .map(|s| base64::decode(s).is_ok())
-                    .unwrap_or(false)
-            });
-
-            if all_strings {
-                // String Set (SS)
-                let strings: Vec<String> = arr
-                    .into_iter()
-                    .map(|v| v.as_str().unwrap().to_string())
-                    .collect();
-                Ok(AttributeValue::Ss(strings))
-            } else if all_numbers {
-                // Number Set (NS)
-                let numbers: Result<Vec<String>, ApiError> = arr
-                    .into_iter()
-                    .map(|v| {
-                        if let Some(i) = v.as_i64() {
-                            Ok(i.to_string())
-                        } else if let Some(f) = v.as_f64() {
-                            Ok(f.to_string())
-                        } else {
-                            Err(ApiError::SerdeError(String::from(
-                                "Invalid number in number set",
-                            )))
-                        }
-                    })
-                    .collect();
-                Ok(AttributeValue::Ns(numbers?))
-            } else if all_binary {
-                // Binary Set (BS)
-                let binaries: Result<Vec<Blob>, ApiError> = arr
-                    .into_iter()
-                    .map(|v| {
-                        let s = v
-                            .as_str()
-                            .ok_or(ApiError::SerdeError(String::from("Invalid binary value")))?;
-                        let decoded = base64::decode(s).map_err(|e| {
-                            ApiError::SerdeError(format!("Failed to decode base64: {}", e))
-                        })?;
-                        Ok(Blob::new(decoded))
-                    })
-                    .collect();
-                Ok(AttributeValue::Bs(binaries?))
-            } else {
-                // List (L)
-                let items: Result<Vec<AttributeValue>, ApiError> =
-                    arr.into_iter().map(to_attribute_value).collect();
-                Ok(AttributeValue::L(items?))
+            match inspect_array_members(&arr) {
+                ArrayMembers::AllStrings => {
+                    // String Set (SS)
+                    let strings: Vec<String> = arr
+                        .into_iter()
+                        .map(|v| v.as_str().unwrap().to_string())
+                        .collect();
+                    Ok(AttributeValue::Ss(strings))
+                }
+                ArrayMembers::AllNumbers => {
+                    // Number Set (NS)
+                    let numbers: Result<Vec<String>, ApiError> = arr
+                        .into_iter()
+                        .map(|v| {
+                            if let Some(i) = v.as_i64() {
+                                Ok(i.to_string())
+                            } else if let Some(f) = v.as_f64() {
+                                Ok(f.to_string())
+                            } else {
+                                // Err("Invalid number in number set".to_string())
+                                Err(ApiError::SerdeError(String::from(
+                                    "Invalid number in number set",
+                                )))
+                            }
+                        })
+                        .collect();
+                    Ok(AttributeValue::Ns(numbers?))
+                }
+                ArrayMembers::AllBinary => {
+                    // Binary Set (BS)
+                    let binaries: Result<Vec<Blob>, ApiError> = arr
+                        .into_iter()
+                        .map(|v| {
+                            let s = v.as_str().ok_or(ApiError::SerdeError(String::from(
+                                "Invalid binary value",
+                            )))?;
+                            let decoded = base64::decode(s).map_err(|e| {
+                                ApiError::SerdeError(format!("Failed to decode base64: {}", e))
+                            })?;
+                            Ok(Blob::new(decoded))
+                        })
+                        .collect();
+                    Ok(AttributeValue::Bs(binaries?))
+                }
+                ArrayMembers::NonUniform => {
+                    // List (L)
+                    let items: Result<Vec<AttributeValue>, ApiError> =
+                        arr.into_iter().map(to_attribute_value).collect();
+                    Ok(AttributeValue::L(items?))
+                }
             }
         }
 
