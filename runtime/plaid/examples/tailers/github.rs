@@ -60,7 +60,7 @@ async fn main() {
 
     loop {
         //println!("Start of log group");
-        get_and_process_dg_logs(&mut gh).await.unwrap();
+        get_and_process_dg_logs(&mut gh, &None).await.unwrap();
 
         while let Ok(log) = logger_rx.recv_timeout(Duration::from_secs(0)) {
             let log: GitHubLog = serde_json::from_slice(&log.data).unwrap();
