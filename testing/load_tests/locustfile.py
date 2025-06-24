@@ -1,5 +1,6 @@
 import json
 import os
+import random
 
 from locust import HttpUser, task, between
 
@@ -7,23 +8,22 @@ class StressTestUser(HttpUser):
     host = os.getenv("LOCUST_HOST", "http://localhost:4554")
     wait_time = between(1, 5)  # Configurable delay between tasks
 
+
     def on_start(self):
-        # Load configurable request body from environment variable or use default
-        body_str = os.getenv("LOCUST_JSON_BODY", '{"key": "value"}')
-        try:
-            self.json_body = json.loads(body_str)
-        except json.JSONDecodeError:
-            print("Invalid JSON in LOCUST_JSON_BODY, falling back to default.")
-            self.json_body = {"key": "value"}
+        self.webhook = os.getenv("LOCUST_WEBHOOK", "AAAA")
 
     @task
-    def post_request_1(self):
-        self.client.post("/webhook/LOADTEST1", json=self.json_body)
+    def get_time(self):
+        body = '{"get_time": true}'
+        self.client.get(f"/webhook/{self.webhook}", json=json.loads(body))
 
     @task
-    def post_request_2(self):
-        self.client.post("/webhook/LOADTEST2", json=self.json_body)
+    def get_random_bytes(self):
+        bytes_num = random.randint(1,100)
+        body = f'{{"get_random_bytes": {bytes_num}}}'
+        self.client.get(f"/webhook/{self.webhook}", json=json.loads(body))
 
     @task
-    def post_request_4(self):
-        self.client.post("/webhook/LOADTEST4", json=self.json_body)
+    def use_cache(self):
+        body = '{"use_cache": true}'
+        self.client.get(f"/webhook/{self.webhook}", json=json.loads(body))
