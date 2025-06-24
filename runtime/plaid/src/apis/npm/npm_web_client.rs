@@ -464,7 +464,7 @@ impl Npm {
         let response = self
             .client
             .get(format!(
-                "{}/settings/{}/tokens",
+                "{}/settings/{}/tokens?perPage=100",
                 NPMJS_COM_URL, self.config.username
             ))
             .header("X-Spiferack", "1") // to get JSON instead of HTML
