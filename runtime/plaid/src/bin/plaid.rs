@@ -93,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(config.apis, delayed_log_sender).await;
+    let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender).await;
 
     // Create an Arc so all the handlers have access to our API object
     let api = Arc::new(api);
