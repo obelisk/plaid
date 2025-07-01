@@ -32,7 +32,7 @@ impl Apis {
                 .body(p.body.clone())
                 .header("Content-Type", "application/json; charset=utf-8"),
             Self::ViewsOpen(p) => client
-                .post(format!("{SLACK_API_URL}{api}", api = "view.open"))
+                .post(format!("{SLACK_API_URL}{api}", api = "views.open"))
                 .body(p.body.clone())
                 .header("Content-Type", "application/json; charset=utf-8"),
             Self::LookupByEmail(p) => client.get(format!(
