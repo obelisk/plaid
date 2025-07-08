@@ -381,6 +381,7 @@ impl_new_function_with_error_buffer!(slack, get_id_from_email, ALLOW_IN_TEST_MOD
 impl_new_function!(slack, post_to_arbitrary_webhook, ALLOW_IN_TEST_MODE);
 impl_new_function!(slack, post_to_named_webhook, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, get_presence, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, get_dnd, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, user_info, ALLOW_IN_TEST_MODE);
 
 // Splunk Functions
@@ -622,6 +623,7 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, slack_get_id_from_email)
         }
         "slack_get_presence" => Function::new_typed_with_env(&mut store, &env, slack_get_presence),
+        "slack_get_dnd" => Function::new_typed_with_env(&mut store, &env, slack_get_dnd),
         "slack_user_info" => Function::new_typed_with_env(&mut store, &env, slack_user_info),
 
         // General Calls
