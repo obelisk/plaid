@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use plaid_stl::slack::{
-    GetIdFromEmail, GetPresence, GetPresenceResponse, PostMessage, UserInfo, UserInfoResponse,
-    ViewOpen,
+    GetDndInfo, GetDndInfoResponse, GetIdFromEmail, GetPresence, GetPresenceResponse, PostMessage,
+    UserInfo, UserInfoResponse, ViewOpen,
 };
 use reqwest::{Client, RequestBuilder};
 
@@ -18,6 +18,7 @@ enum Apis {
     ViewsOpen(plaid_stl::slack::ViewOpen),
     LookupByEmail(plaid_stl::slack::GetIdFromEmail),
     GetPresence(plaid_stl::slack::GetPresence),
+    GetDndInfo(plaid_stl::slack::GetDndInfo),
     UserInfo(plaid_stl::slack::UserInfo),
 }
 
@@ -45,6 +46,11 @@ impl Apis {
                 api = "users.getPresence",
                 user = p.id,
             )),
+            Self::GetDndInfo(p) => client.get(format!(
+                "{SLACK_API_URL}{api}?user={user}",
+                api = "dnd.info",
+                user = p.id
+            )),
             Self::UserInfo(p) => client.get(format!(
                 "{SLACK_API_URL}{api}?user={user}",
                 api = "users.info",
@@ -61,6 +67,7 @@ impl std::fmt::Display for Apis {
             Self::ViewsOpen(_) => write!(f, "ViewsOpen"),
             Self::LookupByEmail(_) => write!(f, "LookupByEmail"),
             Self::GetPresence(_) => write!(f, "GetPresence"),
+            Self::GetDndInfo(_) => write!(f, "GetDndInfo"),
             Self::UserInfo(_) => write!(f, "UserInfo"),
         }
     }
@@ -165,6 +172,32 @@ impl Slack {
                         ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
                     })?;
                 if !gp_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(response)
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get a user's DND info from their ID
+    pub async fn get_dnd(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
+        let p: GetDndInfo = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::GetDndInfo(p), module)
+            .await
+        {
+            Ok((200, response)) => {
+                let gdnd_response: GetDndInfoResponse =
+                    serde_json::from_str(&response).map_err(|e| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
+                    })?;
+                if !gdnd_response.ok {
                     return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
                         response,
                     )));
