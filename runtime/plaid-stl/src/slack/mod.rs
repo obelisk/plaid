@@ -230,6 +230,23 @@ pub struct GetPresenceResponse {
     pub presence: String,
 }
 
+/// Data to be sent to the runtime for getting info about a user's DND status
+#[derive(Serialize, Deserialize)]
+pub struct GetDndInfo {
+    pub bot: String,
+    pub id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetDndInfoResponse {
+    pub ok: bool,
+    pub dnd_enabled: bool,
+    // There are other fields but we don't need to parse them.
+    // Note: there is a `snooze_enabled` property but the docs say
+    //   "All of the snooze_* properties will only be visible if the user being queried is also the current user."
+    // Therefore we leave it out because the typical use case is retrieving info about another user.
+}
+
 /// Get a user's presence status from their ID
 pub fn get_presence(bot: &str, id: &str) -> Result<GetPresenceResponse, PlaidFunctionError> {
     extern "C" {
@@ -246,6 +263,44 @@ pub fn get_presence(bot: &str, id: &str) -> Result<GetPresenceResponse, PlaidFun
 
     let res = unsafe {
         slack_get_presence(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    // This should only happen if the Slack API returns a different structure
+    // than expected. Which would be odd because to get here the runtime
+    // successfully parsed the response.
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
+}
+
+/// Get a user's DND status from their ID
+pub fn get_dnd(bot: &str, id: &str) -> Result<GetDndInfoResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, get_dnd);
+    }
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&GetDndInfo {
+        bot: bot.to_string(),
+        id: id.to_string(),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_get_dnd(
             params.as_bytes().as_ptr(),
             params.as_bytes().len(),
             return_buffer.as_mut_ptr(),
