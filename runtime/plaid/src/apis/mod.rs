@@ -91,6 +91,8 @@ pub enum ApiError {
     YubikeyError(yubikey::YubikeyError),
     WebError(web::WebError),
     TestMode,
+    #[cfg(feature = "aws")]
+    IamError(String),
 }
 
 impl Api {
