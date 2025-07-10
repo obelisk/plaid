@@ -11,10 +11,7 @@ pub mod dynamodb;
 #[cfg(feature = "sled")]
 pub mod sled;
 
-pub mod in_memory;
-
 use futures_util::future::join_all;
-use in_memory::InMemoryDb;
 use serde::Deserialize;
 
 use crate::loader::LimitValue;
@@ -98,9 +95,6 @@ impl std::error::Error for StorageError {}
 /// Defines the basic methods that all storage providers must offer.
 #[async_trait]
 pub trait StorageProvider {
-    /// Return whether this storage provider is backed by persistent storage.
-    /// If not, it means the data only lives in memory and is lost in case of a reboot.
-    fn is_persistent(&self) -> bool;
     /// Insert a new key pair into the storage provider
     async fn insert(
         &self,
@@ -145,13 +139,6 @@ pub trait StorageProvider {
 }
 
 impl Storage {
-    pub fn new_in_memory() -> Self {
-        Self {
-            database: Box::new(InMemoryDb::new().unwrap()),
-            shared_dbs: None,
-        }
-    }
-
     pub async fn new(config: Config) -> Result<Self, StorageError> {
         // Try building a database from the values in the config
         let database: Box<dyn StorageProvider + Send + Sync> = match config.db {

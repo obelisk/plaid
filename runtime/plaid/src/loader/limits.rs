@@ -1,14 +1,12 @@
 use std::ptr::NonNull;
 
 use wasmer::{
-    sys::{
-        vm::{VMMemory, VMMemoryDefinition, VMTable, VMTableDefinition},
-        Tunables,
-    },
-    MemoryError, MemoryStyle, MemoryType, Pages, TableStyle, TableType,
+    vm::{self, MemoryError, MemoryStyle, TableStyle, VMMemoryDefinition, VMTableDefinition},
+    MemoryType, Pages, TableType, Tunables,
 };
 
 // This is to be able to set the tunables
+
 
 /// A custom tunables that allows you to set a memory limit.
 ///
@@ -86,7 +84,7 @@ impl<T: Tunables> Tunables for LimitingTunables<T> {
         &self,
         ty: &MemoryType,
         style: &MemoryStyle,
-    ) -> Result<VMMemory, MemoryError> {
+    ) -> Result<vm::VMMemory, MemoryError> {
         let adjusted = self.adjust_memory(ty);
         self.validate_memory(&adjusted)?;
         self.base.create_host_memory(&adjusted, style)
@@ -100,7 +98,7 @@ impl<T: Tunables> Tunables for LimitingTunables<T> {
         ty: &MemoryType,
         style: &MemoryStyle,
         vm_definition_location: NonNull<VMMemoryDefinition>,
-    ) -> Result<VMMemory, MemoryError> {
+    ) -> Result<vm::VMMemory, MemoryError> {
         let adjusted = self.adjust_memory(ty);
         self.validate_memory(&adjusted)?;
         self.base
@@ -110,7 +108,7 @@ impl<T: Tunables> Tunables for LimitingTunables<T> {
     /// Create a table owned by the host given a [`TableType`] and a [`TableStyle`].
     ///
     /// Delegated to base.
-    fn create_host_table(&self, ty: &TableType, style: &TableStyle) -> Result<VMTable, String> {
+    fn create_host_table(&self, ty: &TableType, style: &TableStyle) -> Result<vm::VMTable, String> {
         self.base.create_host_table(ty, style)
     }
 
@@ -122,7 +120,7 @@ impl<T: Tunables> Tunables for LimitingTunables<T> {
         ty: &TableType,
         style: &TableStyle,
         vm_definition_location: NonNull<VMTableDefinition>,
-    ) -> Result<VMTable, String> {
+    ) -> Result<vm::VMTable, String> {
         self.base.create_vm_table(ty, style, vm_definition_location)
     }
 }

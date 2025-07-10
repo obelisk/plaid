@@ -15,10 +15,7 @@ pub fn calculate_max_buffer_size(page_limit: u32) -> u32 {
 /// When a host function is executing we need to be able to access the guest's memory
 /// for read and write operations. This safely gets those from the environment and
 /// handles all failure cases.
-pub fn get_memory<'a>(
-    env: &FunctionEnvMut<Env>,
-    store: &'a StoreRef,
-) -> Result<MemoryView<'a>, FunctionErrors> {
+pub fn get_memory<'a>(env: &FunctionEnvMut<Env>, store: &'a StoreRef) -> Result<MemoryView<'a>, FunctionErrors> {
     // Fetch the store and memory which make up the needed components
     // of the execution environment.
     let memory = match &env.data().memory {
@@ -38,29 +35,20 @@ pub fn get_memory<'a>(
 
 /// Safely get a string from the guest's memory. This function will take a pointer provided by the
 /// guest, then use a built in function to read the string.
-pub fn safely_get_string(
-    memory_view: &MemoryView,
-    data_buffer: WasmPtr<u8>,
-    buffer_size: u32,
-) -> Result<String, FunctionErrors> {
+pub fn safely_get_string(memory_view: &MemoryView, data_buffer: WasmPtr<u8>, buffer_size: u32) -> Result<String, FunctionErrors> {
     match data_buffer.read_utf8_string(&memory_view, buffer_size as u32) {
         Ok(s) => Ok(s),
         Err(_) => {
             error!("Failed to read the log message from the guest's memory");
             Err(FunctionErrors::ParametersNotUtf8)
-        }
+        },
     }
 }
 
 /// Safely get a Vec<u8> from the guest's memory. This function will take a pointer provided by the
 /// guest, then do a bounds checked read. The buffer_size is validated against max_buffer_size
 /// to prevent malicious modules from requesting excessive memory allocations.
-pub fn safely_get_memory(
-    memory_view: &MemoryView,
-    data_buffer: WasmPtr<u8>,
-    buffer_size: u32,
-    max_buffer_size: u32,
-) -> Result<Vec<u8>, FunctionErrors> {
+pub fn safely_get_memory(memory_view: &MemoryView, data_buffer: WasmPtr<u8>, buffer_size: u32, max_buffer_size: u32) -> Result<Vec<u8>, FunctionErrors> {
     // Validate buffer size against the maximum allowed for this module
     if buffer_size > max_buffer_size {
         return Err(FunctionErrors::CouldNotGetAdequateMemory);
@@ -75,14 +63,9 @@ pub fn safely_get_memory(
 }
 
 /// Safely write data back to the guest's memory. This function will take a pointer provided
-/// to it by the guest, do some bounds checking, and then write the data back into the guest's
+/// to it by the guest, do some bounds checking, and then write the data back into the guest's 
 /// memory. It will return the number of bytes written or an error if the buffer is too small.
-pub fn safely_write_data_back(
-    memory_view: &MemoryView,
-    data: &[u8],
-    data_buffer: WasmPtr<u8>,
-    buffer_size: u32,
-) -> Result<i32, FunctionErrors> {
+pub fn safely_write_data_back(memory_view: &MemoryView, data: &[u8], data_buffer: WasmPtr<u8>, buffer_size: u32) -> Result<i32, FunctionErrors> {
     if buffer_size == 0 {
         return Ok(data.len() as i32);
     }
@@ -95,6 +78,7 @@ pub fn safely_write_data_back(
         .slice(&memory_view, data.len() as u32)
         .map_err(|_| FunctionErrors::CouldNotGetAdequateMemory)?;
 
+    
     for i in 0..data.len() {
         if let Err(_) = values.index(i as u64).write(data[i]) {
             return Err(FunctionErrors::FailedToWriteGuestMemory);

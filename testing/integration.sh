@@ -1,14 +1,8 @@
 #!/bin/bash
 
-# Set up all the variables we need to run the integration tests
-CONFIG_PATH="runtime/plaid/resources/config"
-CONFIG_WORKING_PATH="/tmp/plaid_config/configs"
-
-SECRET_PATH="runtime/plaid/resources/secrets.example.toml"
-SECRET_WORKING_PATH="/tmp/plaid_config/secrets.example.toml"
-
-export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
-
+# Build all of the Plaid workspace
+PLATFORM=$(uname -a)
+CONFIG_PATH="plaid/resources/plaid.toml"
 
 # Compiler should be passed in as the first argument
 if [ -z "$1" ]; then
@@ -17,13 +11,6 @@ if [ -z "$1" ]; then
 fi
 echo "Testing runtime with compiler: $1"
 
-# Set up the working directory
-rm -rf $CONFIG_WORKING_PATH
-mkdir -p $CONFIG_WORKING_PATH
-
-# Copy the configuration and secrets to the tmp directory
-cp -r $CONFIG_PATH/* $CONFIG_WORKING_PATH
-cp $SECRET_PATH $SECRET_WORKING_PATH
 
 # On macOS, we need to install a brew provided version of LLVM
 # so that we can compile WASM binaries.
@@ -31,6 +18,8 @@ if uname | grep -q Darwin; then
   echo "macOS detected so using LLVM from Homebrew for wasm32 compatibility"
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
+
+export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
 
 echo "Building All Plaid Modules"
 cd modules
@@ -45,68 +34,13 @@ cp -r modules/target/wasm32-unknown-unknown/release/test_*.wasm compiled_modules
 ssh-keygen -t ed25519 -f plaidrules_key_ed25519 -N ""
 public_key=$(cat plaidrules_key_ed25519.pub | awk '{printf "%s %s %s", $1, $2, $3}')
 
-# Generate a self-signed cert to test MNRs with
-openssl genrsa -out ca.key 4096
-
-# Generate a self-signed CA cert with CA:TRUE
-openssl req -x509 -new -nodes \
-  -key ca.key \
-  -days 1 \
-  -subj "/CN=My Test CA" \
-  -addext "basicConstraints = CA:TRUE,pathlen:1" \
-  -out ca.pem
-
-# Generate a server key + CSR
-openssl genrsa -out server.key 4096
-openssl req -new -key server.key \
-  -subj "/CN=localhost" \
-  -out server.csr
-
-# Create extfile for leaf cert
-cat > san.cnf <<EOF
-basicConstraints=CA:FALSE
-subjectAltName=DNS:localhost
-EOF
-
-# Sign the server CSR with CA
-openssl x509 -req \
-  -in server.csr \
-  -CA ca.pem -CAkey ca.key -CAcreateserial \
-  -days 1 \
-  -sha256 \
-  -extfile san.cnf \
-  -out server.pem
-
-escaped_cert=$(
-  awk 'BEGIN { ORS="\\n" }
-       {
-         gsub(/\\/,"\\\\");  # escape backslashes
-         gsub(/&/,"\\\&");   # escape ampersands
-         print
-       }' ca.pem
-)
-rm ca.* *.csr san.cnf
-mv server.pem server.key /tmp/plaid_config
-
-# Do any needed replacements within the secrets file
 if uname | grep -q Darwin; then
     # macOS (BSD sed)
-    sed -i '' "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" $SECRET_WORKING_PATH
-    sed -i '' "s|{CI_SLACK_TEST_WEBHOOK}|$SLACK_TEST_WEBHOOK|g" $SECRET_WORKING_PATH
-    sed -i '' "s|{CI_SLACK_TEST_BOT_TOKEN}|$SLACK_TEST_BOT_TOKEN|g" $SECRET_WORKING_PATH
-    sed -i '' "s|{CI_CERTIFICATE_PLACEHOLDER}|$escaped_cert|g" $SECRET_WORKING_PATH
+    sed -i '' "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" ./runtime/plaid/resources/secrets.example.toml
 else
     # Linux (GNU sed)
-    sed -i "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" $SECRET_WORKING_PATH
-    sed -i "s|{CI_SLACK_TEST_WEBHOOK}|$SLACK_TEST_WEBHOOK|g" $SECRET_WORKING_PATH
-    sed -i "s|{CI_SLACK_TEST_BOT_TOKEN}|$SLACK_TEST_BOT_TOKEN|g" $SECRET_WORKING_PATH
-    sed -i "s|{CI_CERTIFICATE_PLACEHOLDER}|$escaped_cert|g" $SECRET_WORKING_PATH
+    sed -i "s|{CI_PUBLIC_KEY_PLACEHOLDER}|$public_key|g" ./runtime/plaid/resources/secrets.example.toml
 fi
-
-# Clear out the module_signatures directory
-rm -rf module_signatures/*
-# Remove the old sled database if there is one (happens on repeated test runs)
-rm -rf /tmp/sled
 
 # Create module signatures directory
 mkdir module_signatures
@@ -135,10 +69,13 @@ echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
 
 if [ "$1" == "llvm" ]; then
-  # If the compiler is llvm, modify the config to use the llvm backend
-  sed -i 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' ${CONFIG_WORKING_PATH}/loading.toml
+  # If the compiler is llvm, modify the plaid.toml file to use the llvm backend
+  # and save to a new file
+  cp plaid/resources/plaid.toml plaid/resources/plaid.llvm.toml
+  sed -i.bak 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' plaid/resources/plaid.llvm.toml && rm plaid/resources/plaid.llvm.toml.bak
+  CONFIG_PATH="plaid/resources/plaid.llvm.toml"
   # If macOS
-  if uname | grep -q Darwin; then
+  if  uname | grep -q Darwin; then
     export RUSTFLAGS="-L /opt/homebrew/lib/"
     export LLVM_SYS_180_PREFIX="/opt/homebrew/Cellar/llvm@18/18.1.8"
   fi
@@ -150,7 +87,7 @@ if [ $? -ne 0 ]; then
   # Exit with an error
   exit 1
 fi
-RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features sled,$1 -- --config ${CONFIG_WORKING_PATH} --secrets $SECRET_WORKING_PATH &
+RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features sled,$1 -- --config ${CONFIG_PATH} --secrets plaid/resources/secrets.example.toml &
 PLAID_PID=$!
 cd ..
 sleep 60
@@ -164,7 +101,6 @@ for module in modules/tests/*; do
   if [ -d "$module" ]; then
     # If the module has a harness.sh file
     if [ -f "$module/harness/harness.sh" ]; then
-      echo "Running integration test for module $module"
       # Run the harness.sh file
       bash $module/harness/harness.sh
       # If the harness.sh file returns an error

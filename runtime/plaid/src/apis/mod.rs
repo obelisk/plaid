@@ -31,8 +31,7 @@ use tokio::runtime::Runtime;
 use web::{Web, WebConfig};
 use yubikey::{Yubikey, YubikeyConfig};
 
-use crate::data::DelayedMessage;
-use crate::executor::Message;
+use crate::{data::DelayedMessage, executor::Message};
 
 use self::rustica::{Rustica, RusticaConfig};
 

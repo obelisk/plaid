@@ -4,6 +4,7 @@ use crate::{executor::Env, functions::FunctionErrors};
 
 use super::{get_memory, safely_get_string, safely_write_data_back};
 
+
 /// Store data in the cache system if one is configured
 pub fn insert(
     env: FunctionEnvMut<Env>,
@@ -26,10 +27,7 @@ pub fn insert(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!(
-                "{}: Memory error in cache_insert: {:?}",
-                env_data.module.name, e
-            );
+            error!("{}: Memory error in cache_insert: {:?}", env_data.module.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -37,10 +35,7 @@ pub fn insert(
     let key = match safely_get_string(&memory_view, key_buf, key_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!(
-                "{}: Key error in cache_insert: {:?}",
-                env_data.module.name, e
-            );
+            error!("{}: Key error in cache_insert: {:?}", env_data.module.name, e);
             return FunctionErrors::ParametersNotUtf8 as i32;
         }
     };
@@ -49,10 +44,7 @@ pub fn insert(
     let value = match safely_get_string(&memory_view, value_buf, value_buf_len) {
         Ok(d) => d,
         Err(e) => {
-            error!(
-                "{}: Value error in cache_insert: {:?}",
-                env_data.module.name, e
-            );
+            error!("{}: Value error in cache_insert: {:?}", env_data.module.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -108,10 +100,7 @@ pub fn get(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!(
-                "{}: Memory error in cache_get: {:?}",
-                env_data.module.name, e
-            );
+            error!("{}: Memory error in cache_get: {:?}", env_data.module.name, e);
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
     };
@@ -134,10 +123,7 @@ pub fn get(
             ) {
                 Ok(x) => x,
                 Err(e) => {
-                    error!(
-                        "{}: Data write error in cache_get: {:?}",
-                        env_data.module.name, e
-                    );
+                    error!("{}: Data write error in cache_get: {:?}", env_data.module.name, e);
                     e as i32
                 }
             }

@@ -3,8 +3,6 @@ resolver = "2"
 
 
 members = [
-    "examples/example_github_graphql",
-
     "tests/test_crashtest",
     "tests/test_db",
     "tests/test_fileopen",
@@ -19,9 +17,6 @@ members = [
     "tests/test_time",
     "tests/test_shared_db_rule_1",
     "tests/test_shared_db_rule_2",
-    "tests/test_slack",
-
-    "load_tests/load_test",
 ]
 
 [profile.release]

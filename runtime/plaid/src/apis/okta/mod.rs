@@ -1,10 +1,7 @@
 mod groups;
 mod users;
 
-use jwt_simple::{
-    claims::Claims,
-    prelude::{Duration as JwtDuration, RS256KeyPair, RSAKeyPairLike},
-};
+use jwt_simple::{claims::Claims, prelude::{Duration as JwtDuration, RS256KeyPair, RSAKeyPairLike}};
 use reqwest::Client;
 use serde::{de, Deserialize, Serialize};
 
@@ -19,7 +16,7 @@ enum Authentication {
     /// Authenticate to the Okta API via an auth token
     ApiKey {
         /// The authentication token
-        token: String,
+        token: String
     },
     /// Authenticate to the Okta API as an Okta app
     OktaApp {
@@ -27,8 +24,8 @@ enum Authentication {
         client_id: String,
         /// Private key for the Okta app
         #[serde(deserialize_with = "private_key_deserializer")]
-        private_key: RS256KeyPair,
-    },
+        private_key: RS256KeyPair
+    }
 }
 
 /// Custom deserialize for an Okta app's private key.
@@ -40,8 +37,7 @@ where
     D: de::Deserializer<'de>,
 {
     let pem_key = String::deserialize(deserializer)?;
-    Ok(RS256KeyPair::from_pem(&pem_key)
-        .map_err(|_| de::Error::custom("Could not deserialize app's private key")))?
+    Ok(RS256KeyPair::from_pem(&pem_key).map_err(|_| de::Error::custom("Could not deserialize app's private key")))?
 }
 
 /// Configuration for Plaid's Okta API
@@ -73,14 +69,14 @@ pub enum OktaError {
     AuthenticationFailure,
     BadPrivateKey,
     JwtSignatureFailure,
-    BadJsonResponse,
+    BadJsonResponse
 }
 
 /// Which operation we will execute through the API. This is used to determine
 /// the OAuth 2.0 scope to include in the request for an access token.
 pub enum OktaOperation {
     GetUserInfo,
-    RemoveUserFromGroup,
+    RemoveUserFromGroup
 }
 
 impl OktaOperation {
@@ -90,7 +86,7 @@ impl OktaOperation {
             // https://developer.okta.com/docs/api/openapi/okta-management/management/tag/User/#tag/User/operation/getUser
             Self::GetUserInfo => "okta.users.read",
             // https://developer.okta.com/docs/api/openapi/okta-management/management/tag/Group/#tag/Group/operation/unassignUserFromGroup
-            Self::RemoveUserFromGroup => "okta.groups.manage",
+            Self::RemoveUserFromGroup => "okta.groups.manage"
         }
     }
 }
@@ -109,10 +105,7 @@ impl Okta {
     pub async fn get_authorization_header(&self, op: &OktaOperation) -> Result<String, OktaError> {
         match &self.config.authentication {
             Authentication::ApiKey { token } => Ok(format!("SSWS {}", token)),
-            Authentication::OktaApp {
-                client_id,
-                private_key,
-            } => {
+            Authentication::OktaApp { client_id, private_key } => {
                 let access_token = self.get_access_token(op, client_id, private_key).await?;
                 Ok(format!("Bearer {}", access_token))
             }
@@ -126,56 +119,40 @@ impl Okta {
             .with_issuer(client_id)
             .with_audience(format!("https://{}/oauth2/v1/token", self.config.domain))
             .with_subject(client_id);
-        Ok(private_key
-            .sign(claims)
-            .map_err(|_| OktaError::JwtSignatureFailure)?)
+        Ok(private_key.sign(claims).map_err(|_| OktaError::JwtSignatureFailure)?)
     }
 
     /// Obtain an access token from Okta, in exchange for a properly constructed JWT.
-    async fn get_access_token(
-        &self,
-        op: &OktaOperation,
-        client_id: &str,
-        private_key: &RS256KeyPair,
-    ) -> Result<String, OktaError> {
+    async fn get_access_token(&self, op: &OktaOperation, client_id: &str, private_key: &RS256KeyPair) -> Result<String, OktaError> {
         // For more details, see https://developer.okta.com/docs/guides/implement-oauth-for-okta-serviceapp/main/#get-an-access-token
         #[derive(Serialize)]
         struct Form<'a> {
             grant_type: &'a str,
             scope: &'a str,
             client_assertion_type: &'a str,
-            client_assertion: &'a str,
+            client_assertion: &'a str
         }
 
         #[derive(Deserialize)]
         #[allow(dead_code)]
-        struct AccessTokenResponse {
+        struct AccessTokenResponse{
             token_type: String,
             expires_in: u32,
             access_token: String,
-            scope: String,
+            scope: String
         }
 
         let form = Form {
             grant_type: "client_credentials",
             scope: op.to_okta_scope(),
             client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-            client_assertion: &self.get_jwt(client_id, private_key)?,
+            client_assertion: &self.get_jwt(client_id, private_key)?
         };
-        let req = self
-            .client
-            .post(format!("https://{}/oauth2/v1/token", self.config.domain))
+        let req = self.client.post(format!("https://{}/oauth2/v1/token", self.config.domain))
             .header("Accept", "application/json")
             .form(&form);
-        let res = req
-            .send()
-            .await
-            .map_err(|_| OktaError::AuthenticationFailure)?;
-        let access_token = res
-            .json::<AccessTokenResponse>()
-            .await
-            .map_err(|_| OktaError::BadJsonResponse)?
-            .access_token;
+        let res = req.send().await.map_err(|_| OktaError::AuthenticationFailure)?;
+        let access_token = res.json::<AccessTokenResponse>().await.map_err(|_| OktaError::BadJsonResponse)?.access_token;
         Ok(access_token)
     }
 }

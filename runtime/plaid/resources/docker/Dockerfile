@@ -20,4 +20,4 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /build/target/release/plaid /plaid
 RUN useradd -m plaiduser
 USER plaiduser
-CMD [ "/plaid", "--config", "/config/config", "--secrets", "/config/secrets.json" ]
+CMD [ "/plaid", "--config", "/config/plaid.toml", "--secrets", "/config/secrets.json" ]

@@ -1,6 +1,0 @@
-# Uncomment this to run with performance monitoring enabled
-[performance_monitoring]
-
-# This is an optional field. If no path is provided, the resulting
-# file is written to /runtime/performance-monitoring/metrics.txt
-# output_file_path = "../somedirectory/file.txt"

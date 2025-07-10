@@ -1,3 +1,0 @@
-# Configure the logging system. In this case we only configure the
-# stdout logger
-[logging."stdout"]

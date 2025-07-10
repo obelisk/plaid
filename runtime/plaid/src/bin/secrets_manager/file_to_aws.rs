@@ -30,87 +30,29 @@ pub async fn file_to_aws(
     // Upload secrets to SM
     for secret in secrets {
         println!("Uploading {}...", secret.name);
-
-        // If we don't want to overwrite existing secrets, just try to create and continue on
-        if !overwrite {
-            create_secret(&sm_client, &secret, &kms_key_id).await;
-            continue;
-        }
-
-        // If in overwrite mode, first get the ARN of the secret from Secrets Manager. If we cannot find an ARN
-        // for the secret, we'll just create the secret and continue
-        let secret_id = match sm_client
-            .get_secret_value()
-            .secret_id(&secret.name)
+        match sm_client
+            .create_secret()
+            .name(secret.name.clone())
+            .kms_key_id(kms_key_id.to_string())
+            .secret_string(secret.value)
+            .force_overwrite_replica_secret(overwrite)
             .send()
             .await
         {
-            Ok(response) => {
-                let Some(arn) = response.arn else {
-                    eprintln!(
-                        "No ARN present in response from Secrets Manager for {}. Skipping...",
-                        secret.name
-                    );
-                    continue;
-                };
-                arn
-            }
+            Ok(_) => {}
             Err(e) => {
                 let err = e.into_service_error();
-                if err.is_resource_not_found_exception() {
-                    println!(
-                        "No existing secret found for {}. Creating a new one...",
-                        &secret.name
+                // If it fails because a secret is already there, just log it but don't fail.
+                // Otherwise it is a real failure.
+                if err.is_resource_exists_exception() {
+                    println!("Secret with name {} already exists in Secrets Manager. Skipping (NOT overwriting) it...", secret.name);
+                } else {
+                    panic!(
+                        "Error while uploading secrets to AWS Secrets Manager: {}",
+                        err
                     );
-                    create_secret(&sm_client, &secret, &kms_key_id).await;
-                    continue;
                 }
-
-                eprintln!(
-                    "Failed to get ARN of {} from Secrets Manager and cannot update its value. Error: {err}",
-                    &secret.name
-                );
-                continue;
             }
-        };
-
-        let response = sm_client
-            .update_secret()
-            .secret_id(secret_id)
-            .kms_key_id(kms_key_id.to_string())
-            .secret_string(secret.value)
-            .send()
-            .await;
-
-        if let Err(e) = response {
-            eprintln!(
-                "Failed to update secret value for {}. Error: {e}",
-                secret.name
-            )
-        }
-    }
-}
-
-async fn create_secret(client: &Client, secret: &PlaidSecret, kms_key_id: &impl Display) {
-    let response = client
-        .create_secret()
-        .name(&secret.name)
-        .kms_key_id(kms_key_id.to_string())
-        .secret_string(&secret.value)
-        .send()
-        .await;
-
-    if let Err(e) = response {
-        let err = e.into_service_error();
-        // If it fails because a secret is already there, just log it but don't fail.
-        // Otherwise it is a real failure.
-        if err.is_resource_exists_exception() {
-            println!("Secret with name {} already exists in Secrets Manager. Skipping (NOT overwriting) it...", secret.name);
-        } else {
-            panic!(
-                "Error while uploading {} to AWS Secrets Manager. Error: {err}",
-                secret.name
-            );
         }
     }
 }
