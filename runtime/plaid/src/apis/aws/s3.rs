@@ -9,7 +9,7 @@ use aws_sdk_s3::operation::put_object_tagging::PutObjectTaggingError;
 use aws_sdk_s3::types::{Tag, Tagging};
 use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client};
 use plaid_stl::aws::s3::{
-    DeleteObjectRequest, GetObjectReponse, GetObjectRequest, ListObjectVersionsRequest,
+    DeleteObjectRequest, GetObjectRequest, GetObjectResponse, ListObjectVersionsRequest,
     ListObjectVersionsResponse, ListObjectsRequest, ListObjectsResponse, ObjectAttributes,
     ObjectVersion, PutObjectRequest, PutObjectTagRequest,
 };
@@ -309,7 +309,7 @@ impl S3 {
                 .await
                 .map_err(S3Errors::GetObjectError)?;
 
-            GetObjectReponse::PresignedUri(response.uri().to_string())
+            GetObjectResponse::PresignedUri(response.uri().to_string())
         } else {
             let response = request_builder
                 .send()
@@ -332,7 +332,7 @@ impl S3 {
                 .map_err(S3Errors::BytesStreamError)?
                 .into_bytes();
 
-            GetObjectReponse::Object(object_bytes.to_vec())
+            GetObjectResponse::Object(object_bytes.to_vec())
         };
 
         let serialized = serde_json::to_string(&response).map_err(|_| ApiError::BadRequest)?;
