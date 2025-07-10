@@ -16,9 +16,6 @@ use super::DataError;
 
 const LOGBACK_NS: &str = "logback_internal";
 
-#[derive(Deserialize, Default)]
-pub struct InternalConfig {}
-
 #[derive(Serialize, Deserialize)]
 pub struct DelayedMessage {
     pub delay: u64,
@@ -52,54 +49,49 @@ impl std::cmp::Ord for DelayedMessage {
 }
 
 pub struct Internal {
-    #[allow(dead_code)]
-    config: InternalConfig,
-    log_heap: BinaryHeap<Reverse<DelayedMessage>>,
     sender: Sender<Message>,
     receiver: Receiver<DelayedMessage>,
     internal_sender: Sender<DelayedMessage>,
-    storage: Option<Arc<Storage>>,
+    storage: Arc<Storage>,
+}
+
+/// Fill the log heap with the content read from the DB
+async fn fill_heap_from_db(
+    storage: Arc<Storage>,
+) -> Result<BinaryHeap<Reverse<DelayedMessage>>, DataError> {
+    let mut log_heap = BinaryHeap::new();
+
+    let previous_logs = storage
+        .fetch_all(LOGBACK_NS, None)
+        .await
+        .map_err(|e| DataError::StorageError(e))?;
+
+    for (key, value) in previous_logs {
+        // We want to extract from the DB a message and a delay.
+        let (message, delay) = match serde_json::from_slice::<DelayedMessage>(&value) {
+            Ok(item) => (item.message, item.delay),
+            Err(e) => {
+                warn!(
+                    "Skipping log in storage system which could not be deserialized [{e}]: {:X?}",
+                    key
+                );
+                continue;
+            }
+        };
+        log_heap.push(Reverse(DelayedMessage { delay, message }));
+    }
+
+    Ok(log_heap)
 }
 
 impl Internal {
     pub async fn new(
-        config: InternalConfig,
         log_sender: Sender<Message>,
-        storage: Option<Arc<Storage>>,
+        storage: Arc<Storage>,
     ) -> Result<Self, DataError> {
         let (internal_sender, receiver) = bounded(4096);
 
-        let mut log_heap = BinaryHeap::new();
-
-        if let Some(storage) = &storage {
-            let previous_logs = storage
-                .fetch_all(LOGBACK_NS, None)
-                .await
-                .map_err(|e| DataError::StorageError(e))?;
-
-            for (key, value) in previous_logs {
-                // We want to extract from the DB a message and a delay.
-                // First, we try deserializing the new format, where the DB key is a message ID, and the value is the serialized DelayedMessage
-                let (message, delay) = match serde_json::from_slice::<DelayedMessage>(&value) {
-                    Ok(item) => {
-                        // Everything OK, we were deserializing a logback in the "new" format
-                        (item.message, item.delay)
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Skipping log in storage system which could not be deserialized [{e}]: {:X?}",
-                            key
-                        );
-                        continue;
-                    }
-                };
-                log_heap.push(Reverse(DelayedMessage { delay, message }));
-            }
-        }
-
         Ok(Self {
-            config,
-            log_heap,
             sender: log_sender,
             receiver,
             internal_sender,
@@ -111,63 +103,70 @@ impl Internal {
         self.internal_sender.clone()
     }
 
-    pub async fn fetch_internal_logs(&mut self) -> Result<(), String> {
+    pub async fn fetch_internal_logs(&mut self, running_logbacks: bool) -> Result<(), String> {
         let start = SystemTime::now();
         let current_time = start
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
 
-        // Pull all logs off the channel, set their time, and put them on the heap.
-        //
-        // If persistence is available, we will also set them there in case the system
-        // reboots
+        // First, receive everything from the channel and write to DB
         while let Ok(mut log) = self.receiver.try_recv() {
             log.delay += current_time;
 
-            if let Some(storage) = &self.storage {
-                // Prepare what will be stored in the DB by serializing the DelayedMessage
-                if let Ok(db_item) = serde_json::to_vec(&log) {
-                    if let Err(e) = storage
-                        .insert(LOGBACK_NS.to_string(), log.message.id.clone(), db_item)
-                        .await
-                    {
-                        error!("Storage system could not persist a message: {e}");
-                    }
+            // Prepare what will be stored in the DB by serializing the DelayedMessage
+            if let Ok(db_item) = serde_json::to_vec(&log) {
+                if let Err(e) = self
+                    .storage
+                    .insert(LOGBACK_NS.to_string(), log.message.id.clone(), db_item)
+                    .await
+                {
+                    error!("Storage system could not persist a message: {e}");
                 }
             }
-
-            // Put the log into the in-memory heap
-            self.log_heap.push(Reverse(log));
         }
 
-        while let Some(heap_top) = self.log_heap.peek() {
-            let heap_top = &heap_top.0;
+        // If we are _not_ running logbacks, then we are done: we have sent the logbacks to the DB
+        // and someone else will pick them up.
+        // Instead, if we are running logbacks, then we continue by pulling from the DB and processing.
 
-            if current_time < heap_top.delay {
-                info!(
+        if running_logbacks {
+            // Fill the heap with the content read from the DB.
+            // This ensures that modifications which are made out-of-band to the DB are
+            // reflected in the heap's content.
+            let mut log_heap = fill_heap_from_db(self.storage.clone())
+                .await
+                .map_err(|e| format!("{e:?}"))?;
+
+            // Now the heap is reflecting the content of the DB: we can look at it
+            // and see if something should be executed.
+
+            while let Some(heap_top) = log_heap.peek() {
+                let heap_top = &heap_top.0;
+
+                if current_time < heap_top.delay {
+                    info!(
                     "There are no logs that have elapsed their delay. Next log is in: {} seconds",
                     heap_top.delay - current_time
                 );
-                break;
-            }
+                    break;
+                }
 
-            let log = self.log_heap.pop().unwrap();
-            if let Some(storage) = &self.storage {
+                let log = log_heap.pop().unwrap();
                 // Delete the logback from the storage because we are about to send it for processing.
-                // According to the new format, the key is the ID inside the DelayedMessage's message field
-                match storage.delete(LOGBACK_NS, &log.0.message.id).await {
+                match self.storage.delete(LOGBACK_NS, &log.0.message.id).await {
                     Ok(None) => {
                         error!("We tried to delete a log back message that wasn't persisted")
                     }
                     Ok(Some(_)) => (),
                     Err(e) => error!("Error removing persisted log: {e}"),
                 }
+                self.sender.send(log.0.message).unwrap();
             }
-            self.sender.send(log.0.message).unwrap();
+
+            debug!("Heap Size: {}", log_heap.len());
         }
 
-        debug!("Heap Size: {}", self.log_heap.len());
         Ok(())
     }
 }

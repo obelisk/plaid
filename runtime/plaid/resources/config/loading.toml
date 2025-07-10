@@ -1,0 +1,105 @@
+# Configure the loading and linking system. This configures how much
+# computation is allocated for module invocations and manual remapping
+# of module names to log types which is useful is a synthetic logtype
+# contains underscores.
+[loading]
+module_dir = "../compiled_modules/"
+lru_cache_size = 200
+compiler_backend = "cranelift"
+
+test_mode = true
+test_mode_exemptions = [
+    "test_crashtest.wasm",
+    "test_db.wasm",
+    "test_fileopen.wasm",
+    "test_get_everything.wasm",
+    "test_logback.wasm",
+    "test_mnr.wasm",
+    "test_persistent_response.wasm",
+    "test_random.wasm",
+    "test_regex.wasm",
+    "test_sshcerts_usage.wasm",
+    "test_time.wasm",
+    "test_shared_db_rule_1.wasm",
+    "test_shared_db_rule_2.wasm",
+    "test_slack.wasm",
+]
+
+
+[loading.persistent_response_size]
+"test_persistent_response.wasm" = 1024
+"test_sshcerts_usage.wasm" = 1024
+"test_logback.wasm" = 1024
+"test_mnr.wasm" = 1024
+"test_get_everything.wasm" = 1024
+"example_github_graphql.wasm" = 100_000
+
+[loading.universal_accessory_data]
+"key_1" = "value_1"
+"key_2" = "value_2"
+"key_4" = "value_4_ignored"
+
+[loading.accessory_data_log_type_overrides.test_geteverything]
+"key_1" = "value_1_intermediate"
+"key_4" = "value_4"
+
+[loading.accessory_data_file_overrides."test_get_everything.wasm"]
+"key_1" = "value_1_new"
+"key_3" = "value_3"
+
+[loading.secrets]
+[loading.secrets."testing"]
+"test_secret" = "{plaid-secret{test-secret}}"
+
+[loading.secrets."test_geteverything"]
+"my_secret" = "verySecureSecret"
+
+[loading.secrets."example_github_graphql"]
+"organization_fetch_auth_token" = "{plaid-secret{example-auth-token}}"
+
+[loading.log_type_overrides]
+"test_crashtest.wasm" = "crashtest"
+"test_db.wasm" = "test_db"
+"test_fileopen.wasm" = "test_fileopen"
+"test_get_everything.wasm" = "test_geteverything"
+"test_logback.wasm" = "test_logback"
+"test_mnr.wasm" = "test_mnr"
+"test_persistent_response.wasm" = "prtest"
+"test_random.wasm" = "test_random"
+"test_regex.wasm" = "test_regex"
+"test_sshcerts_usage.wasm" = "test_sshcerts"
+"test_testmode.wasm" = "testmode"
+"test_time.wasm" = "time"
+"test_shared_db_rule_1.wasm" = "test_shareddb_1"
+"test_shared_db_rule_2.wasm" = "test_shareddb_2"
+"test_slack.wasm" = "test_slack"
+"example_github_graphql.wasm" = "example_github_graphql"
+
+# Configure the computation amount. See the loader module for more
+# information on how computation cost is calculated.
+[loading.computation_amount]
+default = 55_000_000
+[loading.computation_amount.log_type]
+okta = 9_000_000
+[loading.computation_amount.module_overrides]
+"example_rule.wasm" = 5_000_000
+"test_shared_db_rule_1.wasm" = 1_000_000_000
+"test_shared_db_rule_2.wasm" = 1_000_000_000
+
+[loading.memory_page_count]
+default = 300
+[loading.memory_page_count.log_type]
+okta = 200
+[loading.memory_page_count.module_overrides]
+"example_rule.wasm" = 50
+"test_crashtest.wasm" = 150
+
+[loading.storage_size]
+default = "Unlimited"
+[loading.storage_size.log_type]
+[loading.storage_size.module_overrides]
+"test_db.wasm" = { Limited = 50 }
+
+[loading.module_signing]
+authorized_signers = ["{plaid-secret{public-key}}"]
+signatures_required = 1

@@ -29,6 +29,10 @@ impl Sled {
 
 #[async_trait]
 impl StorageProvider for Sled {
+    fn is_persistent(&self) -> bool {
+        true
+    }
+
     async fn insert(
         &self,
         namespace: String,

@@ -1,3 +1,5 @@
+pub mod thread_pools;
+
 use crate::apis::Api;
 
 use crate::functions::{
@@ -8,7 +10,8 @@ use crate::logging::{Logger, LoggingError};
 use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, TrySendError};
+use thread_pools::ExecutionThreadPools;
 use tokio::sync::oneshot::Sender as OneShotSender;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
@@ -18,8 +21,8 @@ use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// When a rule is used to generate a response to a GET request, this structure
 /// is what is passed from the executor to the async webhook runtime.
@@ -87,7 +90,6 @@ impl Message {
         data: Vec<u8>,
         source: LogSource,
         logbacks_allowed: LogbacksAllowed,
-        headers: HashMap<String, Vec<u8>>,
         query_params: HashMap<String, Vec<u8>>,
         response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
         module: Option<Arc<PlaidModule>>,
@@ -96,7 +98,7 @@ impl Message {
             id: uuid::Uuid::new_v4().to_string(),
             type_,
             data,
-            headers,
+            headers: HashMap::new(),
             query_params,
             source,
             logbacks_allowed,
@@ -145,7 +147,7 @@ pub struct Env {
 
 /// The executor that processes messages
 pub struct Executor {
-    _handles: Vec<JoinHandle<Result<(), ExecutorError>>>,
+    thread_pools: ExecutionThreadPools,
 }
 
 /// Errors encountered by the executor while trying to execute a module
@@ -409,24 +411,6 @@ fn process_message_with_module(
     els: Logger,
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
-    // For every module that operates on that log type
-    // Mark this rule as currently being processed by locking the mutex
-    // This lock will be dropped at the end of the iteration so we don't
-    // need to handle unlocking it
-    let _lock = match module.concurrency_unsafe {
-        Some(ref mutex) => match mutex.lock() {
-            Ok(guard) => Some(guard),
-            Err(p_err) => {
-                error!(
-                    "Lock was poisoned on [{}]. Clearing and continuing: {p_err}.",
-                    module.name
-                );
-                mutex.clear_poison();
-                mutex.lock().ok()
-            }
-        },
-        None => None,
-    };
     // TODO @obelisk: This will quietly swallow locking errors on the persistent response
     // This will eventually be caught if something tries to update the response but I don't
     // know if that's good enough.
@@ -606,28 +590,82 @@ fn determine_error(
 
 impl Executor {
     pub fn new(
-        receiver: Receiver<Message>,
+        thread_pools: ExecutionThreadPools,
         modules: HashMap<String, Vec<Arc<PlaidModule>>>,
         api: Arc<Api>,
         storage: Option<Arc<Storage>>,
-        execution_threads: u8,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
     ) -> Self {
-        let mut _handles = vec![];
-        for i in 0..execution_threads {
-            info!("Starting Execution Thread {i}");
-            let receiver = receiver.clone();
+        // General processing
+        for i in 0..thread_pools.general_pool.num_threads {
+            info!("Starting Execution Thread {i} Dedicated to General Processing");
+            let receiver = thread_pools.general_pool.receiver.clone();
             let api = api.clone();
             let storage = storage.clone();
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
-            _handles.push(thread::spawn(move || {
-                execution_loop(receiver, modules, api, storage, els, performance_sender)
-            }));
+            thread::spawn(move || loop {
+                if let Err(e) = execution_loop(
+                    receiver.clone(),
+                    modules.clone(),
+                    api.clone(),
+                    storage.clone(),
+                    els.clone(),
+                    performance_sender.clone(),
+                ) {
+                    error!("Execution thread exited with error: {e}");
+                }
+                thread::sleep(Duration::from_secs(10));
+            });
         }
 
-        Self { _handles }
+        // Dedicated processing
+        for (log_type, thread_pool) in &thread_pools.dedicated_pools {
+            for i in 0..thread_pool.num_threads {
+                info!("Starting Execution Thread {i} Dedicated to {log_type}");
+                let receiver = thread_pool.receiver.clone();
+                let api = api.clone();
+                let storage = storage.clone();
+                let modules = modules.clone();
+                let els = els.clone();
+                let performance_sender = performance_monitoring_mode.clone();
+                thread::spawn(move || loop {
+                    if let Err(e) = execution_loop(
+                        receiver.clone(),
+                        modules.clone(),
+                        api.clone(),
+                        storage.clone(),
+                        els.clone(),
+                        performance_sender.clone(),
+                    ) {
+                        error!("Execution thread exited with error: {e}");
+                    }
+                    thread::sleep(Duration::from_secs(10));
+                });
+            }
+        }
+        Self { thread_pools }
+    }
+
+    /// Execute a message coming from a webhook, by sending it to the appropriate thread pool.
+    /// That will be the thread pool dedicated to the message's type, if one exists, or the
+    /// default thread pool for general execution.
+    pub fn execute_webhook_message(
+        self: &Self,
+        message: Message,
+    ) -> Result<(), TrySendError<Message>> {
+        let sender = match self.thread_pools.dedicated_pools.get(&message.type_) {
+            Some(tp) => {
+                // We have a dedicated thread pool for this type: send the log to that channel
+                &tp.sender
+            }
+            None => {
+                // We have no dedicated thread pool for this type: just send to the general one.
+                &self.thread_pools.general_pool.sender
+            }
+        };
+        sender.try_send(message)
     }
 }
