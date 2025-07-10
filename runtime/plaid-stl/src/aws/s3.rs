@@ -16,7 +16,7 @@ pub enum ObjectFetchMode {
 
 /// Represents the response returned from the `get_object` function.
 #[derive(Deserialize, Serialize, Debug)]
-pub enum GetObjectReponse {
+pub enum GetObjectResponse {
     /// The full object data.
     Object(Vec<u8>),
     /// A presigned URI for accessing the object.
@@ -353,7 +353,7 @@ pub fn get_object(
     bucket_id: &str,
     object_key: &str,
     fetch_mode: ObjectFetchMode,
-) -> Result<GetObjectReponse, PlaidFunctionError> {
+) -> Result<GetObjectResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_s3, get_object);
     }
