@@ -240,7 +240,7 @@ macro_rules! impl_new_sub_module_function_with_error_buffer {
 
                 // Check that AWS API is configured
                 let aws = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
-                let sub_module = &aws.$sub_module.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
+                let sub_module = aws.$sub_module.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
 
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
@@ -336,7 +336,7 @@ macro_rules! impl_new_sub_module_function {
 
                 // Check that API is configured
                 let api = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
-                let sub_module = &api.$sub_module.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
+                let sub_module = api.$sub_module.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
 
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
