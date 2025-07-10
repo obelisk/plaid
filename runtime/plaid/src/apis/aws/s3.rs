@@ -196,27 +196,11 @@ impl S3 {
             .versions()
             .iter()
             .filter_map(|ver| {
-                let Some(version_id) = ver.version_id.clone() else {
-                    return None;
-                };
-
-                let Some(key) = ver.key.clone() else {
-                    return None;
-                };
-
-                let Some(is_latest) = ver.is_latest else {
-                    return None;
-                };
-
-                let Some(last_modified) = ver.last_modified else {
-                    return None;
-                };
-
                 Some(ObjectVersion {
-                    key,
-                    is_latest,
-                    last_modified: last_modified.secs(),
-                    version_id,
+                    key: ver.key.clone()?,
+                    is_latest: ver.is_latest?,
+                    last_modified: ver.last_modified?.secs(),
+                    version_id: ver.version_id.clone()?,
                 })
             })
             .collect::<Vec<_>>();
