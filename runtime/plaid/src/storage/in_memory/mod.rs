@@ -72,47 +72,17 @@ impl StorageProvider for InMemoryDb {
         &self,
         namespace: &str,
         prefix: Option<&str>,
-    ) -> Result<Vec<(String, Vec<u8>)>, StorageError> {
+    ) -> Result<Vec<(String, Option<Vec<u8>>)>, StorageError> {
         let db = self.db.read().await;
         let values = db
             .get(namespace)
             .map(|ns| {
                 ns.iter()
                     .filter(|(k, _)| prefix.map_or(true, |p| k.starts_with(p)))
-                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .map(|(k, v)| (k.clone(), Some(v.clone())))
                     .collect()
             })
             .unwrap_or_default();
         Ok(values)
-    }
-
-    async fn get_namespace_byte_size(&self, namespace: &str) -> Result<u64, StorageError> {
-        let all = self.fetch_all(namespace, None).await?;
-        let mut counter = 0u64;
-        for item in all {
-            // Count bytes for keys and values
-            counter += item.0.as_bytes().len() as u64 + item.1.len() as u64;
-        }
-        Ok(counter)
-    }
-
-    async fn apply_migration(
-        &self,
-        namespace: &str,
-        f: Box<dyn Fn(String, Vec<u8>) -> (String, Vec<u8>) + Send + Sync>,
-    ) -> Result<(), StorageError> {
-        // Get all the data for this namespace
-        let data = self.fetch_all(namespace, None).await?;
-        // For each key/value pair, perform the migration...
-        for (key, value) in data {
-            // Apply the transformation and obtain a new key and new value
-            let (new_key, new_value) = f(key.clone(), value);
-            // Delete the old entry because we are about to insert the new one
-            self.delete(namespace, &key).await?;
-            // And insert the new pair
-            self.insert(namespace.to_string(), new_key, new_value)
-                .await?;
-        }
-        Ok(())
     }
 }

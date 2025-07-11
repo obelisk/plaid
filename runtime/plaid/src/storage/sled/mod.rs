@@ -117,7 +117,7 @@ impl StorageProvider for Sled {
         &self,
         namespace: &str,
         prefix: Option<&str>,
-    ) -> Result<Vec<(String, Vec<u8>)>, StorageError> {
+    ) -> Result<Vec<(String, Option<Vec<u8>>)>, StorageError> {
         let tree = self
             .db
             .open_tree(namespace.as_bytes())
@@ -129,11 +129,11 @@ impl StorageProvider for Sled {
         };
         // The use of a filter_map here means keys that fail to be pulled will be thrown away.
         // I don't know if this is possible? Maybe if the database is moved out from under us?
-        let data: Vec<(String, Vec<u8>)> = key_iter
+        let data = key_iter
             .filter_map(|x| match x {
                 Ok((k, v)) => String::from_utf8(k.to_vec())
                     .ok()
-                    .map(|key| (key, v.to_vec())),
+                    .map(|key| (key, Some(v.to_vec()))),
                 Err(e) => {
                     error!("Storage Error Listing Keys: {e}");
                     None
@@ -142,35 +142,5 @@ impl StorageProvider for Sled {
             .collect();
 
         Ok(data)
-    }
-
-    async fn get_namespace_byte_size(&self, namespace: &str) -> Result<u64, StorageError> {
-        let all = self.fetch_all(namespace, None).await?;
-        let mut counter = 0u64;
-        for item in all {
-            // Count bytes for keys and values
-            counter += item.0.as_bytes().len() as u64 + item.1.len() as u64;
-        }
-        Ok(counter)
-    }
-
-    async fn apply_migration(
-        &self,
-        namespace: &str,
-        f: Box<dyn Fn(String, Vec<u8>) -> (String, Vec<u8>) + Send + Sync>,
-    ) -> Result<(), StorageError> {
-        // Get all the data for this namespace
-        let data = self.fetch_all(namespace, None).await?;
-        // For each key/value pair, perform the migration...
-        for (key, value) in data {
-            // Apply the transformation and obtain a new key and new value
-            let (new_key, new_value) = f(key.clone(), value);
-            // Delete the old entry because we are about to insert the new one
-            self.delete(namespace, &key).await?;
-            // And insert the new pair
-            self.insert(namespace.to_string(), new_key, new_value)
-                .await?;
-        }
-        Ok(())
     }
 }
