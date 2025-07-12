@@ -241,7 +241,8 @@ pub struct GetDndInfo {
 pub struct GetDndInfoResponse {
     pub ok: bool,
     pub dnd_enabled: bool,
-    // There are other fields but we don't need to parse them.
+    pub next_dnd_start_ts: u64,
+    pub next_dnd_end_ts: u64,
     // Note: there is a `snooze_enabled` property but the docs say
     //   "All of the snooze_* properties will only be visible if the user being queried is also the current user."
     // Therefore we leave it out because the typical use case is retrieving info about another user.
