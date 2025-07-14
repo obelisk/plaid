@@ -42,12 +42,13 @@ pub struct SharedDb {
 
 /// Plaid's DB layer
 #[derive(Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "type")]
 pub enum DatabaseConfig {
     #[cfg(feature = "sled")]
     Sled(sled::Config),
     #[cfg(feature = "aws")]
     DynamoDb(dynamodb::Config),
+    InMemory,
 }
 
 /// Plaid's storage configuration
@@ -192,6 +193,7 @@ impl Storage {
                     .await
                     .map_err(|e| StorageError::StorageInitError(e))?,
             ),
+            Some(DatabaseConfig::InMemory) => Box::new(InMemoryDb::new().unwrap()), // unwrap OK: cannot fail
             _ => {
                 return Err(StorageError::NoStorageConfigured);
             }
