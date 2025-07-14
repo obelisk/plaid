@@ -58,9 +58,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None => {
                     info!("No DB configured");
                 }
+                #[cfg(feature = "aws")]
                 Some(storage::DatabaseConfig::DynamoDb(_)) => {
                     info!("Using DynamoDB");
                 }
+                #[cfg(feature = "sled")]
                 Some(storage::DatabaseConfig::Sled(_)) => {
                     info!("Using Sled");
                 }
