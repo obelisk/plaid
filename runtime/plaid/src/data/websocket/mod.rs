@@ -220,7 +220,11 @@ impl WebsocketGenerator {
                         return;
                     };
 
-                    logger.log_websocket_dropped(socket_name).unwrap();
+                    if let Err(e) = logger.log_websocket_dropped(socket_name.clone()) {
+                        error!(
+                            "Failed to log WebSocket drop for socket [{socket_name}]. Error: {e}",
+                        );
+                    };
 
                     client.uri_selector.mark_failed();
                 }
