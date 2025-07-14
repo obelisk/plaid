@@ -4,9 +4,14 @@ r = ["test_shared_db_rule_1.wasm"]
 rw = ["test_shared_db_rule_2.wasm"]
 
 [storage.db]
-sled_path = "/tmp/sled"
+type = "InMemory"
 
 # [storage.db]
+# type = "Sled"
+# sled_path = "/tmp/sled"
+
+# [storage.db]
+# type = "DynamoDb"
 # table_name = "test-plaid"
 
 # [storage.db.authentication]
