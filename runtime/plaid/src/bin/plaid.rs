@@ -54,6 +54,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = match config.storage {
         Some(config) => {
             info!("Storage system configured");
+            match config.db {
+                None => {
+                    info!("No DB configured");
+                }
+                #[cfg(feature = "aws")]
+                Some(storage::DatabaseConfig::DynamoDb(_)) => {
+                    info!("Using DynamoDB");
+                }
+                #[cfg(feature = "sled")]
+                Some(storage::DatabaseConfig::Sled(_)) => {
+                    info!("Using Sled");
+                }
+                Some(storage::DatabaseConfig::InMemory) => {
+                    info!("Using an in-memory DB");
+                    warn!(
+                        "!!! This is just an in-memory storage and is NOT persisted across reboots !!!"
+                    )
+                }
+            }
             let s = Arc::new(Storage::new(config).await?);
             match &s.shared_dbs {
                 None => info!("No shared DBs configured"),
