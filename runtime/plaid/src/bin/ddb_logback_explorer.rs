@@ -38,13 +38,12 @@ impl Ord for TmpLogback {
     }
 }
 
-impl TryFrom<(String, Vec<u8>)> for DbEntry {
+impl TryFrom<(String, Option<Vec<u8>>)> for DbEntry {
     type Error = String;
 
-    fn try_from(input: (String, Vec<u8>)) -> Result<Self, Self::Error> {
-        let value =
-            String::from_utf8(input.1).map_err(|_| "The value is not printable".to_string())?;
-        let delayed_message = serde_json::from_str::<DelayedMessage>(&value)
+    fn try_from(input: (String, Option<Vec<u8>>)) -> Result<Self, Self::Error> {
+        let value = input.1.ok_or("The value is not present".to_string())?;
+        let delayed_message = serde_json::from_slice::<DelayedMessage>(&value)
             .map_err(|_| "Failed to parse DelayedMessage".to_string())?;
         Ok(DbEntry {
             key: input.0,
@@ -54,7 +53,10 @@ impl TryFrom<(String, Vec<u8>)> for DbEntry {
 }
 
 /// Get all the data (keys and values) from a given namespace.
-async fn fetch_all(table_name: &str, namespace: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
+async fn fetch_all(
+    table_name: &str,
+    namespace: &str,
+) -> Result<Vec<(String, Option<Vec<u8>>)>, String> {
     let config = plaid::storage::dynamodb::Config {
         authentication: plaid::AwsAuthentication::Iam {},
         table_name: table_name.to_string(),

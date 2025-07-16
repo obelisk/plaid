@@ -179,7 +179,7 @@ impl StorageProvider for DynamoDb {
         &self,
         namespace: &str,
         prefix: Option<&str>,
-    ) -> Result<Vec<(String, Vec<u8>)>, StorageError> {
+    ) -> Result<Vec<(String, Option<Vec<u8>>)>, StorageError> {
         let mut everything = vec![];
 
         let items = dynamodb_query(
@@ -193,60 +193,30 @@ impl StorageProvider for DynamoDb {
 
         // Add retrieved items to our growing list
         for item in &items {
-            everything.push((
-                item.get(KEY)
-                    .ok_or(StorageError::Access(
-                        "Could not list storage contents".to_string(),
-                    ))?
-                    .as_s()
-                    .map_err(|_| {
-                        StorageError::Access("Could not list storage contents".to_string())
-                    })?
-                    .clone(),
-                item.get(VALUE)
-                    .ok_or(StorageError::Access(
-                        "Could not list storage contents".to_string(),
-                    ))?
-                    .as_b()
-                    .map_err(|_| {
-                        StorageError::Access("Could not list storage contents".to_string())
-                    })?
-                    .clone()
-                    .into_inner(),
-            ));
+            let key = item
+                .get(KEY)
+                .ok_or(StorageError::Access(
+                    "Could not list storage contents".to_string(),
+                ))?
+                .as_s()
+                .map_err(|_| StorageError::Access("Could not list storage contents".to_string()))?;
+
+            let value = match item.get(VALUE) {
+                None => None,
+                Some(v) => Some(
+                    v.as_b()
+                        .map_err(|_| {
+                            StorageError::Access("Could not list storage contents".to_string())
+                        })?
+                        .clone()
+                        .into_inner(),
+                ),
+            };
+
+            everything.push((key.to_string(), value));
         }
 
         Ok(everything)
-    }
-
-    async fn get_namespace_byte_size(&self, namespace: &str) -> Result<u64, StorageError> {
-        let all = self.fetch_all(namespace, None).await?;
-        let mut counter = 0u64;
-        for item in all {
-            // Count bytes for keys and values
-            counter += item.0.as_bytes().len() as u64 + item.1.len() as u64;
-        }
-        Ok(counter)
-    }
-
-    async fn apply_migration(
-        &self,
-        namespace: &str,
-        f: Box<dyn Fn(String, Vec<u8>) -> (String, Vec<u8>) + Send + Sync>,
-    ) -> Result<(), StorageError> {
-        // Get all the data for this namespace
-        let data = self.fetch_all(namespace, None).await?;
-        // For each key/value pair, perform the migration...
-        for (key, value) in data {
-            // Apply the transformation and obtain a new key and new value
-            let (new_key, new_value) = f(key.clone(), value);
-            // Delete the old entry because we are about to insert the new one
-            self.delete(namespace, &key).await?;
-            // And insert the new pair
-            self.insert(namespace.to_string(), new_key, new_value)
-                .await?;
-        }
-        Ok(())
     }
 }
 

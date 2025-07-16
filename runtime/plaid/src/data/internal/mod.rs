@@ -67,18 +67,22 @@ async fn fill_heap_from_db(
         .map_err(|e| DataError::StorageError(e))?;
 
     for (key, value) in previous_logs {
-        // We want to extract from the DB a message and a delay.
-        let (message, delay) = match serde_json::from_slice::<DelayedMessage>(&value) {
-            Ok(item) => (item.message, item.delay),
-            Err(e) => {
-                warn!(
-                    "Skipping log in storage system which could not be deserialized [{e}]: {:X?}",
-                    key
-                );
-                continue;
-            }
-        };
-        log_heap.push(Reverse(DelayedMessage { delay, message }));
+        if let Some(value) = value {
+            // We want to extract from the DB a message and a delay.
+            let (message, delay) = match serde_json::from_slice::<DelayedMessage>(&value) {
+                Ok(item) => (item.message, item.delay),
+                Err(e) => {
+                    warn!(
+                        "Skipping log in storage system which could not be deserialized [{e}]: {:X?}",
+                        key
+                    );
+                    continue;
+                }
+            };
+            log_heap.push(Reverse(DelayedMessage { delay, message }));
+        } else {
+            warn!("Empty value for logback with key {key}, skipping it.");
+        }
     }
 
     Ok(log_heap)
