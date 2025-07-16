@@ -299,4 +299,11 @@ impl DataGenerator for &mut Okta {
             ))
             .map_err(|_| ())
     }
+
+    fn list_already_seen(&self) -> Vec<String> {
+        self.seen_logs_uuid
+            .iter()
+            .map(|(key, _val)| key.to_string())
+            .collect()
+    }
 }
