@@ -19,7 +19,6 @@ use std::{
 
 use crossbeam_channel::Sender;
 
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use time::OffsetDateTime;
 
@@ -258,13 +257,12 @@ fn get_time() -> u64 {
         .as_secs()
 }
 
-async fn read_from_storage<T: DeserializeOwned>(
+async fn read_vec_from_storage(
     storage: &Option<Arc<Storage>>,
     namespace: &str,
     key: &str,
-    parse_utf8: bool,
     dg_name: &str,
-) -> Option<T> {
+) -> Option<Vec<String>> {
     let storage = match storage {
         None => return None,
         Some(s) => s,
@@ -275,25 +273,43 @@ async fn read_from_storage<T: DeserializeOwned>(
             error!("Could not read {key} for {dg_name} from storage: {e}");
             None
         }
-        Ok(Some(res)) => {
-            if parse_utf8 {
-                match String::from_utf8(res.clone()) {
-                    Ok(s) => serde_json::from_str(&s).ok(),
-                    Err(e) => {
-                        error!("Could not parse {key} (UTF-8) for {dg_name}: {e}");
-                        None
-                    }
-                }
-            } else {
-                match serde_json::from_slice(&res) {
-                    Ok(v) => Some(v),
-                    Err(e) => {
-                        error!("Could not parse {key} for {dg_name} from storage: {e}");
-                        None
-                    }
-                }
+        Ok(Some(res)) => match serde_json::from_slice(&res) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                error!("Could not parse {key} for {dg_name} from storage: {e}");
+                None
             }
+        },
+        Ok(None) => {
+            info!("Could not find {key} for {dg_name} in storage");
+            None
         }
+    }
+}
+
+async fn read_string_from_storage(
+    storage: &Option<Arc<Storage>>,
+    namespace: &str,
+    key: &str,
+    dg_name: &str,
+) -> Option<String> {
+    let storage = match storage {
+        None => return None,
+        Some(s) => s,
+    };
+
+    match storage.get(namespace, key).await {
+        Err(e) => {
+            error!("Could not read {key} for {dg_name} from storage: {e}");
+            None
+        }
+        Ok(Some(res)) => match String::from_utf8(res.clone()) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                error!("Could not parse {key} (UTF-8) for {dg_name}: {e}");
+                None
+            }
+        },
         Ok(None) => {
             info!("Could not find {key} for {dg_name} in storage");
             None
@@ -367,19 +383,26 @@ pub async fn get_and_process_dg_logs(
     // if Plaid was not running for some period of time.
 
     let storage_namespace = &format!("{DATA_GENERATOR_STORAGE_PREFIX}_{}", dg.get_name());
+    debug!("Storage namespace for DG state: {storage_namespace}");
 
     let last_seen: Option<String> =
-        read_from_storage::<String>(storage, storage_namespace, LAST_SEEN, true, &dg.get_name())
-            .await;
+        read_string_from_storage(storage, storage_namespace, LAST_SEEN, &dg.get_name()).await;
+    match last_seen {
+        Some(ref ls) => debug!("last_seen's value is {ls}"),
+        None => debug!("last_seen is None!"),
+    }
 
-    let seen_logs_uuids: Option<Vec<String>> = read_from_storage::<Vec<String>>(
+    let seen_logs_uuids: Option<Vec<String>> = read_vec_from_storage(
         storage,
         storage_namespace,
         ALREADY_SEEN_UUIDS,
-        false,
         &dg.get_name(),
     )
     .await;
+    match seen_logs_uuids {
+        Some(ref slu) => debug!("seen_logs_uuids is fine and has {} elements", slu.len()),
+        None => debug!("seen_logs_uuids is None!"),
+    }
 
     update_dg_from_storage(&mut dg, last_seen, seen_logs_uuids);
 
