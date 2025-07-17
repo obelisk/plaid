@@ -25,8 +25,8 @@ use time::OffsetDateTime;
 pub use self::internal::DelayedMessage;
 
 const DATA_GENERATOR_STORAGE_PREFIX: &str = "__DATA_GENERATOR";
-const LAST_SEEN: &str = "last_seen";
-const ALREADY_SEEN_UUIDS: &str = "already_seen_uuids";
+const LAST_SEEN_KEY: &str = "last_seen";
+const ALREADY_SEEN_UUIDS_KEY: &str = "already_seen_uuids";
 
 // Configure data sources that Plaid will use fetch data itself and
 // send to modules
@@ -386,7 +386,7 @@ pub async fn get_and_process_dg_logs(
     debug!("Storage namespace for DG state: {storage_namespace}");
 
     let last_seen: Option<String> =
-        read_string_from_storage(storage, storage_namespace, LAST_SEEN, &dg.get_name()).await;
+        read_string_from_storage(storage, storage_namespace, LAST_SEEN_KEY, &dg.get_name()).await;
     match last_seen {
         Some(ref ls) => debug!("last_seen's value is {ls}"),
         None => debug!("last_seen is None!"),
@@ -395,7 +395,7 @@ pub async fn get_and_process_dg_logs(
     let seen_logs_uuids: Option<Vec<String>> = read_vec_from_storage(
         storage,
         storage_namespace,
-        ALREADY_SEEN_UUIDS,
+        ALREADY_SEEN_UUIDS_KEY,
         &dg.get_name(),
     )
     .await;
@@ -516,7 +516,7 @@ pub async fn get_and_process_dg_logs(
                 if let Err(e) = storage
                     .insert(
                         storage_namespace.to_string(),
-                        LAST_SEEN.to_string(),
+                        LAST_SEEN_KEY.to_string(),
                         dg.get_last_seen()
                             .unix_timestamp_nanos()
                             .to_string()
@@ -526,7 +526,7 @@ pub async fn get_and_process_dg_logs(
                     .await
                 {
                     error!(
-                        "Could not store {LAST_SEEN} for DG {}. Continuing anyway. Error: {e}",
+                        "Could not store {LAST_SEEN_KEY} for DG {}. Continuing anyway. Error: {e}",
                         dg.get_name()
                     );
                 }
@@ -538,12 +538,12 @@ pub async fn get_and_process_dg_logs(
                 if let Err(e) = storage
                     .insert(
                         storage_namespace.to_string(),
-                        ALREADY_SEEN_UUIDS.to_string(),
+                        ALREADY_SEEN_UUIDS_KEY.to_string(),
                         already_seen,
                     )
                     .await
                 {
-                    error!("Could not store {ALREADY_SEEN_UUIDS} for DG {}. Continuing anyway. Error: {e}", dg.get_name());
+                    error!("Could not store {ALREADY_SEEN_UUIDS_KEY} for DG {}. Continuing anyway. Error: {e}", dg.get_name());
                 }
             }
         }
