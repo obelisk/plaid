@@ -111,7 +111,7 @@ impl Data {
                 handle.spawn(async move {
                     loop {
                         if let Err(_) =
-                            get_and_process_dg_logs(&mut gh, &Some(storage_clone.clone())).await
+                            get_and_process_dg_logs(&mut gh, Some(storage_clone.clone())).await
                         {
                             error!("GitHub Data Fetch Error")
                         }
@@ -127,7 +127,7 @@ impl Data {
                 handle.spawn(async move {
                     loop {
                         if let Err(_) =
-                            get_and_process_dg_logs(&mut okta, &Some(storage_clone.clone())).await
+                            get_and_process_dg_logs(&mut okta, Some(storage_clone.clone())).await
                         {
                             error!("Okta Data Fetch Error")
                         }
@@ -258,15 +258,12 @@ fn get_time() -> u64 {
 }
 
 async fn read_vec_from_storage(
-    storage: &Option<Arc<Storage>>,
+    storage: Option<Arc<Storage>>,
     namespace: &str,
     key: &str,
     dg_name: &str,
 ) -> Option<Vec<String>> {
-    let storage = match storage {
-        None => return None,
-        Some(s) => s,
-    };
+    let storage = storage?;
 
     match storage.get(namespace, key).await {
         Err(e) => {
@@ -288,15 +285,12 @@ async fn read_vec_from_storage(
 }
 
 async fn read_string_from_storage(
-    storage: &Option<Arc<Storage>>,
+    storage: Option<Arc<Storage>>,
     namespace: &str,
     key: &str,
     dg_name: &str,
 ) -> Option<String> {
-    let storage = match storage {
-        None => return None,
-        Some(s) => s,
-    };
+    let storage = storage?;
 
     match storage.get(namespace, key).await {
         Err(e) => {
@@ -374,7 +368,7 @@ fn update_dg_from_storage<T: DataGenerator>(
 /// Internally, this method handles making overlapping queries and logs de-duplication.
 pub async fn get_and_process_dg_logs(
     mut dg: impl DataGenerator,
-    storage: &Option<Arc<Storage>>,
+    storage: Option<Arc<Storage>>,
 ) -> Result<(), ()> {
     let sleep_duration = Duration::from_millis(dg.get_sleep_duration());
 
@@ -385,15 +379,20 @@ pub async fn get_and_process_dg_logs(
     let storage_namespace = &format!("{DATA_GENERATOR_STORAGE_PREFIX}_{}", dg.get_name());
     debug!("Storage namespace for DG state: {storage_namespace}");
 
-    let last_seen: Option<String> =
-        read_string_from_storage(storage, storage_namespace, LAST_SEEN_KEY, &dg.get_name()).await;
+    let last_seen: Option<String> = read_string_from_storage(
+        storage.clone(),
+        storage_namespace,
+        LAST_SEEN_KEY,
+        &dg.get_name(),
+    )
+    .await;
     match last_seen {
         Some(ref ls) => debug!("last_seen's value is {ls}"),
         None => debug!("last_seen is None!"),
     }
 
     let seen_logs_uuids: Option<Vec<String>> = read_vec_from_storage(
-        storage,
+        storage.clone(),
         storage_namespace,
         ALREADY_SEEN_UUIDS_KEY,
         &dg.get_name(),
@@ -510,7 +509,7 @@ pub async fn get_and_process_dg_logs(
         }
         // If we are here, then we sent something for processing: we update the DG's state in the storage so that,
         // in case of a reboot, we can continue from where we had left off.
-        match storage {
+        match &storage {
             None => (),
             Some(storage) => {
                 if let Err(e) = storage
