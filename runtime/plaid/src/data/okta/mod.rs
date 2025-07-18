@@ -42,6 +42,12 @@ pub struct OktaConfig {
     /// Size of the LRU cache that we use to deduplicate logs
     #[serde(default = "default_lru_cache_size")]
     lru_cache_size: usize,
+    /// Max number of seconds in the since..until span for pulling logs from the source
+    #[serde(default = "default_since_until")]
+    max_since_until: u64,
+    /// Max number of seconds for the look-back window
+    #[serde(default = "default_max_catchup")]
+    max_catchup: u64,
 }
 
 /// Custom parser for limit. Returns an error if a limit = 0 or limit > 1000 is given
@@ -67,6 +73,18 @@ where
 /// of `OktaConfig` in the event that no value is provided.
 fn default_sleep_milliseconds() -> u64 {
     1000
+}
+
+/// This function provides the default max value for the since..until time span, in seconds.
+/// It is used as the default value for deserialization of the `max_since_until` field,
+/// of `OktaConfig` in the event that no value is provided.
+fn default_since_until() -> u64 {
+    60
+}
+
+/// This function provides the default max value for the max catch-up look-back window.
+fn default_max_catchup() -> u64 {
+    3 * 3600 // 3 hours
 }
 
 /// This function provides the default size of the LRU cache.
@@ -120,7 +138,7 @@ impl Okta {
     }
 }
 
-impl DataGenerator for &mut Okta {
+impl DataGenerator for Okta {
     // For the documentation on these methods, see the trait.
 
     async fn fetch_logs(
@@ -298,5 +316,20 @@ impl DataGenerator for &mut Okta {
                 self.config.logbacks_allowed.clone(),
             ))
             .unwrap();
+    }
+
+    fn list_already_seen(&self) -> Vec<String> {
+        self.seen_logs_uuid
+            .iter()
+            .map(|(key, _val)| key.to_string())
+            .collect()
+    }
+
+    fn get_max_since_until_interval(&self) -> u64 {
+        self.config.max_since_until
+    }
+
+    fn get_max_catchup_time(&self) -> u64 {
+        self.config.max_catchup
     }
 }
