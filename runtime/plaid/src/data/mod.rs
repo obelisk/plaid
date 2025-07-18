@@ -105,9 +105,11 @@ impl Data {
         let handle = tokio::runtime::Handle::current();
 
         if roles.data_generators {
-            let storage_clone = storage.clone();
             // Start the Github Audit task if there is one
             if let Some(mut gh) = di.github {
+                let storage_clone = storage.clone();
+                // Update the DG's state from the storage: this recovers the last_seen and seen_logs_uuid from a previous run
+                update_dg_from_storage(&mut gh, Some(storage_clone.clone())).await;
                 handle.spawn(async move {
                     loop {
                         if let Err(_) =
@@ -124,6 +126,8 @@ impl Data {
             // Start the Okta System Logs task if there is one
             if let Some(mut okta) = di.okta {
                 let storage_clone = storage.clone();
+                // Update the DG's state from the storage: this recovers the last_seen and seen_logs_uuid from a previous run
+                update_dg_from_storage(&mut okta, Some(storage_clone.clone())).await;
                 handle.spawn(async move {
                     loop {
                         if let Err(_) =
@@ -257,6 +261,7 @@ fn get_time() -> u64 {
         .as_secs()
 }
 
+/// Read a JSON-serialized `Vec<String>` from storage.
 async fn read_vec_from_storage(
     storage: Option<Arc<Storage>>,
     namespace: &str,
@@ -284,6 +289,7 @@ async fn read_vec_from_storage(
     }
 }
 
+/// Read a string from storage.
 async fn read_string_from_storage(
     storage: Option<Arc<Storage>>,
     namespace: &str,
@@ -311,12 +317,43 @@ async fn read_string_from_storage(
     }
 }
 
+/// Get the storage namespace the DG's state is stored under.
+fn get_dg_storage_namespace(dg_name: &str) -> String {
+    format!("{DATA_GENERATOR_STORAGE_PREFIX}_{}", dg_name)
+}
+
 /// Update a data generator with state information fetched from the storage.
-fn update_dg_from_storage<T: DataGenerator>(
-    dg: &mut T,
-    last_seen: Option<String>,
-    seen_logs_uuids: Option<Vec<String>>,
-) {
+async fn update_dg_from_storage<T: DataGenerator>(dg: &mut T, storage: Option<Arc<Storage>>) {
+    // Retrieve from storage information about the previous run, if present.
+    // This way, we can remember what was the last log we had seen, and we can backfill
+    // if Plaid was not running for some period of time.
+
+    let storage_namespace = &get_dg_storage_namespace(&dg.get_name());
+
+    let last_seen: Option<String> = read_string_from_storage(
+        storage.clone(),
+        storage_namespace,
+        LAST_SEEN_KEY,
+        &dg.get_name(),
+    )
+    .await;
+    match last_seen {
+        Some(ref ls) => debug!("last_seen's value is {ls}"),
+        None => debug!("last_seen is None!"),
+    }
+
+    let seen_logs_uuids: Option<Vec<String>> = read_vec_from_storage(
+        storage.clone(),
+        storage_namespace,
+        ALREADY_SEEN_UUIDS_KEY,
+        &dg.get_name(),
+    )
+    .await;
+    match seen_logs_uuids {
+        Some(ref slu) => debug!("seen_logs_uuids has {} elements", slu.len()),
+        None => debug!("seen_logs_uuids is None!"),
+    }
+
     match (last_seen, seen_logs_uuids) {
         (Some(last_seen), Some(seen_logs_uuids)) => {
             // We found state, so we update our data generator with it
@@ -367,45 +404,12 @@ fn update_dg_from_storage<T: DataGenerator>(
 /// Get logs from a data generator, one page at a time, and send them to rules for processing.
 /// Internally, this method handles making overlapping queries and logs de-duplication.
 pub async fn get_and_process_dg_logs(
-    mut dg: impl DataGenerator,
+    dg: &mut impl DataGenerator,
     storage: Option<Arc<Storage>>,
 ) -> Result<(), ()> {
     let sleep_duration = Duration::from_millis(dg.get_sleep_duration());
 
-    // Retrieve from storage information about the previous run, if present.
-    // This way, we can remember what was the last log we had seen, and we can backfill
-    // if Plaid was not running for some period of time.
-
-    let storage_namespace = &format!("{DATA_GENERATOR_STORAGE_PREFIX}_{}", dg.get_name());
-    debug!("Storage namespace for DG state: {storage_namespace}");
-
-    let last_seen: Option<String> = read_string_from_storage(
-        storage.clone(),
-        storage_namespace,
-        LAST_SEEN_KEY,
-        &dg.get_name(),
-    )
-    .await;
-    match last_seen {
-        Some(ref ls) => debug!("last_seen's value is {ls}"),
-        None => debug!("last_seen is None!"),
-    }
-
-    let seen_logs_uuids: Option<Vec<String>> = read_vec_from_storage(
-        storage.clone(),
-        storage_namespace,
-        ALREADY_SEEN_UUIDS_KEY,
-        &dg.get_name(),
-    )
-    .await;
-    match seen_logs_uuids {
-        Some(ref slu) => debug!("seen_logs_uuids is fine and has {} elements", slu.len()),
-        None => debug!("seen_logs_uuids is None!"),
-    }
-
-    update_dg_from_storage(&mut dg, last_seen, seen_logs_uuids);
-
-    // Now that the data generator has been (potentially) updated with the state we had in storage, the loop can begin.
+    let storage_namespace = &get_dg_storage_namespace(&dg.get_name());
 
     loop {
         // Get logs that happened since `last_seen`.
@@ -509,41 +513,38 @@ pub async fn get_and_process_dg_logs(
         }
         // If we are here, then we sent something for processing: we update the DG's state in the storage so that,
         // in case of a reboot, we can continue from where we had left off.
-        match &storage {
-            None => (),
-            Some(storage) => {
-                if let Err(e) = storage
-                    .insert(
-                        storage_namespace.to_string(),
-                        LAST_SEEN_KEY.to_string(),
-                        dg.get_last_seen()
-                            .unix_timestamp_nanos()
-                            .to_string()
-                            .as_bytes()
-                            .to_vec(),
-                    )
-                    .await
-                {
-                    error!(
-                        "Could not store {LAST_SEEN_KEY} for DG {}. Continuing anyway. Error: {e}",
-                        dg.get_name()
-                    );
-                }
-                let already_seen = dg.list_already_seen();
-                // Serialize this Vec<String>: this should never fail but, if it does,
-                // we serialize an empty vector and accept the consequences.
-                let already_seen = serde_json::to_vec(&already_seen)
-                    .unwrap_or(serde_json::to_vec(&Vec::<String>::new()).unwrap());
-                if let Err(e) = storage
-                    .insert(
-                        storage_namespace.to_string(),
-                        ALREADY_SEEN_UUIDS_KEY.to_string(),
-                        already_seen,
-                    )
-                    .await
-                {
-                    error!("Could not store {ALREADY_SEEN_UUIDS_KEY} for DG {}. Continuing anyway. Error: {e}", dg.get_name());
-                }
+        if let Some(ref storage) = storage {
+            if let Err(e) = storage
+                .insert(
+                    storage_namespace.to_string(),
+                    LAST_SEEN_KEY.to_string(),
+                    dg.get_last_seen()
+                        .unix_timestamp_nanos()
+                        .to_string()
+                        .as_bytes()
+                        .to_vec(),
+                )
+                .await
+            {
+                error!(
+                    "Could not store {LAST_SEEN_KEY} for DG {}. Continuing anyway. Error: {e}",
+                    dg.get_name()
+                );
+            }
+            let already_seen = dg.list_already_seen();
+            // Serialize this Vec<String>: this should never fail but, if it does,
+            // we serialize an empty vector and accept the consequences.
+            let already_seen = serde_json::to_vec(&already_seen)
+                .unwrap_or(serde_json::to_vec(&Vec::<String>::new()).unwrap());
+            if let Err(e) = storage
+                .insert(
+                    storage_namespace.to_string(),
+                    ALREADY_SEEN_UUIDS_KEY.to_string(),
+                    already_seen,
+                )
+                .await
+            {
+                error!("Could not store {ALREADY_SEEN_UUIDS_KEY} for DG {}. Continuing anyway. Error: {e}", dg.get_name());
             }
         }
 
