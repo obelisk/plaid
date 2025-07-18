@@ -182,7 +182,7 @@ impl Github {
     }
 }
 
-impl DataGenerator for &mut Github {
+impl DataGenerator for Github {
     // For the documentation on these methods, see the trait.
 
     async fn fetch_logs(

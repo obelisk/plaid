@@ -138,7 +138,7 @@ impl Okta {
     }
 }
 
-impl DataGenerator for &mut Okta {
+impl DataGenerator for Okta {
     // For the documentation on these methods, see the trait.
 
     async fn fetch_logs(
