@@ -1,0 +1,11 @@
+[cache]
+
+[cache.cache_entries]
+default = 200
+[cache.cache_entries.log_type]
+[cache.cache_entries.module_overrides]
+
+[cache.backend]
+type = "Redis"
+hostname = "127.0.0.1"
+port = 6379

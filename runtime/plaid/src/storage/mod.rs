@@ -84,7 +84,7 @@ impl std::fmt::Display for StorageError {
                 write!(f, "No storage system configuration could be found")
             }
             Self::CouldNotAccessStorage(ref e) => {
-                write!(f, "Access the storage datastore was not possible: {e}")
+                write!(f, "Access to the storage datastore was not possible: {e}")
             }
             Self::Access(ref e) => write!(f, "There was a failure accessing a key: {e}"),
             Self::SharedDbError(ref e) => {

@@ -4,7 +4,6 @@
 # contains underscores.
 [loading]
 module_dir = "../compiled_modules/"
-lru_cache_size = 200
 compiler_backend = "cranelift"
 readiness_check_file = "./plaid_ready"
 
@@ -29,7 +28,6 @@ test_mode_exemptions = [
     "test_vec_entrypoint.wasm",
     "test_jwt.wasm",
 ]
-
 
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024

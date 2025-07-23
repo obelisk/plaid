@@ -10,6 +10,7 @@ use crate::performance::PerformanceMonitoring;
 use crate::InstanceRoles;
 
 use super::apis::ApiConfigs;
+use super::cache::Config as CacheConfig;
 use super::data::DataConfig;
 use super::loader::Configuration as LoaderConfiguration;
 use super::logging::LoggingConfiguration;
@@ -151,6 +152,8 @@ pub struct Configuration {
     /// Set what modules will be loaded, what logging channels they're going to use
     /// and their computation and memory limits.
     pub loading: LoaderConfiguration,
+    /// Configuration for the cache system.
+    pub cache: CacheConfig,
 }
 
 /// Plaid's configuration augmented with the roles that this instance is playing.
@@ -298,6 +301,13 @@ pub fn read_and_interpolate(
         .filter_map(Result::ok)
         .map(|dir_entry| dir_entry.path())
         .filter(|path| path.is_file())
+        .filter(|path| {
+            path.extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_lowercase()
+                == "toml"
+        })
         .collect();
     paths.sort_by(|a, b| {
         a.file_name()
