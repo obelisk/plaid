@@ -57,35 +57,48 @@ pub fn insert(
         }
     };
 
-    match cache.write().map(|mut cache| cache.put(key, value)) {
-        Ok(Some(previous_value)) => {
-            match safely_write_data_back(
-                &memory_view,
-                &previous_value.as_bytes(),
-                data_buffer,
-                data_buffer_len,
-            ) {
-                Ok(x) => x,
-                Err(e) => {
-                    error!(
-                        "{}: Data write error in cache_insert: {:?}",
-                        env_data.module.name, e
-                    );
-                    e as i32
+    // Perform a blocking cache put
+    env_data.api.clone().runtime.block_on(async move {
+        let result = cache
+            .write()
+            .map_err(|_| {
+                error!("Could not get RwLock for cache");
+                FunctionErrors::CacheDisabled as i32
+            })
+            .map(async |mut cache| match cache.put(&key, &value).await {
+                Ok(Some(previous_value)) => {
+                    match safely_write_data_back(
+                        &memory_view,
+                        &previous_value.as_bytes(),
+                        data_buffer,
+                        data_buffer_len,
+                    ) {
+                        Ok(x) => x,
+                        Err(e) => {
+                            error!(
+                                "{}: Data write error in cache_insert: {:?}",
+                                env_data.module.name, e
+                            );
+                            e as i32
+                        }
+                    }
                 }
-            }
+                Ok(None) => 0,
+                Err(e) => {
+                    if let Err(e) = env_data.external_logging_system.log_internal_message(
+                        crate::logging::Severity::Error,
+                        format!("Cache system error in [{}]: {:?}", env_data.module.name, e),
+                    ) {
+                        error!("Logging system is not working!!: {:?}", e);
+                    }
+                    FunctionErrors::CacheDisabled as i32
+                }
+            });
+        match result {
+            Ok(v) => v.await,
+            Err(v) => v,
         }
-        Ok(None) => 0,
-        Err(e) => {
-            if let Err(e) = env_data.external_logging_system.log_internal_message(
-                crate::logging::Severity::Error,
-                format!("Cache system error in [{}]: {:?}", env_data.module.name, e),
-            ) {
-                error!("Logging system is not working!!: {:?}", e);
-            }
-            FunctionErrors::CacheDisabled as i32
-        }
-    }
+    })
 }
 
 /// Get data from the cache system if one is configured
@@ -124,33 +137,46 @@ pub fn get(
         }
     };
 
-    match cache.write().map(|mut cache| cache.get(&key).cloned()) {
-        Ok(Some(value)) => {
-            match safely_write_data_back(
-                &memory_view,
-                &value.as_bytes(),
-                data_buffer,
-                data_buffer_len,
-            ) {
-                Ok(x) => x,
-                Err(e) => {
-                    error!(
-                        "{}: Data write error in cache_get: {:?}",
-                        env_data.module.name, e
-                    );
-                    e as i32
+    // Perform a blocking cache get
+    env_data.api.clone().runtime.block_on(async move {
+        let result = cache
+            .write()
+            .map_err(|_| {
+                error!("Could not get RwLock for cache");
+                FunctionErrors::CacheDisabled as i32
+            })
+            .map(async |mut cache| match cache.get(&key).await {
+                Ok(Some(value)) => {
+                    match safely_write_data_back(
+                        &memory_view,
+                        &value.as_bytes(),
+                        data_buffer,
+                        data_buffer_len,
+                    ) {
+                        Ok(x) => x,
+                        Err(e) => {
+                            error!(
+                                "{}: Data write error in cache_get: {:?}",
+                                env_data.module.name, e
+                            );
+                            e as i32
+                        }
+                    }
                 }
-            }
+                Ok(None) => 0,
+                Err(e) => {
+                    if let Err(e) = env_data.external_logging_system.log_internal_message(
+                        crate::logging::Severity::Error,
+                        format!("Cache system error in [{}]: {:?}", env_data.module.name, e),
+                    ) {
+                        error!("Logging system is not working!!: {:?}", e);
+                    }
+                    FunctionErrors::CacheDisabled as i32
+                }
+            });
+        match result {
+            Ok(v) => v.await,
+            Err(v) => v,
         }
-        Ok(None) => 0,
-        Err(e) => {
-            if let Err(e) = env_data.external_logging_system.log_internal_message(
-                crate::logging::Severity::Error,
-                format!("Cache system error in [{}]: {:?}", env_data.module.name, e),
-            ) {
-                error!("Logging system is not working!!: {:?}", e);
-            }
-            FunctionErrors::CacheDisabled as i32
-        }
-    }
+    })
 }
