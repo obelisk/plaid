@@ -10,6 +10,7 @@ use crate::performance::PerformanceMonitoring;
 use crate::InstanceRoles;
 
 use super::apis::ApiConfigs;
+use super::cache::Config as CacheConfig;
 use super::data::DataConfig;
 use super::loader::Configuration as LoaderConfiguration;
 use super::logging::LoggingConfiguration;
@@ -151,6 +152,7 @@ pub struct Configuration {
     /// Set what modules will be loaded, what logging channels they're going to use
     /// and their computation and memory limits.
     pub loading: LoaderConfiguration,
+    pub cache: CacheConfig,
 }
 
 /// Plaid's configuration augmented with the roles that this instance is playing.
