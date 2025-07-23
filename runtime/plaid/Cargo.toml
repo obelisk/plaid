@@ -10,6 +10,7 @@ default = ["aws", "sled", "cranelift"]
 aws = ["dep:aws-sdk-kms", "dep:aws-sdk-dynamodb"]
 cranelift = ["wasmer/cranelift"]
 llvm = ["wasmer/llvm"]
+redis = []
 
 [dependencies]
 aes          = "0.7"
