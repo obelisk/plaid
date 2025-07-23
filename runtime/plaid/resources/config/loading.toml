@@ -4,7 +4,6 @@
 # contains underscores.
 [loading]
 module_dir = "../compiled_modules/"
-lru_cache_size = 200
 compiler_backend = "cranelift"
 
 test_mode = true
@@ -24,6 +23,11 @@ test_mode_exemptions = [
     "test_shared_db_rule_2.wasm",
     "test_slack.wasm",
 ]
+
+[loading.cache_entries]
+default = 200
+[loading.cache_entries.log_type]
+[loading.cache_entries.module_overrides]
 
 
 [loading.persistent_response_size]

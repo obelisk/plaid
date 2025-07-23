@@ -5,14 +5,12 @@ mod utils;
 
 use errors::Errors;
 use limits::LimitingTunables;
-use lru::LruCache;
 use serde::{de, Deserialize, Serialize};
 use signing::check_module_signatures;
 use sshcerts::PublicKey;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs::{self};
-use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
 use utils::{
     cost_function, get_module_computation_limit, get_module_page_count,
@@ -31,6 +29,7 @@ use wasmer::sys::Cranelift;
 use wasmer::{sys::BaseTunables, Engine, Module, Pages};
 use wasmer_middlewares::Metering;
 
+use crate::cache::Cache;
 use crate::storage::Storage;
 
 /// Limit imposed on some resource
@@ -113,8 +112,8 @@ pub struct Configuration {
     pub memory_page_count: LimitedAmount,
     /// How many bytes a module is allowed to store in persistent storage
     pub storage_size: LimitableAmount,
-    /// The size of the LRU cache for each module. Not setting it means LRUs are disabled
-    pub lru_cache_size: Option<usize>,
+    /// How many key-value entries a module is allowed to store in the cache.
+    pub cache_entries: LimitedAmount,
     /// The secrets that are available to modules. No actual secrets should be included in this map.
     /// Instead, the values here should be names of secrets whose values are present in
     /// the secrets file. This makes it possible for to check in your Plaid config without exposing secrets.
@@ -263,8 +262,8 @@ pub struct PlaidModule {
     pub accessory_data: Option<HashMap<String, Vec<u8>>>,
     /// Any defined secrets the module is allowed to access
     pub secrets: Option<HashMap<String, Vec<u8>>>,
-    /// An LRU cache for the module if the runtime has allowed LRU caches for modules
-    pub cache: Option<Arc<RwLock<LruCache<String, String>>>>,
+    /// A cache for the module if the runtime has allowed caches for modules
+    pub cache: Option<Arc<RwLock<Cache>>>,
     /// See the PersistentResponse type.
     pub persistent_response: Option<PersistentResponse>,
     /// If the module is in test mode, meaning it should not be allowed to cause side effects
@@ -408,6 +407,7 @@ impl PlaidModules {
 /// Load all modules, according to Plaid's configuration
 pub async fn load(
     config: Configuration,
+    cache_config: crate::cache::Config,
     storage: Option<Arc<Storage>>,
 ) -> Result<PlaidModules, ()> {
     let module_paths = fs::read_dir(config.module_dir.clone()).unwrap();
@@ -482,14 +482,25 @@ pub async fn load(
         };
 
         // Configure cache for module
-        let cache = config.lru_cache_size.and_then(|size| {
-            if size == 0 {
-                None // No cache if provided size is 0
-            } else {
-                NonZeroUsize::new(size)
-                    .map(|non_zero_size| Arc::new(RwLock::new(LruCache::new(non_zero_size))))
-            }
-        });
+        let mut cache_entries = config.cache_entries.default;
+        if let Some(v) = config.cache_entries.log_type.get(&type_) {
+            cache_entries = *v;
+        }
+        if let Some(v) = config.cache_entries.module_overrides.get(&filename) {
+            cache_entries = *v;
+        }
+
+        let cache = if cache_entries == 0 {
+            None // No cache if provided size is 0
+        } else {
+            Some(Arc::new(RwLock::new(
+                Cache::new(cache_entries as usize, cache_config.clone())
+                    .await
+                    .map_err(|e| {
+                        error!("{e}");
+                    })?,
+            )))
+        };
 
         // Persistent response is available to be set per module. This allows it to persistently
         // store the result of its run. It can use this during further runs, or it can be used
