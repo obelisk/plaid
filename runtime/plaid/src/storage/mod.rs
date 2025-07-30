@@ -130,9 +130,22 @@ pub trait StorageProvider {
         &self,
         namespace: &str,
         prefix: Option<&str>,
-    ) -> Result<Vec<(String, Vec<u8>)>, StorageError>;
+    ) -> Result<Vec<(String, Option<Vec<u8>>)>, StorageError>;
     /// Get the number of bytes stored in a namespace. This will include keys and values.
-    async fn get_namespace_byte_size(&self, namespace: &str) -> Result<u64, StorageError>;
+    async fn get_namespace_byte_size(&self, namespace: &str) -> Result<u64, StorageError> {
+        let all = self.fetch_all(namespace, None).await?;
+
+        let total_size = all
+            .into_iter()
+            .map(|(key, value)| {
+                let key_size = key.as_bytes().len() as u64;
+                let value_size = value.map_or(0, |v| v.len() as u64);
+                key_size + value_size
+            })
+            .sum();
+
+        Ok(total_size)
+    }
     /// Apply a migration to all the entries of a namespace by computing a function on each `(key,value)`
     /// pair. The old pair is deleted from the DB and the new one is inserted.  
     /// Note - The function is applied in a random order over the entries. If the function is not injective over the space
@@ -141,7 +154,23 @@ pub trait StorageProvider {
         &self,
         namespace: &str,
         f: Box<dyn Fn(String, Vec<u8>) -> (String, Vec<u8>) + Send + Sync>,
-    ) -> Result<(), StorageError>;
+    ) -> Result<(), StorageError> {
+        // Get all the data for this namespace
+        let data = self.fetch_all(namespace, None).await?;
+        // For each key/value pair, perform the migration...
+        for (key, value) in data {
+            if let Some(value) = value {
+                // Apply the transformation and obtain a new key and new value
+                let (new_key, new_value) = f(key.clone(), value);
+                // Delete the old entry because we are about to insert the new one
+                self.delete(namespace, &key).await?;
+                // And insert the new pair
+                self.insert(namespace.to_string(), new_key, new_value)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Storage {
@@ -240,7 +269,7 @@ impl Storage {
         &self,
         namespace: &str,
         prefix: Option<&str>,
-    ) -> Result<Vec<(String, Vec<u8>)>, StorageError> {
+    ) -> Result<Vec<(String, Option<Vec<u8>>)>, StorageError> {
         self.database.fetch_all(namespace, prefix).await
     }
 
