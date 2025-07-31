@@ -1,3 +1,4 @@
 [cache]
 [cache.backend]
-type = "InMemory"
+type = "Redis"
+url = "redis://127.0.0.1:6379"

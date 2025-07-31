@@ -10,7 +10,6 @@ default = ["aws", "sled", "cranelift"]
 aws = ["dep:aws-sdk-kms", "dep:aws-sdk-dynamodb"]
 cranelift = ["wasmer/cranelift"]
 llvm = ["wasmer/llvm"]
-redis = []
 
 [dependencies]
 alkali = "0.3.0"
@@ -41,6 +40,7 @@ octocrab = "0.37"
 paste = "1.0"
 plaid_stl = { path = "../plaid-stl" }
 rcgen = { version = "0.10", features = ["x509-parser"] }
+redis = { version = "0.32.4", features = ["aio", "tokio-comp"], optional = true }
 regex = "1"
 ring = "0.17"
 reqwest = { version = "0.12", default-features = false, features = [
