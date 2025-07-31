@@ -8,7 +8,7 @@ use std::fmt::Display;
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use crate::cache::in_memory::InMemoryCache;
+use crate::cache::{in_memory::InMemoryCache, redis::RedisCache};
 
 #[derive(Deserialize, Clone)]
 #[serde(tag = "type")]
@@ -33,7 +33,8 @@ pub struct Cache {
 pub enum CacheError {
     CacheInitError(String),
     NoCacheConfigured,
-    CouldNotAccessCache(String),
+    PutError(String),
+    GetError(String),
 }
 
 impl std::fmt::Display for CacheError {
@@ -43,8 +44,11 @@ impl std::fmt::Display for CacheError {
             Self::NoCacheConfigured => {
                 write!(f, "No cache system configuration could be found")
             }
-            Self::CouldNotAccessCache(ref e) => {
-                write!(f, "Access to the cache datastore was not possible: {e}")
+            Self::PutError(ref e) => {
+                write!(f, "Error while inserting into the cache: {e}")
+            }
+            Self::GetError(ref e) => {
+                write!(f, "Error while getting from the cache: {e}")
             }
         }
     }
@@ -62,8 +66,14 @@ pub trait CacheProvider {
 impl Cache {
     pub async fn new(capacity: usize, config: Config) -> Result<Self, CacheError> {
         let cache: Box<dyn CacheProvider + Send + Sync> = match config.backend {
-            Some(CacheBackend::InMemory) => Box::new(InMemoryCache::new(capacity)),
-            // Some(...) for Redis
+            Some(CacheBackend::InMemory) => {
+                info!("Using in-memory cache with capacity {capacity}");
+                Box::new(InMemoryCache::new(capacity))
+            }
+            Some(CacheBackend::Redis(config)) => {
+                info!("Using redis cache with URL {}", config.url);
+                Box::new(RedisCache::new(config).await.unwrap())
+            }
             _ => return Err(CacheError::NoCacheConfigured),
         };
 
