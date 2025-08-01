@@ -3,12 +3,15 @@ pub mod redis;
 
 pub mod in_memory;
 
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use crate::cache::{in_memory::InMemoryCache, redis::RedisCache};
+use crate::{
+    cache::{in_memory::InMemoryCache, redis::RedisCache},
+    loader::LimitedAmount,
+};
 
 #[derive(Deserialize, Clone)]
 #[serde(tag = "type")]
@@ -20,6 +23,9 @@ pub enum CacheBackend {
 
 #[derive(Deserialize, Clone)]
 pub struct Config {
+    /// How many key-value entries a module is allowed to store in the cache.
+    pub cache_entries: LimitedAmount,
+    /// Which backend is used for the cache layer, if any.
     pub backend: Option<CacheBackend>,
 }
 
@@ -33,6 +39,7 @@ pub struct Cache {
 pub enum CacheError {
     CacheInitError(String),
     NoCacheConfigured,
+    CacheAccessError(String),
     PutError(String),
     GetError(String),
 }
@@ -43,6 +50,9 @@ impl std::fmt::Display for CacheError {
             Self::CacheInitError(ref e) => write!(f, "Error while initializing cache: {e}"),
             Self::NoCacheConfigured => {
                 write!(f, "No cache system configuration could be found")
+            }
+            Self::CacheAccessError(ref e) => {
+                write!(f, "Could not access cache: {e}")
             }
             Self::PutError(ref e) => {
                 write!(f, "Error while inserting into the cache: {e}")
@@ -59,19 +69,30 @@ impl std::error::Error for CacheError {}
 /// Defines the basic methods that all cache providers must offer.
 #[async_trait]
 pub trait CacheProvider {
-    async fn put(&mut self, key: &str, value: &str) -> Result<Option<String>, CacheError>;
-    async fn get(&mut self, key: &str) -> Result<Option<String>, CacheError>;
+    /// Insert a value in the cache. If this is overwriting a previous value, return the previous value.
+    async fn put(
+        &self,
+        namespace: &str,
+        key: &str,
+        value: &str,
+    ) -> Result<Option<String>, CacheError>;
+    /// Get a value from the cache, if present.
+    async fn get(&self, namespace: &str, key: &str) -> Result<Option<String>, CacheError>;
 }
 
 impl Cache {
-    pub async fn new(capacity: usize, config: Config) -> Result<Self, CacheError> {
+    pub async fn new(
+        modules_and_logtypes: HashMap<String, String>,
+        config: Config,
+    ) -> Result<Self, CacheError> {
         let cache: Box<dyn CacheProvider + Send + Sync> = match config.backend {
             Some(CacheBackend::InMemory) => {
-                info!("Using in-memory cache with capacity {capacity}");
-                Box::new(InMemoryCache::new(capacity))
+                info!("Using in-memory cache");
+                Box::new(InMemoryCache::new(modules_and_logtypes, config))
             }
             Some(CacheBackend::Redis(config)) => {
-                info!("Using redis cache with URL {}", config.url);
+                // Note - capacity not taken into account when using redis
+                info!("Using redis cache with config [{}]", config);
                 Box::new(RedisCache::new(config).await.unwrap())
             }
             _ => return Err(CacheError::NoCacheConfigured),
@@ -81,14 +102,23 @@ impl Cache {
     }
 
     pub async fn put(
-        &mut self,
+        &self,
+        namespace: impl Display,
         key: impl Display,
         value: impl Display,
     ) -> Result<Option<String>, CacheError> {
-        self.cache.put(&key.to_string(), &value.to_string()).await
+        self.cache
+            .put(&namespace.to_string(), &key.to_string(), &value.to_string())
+            .await
     }
 
-    pub async fn get(&mut self, key: impl Display) -> Result<Option<String>, CacheError> {
-        self.cache.get(&key.to_string()).await
+    pub async fn get(
+        &self,
+        namespace: impl Display,
+        key: impl Display,
+    ) -> Result<Option<String>, CacheError> {
+        self.cache
+            .get(&namespace.to_string(), &key.to_string())
+            .await
     }
 }

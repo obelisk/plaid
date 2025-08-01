@@ -3,6 +3,7 @@ extern crate log;
 
 use performance::ModulePerformanceMetadata;
 use plaid::{
+    cache::Cache,
     config::{
         CachingMode, ConfigurationWithRoles, GetMode, ResponseMode, WebhookServerConfiguration,
     },
@@ -126,12 +127,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Loading all the modules");
     // Load all the modules that form our Nanoservices and Plaid rules
-    let modules = Arc::new(
-        loader::load(config.loading, config.cache, storage.clone())
-            .await
-            .unwrap(),
-    );
+    let modules = Arc::new(loader::load(config.loading, storage.clone()).await.unwrap());
     let modules_by_name = Arc::new(modules.get_modules());
+
+    let modules_and_logtypes = modules.get_module_logtypes();
+
+    let cache = Cache::new(modules_and_logtypes, config.cache)
+        .await
+        .unwrap(); // TODO fix unwrap
+    let cache = Arc::new(cache);
 
     // Print information about the threads we are starting
     info!(
@@ -159,6 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         modules.get_channels(),
         api,
         storage,
+        Some(cache),
         els.clone(),
         performance_sender.clone(),
     );

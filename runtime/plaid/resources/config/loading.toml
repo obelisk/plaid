@@ -24,12 +24,6 @@ test_mode_exemptions = [
     "test_slack.wasm",
 ]
 
-[loading.cache_entries]
-default = 200
-[loading.cache_entries.log_type]
-[loading.cache_entries.module_overrides]
-
-
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
 "test_sshcerts_usage.wasm" = 1024
