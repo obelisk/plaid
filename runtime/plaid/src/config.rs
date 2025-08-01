@@ -301,6 +301,13 @@ pub fn read_and_interpolate(
         .filter_map(Result::ok)
         .map(|dir_entry| dir_entry.path())
         .filter(|path| path.is_file())
+        .filter(|path| {
+            path.extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_lowercase()
+                == "toml"
+        })
         .collect();
     paths.sort_by(|a, b| {
         a.file_name()
