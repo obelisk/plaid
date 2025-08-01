@@ -151,9 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let modules_and_logtypes = modules.get_module_logtypes();
 
-    let cache = Cache::new(modules_and_logtypes, config.cache)
-        .await
-        .unwrap(); // TODO fix unwrap
+    let cache = Cache::new(modules_and_logtypes, config.cache).await?;
     let cache = Arc::new(cache);
 
     // Print information about the threads we are starting
