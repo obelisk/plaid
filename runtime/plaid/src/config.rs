@@ -152,6 +152,7 @@ pub struct Configuration {
     /// Set what modules will be loaded, what logging channels they're going to use
     /// and their computation and memory limits.
     pub loading: LoaderConfiguration,
+    /// Configuration for the cache system.
     pub cache: CacheConfig,
 }
 
