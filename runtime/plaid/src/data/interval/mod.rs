@@ -1,9 +1,11 @@
+use chrono::Utc;
+use cron::Schedule;
 use crossbeam_channel::Sender;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
-use ring::rand::SecureRandom;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use std::str::FromStr;
 use std::{
-    cmp::{max, Reverse},
+    cmp::Reverse,
     collections::{BinaryHeap, HashMap},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -16,9 +18,6 @@ pub struct IntervalConfig {
     /// A HashMap of job name to job config.
     #[serde(deserialize_with = "parse_jobs")]
     jobs: HashMap<String, IntervalJob>,
-    /// Maximum percentage of internal time to shift all jobs for better work distribution    
-    #[serde(deserialize_with = "parse_splay")]
-    splay: u32,
 }
 
 /// Custom parser for `jobs`. Returns an error if an empty jobs map is provided
@@ -33,28 +32,16 @@ where
     Ok(map)
 }
 
-/// Custom parser for splay. Returns an error if a splay > 100 is given
-fn parse_splay<'de, D>(deserializer: D) -> Result<u32, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let splay = u32::deserialize(deserializer)?;
-
-    if splay > 100 {
-        Err(serde::de::Error::custom(
-            "Invalid splay value provided. Max splay is 100",
-        ))
-    } else {
-        Ok(splay)
-    }
-}
-
 #[derive(Deserialize, Clone)]
 /// Defines a interval job to be scheduled and executed
 struct IntervalJob {
-    /// Time (in seconds) between each execution
-    #[serde(deserialize_with = "parse_interval")]
-    interval: u64,
+    /// Execution schedule for the job, specified as a seven-field cron expression:
+    /// `sec min hour day-of-month month day-of-week year`
+    ///
+    /// For example, `"0 * * * * * *"` fires at the top of every minute.
+    /// See the `cron` crate documentation for details.
+    #[serde(deserialize_with = "parse_schedule")]
+    schedule: Schedule,
     /// The log type the generated message will be sent to
     log_type: String,
     /// Optional data to log to the rule
@@ -64,38 +51,33 @@ struct IntervalJob {
     pub logbacks_allowed: LogbacksAllowed,
 }
 
-/// Custom parser for interval. Returns an error if an interval of 0 is provided
-fn parse_interval<'de, D>(deserializer: D) -> Result<u64, D::Error>
+/// Custom parser for Schedule
+fn parse_schedule<'de, D>(deserializer: D) -> Result<Schedule, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let interval = u64::deserialize(deserializer)?;
-
-    if interval == 0 {
-        Err(serde::de::Error::custom(
-            "Invalid interval value provided. Minimum interval is 1",
-        ))
-    } else {
-        Ok(interval)
-    }
+    let schedule_raw = String::deserialize(deserializer)?;
+    Schedule::from_str(&schedule_raw)
+        .map_err(|e| serde::de::Error::custom(format!("Invalid schedule provided: {e}")))
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 /// Scheduled jobs are stored in a heap and contain all required data to execute and reschedule jobs
 pub struct ScheduledJob {
     /// Timestamp that the job will be executed at
     execution_time: u64,
-    /// Time between job executions - used in combination with execution_time to reschedule the job after execution
-    interval: u64,
+    /// Execution schedule for the job
+    #[serde(deserialize_with = "parse_schedule")]
+    schedule: Schedule,
     /// Message to send to executor
     message: Message,
 }
 
 impl ScheduledJob {
-    pub fn new(execution_time: u64, interval: u64, message: Message) -> Self {
+    pub fn new(execution_time: u64, schedule: Schedule, message: Message) -> Self {
         Self {
             execution_time,
-            interval,
+            schedule,
             message,
         }
     }
@@ -134,39 +116,21 @@ pub struct Interval {
 impl Interval {
     pub fn new(config: IntervalConfig, log_sender: Sender<Message>) -> Self {
         let mut job_heap = BinaryHeap::new();
-        let current_time = get_current_time();
-        let srand = ring::rand::SystemRandom::new();
 
         // Initialize job heap
         // Iterates over interval job config and pushes job onto heap
         for (name, job) in config.jobs.iter() {
-            // Offset the start times of our job to reduce Plaid's workload of jobs hitting at the same time
-            // We calculate a job's splay by taking the configured splay as a percentage of our job interval.
-            // A random number between 0 and the calculated value is then added to the job's execution time
-            //
-            // If the interval or configured splay is very small, it's possible that our calculated splay is 0
-            // This will cause gen_range() to panic so we default to 1 if the calculated splay is 0.
-            let splay = max(
-                ((config.splay as f64 / 100.0) * job.interval as f64) as u64,
-                1,
-            );
-
-            // Generate a random number between 0 and splay
-            let mut bytes = [0u8; 8];
-            // In the very rare case that we cannot pull randomness, default to 42.
-            // This is just for calculating a timing offset and not a security critical
-            // operation, so using a hard coded number is not an issue.
-            if let Err(_) = srand.fill(&mut bytes) {
-                bytes = 42u64.to_ne_bytes(); // Encode 42 using native endian format
-            }
-
-            // Yes there is a slight randomness bias here but we're just calculating a splay
-            // so this is not a security critical operation.
-            let job_splay = u64::from_be_bytes(bytes) % splay;
+            let next_execution = job.schedule.upcoming(Utc).take(1).collect::<Vec<_>>();
+            let Some(time) = next_execution.first() else {
+                warn!(
+                    "Execution for interval job {name} is in the past. It will not be processed."
+                );
+                continue;
+            };
 
             let message = ScheduledJob::new(
-                job.interval + job_splay + current_time,
-                job.interval,
+                (time.timestamp_millis() / 1000) as u64,
+                job.schedule.clone(),
                 Message::new(
                     job.log_type.to_string(),
                     job.data.clone().unwrap_or_default().into(),
@@ -178,7 +142,6 @@ impl Interval {
         }
 
         Interval {
-            //config,
             sender: log_sender,
             job_heap,
         }
@@ -206,11 +169,17 @@ impl Interval {
             let job = self.job_heap.pop().unwrap();
             self.sender.send(job.0.message.create_duplicate()).unwrap();
 
+            // Try to get next execution time. If there are no more scheduled executions for this job, we'll exit early.
+            let next_execution = job.0.schedule.upcoming(Utc).take(1).collect::<Vec<_>>();
+            let Some(time) = next_execution.first() else {
+                continue;
+            };
+
             // Reschedule the job by adding it back to the heap with an updated execution time
             let new_message = ScheduledJob {
-                execution_time: job.0.interval + current_time,
+                execution_time: (time.timestamp_millis() / 1000) as u64,
                 message: job.0.message.create_duplicate(),
-                interval: job.0.interval,
+                schedule: job.0.schedule,
             };
 
             self.job_heap.push(Reverse(new_message));
