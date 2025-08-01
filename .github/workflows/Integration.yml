@@ -92,24 +92,24 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Start Redis
-        run: |
-          docker run -d \
-            --name redis-test \
-            -p 6379:6379 \
-            redis:8.0-alpine
+      run: |
+        docker run -d \
+          --name redis-test \
+          -p 6379:6379 \
+          redis:8.0-alpine
 
     - name: Wait for Redis to be ready
-        run: |
-          for i in {1..10}; do
-            if nc -z 127.0.0.1 6379; then
-              echo "Redis is up"; break
-            fi
-            sleep 1
-          done
+      run: |
+        for i in {1..10}; do
+          if nc -z 127.0.0.1 6379; then
+            echo "Redis is up"; break
+          fi
+          sleep 1
+        done
 
     - name: Run Integration Tests on Cranelift
       run: ./testing/integration.sh cranelift redis
 
     - name: Tear down Redis
-        if: always()
-        run: docker rm -f redis-test
+      if: always()
+      run: docker rm -f redis-test
