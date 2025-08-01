@@ -1,32 +1,81 @@
 //! This module provides a way for Plaid to use an in-memory cache.
 
-use std::num::NonZeroUsize;
-
-use async_trait::async_trait;
-
-use lru::LruCache;
-
 use crate::cache::CacheError;
+use async_trait::async_trait;
+use lru::LruCache;
+use std::{collections::HashMap, num::NonZeroUsize};
+use tokio::sync::RwLock;
 
 /// A wrapper for the cache
 pub struct InMemoryCache {
-    cache: LruCache<String, String>,
+    /// This is mapping module names to LruCache objects: one cache per module
+    cache: HashMap<String, RwLock<LruCache<String, String>>>,
 }
 
 impl InMemoryCache {
-    pub fn new(capacity: usize) -> Self {
-        let cache = LruCache::new(NonZeroUsize::new(capacity).unwrap());
+    pub fn new(modules_and_logtypes: HashMap<String, String>, config: super::Config) -> Self {
+        // Create an LruCache for each module and collect everything into a HashMap
+        let cache: HashMap<String, RwLock<LruCache<String, String>>> = modules_and_logtypes
+            .iter()
+            .map(|(module, logtype)| {
+                // Figure out the capacity of the cache for this module
+                let mut capacity = config.cache_entries.default;
+                if let Some(v) = config.cache_entries.log_type.get(logtype) {
+                    capacity = *v;
+                }
+                if let Some(v) = config.cache_entries.module_overrides.get(module) {
+                    capacity = *v;
+                }
+
+                let module_cache =
+                    RwLock::new(LruCache::new(NonZeroUsize::new(capacity as usize).unwrap()));
+                (module.to_string(), module_cache)
+            })
+            .collect();
+
         InMemoryCache { cache }
     }
 }
 
+/*
+NOTE to @obelisk - Ideally, I would like to create the LruCache on the fly, like
+
+    self.cache.entry(...).or_insert_with(...)
+
+so that if it's the first time we touch a module's cache, we create one just-in-time.
+However, that would require having the `capacity` parameter to initialize the LruCache.
+And I don't know how to drag it into these functions without polluting the function's signature.
+So I am going with ahead-of-time initialization, taking a Vec with module names and creating one
+LruCache per module.
+*/
+
 #[async_trait]
 impl super::CacheProvider for InMemoryCache {
-    async fn put(&mut self, key: &str, value: &str) -> Result<Option<String>, CacheError> {
-        Ok(self.cache.put(key.to_string(), value.to_string()))
+    async fn put(
+        &self,
+        namespace: &str,
+        key: &str,
+        value: &str,
+    ) -> Result<Option<String>, CacheError> {
+        let module_cache = self
+            .cache
+            .get(namespace)
+            .ok_or(CacheError::CacheAccessError(format!(
+                "Cache not found for module {namespace}"
+            )))?;
+        Ok(module_cache
+            .write()
+            .await
+            .put(key.to_string(), value.to_string()))
     }
 
-    async fn get(&mut self, key: &str) -> Result<Option<String>, CacheError> {
-        Ok(self.cache.get(&key.to_string()).cloned())
+    async fn get(&self, namespace: &str, key: &str) -> Result<Option<String>, CacheError> {
+        let module_cache = self
+            .cache
+            .get(namespace)
+            .ok_or(CacheError::CacheAccessError(format!(
+                "Cache not found for module {namespace}"
+            )))?;
+        Ok(module_cache.write().await.get(&key.to_string()).cloned())
     }
 }
