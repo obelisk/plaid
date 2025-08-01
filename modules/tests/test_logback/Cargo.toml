@@ -4,6 +4,9 @@ description = "Test rule that returns a value, which is set when a logback is re
 version = "0.1.0"
 edition = "2021"
 
+[features]
+redis = [] # This is only so that VS Code's rust analyzer does not complain
+
 [dependencies]
 plaid_stl = { path = "../../../runtime/plaid-stl" }
 serde = { version = "1.0", features = ["derive"] }
