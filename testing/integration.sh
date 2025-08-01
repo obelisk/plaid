@@ -17,6 +17,15 @@ if [ -z "$1" ]; then
 fi
 echo "Testing runtime with compiler: $1"
 
+# Cache backend should be passed in as the second argument
+if [ -z "$2" ]; then
+  echo "No cache backend specified. Defaulting to in-memory cache."
+  CACHE_BACKEND="inmemory"
+else
+  CACHE_BACKEND="$2"
+fi
+echo "Testing runtime with cache backend: $CACHE_BACKEND"
+
 # Set up the working directory
 rm -rf $CONFIG_WORKING_PATH
 mkdir -p $CONFIG_WORKING_PATH
@@ -24,6 +33,9 @@ mkdir -p $CONFIG_WORKING_PATH
 # Copy the configuration and secrets to the tmp directory
 cp -r $CONFIG_PATH/* $CONFIG_WORKING_PATH
 cp $SECRET_PATH $SECRET_WORKING_PATH
+
+# Use the correct config file for the chosen cache backend
+mv $CONFIG_WORKING_PATH/cache.toml.$CACHE_BACKEND $CONFIG_WORKING_PATH/cache.toml
 
 # On macOS, we need to install a brew provided version of LLVM
 # so that we can compile WASM binaries.
