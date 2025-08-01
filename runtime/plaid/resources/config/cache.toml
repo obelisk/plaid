@@ -6,6 +6,8 @@ default = 200
 [cache.cache_entries.module_overrides]
 
 [cache.backend]
-type = "Redis"
-hostname = "127.0.0.1"
-port = "6379"
+type = "InMemory"
+
+# type = "Redis"
+# hostname = "127.0.0.1"
+# port = "6379"
