@@ -71,12 +71,7 @@ impl RedisCache {
         let client = redis::Client::open(conn_string).map_err(|e| {
             CacheError::CacheInitError(format!("Could not create redis client: {e}"))
         })?;
-        // let connection = client
-        //     .get_multiplexed_async_connection()
-        //     .await
-        //     .map_err(|e| {
-        //         CacheError::CacheInitError(format!("Could not create redis connection: {e}"))
-        //     })?;
+
         Ok(Self { client })
     }
 }
