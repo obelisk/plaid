@@ -9,13 +9,13 @@ use tokio::sync::RwLock;
 /// A wrapper for the cache
 pub struct InMemoryCache {
     /// This is mapping module names to LruCache objects: one cache per module
-    cache: HashMap<String, RwLock<LruCache<String, String>>>,
+    caches: HashMap<String, RwLock<LruCache<String, String>>>,
 }
 
 impl InMemoryCache {
     pub fn new(modules_and_logtypes: HashMap<String, String>, config: super::Config) -> Self {
         // Create an LruCache for each module and collect everything into a HashMap
-        let cache: HashMap<String, RwLock<LruCache<String, String>>> = modules_and_logtypes
+        let caches: HashMap<String, RwLock<LruCache<String, String>>> = modules_and_logtypes
             .iter()
             .map(|(module, logtype)| {
                 // Figure out the capacity of the cache for this module
@@ -29,11 +29,12 @@ impl InMemoryCache {
 
                 let module_cache =
                     RwLock::new(LruCache::new(NonZeroUsize::new(capacity as usize).unwrap()));
+
                 (module.to_string(), module_cache)
             })
             .collect();
 
-        InMemoryCache { cache }
+        InMemoryCache { caches }
     }
 }
 
@@ -58,7 +59,7 @@ impl super::CacheProvider for InMemoryCache {
         value: &str,
     ) -> Result<Option<String>, CacheError> {
         let module_cache = self
-            .cache
+            .caches
             .get(namespace)
             .ok_or(CacheError::CacheAccessError(format!(
                 "Cache not found for module {namespace}"
@@ -71,7 +72,7 @@ impl super::CacheProvider for InMemoryCache {
 
     async fn get(&self, namespace: &str, key: &str) -> Result<Option<String>, CacheError> {
         let module_cache = self
-            .cache
+            .caches
             .get(namespace)
             .ok_or(CacheError::CacheAccessError(format!(
                 "Cache not found for module {namespace}"

@@ -8,10 +8,12 @@ use std::{collections::HashMap, fmt::Display};
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use crate::{
-    cache::{in_memory::InMemoryCache, redis::RedisCache},
-    loader::LimitedAmount,
-};
+use crate::loader::LimitedAmount;
+
+use in_memory::InMemoryCache;
+
+#[cfg(feature = "redis")]
+use redis::RedisCache;
 
 #[derive(Deserialize, Clone)]
 #[serde(tag = "type")]
@@ -90,6 +92,7 @@ impl Cache {
                 info!("Using in-memory cache");
                 Box::new(InMemoryCache::new(modules_and_logtypes, config))
             }
+            #[cfg(feature = "redis")]
             Some(CacheBackend::Redis(config)) => {
                 // Note - capacity not taken into account when using redis
                 info!("Using redis cache with config [{}]", config);
