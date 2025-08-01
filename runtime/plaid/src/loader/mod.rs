@@ -29,18 +29,17 @@ use wasmer::sys::Cranelift;
 use wasmer::{sys::BaseTunables, Engine, Module, Pages};
 use wasmer_middlewares::Metering;
 
-use crate::cache::Cache;
 use crate::storage::Storage;
 
 /// Limit imposed on some resource
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct LimitedAmount {
     /// The limit's default value
-    default: u64,
+    pub default: u64,
     /// Override values based on log type
-    log_type: HashMap<String, u64>,
+    pub log_type: HashMap<String, u64>,
     /// Override values based on module names
-    module_overrides: HashMap<String, u64>,
+    pub module_overrides: HashMap<String, u64>,
 }
 
 /// Represents the value of a limit imposed on some resource.
@@ -112,8 +111,6 @@ pub struct Configuration {
     pub memory_page_count: LimitedAmount,
     /// How many bytes a module is allowed to store in persistent storage
     pub storage_size: LimitableAmount,
-    /// How many key-value entries a module is allowed to store in the cache.
-    pub cache_entries: LimitedAmount,
     /// The secrets that are available to modules. No actual secrets should be included in this map.
     /// Instead, the values here should be names of secrets whose values are present in
     /// the secrets file. This makes it possible for to check in your Plaid config without exposing secrets.
@@ -246,6 +243,8 @@ impl PersistentResponse {
 pub struct PlaidModule {
     /// The name of the module
     pub name: String,
+    /// The logtype the module operates on
+    pub logtype: String,
     /// The compiled WASM module
     pub module: Module,
     /// The WASM engine used to run the module
@@ -262,8 +261,6 @@ pub struct PlaidModule {
     pub accessory_data: Option<HashMap<String, Vec<u8>>>,
     /// Any defined secrets the module is allowed to access
     pub secrets: Option<HashMap<String, Vec<u8>>>,
-    /// A cache for the module if the runtime has allowed caches for modules
-    pub cache: Option<Arc<RwLock<Cache>>>,
     /// See the PersistentResponse type.
     pub persistent_response: Option<PersistentResponse>,
     /// If the module is in test mode, meaning it should not be allowed to cause side effects
@@ -359,6 +356,7 @@ impl PlaidModule {
 
         Ok(Self {
             name: filename.to_string(),
+            logtype: log_type.to_string(),
             module,
             engine,
             computation_limit,
@@ -367,7 +365,6 @@ impl PlaidModule {
             page_limit,
             accessory_data: None,
             secrets: None,
-            cache: None,
             persistent_response: None,
             test_mode,
         })
@@ -398,16 +395,23 @@ impl PlaidModules {
     }
 
     /// Get a particular module by name. This makes the API ergonomic enough
-    /// we don't need to exposure the underlying data structures.
+    /// we don't need to expose the underlying data structures.
     pub fn get_module(&self, name: &str) -> Option<Arc<PlaidModule>> {
         self.modules.get(name).cloned()
+    }
+
+    /// Get a mapping between module names and log types.
+    pub fn get_module_logtypes(&self) -> HashMap<String, String> {
+        self.modules
+            .iter()
+            .map(|(name, module)| (name.to_string(), module.logtype.clone()))
+            .collect()
     }
 }
 
 /// Load all modules, according to Plaid's configuration
 pub async fn load(
     config: Configuration,
-    cache_config: crate::cache::Config,
     storage: Option<Arc<Storage>>,
 ) -> Result<PlaidModules, ()> {
     let module_paths = fs::read_dir(config.module_dir.clone()).unwrap();
@@ -481,27 +485,6 @@ pub async fn load(
             continue;
         };
 
-        // Configure cache for module
-        let mut cache_entries = config.cache_entries.default;
-        if let Some(v) = config.cache_entries.log_type.get(&type_) {
-            cache_entries = *v;
-        }
-        if let Some(v) = config.cache_entries.module_overrides.get(&filename) {
-            cache_entries = *v;
-        }
-
-        let cache = if cache_entries == 0 {
-            None // No cache if provided size is 0
-        } else {
-            Some(Arc::new(RwLock::new(
-                Cache::new(cache_entries as usize, cache_config.clone())
-                    .await
-                    .map_err(|e| {
-                        error!("{e}");
-                    })?,
-            )))
-        };
-
         // Persistent response is available to be set per module. This allows it to persistently
         // store the result of its run. It can use this during further runs, or it can be used
         // as the target of GET request hooks.
@@ -512,7 +495,7 @@ pub async fn load(
             .map(PersistentResponse::new);
 
         // Set optional fields on our new module
-        plaid_module.cache = cache;
+        // plaid_module.cache = cache;
         plaid_module.persistent_response = persistent_response;
         plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
         plaid_module.accessory_data = module_accessory_data(&config, &plaid_module.name, &type_);
