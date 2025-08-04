@@ -360,7 +360,7 @@ impl Github {
             self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
         let body = request.get("body").ok_or(ApiError::BadRequest)?;
 
-        info!("Updating branch protection rules for branch [{branch}] in repo [{repo}] on behalf of {module}");
+        info!("Updating branch protection rules for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/branches/{branch}/protection");
 
         match self
@@ -376,6 +376,75 @@ impl Github {
                     )))
                 }
             }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Require signed commits on a given branch of a given repo.
+    /// See https://docs.github.com/en/enterprise-cloud@latest/rest/branches/branch-protection?apiVersion=2022-11-28#create-commit-signature-protection for more detail
+    pub async fn require_signed_commits(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
+        let repo =
+            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let branch =
+            self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
+
+        info!("Enforcing signed commits for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
+        let address =
+            format!("/repos/{owner}/{repo}/branches/{branch}/protection/required_signatures");
+
+        match self
+            .make_generic_post_request(address, None::<String>, module)
+            .await
+        {
+            Ok((status, _)) => {
+                if status == 200 {
+                    Ok(0)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get the weekly commit count on a given repo.
+    /// See https://docs.github.com/en/rest/metrics/statistics?apiVersion=2022-11-28#get-the-weekly-commit-count for more detail
+    pub async fn get_weekly_commit_count(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
+        let repo =
+            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+
+        info!("Fetching weekly commit count for repo [{owner}/{repo}] on behalf of {module}");
+        let address = format!("/repos/{owner}/{repo}/stats/participation");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
             Err(e) => Err(e),
         }
     }

@@ -307,6 +307,7 @@ impl_new_function!(
 impl_new_function!(github, trigger_repo_dispatch, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, check_org_membership_of_user, ALLOW_IN_TEST_MODE);
 impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, require_signed_commits, DISALLOW_IN_TEST_MODE);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query, ALLOW_IN_TEST_MODE);
@@ -327,6 +328,7 @@ impl_new_function!(
     pull_request_request_reviewers,
     DISALLOW_IN_TEST_MODE
 );
+impl_new_function_with_error_buffer!(github, get_weekly_commit_count, ALLOW_IN_TEST_MODE);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
@@ -608,6 +610,12 @@ pub fn to_api_function(
         }
         "github_pull_request_request_reviewers" => {
             Function::new_typed_with_env(&mut store, &env, github_pull_request_request_reviewers)
+        }
+        "github_require_signed_commits" => {
+            Function::new_typed_with_env(&mut store, &env, github_require_signed_commits)
+        }
+        "github_get_weekly_commit_count" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_weekly_commit_count)
         }
 
         // Slack Calls
