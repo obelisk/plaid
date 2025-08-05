@@ -1758,12 +1758,13 @@ pub fn pull_request_request_reviewers(
     Ok(())
 }
 
-/// Enforce signed commits on a given branch of a given repo
+/// Enforce signed commits (if `activated` is true) or turn it off (if `activated` is false) on a given branch of a given repo.
 /// For more details, see https://docs.github.com/en/enterprise-cloud@latest/rest/branches/branch-protection?apiVersion=2022-11-28#create-commit-signature-protection
 pub fn require_signed_commits(
     owner: impl Display,
     repo: impl Display,
     branch: impl Display,
+    activated: bool,
 ) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(github, require_signed_commits);
@@ -1773,6 +1774,14 @@ pub fn require_signed_commits(
     params.insert("owner", owner.to_string());
     params.insert("repo", repo.to_string());
     params.insert("branch", branch.to_string());
+    params.insert(
+        "activated",
+        if activated {
+            "y".to_string()
+        } else {
+            "n".to_string()
+        },
+    );
 
     let params = serde_json::to_string(&params).unwrap();
     let res = unsafe {

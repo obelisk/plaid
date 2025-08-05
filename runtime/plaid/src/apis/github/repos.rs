@@ -399,25 +399,57 @@ impl Github {
             self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
         let branch =
             self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
+        let activated = match request
+            .get("activated")
+            .ok_or(ApiError::BadRequest)?
+            .to_string()
+            .as_str()
+        {
+            "y" => true,
+            "n" => false,
+            _ => return Err(ApiError::BadRequest),
+        };
 
-        info!("Enforcing signed commits for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
         let address =
             format!("/repos/{owner}/{repo}/branches/{branch}/protection/required_signatures");
 
-        match self
-            .make_generic_post_request(address, None::<String>, module)
-            .await
-        {
-            Ok((status, _)) => {
-                if status == 200 {
-                    Ok(0)
-                } else {
-                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
-                        status,
-                    )))
+        // Turned signed commits on or off dependending on the value of `activated`
+        if activated {
+            info!("Enforcing signed commits for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
+
+            match self
+                .make_generic_post_request(address, None::<String>, module)
+                .await
+            {
+                Ok((status, _)) => {
+                    if status == 200 {
+                        Ok(0)
+                    } else {
+                        Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                            status,
+                        )))
+                    }
                 }
+                Err(e) => Err(e),
             }
-            Err(e) => Err(e),
+        } else {
+            info!("Turning off signed commits for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
+
+            match self
+                .make_generic_delete_request(address, None::<&String>, module)
+                .await
+            {
+                Ok((status, _)) => {
+                    if status == 204 {
+                        Ok(0)
+                    } else {
+                        Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                            status,
+                        )))
+                    }
+                }
+                Err(e) => Err(e),
+            }
         }
     }
 
