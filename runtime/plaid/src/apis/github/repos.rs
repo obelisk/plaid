@@ -350,7 +350,7 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: HashMap<String, String> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
@@ -359,12 +359,16 @@ impl Github {
         let branch =
             self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
         let body = request.get("body").ok_or(ApiError::BadRequest)?;
+        // We deserialize to a Value. This has two effects: (1) it checks that we received valid JSON,
+        // and (2) it prepares the body that will be sent later with the request.
+        let body =
+            serde_json::from_str::<serde_json::Value>(&body).map_err(|_| ApiError::BadRequest)?;
 
         info!("Updating branch protection rules for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/branches/{branch}/protection");
 
         match self
-            .make_generic_put_request(address, Some(body), module)
+            .make_generic_put_request(address, Some(&body), module)
             .await
         {
             Ok((status, _)) => {
