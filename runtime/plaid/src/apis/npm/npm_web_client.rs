@@ -464,7 +464,7 @@ impl Npm {
         let response = self
             .client
             .get(format!(
-                "{}/settings/{}/tokens?perPage=100",
+                "{}/settings/{}/tokens",
                 NPMJS_COM_URL, self.config.username
             ))
             .header("X-Spiferack", "1") // to get JSON instead of HTML
@@ -474,28 +474,41 @@ impl Npm {
         if response.status().as_u16() != 200 {
             return Ok(handle_bad_response(&response));
         }
+        let response = response
+            .json::<Value>()
+            .await
+            .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?;
 
-        // Tokens are returned in a JSON structure under "list > objects". We first deserialize to a
-        // generic Value, then get "list > objects" and convert to a vector of NpmTokens. Finally, we
-        // keep only granular tokens and return the result.
-        let granular_tokens = serde_json::from_value::<Vec<NpmToken>>(
+        // Get total number of tokens that we will need to retrieve
+        let total_tokens: u64 = serde_json::from_value(
             response
-                .json::<Value>()
-                .await
-                .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?
                 .get("list")
                 .ok_or(ApiError::NpmError(NpmError::FailedToListGranularTokens))?
-                .get("objects")
+                .get("total")
                 .ok_or(ApiError::NpmError(NpmError::FailedToListGranularTokens))?
                 .clone(),
         )
-        .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?
-        .iter()
-        .filter(|v| v.token_type == Some("granular".to_string()))
-        .cloned()
-        .collect::<Vec<NpmToken>>();
+        .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?;
 
-        let tokens = serde_json::to_string(&granular_tokens)
+        let tokens = match self
+            .get_paginated_data_from_npm_website::<NpmToken>(
+                &format!("{}/settings/{}/tokens", NPMJS_COM_URL, self.config.username),
+                total_tokens,
+            )
+            .await
+        {
+            Ok(tokens) => tokens,
+            Err(e) => return Ok(RuntimeReturnValue::serialize_from_err(e)),
+        };
+
+        // Filter results and keep only granular tokens
+        let tokens: Vec<NpmToken> = tokens
+            .iter()
+            .filter(|v| v.token_type == Some("granular".to_string()))
+            .cloned()
+            .collect();
+
+        let tokens = serde_json::to_string(&tokens)
             .map_err(|_| ApiError::NpmError(NpmError::FailedToListGranularTokens))?;
         Ok(RuntimeReturnValue::serialize_from_str(&tokens))
     }
@@ -1117,6 +1130,25 @@ impl Paginable for NpmPackageWithPermission {
         }
 
         Ok(all_packages)
+    }
+}
+
+impl Paginable for NpmToken {
+    fn from_paginated_response(value: &Value) -> Result<Vec<Self>, ()>
+    where
+        Self: Sized,
+    {
+        let tokens = serde_json::from_value::<Vec<NpmToken>>(
+            value
+                .get("list")
+                .ok_or(())?
+                .get("objects")
+                .ok_or(())?
+                .clone(),
+        )
+        .map_err(|_| ())?;
+
+        Ok(tokens)
     }
 }
 
