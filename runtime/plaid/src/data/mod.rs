@@ -219,7 +219,7 @@ pub trait DataGenerator {
     fn mark_already_seen(&mut self, id: impl Display);
 
     /// Forward the payload to the channels for processing
-    fn send_for_processing(&self, payload: Vec<u8>);
+    fn send_for_processing(&self, payload: Vec<u8>) -> Result<(), ()>;
 }
 
 /// Get the system time in seconds from the Epoch
@@ -300,7 +300,12 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
                 // We have already seen this log: skip it
                 continue;
             }
-            // We have not seen this log: add it to the cache
+
+            // This log is new: send it into the logging system to be processed by the rule(s)
+            dg.send_for_processing(log.payload)?;
+            sent_for_processing += 1;
+
+            // Now that the message has been successfully sent, add it to the cache
             dg.mark_already_seen(log.id);
 
             // Check if this is the latest log we've seen and update if so.
@@ -313,13 +318,6 @@ pub async fn get_and_process_dg_logs(mut dg: impl DataGenerator) -> Result<(), (
             if log.timestamp > dg.get_last_seen() {
                 dg.set_last_seen(log.timestamp);
             }
-
-            // Send log into the logging system to be processed by the rule(s)
-            //
-            // Eventually these errors need to bubble up so the service can shut down
-            // then be restarted by an orchestration service
-            dg.send_for_processing(log.payload);
-            sent_for_processing += 1;
         }
         // If there have been no new logs sent for processing, we exit.
         // Exiting here will result in a 10 second wait between restarts

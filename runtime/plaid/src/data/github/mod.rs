@@ -322,7 +322,7 @@ impl DataGenerator for &mut Github {
         self.seen_logs_uuid.put(id.to_string(), 0u32);
     }
 
-    fn send_for_processing(&self, payload: Vec<u8>) {
+    fn send_for_processing(&self, payload: Vec<u8>) -> Result<(), ()> {
         self.logger
             .send(Message::new(
                 format!("github"),
@@ -330,6 +330,6 @@ impl DataGenerator for &mut Github {
                 LogSource::Generator(Generator::Github),
                 self.config.logbacks_allowed.clone(),
             ))
-            .unwrap();
+            .map_err(|_| ())
     }
 }

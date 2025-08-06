@@ -289,7 +289,7 @@ impl DataGenerator for &mut Okta {
         self.seen_logs_uuid.put(id.to_string(), 0u32);
     }
 
-    fn send_for_processing(&self, payload: Vec<u8>) {
+    fn send_for_processing(&self, payload: Vec<u8>) -> Result<(), ()> {
         self.logger
             .send(Message::new(
                 "okta".to_string(),
@@ -297,6 +297,6 @@ impl DataGenerator for &mut Okta {
                 LogSource::Generator(Generator::Okta),
                 self.config.logbacks_allowed.clone(),
             ))
-            .unwrap();
+            .map_err(|_| ())
     }
 }
