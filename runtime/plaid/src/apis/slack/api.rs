@@ -25,6 +25,13 @@ enum Apis {
 const SLACK_API_URL: &str = "https://slack.com/api/";
 type Result<T> = std::result::Result<T, ApiError>;
 
+/// This struct is used to deserialize a response from Slack API and
+/// just check if the result is OK or not.
+#[derive(serde::Deserialize)]
+struct GenericSlackResponse {
+    ok: bool,
+}
+
 impl Apis {
     fn build_request(&self, client: &Client) -> RequestBuilder {
         match self {
@@ -111,7 +118,18 @@ impl Slack {
             .call_slack(p.bot.clone(), Apis::ViewsOpen(p), module)
             .await
         {
-            Ok((200, _)) => Ok(0),
+            Ok((200, response)) => {
+                let slack_response: GenericSlackResponse = serde_json::from_str(&response)
+                    .map_err(|_| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(response.clone()))
+                    })?;
+                if !slack_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(0)
+            }
             Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                 status,
             ))),
@@ -127,7 +145,18 @@ impl Slack {
             .call_slack(p.bot.clone(), Apis::PostMessage(p), module)
             .await
         {
-            Ok((200, _)) => Ok(0),
+            Ok((200, response)) => {
+                let slack_response: GenericSlackResponse = serde_json::from_str(&response)
+                    .map_err(|_| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(response.clone()))
+                    })?;
+                if !slack_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(0)
+            }
             Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                 status,
             ))),
@@ -147,10 +176,16 @@ impl Slack {
             .await
         {
             Ok((200, response)) => {
-                let response: UserInfoResponse = serde_json::from_str(&response).map_err(|e| {
-                    ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
-                })?;
-                Ok(response.user.id)
+                let u_response: UserInfoResponse =
+                    serde_json::from_str(&response).map_err(|e| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
+                    })?;
+                if !u_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(u_response.user.id)
             }
             Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                 status,
