@@ -495,7 +495,6 @@ pub async fn load(
             .map(PersistentResponse::new);
 
         // Set optional fields on our new module
-        // plaid_module.cache = cache;
         plaid_module.persistent_response = persistent_response;
         plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
         plaid_module.accessory_data = module_accessory_data(&config, &plaid_module.name, &type_);
