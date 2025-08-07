@@ -1777,9 +1777,9 @@ pub fn require_signed_commits(
     params.insert(
         "activated",
         if activated {
-            "y".to_string()
+            "true".to_string()
         } else {
-            "n".to_string()
+            "false".to_string()
         },
     );
 
