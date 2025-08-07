@@ -415,7 +415,7 @@ impl Github {
 
         // Turned signed commits on or off dependending on the value of `activated`
         if activated {
-            info!("Enforcing signed commits for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
+            info!("Enabling signed commits requirement for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
 
             match self
                 .make_generic_post_request(address, None::<String>, module)
@@ -433,7 +433,7 @@ impl Github {
                 Err(e) => Err(e),
             }
         } else {
-            info!("Turning off signed commits for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
+            info!("Disabling signed commits requirement for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
 
             match self
                 .make_generic_delete_request(address, None::<&String>, module)
