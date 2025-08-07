@@ -308,6 +308,8 @@ impl_new_function!(github, trigger_repo_dispatch, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, check_org_membership_of_user, ALLOW_IN_TEST_MODE);
 impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, require_signed_commits, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, add_repo_to_team, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, remove_repo_from_team, DISALLOW_IN_TEST_MODE);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query, ALLOW_IN_TEST_MODE);
@@ -616,6 +618,12 @@ pub fn to_api_function(
         }
         "github_get_weekly_commit_count" => {
             Function::new_typed_with_env(&mut store, &env, github_get_weekly_commit_count)
+        }
+        "github_add_repo_to_team" => {
+            Function::new_typed_with_env(&mut store, &env, github_add_repo_to_team)
+        }
+        "github_remove_repo_from_team" => {
+            Function::new_typed_with_env(&mut store, &env, github_remove_repo_from_team)
         }
 
         // Slack Calls

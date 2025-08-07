@@ -1723,8 +1723,8 @@ pub struct PullRequestRequestReviewers {
     pub team_reviewers: Vec<String>,
 }
 
-/// Delete a deploy key with given ID from a given repository.
-/// For more details, see https://docs.github.com/en/rest/deploy-keys/deploy-keys?apiVersion=2022-11-28#delete-a-deploy-key
+/// Request a reviewer on a PR
+/// For more details, see https://docs.github.com/en/rest/pulls/review-requests?apiVersion=2022-11-28#request-reviewers-for-a-pull-request
 pub fn pull_request_request_reviewers(
     owner: impl Display,
     repo: impl Display,
@@ -1797,6 +1797,37 @@ pub fn require_signed_commits(
     Ok(())
 }
 
+/// Add a repo to a GH team, with a given permission.
+/// For more details, see https://docs.github.com/en/rest/teams/teams?apiVersion=2022-11-28#add-or-update-team-repository-permissions
+pub fn add_repo_to_team(
+    org: impl Display,
+    repo: impl Display,
+    team_slug: impl Display,
+    permission: impl Display,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, add_repo_to_team);
+    }
+
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("org", org.to_string());
+    params.insert("team_slug", team_slug.to_string());
+    params.insert("repo", repo.to_string());
+    params.insert("permission", permission.to_string());
+
+    let params = serde_json::to_string(&params).unwrap();
+    let res =
+        unsafe { github_add_repo_to_team(params.as_bytes().as_ptr(), params.as_bytes().len()) };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
+
 /// Get the weekly commit count on a given repo.
 /// For more details, see https://docs.github.com/en/rest/metrics/statistics?apiVersion=2022-11-28#get-the-weekly-commit-count
 pub fn get_weekly_commit_count(
@@ -1840,4 +1871,34 @@ pub fn get_weekly_commit_count(
         .map_err(|_| PlaidFunctionError::InternalApiError)?;
 
     Ok(response_body)
+}
+
+/// Remove a repo from a GH team.
+/// For more details, see https://docs.github.com/en/rest/teams/teams?apiVersion=2022-11-28#remove-a-repository-from-a-team
+pub fn remove_repo_from_team(
+    org: impl Display,
+    repo: impl Display,
+    team_slug: impl Display,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, remove_repo_from_team);
+    }
+
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("org", org.to_string());
+    params.insert("team_slug", team_slug.to_string());
+    params.insert("repo", repo.to_string());
+
+    let params = serde_json::to_string(&params).unwrap();
+    let res = unsafe {
+        github_remove_repo_from_team(params.as_bytes().as_ptr(), params.as_bytes().len())
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
 }
