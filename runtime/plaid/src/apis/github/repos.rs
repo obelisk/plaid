@@ -405,8 +405,8 @@ impl Github {
             .to_string()
             .as_str()
         {
-            "y" => true,
-            "n" => false,
+            "true" => true,
+            "false" => false,
             _ => return Err(ApiError::BadRequest),
         };
 
