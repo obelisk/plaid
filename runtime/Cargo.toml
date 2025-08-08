@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["plaid", "plaid-stl"]
+members = ["plaid", "plaid-stl", "blocksmith"]
 
 [profile.release]
 opt-level = 3
