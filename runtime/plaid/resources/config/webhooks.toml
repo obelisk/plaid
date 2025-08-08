@@ -93,6 +93,18 @@ headers = []
 log_type = "test_slack"
 headers = []
 
+[webhooks."internal".webhooks."multilogtype1"]
+log_type = "multilogtype1"
+headers = []
+
+[webhooks."internal".webhooks."multilogtype2"]
+log_type = "multilogtype2"
+headers = []
+
+[webhooks."internal".webhooks."multilogtype3"]
+log_type = "multilogtype3"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples
