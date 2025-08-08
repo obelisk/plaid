@@ -22,6 +22,7 @@ members = [
     "tests/test_slack",
     "load_tests/load_test",
     "tests/test_cron",
+    "tests/test_multi_logtype",
 ]
 
 [profile.release]

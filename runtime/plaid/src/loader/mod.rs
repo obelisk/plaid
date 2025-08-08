@@ -106,7 +106,7 @@ pub struct Configuration {
     /// Where to load modules from
     pub module_dir: String,
     /// What the log type of a module should be if it's not the first part of the filename
-    pub log_type_overrides: HashMap<String, String>,
+    pub log_type_overrides: HashMap<String, Vec<String>>,
     /// How much computation a module is allowed to do
     pub computation_amount: LimitedAmount,
     /// How much memory a module is allowed to use
@@ -299,20 +299,24 @@ impl PlaidModule {
         storage_amount: &LimitableAmount,
         storage: Option<Arc<Storage>>,
         module_bytes: Vec<u8>,
-        log_type: &str,
+        log_types: &[String],
         test_mode: bool,
         compiler_backend: &CompilerBackend,
     ) -> Result<Self, Errors> {
+        // ************************************************************************************************************************
+        // In the following, we use &log_types[0] as a temporary workaround. REMOVE BEFORE MERGING !!!
+        // ************************************************************************************************************************
+
         // Get the computation limit for the module
         let computation_limit =
-            get_module_computation_limit(computation_amount, &filename, log_type);
+            get_module_computation_limit(computation_amount, &filename, &log_types[0]);
 
         // Get the memory limit for the module
-        let page_limit = get_module_page_count(memory_page_count, &filename, log_type);
+        let page_limit = get_module_page_count(memory_page_count, &filename, &log_types[0]);
 
         // Get the persistent storage limit
         let storage_limit =
-            get_module_persistent_storage_limit(storage_amount, &filename, log_type);
+            get_module_persistent_storage_limit(storage_amount, &filename, &log_types[0]);
 
         let metering = Arc::new(Metering::new(computation_limit, cost_function));
 
@@ -353,7 +357,7 @@ impl PlaidModule {
         };
         let storage_current = Arc::new(RwLock::new(storage_current_bytes));
 
-        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Storage: [{storage_current_bytes}/{storage_limit} bytes used] Log Type: [{log_type}]. Test Mode: [{test_mode}]");
+        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Storage: [{storage_current_bytes}/{storage_limit} bytes used] Log Types: [{log_types:?}]. Test Mode: [{test_mode}]");
         for import in module.imports() {
             info!("\tImport: {}", import.name());
         }
@@ -451,13 +455,13 @@ pub async fn load(
             }
         }
 
-        // See if a type is defined in the configuration file, if not then we will grab the first part
+        // Determine which log types this module will handle.
+        // See if a list of types is defined in the configuration file, if not then we will grab the first part
         // of the filename up to the first underscore.
-        let type_ = if let Some(type_) = config.log_type_overrides.get(&filename) {
-            type_.to_string()
+        let types = if let Some(types) = config.log_type_overrides.get(&filename) {
+            types.clone()
         } else {
-            let type_: Vec<&str> = filename.split('_').collect();
-            type_[0].to_string()
+            vec![filename.split('_').collect::<Vec<&str>>()[0].to_string()]
         };
 
         // Default is the global test mode. Then if the module is in the exemptions specification
@@ -472,7 +476,7 @@ pub async fn load(
             &config.storage_size,
             storage.clone(),
             module_bytes,
-            &type_,
+            &types,
             test_mode,
             &config.compiler_backend,
         )
@@ -500,20 +504,26 @@ pub async fn load(
             .copied()
             .map(PersistentResponse::new);
 
+        // ************************************************************************************************************************
+        // In the following, we use &types[0] as a temporary workaround. REMOVE BEFORE MERGING !!!
+        // ************************************************************************************************************************
+
         // Set optional fields on our new module
         plaid_module.cache = cache;
         plaid_module.persistent_response = persistent_response;
-        plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
-        plaid_module.accessory_data = module_accessory_data(&config, &plaid_module.name, &type_);
+        plaid_module.secrets = byte_secrets.get(&types[0]).map(|x| x.clone());
+        plaid_module.accessory_data = module_accessory_data(&config, &plaid_module.name, &types[0]);
 
         // Put it in an Arc because we're going to have multiple references to it
         let plaid_module = Arc::new(plaid_module);
 
-        // Insert into the channels map
-        if let Some(mods) = modules.channels.get_mut(&type_) {
-            mods.push(plaid_module.clone());
-        } else {
-            modules.channels.insert(type_, vec![plaid_module.clone()]);
+        // Insert into the channels maps
+        for type_ in types {
+            if let Some(mods) = modules.channels.get_mut(&type_) {
+                mods.push(plaid_module.clone());
+            } else {
+                modules.channels.insert(type_, vec![plaid_module.clone()]);
+            }
         }
 
         // Insert into the name map
