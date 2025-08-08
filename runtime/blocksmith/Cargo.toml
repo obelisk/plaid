@@ -1,0 +1,21 @@
+[package]
+name = "blocksmith"
+description = "A simple tool for encrypting / decrypting strings under AES-128-CBC"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "blocksmith"
+path = "src/lib.rs"
+
+[[bin]]
+name = "blocksmith"
+path = "src/main.rs"
+
+[dependencies]
+aes          = "0.7"
+base64       = "0.21"
+block-modes  = "0.8"
+clap         = { version = "4", features = ["derive"] }
+hex          = "0.4"
+rand         = "0.8"

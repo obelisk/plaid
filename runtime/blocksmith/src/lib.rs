@@ -1,0 +1,41 @@
+use aes::Aes128;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE};
+use block_modes::block_padding::Pkcs7;
+use block_modes::{BlockMode, Cbc};
+use rand::RngCore;
+
+#[derive(Debug)]
+pub enum Errors {
+    EncryptionFailure,
+    DecryptionFailure,
+}
+
+type Aes128Cbc = Cbc<Aes128, Pkcs7>;
+
+/// Encrypts with AES-128-CBC + PKCS7. `key` must be 16 bytes.
+/// Returns base64(iv||ciphertext).
+pub fn encrypt(key: &[u8], plaintext: &str) -> Result<String, Errors> {
+    let mut iv = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut iv);
+    let cipher = Aes128Cbc::new_from_slices(key, &iv).map_err(|_| Errors::EncryptionFailure)?;
+    let ct = cipher.encrypt_vec(plaintext.as_bytes());
+    let mut out = iv.to_vec();
+    out.extend(ct);
+    Ok(URL_SAFE.encode(&out))
+}
+
+/// Decrypts a base64-encoded blob (iv||ciphertext). `key` must be 16 bytes.
+pub fn decrypt(key: &[u8], blob_hex: &str) -> Result<String, Errors> {
+    let data = URL_SAFE
+        .decode(blob_hex)
+        .map_err(|_| Errors::DecryptionFailure)?;
+    if data.len() < 16 {
+        return Err(Errors::DecryptionFailure);
+    }
+    let (iv, ct) = data.split_at(16);
+    let cipher = Aes128Cbc::new_from_slices(key, iv).map_err(|_| Errors::DecryptionFailure)?;
+    let pt = cipher
+        .decrypt_vec(ct)
+        .map_err(|_| Errors::DecryptionFailure)?;
+    String::from_utf8(pt).map_err(|_| Errors::DecryptionFailure)
+}
