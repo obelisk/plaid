@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 
-use crate::{datetime, PlaidFunctionError};
+use crate::{aes::aes_decrypt_local_key, datetime, PlaidFunctionError};
 
 pub enum ReviewPatAction {
     Approve,
@@ -1110,6 +1110,36 @@ pub fn get_custom_properties_values(
         .map_err(|_| PlaidFunctionError::InternalApiError)?;
 
     Ok(response_body)
+}
+
+/// Get custom properties for a repository, and decrypt the property's name with a given key.
+/// Note - If decryption fails, then the property's name is left untouched.
+///
+/// ## Arguments
+///
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `key_id` - The ID of the AES key to be used for decrypting custom properties' names.
+pub fn get_encrypted_custom_properties_values(
+    owner: impl Display,
+    repo: impl Display,
+    key_id: impl Display,
+) -> Result<Vec<RepositoryCustomProperty>, PlaidFunctionError> {
+    // Get the properties as they are
+    let custom_properties = get_custom_properties_values(owner, repo)?;
+
+    // Go through the properties and try to decrypt all their names with the given key
+    Ok(custom_properties
+        .iter()
+        .map(|cp| {
+            let property_name = aes_decrypt_local_key(&key_id.to_string(), &cp.property_name)
+                .unwrap_or(cp.property_name.clone());
+            RepositoryCustomProperty {
+                property_name,
+                value: cp.value.clone(),
+            }
+        })
+        .collect())
 }
 
 /// Get protection rules (as in ruleset) for a branch
