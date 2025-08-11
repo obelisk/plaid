@@ -25,9 +25,9 @@ pub fn encrypt(key: &[u8], plaintext: &str) -> Result<String, Errors> {
 }
 
 /// Decrypts a base64-encoded blob (iv||ciphertext). `key` must be 16 bytes.
-pub fn decrypt(key: &[u8], blob_hex: &str) -> Result<String, Errors> {
+pub fn decrypt(key: &[u8], ciphertext: &str) -> Result<String, Errors> {
     let data = URL_SAFE
-        .decode(blob_hex)
+        .decode(ciphertext)
         .map_err(|_| Errors::DecryptionFailure)?;
     if data.len() < 16 {
         return Err(Errors::DecryptionFailure);
