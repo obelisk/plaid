@@ -75,6 +75,7 @@ impl From<PlaidFunctionError> for i32 {
     }
 }
 
+pub mod aes;
 pub mod aws;
 pub mod github;
 pub mod network;

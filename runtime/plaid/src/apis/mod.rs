@@ -1,3 +1,4 @@
+pub mod aes;
 #[cfg(feature = "aws")]
 pub mod aws;
 pub mod general;
@@ -11,6 +12,7 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
+use aes::AesConfig;
 #[cfg(feature = "aws")]
 use aws::{Aws, AwsConfig};
 #[cfg(feature = "aws")]
@@ -31,6 +33,7 @@ use tokio::runtime::Runtime;
 use web::{Web, WebConfig};
 use yubikey::{Yubikey, YubikeyConfig};
 
+use crate::apis::aes::Aes;
 use crate::data::DelayedMessage;
 use crate::executor::Message;
 
@@ -39,6 +42,7 @@ use self::rustica::{Rustica, RusticaConfig};
 /// All the APIs that Plaid can use
 pub struct Api {
     pub runtime: Runtime,
+    pub aes: Option<Aes>,
     #[cfg(feature = "aws")]
     pub aws: Option<Aws>,
     pub general: Option<General>,
@@ -56,6 +60,7 @@ pub struct Api {
 /// Configurations for all the APIs Plaid can use
 #[derive(Deserialize)]
 pub struct ApiConfigs {
+    pub aes: Option<AesConfig>,
     #[cfg(feature = "aws")]
     pub aws: Option<AwsConfig>,
     pub general: Option<GeneralConfig>,
@@ -72,6 +77,7 @@ pub struct ApiConfigs {
 
 #[derive(Debug)]
 pub enum ApiError {
+    AesError(String),
     BadRequest,
     ImpossibleError,
     ConfigurationError(String),
@@ -99,6 +105,11 @@ impl Api {
         log_sender: Sender<Message>,
         delayed_log_sender: Sender<DelayedMessage>,
     ) -> Self {
+        let aes = match config.aes {
+            Some(aes) => Some(Aes::new(aes)),
+            _ => None,
+        };
+
         #[cfg(feature = "aws")]
         let aws = match config.aws {
             Some(aws) => Some(Aws::new(aws).await),
@@ -162,6 +173,7 @@ impl Api {
         };
 
         Self {
+            aes,
             runtime: Runtime::new().unwrap(),
             #[cfg(feature = "aws")]
             aws,

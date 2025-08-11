@@ -93,6 +93,10 @@ headers = []
 log_type = "test_slack"
 headers = []
 
+[webhooks."internal".webhooks."test_aes_enc_dec"]
+log_type = "test_aes_enc_dec"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples

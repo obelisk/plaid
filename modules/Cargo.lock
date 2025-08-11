@@ -344,6 +344,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_aes_enc_dec"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "test_crashtest"
 version = "0.1.0"
 dependencies = [

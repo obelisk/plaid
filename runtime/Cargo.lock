@@ -3309,6 +3309,7 @@ dependencies = [
  "aws-sdk-kms",
  "aws-sdk-secretsmanager",
  "base64 0.13.1",
+ "blocksmith",
  "chrono",
  "clap",
  "cron",
