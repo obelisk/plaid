@@ -24,6 +24,7 @@ test_mode_exemptions = [
     "test_shared_db_rule_2.wasm",
     "test_slack.wasm",
     "test_cron.wasm",
+    "test_aes_enc_dec.wasm",
 ]
 
 
