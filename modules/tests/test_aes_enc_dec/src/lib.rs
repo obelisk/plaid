@@ -26,5 +26,11 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
     if aes::aes_encrypt_local_key("does_not_exist", PLAINTEXT).is_err() {
         make_named_request("test-response", "OK", HashMap::new()).unwrap();
     }
+
+    // Now try with a key that this rule can only encrypt with. Encryption should work, decryption should fail
+    let ciphertext = aes::aes_encrypt_local_key("aes_key_only_enc", PLAINTEXT).unwrap();
+    if aes::aes_decrypt_local_key("aes_key_only_enc", ciphertext).is_err() {
+        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+    }
     Ok(())
 }
