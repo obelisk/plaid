@@ -76,6 +76,7 @@ test_mode_exemptions = [
 "test_slack.wasm" = "test_slack"
 "example_github_graphql.wasm" = "example_github_graphql"
 "test_cron.wasm" = "test_cron"
+"test_aes_enc_dec.wasm" = "test_aes_enc_dec"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
