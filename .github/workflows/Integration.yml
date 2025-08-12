@@ -152,8 +152,8 @@ jobs:
           -e REDIS_PASSWORD=testpassword \
           redis:8.0-alpine \
           sh -c 'printf "user %s on >%s ~* +@all\n" "$REDIS_USER" "$REDIS_PASSWORD" \
-            > /usr/local/etc/redis/redis.conf \
-            && redis-server /usr/local/etc/redis/redis.conf'
+            > /data/redis.conf \
+            && redis-server /data/redis.conf'
 
     - name: Wait for Redis to be ready
       run: |
