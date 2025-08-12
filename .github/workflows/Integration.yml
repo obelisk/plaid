@@ -120,7 +120,7 @@ jobs:
 
 
 
-ubuntu-redis-auth:
+  ubuntu-redis-auth:
     runs-on: ubuntu-latest
 
     steps:
