@@ -46,7 +46,7 @@ paste = "1.0"
 plaid_stl = { path = "../plaid-stl" }
 rand         = "0.8"
 rcgen = { version = "0.10", features = ["x509-parser"] }
-redis = { version = "0.32", features = ["aio", "tokio-comp"], optional = true }
+redis = { version = "0.32", features = ["aio", "tokio-comp", "connection-manager"], optional = true }
 regex = "1"
 ring = "0.17"
 reqwest = { version = "0.12", default-features = false, features = [

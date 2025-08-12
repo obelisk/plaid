@@ -156,7 +156,7 @@ if [ "$1" == "llvm" ]; then
   fi
 fi
 
-if [ "$CACHE_BACKEND" = "redis" ] || [ "$CACHE_BACKEND" = "redis-auth" ]; then
+if [[ "$CACHE_BACKEND" == redis* ]]; then
   FEATURES="sled,$1,redis"
 else
   FEATURES="sled,$1"
