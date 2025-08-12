@@ -5,12 +5,11 @@ use serde::Deserialize;
 
 use crate::cache::CacheError;
 
-use redis::{AsyncCommands, Client};
+use redis::{aio::ConnectionManager, AsyncCommands};
 
 /// A wrapper for the cache
 pub struct RedisCache {
-    // connection: MultiplexedConnection,
-    client: Client,
+    connection_manager: ConnectionManager,
 }
 
 /// Configuration for the Redis cache
@@ -71,8 +70,12 @@ impl RedisCache {
         let client = redis::Client::open(conn_string).map_err(|e| {
             CacheError::CacheInitError(format!("Could not create redis client: {e}"))
         })?;
+        let connection_manager = client
+            .get_connection_manager()
+            .await
+            .map_err(|e| CacheError::CacheAccessError(e.to_string()))?;
 
-        Ok(Self { client })
+        Ok(Self { connection_manager })
     }
 }
 
@@ -84,13 +87,7 @@ impl super::CacheProvider for RedisCache {
         key: &str,
         value: &str,
     ) -> Result<Option<String>, CacheError> {
-        let mut connection = self
-            .client
-            .get_multiplexed_async_connection()
-            .await
-            .map_err(|e| {
-                CacheError::CacheAccessError(format!("Could not create redis connection: {e}"))
-            })?;
+        let mut connection = self.connection_manager.clone();
         let old = connection
             .hget(namespace, key)
             .await
@@ -103,13 +100,7 @@ impl super::CacheProvider for RedisCache {
     }
 
     async fn get(&self, namespace: &str, key: &str) -> Result<Option<String>, CacheError> {
-        let mut connection = self
-            .client
-            .get_multiplexed_async_connection()
-            .await
-            .map_err(|e| {
-                CacheError::CacheAccessError(format!("Could not create redis connection: {e}"))
-            })?;
+        let mut connection = self.connection_manager.clone();
         let r = connection
             .hget(namespace, key)
             .await
