@@ -38,18 +38,6 @@ impl InMemoryCache {
     }
 }
 
-/*
-NOTE to @obelisk - Ideally, I would like to create the LruCache on the fly, like
-
-    self.cache.entry(...).or_insert_with(...)
-
-so that if it's the first time we touch a module's cache, we create one just-in-time.
-However, that would require having the `capacity` parameter to initialize the LruCache.
-And I don't know how to drag it into these functions without polluting the function's signature.
-So I am going with ahead-of-time initialization, taking a Vec with module names and creating one
-LruCache per module.
-*/
-
 #[async_trait]
 impl super::CacheProvider for InMemoryCache {
     async fn put(
