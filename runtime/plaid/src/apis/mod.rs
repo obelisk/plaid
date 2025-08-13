@@ -1,6 +1,6 @@
-pub mod aes;
 #[cfg(feature = "aws")]
 pub mod aws;
+pub mod cryptography;
 pub mod general;
 pub mod github;
 pub mod npm;
@@ -12,7 +12,6 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
-use aes::AesConfig;
 #[cfg(feature = "aws")]
 use aws::{Aws, AwsConfig};
 #[cfg(feature = "aws")]
@@ -33,7 +32,7 @@ use tokio::runtime::Runtime;
 use web::{Web, WebConfig};
 use yubikey::{Yubikey, YubikeyConfig};
 
-use crate::apis::aes::Aes;
+use crate::apis::cryptography::{Cryptography, CryptographyConfig};
 use crate::data::DelayedMessage;
 use crate::executor::Message;
 
@@ -42,7 +41,7 @@ use self::rustica::{Rustica, RusticaConfig};
 /// All the APIs that Plaid can use
 pub struct Api {
     pub runtime: Runtime,
-    pub aes: Option<Aes>,
+    pub cryptography: Option<Cryptography>,
     #[cfg(feature = "aws")]
     pub aws: Option<Aws>,
     pub general: Option<General>,
@@ -60,7 +59,7 @@ pub struct Api {
 /// Configurations for all the APIs Plaid can use
 #[derive(Deserialize)]
 pub struct ApiConfigs {
-    pub aes: Option<AesConfig>,
+    pub cryptography: Option<CryptographyConfig>,
     #[cfg(feature = "aws")]
     pub aws: Option<AwsConfig>,
     pub general: Option<GeneralConfig>,
@@ -77,7 +76,7 @@ pub struct ApiConfigs {
 
 #[derive(Debug)]
 pub enum ApiError {
-    AesError(String),
+    CryptographyError(String),
     BadRequest,
     ImpossibleError,
     ConfigurationError(String),
@@ -105,8 +104,8 @@ impl Api {
         log_sender: Sender<Message>,
         delayed_log_sender: Sender<DelayedMessage>,
     ) -> Self {
-        let aes = match config.aes {
-            Some(aes) => Some(Aes::new(aes)),
+        let cryptography = match config.cryptography {
+            Some(cryptography) => Some(Cryptography::new(cryptography)),
             _ => None,
         };
 
@@ -173,7 +172,7 @@ impl Api {
         };
 
         Self {
-            aes,
+            cryptography,
             runtime: Runtime::new().unwrap(),
             #[cfg(feature = "aws")]
             aws,

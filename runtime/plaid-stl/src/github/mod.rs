@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 
-use crate::{aes::aes_decrypt_local_key, datetime, PlaidFunctionError};
+use crate::{cryptography::aes_128_cbc_decrypt, datetime, PlaidFunctionError};
 
 pub enum ReviewPatAction {
     Approve,
@@ -1132,7 +1132,7 @@ pub fn get_encrypted_custom_properties_values(
     Ok(custom_properties
         .iter()
         .map(|cp| {
-            let property_name = aes_decrypt_local_key(&key_id.to_string(), &cp.property_name)
+            let property_name = aes_128_cbc_decrypt(&key_id.to_string(), &cp.property_name)
                 .unwrap_or(cp.property_name.clone());
             RepositoryCustomProperty {
                 property_name,
