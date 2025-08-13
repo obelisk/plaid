@@ -126,29 +126,31 @@ impl Cryptography {
 
         let payload: AesDecryptPayload = serde_json::from_str(&params)
             .map_err(|_| ApiError::CryptographyError("Failed to parse payload".to_string()))?;
-        if self.can_module_perform_aes_action(&module.name, &payload.key_id, AesAction::Decrypt) {
-            info!(
-                "Performing an AES decryption with local key [{}] on behalf of module [{module}]",
-                payload.key_id
-            );
-            let key = self
-                .aes
-                .as_ref()
-                .unwrap() // OK: we checked above
-                .key_specs
-                .get(&payload.key_id.to_string())
-                .unwrap() // OK because we checked above
-                .key
-                .clone();
-            let key = hex::decode(key)
-                .map_err(|_| ApiError::CryptographyError("Failed to decode key".to_string()))?;
-            cryptography::aes_128_cbc::decrypt(&key, &payload.ciphertext.to_string()).map_err(
-                |_| ApiError::CryptographyError("Failed to decrypt ciphertext".to_string()),
-            )
-        } else {
-            Err(ApiError::CryptographyError(
+
+        if !self.can_module_perform_aes_action(&module.name, &payload.key_id, AesAction::Decrypt) {
+            return Err(ApiError::CryptographyError(
                 "Missing key or operation not permitted".to_string(),
-            ))
+            ));
         }
+
+        info!(
+            "Performing an AES decryption with local key [{}] on behalf of module [{module}]",
+            payload.key_id
+        );
+
+        let key = self
+            .aes
+            .as_ref()
+            .unwrap() // OK: we checked above
+            .key_specs
+            .get(&payload.key_id.to_string())
+            .unwrap() // OK because we checked above
+            .key
+            .clone();
+        let key = hex::decode(key)
+            .map_err(|_| ApiError::CryptographyError("Failed to decode key".to_string()))?;
+
+        cryptography::aes_128_cbc::decrypt(&key, &payload.ciphertext.to_string())
+            .map_err(|_| ApiError::CryptographyError("Failed to decrypt ciphertext".to_string()))
     }
 }
