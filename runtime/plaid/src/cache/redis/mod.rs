@@ -1,12 +1,10 @@
 //! This module provides a way for Plaid to use Redis as a cache layer
 
-use async_trait::async_trait;
-use plaid_stl::plaid::random::fetch_random_bytes;
-use serde::Deserialize;
-
 use crate::cache::CacheError;
-
+use async_trait::async_trait;
 use redis::{aio::ConnectionManager, AsyncCommands};
+use ring::rand::SecureRandom;
+use serde::Deserialize;
 
 /// How entries are evicted from the Redis cache
 #[derive(Deserialize, Clone)]
@@ -174,10 +172,10 @@ impl super::CacheProvider for RedisCache {
 /// Return a random `usize` in the half-open range `[start, end)`
 /// using simple modulo reduction (may introduce slight bias).
 fn random_usize(start: usize, end: usize) -> Result<usize, ()> {
-    let buf: [u8; 8] = fetch_random_bytes(8)
-        .map_err(|_| ())?
-        .try_into()
-        .map_err(|_| ())?;
+    let rng = ring::rand::SystemRandom::new();
+    let mut buf = [0u8; 8];
+    // We'll pull 8 bytes (u64) and cast down to usize.
+    rng.fill(&mut buf).map_err(|_| ())?;
     let n = u64::from_be_bytes(buf) as usize;
 
     let span = end.checked_sub(start).ok_or(())?;
