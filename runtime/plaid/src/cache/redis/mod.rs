@@ -1,15 +1,43 @@
 //! This module provides a way for Plaid to use Redis as a cache layer
 
 use async_trait::async_trait;
+use plaid_stl::plaid::random::fetch_random_bytes;
 use serde::Deserialize;
 
 use crate::cache::CacheError;
 
 use redis::{aio::ConnectionManager, AsyncCommands};
 
+/// How entries are evicted from the Redis cache
+#[derive(Deserialize, Clone)]
+pub enum EvictionPolicy {
+    /// Entries are never evicted from Redis
+    NoEviction,
+    /// When the max number of entries is reached, an entry is
+    /// evicted at random to make space for new insertions.
+    RandomEviction(usize),
+}
+
+impl std::fmt::Display for EvictionPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let output = match self {
+            Self::NoEviction => "no eviction".to_string(),
+            Self::RandomEviction(max) => format!("random eviction: max {max} entries"),
+        };
+        write!(f, "{output}")
+    }
+}
+
+impl Default for EvictionPolicy {
+    fn default() -> Self {
+        Self::NoEviction
+    }
+}
+
 /// A wrapper for the cache
 pub struct RedisCache {
     connection_manager: ConnectionManager,
+    eviction_policy: EvictionPolicy,
 }
 
 /// Configuration for the Redis cache
@@ -19,12 +47,13 @@ pub struct Config {
     pub port: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub eviction_policy: Option<EvictionPolicy>,
 }
 
 impl std::fmt::Display for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let output = format!(
-            "Hostname: {} | Port: {} | Username: {} | Password: {}",
+            "Hostname: {} | Port: {} | Username: {} | Password: {} | Eviction policy: {}",
             self.hostname,
             self.port.clone().unwrap_or("NA".to_string()),
             self.username.clone().unwrap_or("NA".to_string()),
@@ -32,7 +61,8 @@ impl std::fmt::Display for Config {
                 "********".to_string()
             } else {
                 "[password not set]".to_string()
-            }
+            },
+            self.eviction_policy.clone().unwrap_or_default()
         );
         write!(f, "{output}")
     }
@@ -75,7 +105,11 @@ impl RedisCache {
             .await
             .map_err(|e| CacheError::CacheAccessError(e.to_string()))?;
 
-        Ok(Self { connection_manager })
+        let eviction_policy = config.eviction_policy.unwrap_or_default();
+        Ok(Self {
+            connection_manager,
+            eviction_policy,
+        })
     }
 }
 
@@ -92,10 +126,38 @@ impl super::CacheProvider for RedisCache {
             .hget(namespace, key)
             .await
             .map_err(|e| CacheError::GetError(e.to_string()))?;
+
+        // Check if we need to evict an entry. If so, do it to make space for the upcoming insertion.
+        // Note - We do this in an "optimistic" way, without locking anything.
+        match self.eviction_policy {
+            EvictionPolicy::NoEviction => {}
+            EvictionPolicy::RandomEviction(max_entries) => {
+                // Count items
+                let count: usize = connection
+                    .hlen(namespace)
+                    .await
+                    .map_err(|e| CacheError::GetError(e.to_string()))?;
+                if count >= max_entries {
+                    // Pull all the entries and take one at random
+                    let entries: Vec<String> = connection
+                        .hkeys(namespace)
+                        .await
+                        .map_err(|e| CacheError::GetError(e.to_string()))?;
+                    if let Some(evict) = entries.get(random_usize(0, entries.len()).unwrap_or(0)) {
+                        let () = connection
+                            .hdel(namespace, evict)
+                            .await
+                            .map_err(|e| CacheError::PutError(e.to_string()))?;
+                    }
+                }
+            }
+        }
+
         let () = connection
             .hset(namespace, key, value)
             .await
             .map_err(|e| CacheError::PutError(e.to_string()))?;
+
         Ok(old)
     }
 
@@ -107,4 +169,17 @@ impl super::CacheProvider for RedisCache {
             .map_err(|e| CacheError::GetError(e.to_string()))?;
         Ok(r)
     }
+}
+
+/// Return a random `usize` in the half-open range `[start, end)`
+/// using simple modulo reduction (may introduce slight bias).
+fn random_usize(start: usize, end: usize) -> Result<usize, ()> {
+    let buf: [u8; 8] = fetch_random_bytes(8)
+        .map_err(|_| ())?
+        .try_into()
+        .map_err(|_| ())?;
+    let n = u64::from_be_bytes(buf) as usize;
+
+    let span = end.checked_sub(start).ok_or(())?;
+    Ok(start + (n % span))
 }
