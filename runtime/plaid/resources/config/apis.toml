@@ -201,18 +201,18 @@ secret_key = ""
 # }
 # """
 
-[apis.aes]
-[[apis.aes.key_specs]]
+[apis.cryptography.aes]
+[[apis.cryptography.aes.key_specs]]
 id = "my_aes_key"
 key = "34958749579573957968934692346934" # This is just an example key. !!! DO NOT USE IN PRODUCTION !!!
 rules_and_actions = { "test_aes_enc_dec.wasm"  = ["Encrypt", "Decrypt"] }
 
-[[apis.aes.key_specs]]
+[[apis.cryptography.aes.key_specs]]
 id = "aes_key_only_enc"
 key = "34958749579573957968934692346935" # This is just an example key. !!! DO NOT USE IN PRODUCTION !!!
 rules_and_actions = { "test_aes_enc_dec.wasm"  = ["Encrypt"] }
 
-[[apis.aes.key_specs]]
+[[apis.cryptography.aes.key_specs]]
 id = "another_aes_key"
 key = "34958749579573957968934692346936" # This is just an example key. !!! DO NOT USE IN PRODUCTION !!!
 rules_and_actions = { "some_rule.wasm"  = ["Encrypt", "Decrypt"] }

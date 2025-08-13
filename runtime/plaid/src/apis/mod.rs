@@ -59,9 +59,9 @@ pub struct Api {
 /// Configurations for all the APIs Plaid can use
 #[derive(Deserialize)]
 pub struct ApiConfigs {
-    pub cryptography: Option<CryptographyConfig>,
     #[cfg(feature = "aws")]
     pub aws: Option<AwsConfig>,
+    pub cryptography: Option<CryptographyConfig>,
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
     pub npm: Option<NpmConfig>,
@@ -172,10 +172,10 @@ impl Api {
         };
 
         Self {
-            cryptography,
             runtime: Runtime::new().unwrap(),
             #[cfg(feature = "aws")]
             aws,
+            cryptography,
             general,
             github,
             npm,
