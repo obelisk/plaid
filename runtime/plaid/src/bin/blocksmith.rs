@@ -1,6 +1,6 @@
-use blocksmith::{decrypt, encrypt};
 use clap::{Parser, Subcommand};
 use hex::decode;
+use plaid::cryptography::aes_128_cbc::{decrypt, encrypt};
 
 #[derive(Parser)]
 #[command(name = "blocksmith", version, about = "AES-128-CBC encrypt/decrypt tool", long_about = None)]

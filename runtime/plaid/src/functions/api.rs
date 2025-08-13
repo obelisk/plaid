@@ -338,8 +338,8 @@ impl_new_function_with_error_buffer!(github, list_fpat_requests_for_org, ALLOW_I
 impl_new_function_with_error_buffer!(github, get_repos_for_fpat, ALLOW_IN_TEST_MODE);
 
 // AES functions
-impl_new_function_with_error_buffer!(aes, encrypt_local, ALLOW_IN_TEST_MODE);
-impl_new_function_with_error_buffer!(aes, decrypt_local, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(cryptography, aes_128_cbc_encrypt, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(cryptography, aes_128_cbc_decrypt, ALLOW_IN_TEST_MODE);
 
 // AWS functions
 #[cfg(feature = "aws")]
@@ -534,8 +534,12 @@ pub fn to_api_function(
         "okta_get_user_data" => Function::new_typed_with_env(&mut store, &env, okta_get_user_data),
 
         // AES calls
-        "aes_encrypt_local" => Function::new_typed_with_env(&mut store, &env, aes_encrypt_local),
-        "aes_decrypt_local" => Function::new_typed_with_env(&mut store, &env, aes_decrypt_local),
+        "cryptography_aes_128_cbc_encrypt" => {
+            Function::new_typed_with_env(&mut store, &env, cryptography_aes_128_cbc_encrypt)
+        }
+        "cryptography_aes_128_cbc_decrypt" => {
+            Function::new_typed_with_env(&mut store, &env, cryptography_aes_128_cbc_decrypt)
+        }
 
         // GitHub Calls
         "github_remove_user_from_repo" => {
