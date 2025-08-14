@@ -148,7 +148,7 @@ pub struct DeleteDeployKeyParams {
 #[derive(Debug, Deserialize)]
 pub struct RepositoryCustomProperty {
     pub property_name: String,
-    pub value: String,
+    pub value: Option<String>,
 }
 
 #[derive(Deserialize)]
