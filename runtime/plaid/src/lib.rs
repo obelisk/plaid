@@ -7,6 +7,7 @@ use aws_sdk_kms::config::Credentials;
 extern crate log;
 
 pub mod apis;
+pub mod cache;
 pub mod config;
 pub mod cryptography;
 pub mod data;
