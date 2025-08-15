@@ -33,7 +33,7 @@ pub enum AwsAuthentication {
 
 /// Get an `SdkConfig` to be used when interacting with AWS services
 #[cfg(feature = "aws")]
-pub async fn get_aws_sdk_config(authentication: AwsAuthentication) -> SdkConfig {
+pub async fn get_aws_sdk_config(authentication: &AwsAuthentication) -> SdkConfig {
     match authentication {
         AwsAuthentication::ApiKey {
             access_key_id,
@@ -45,7 +45,7 @@ pub async fn get_aws_sdk_config(authentication: AwsAuthentication) -> SdkConfig 
             let credentials = Credentials::new(
                 access_key_id,
                 secret_access_key,
-                session_token,
+                session_token.clone(),
                 None,
                 "Plaid",
             );
