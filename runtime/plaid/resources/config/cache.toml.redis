@@ -8,4 +8,4 @@ default = 200
 [cache.backend]
 type = "Redis"
 hostname = "127.0.0.1"
-port = "6379"
+port = 6379

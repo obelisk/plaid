@@ -42,7 +42,7 @@ pub struct RedisCache {
 #[derive(Deserialize, Clone)]
 pub struct Config {
     pub hostname: String,
-    pub port: Option<String>,
+    pub port: Option<u16>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub eviction_policy: Option<EvictionPolicy>,
