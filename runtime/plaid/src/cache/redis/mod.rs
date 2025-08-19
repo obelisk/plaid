@@ -53,7 +53,7 @@ impl std::fmt::Display for Config {
         let output = format!(
             "Hostname: {} | Port: {} | Username: {} | Password: {} | Eviction policy: {}",
             self.hostname,
-            self.port.clone().unwrap_or("NA".to_string()),
+            self.port.clone().unwrap_or(6379),
             self.username.clone().unwrap_or("NA".to_string()),
             if self.password.is_some() {
                 "********".to_string()
