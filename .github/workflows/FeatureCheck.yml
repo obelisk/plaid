@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Setup Rust
         run: |
+          rustup toolchain install nightly-2024-12-14  # pinning the nightly version should help with caching dependencies
+          rustup default nightly-2024-12-14
           rustup target add wasm32-unknown-unknown
 
       - uses: actions/checkout@v4
