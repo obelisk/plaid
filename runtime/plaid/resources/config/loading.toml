@@ -4,7 +4,6 @@
 # contains underscores.
 [loading]
 module_dir = "../compiled_modules/"
-lru_cache_size = 200
 compiler_backend = "cranelift"
 
 test_mode = true
@@ -26,7 +25,6 @@ test_mode_exemptions = [
     "test_cron.wasm",
     "test_aes_enc_dec.wasm",
 ]
-
 
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
