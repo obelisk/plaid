@@ -37,6 +37,7 @@ pub struct DataConfig {
     github: Option<github::GithubConfig>,
     okta: Option<okta::OktaConfig>,
     interval: Option<interval::IntervalConfig>,
+    #[cfg(feature = "aws")]
     sqs: Option<sqs::SQSConfig>,
     websocket: Option<websocket::WebSocketDataGenerator>,
 }
@@ -101,6 +102,7 @@ impl DataInternal {
             okta,
             internal: Some(internal?),
             interval,
+            #[cfg(feature = "aws")]
             sqs,
             websocket_external,
         })
