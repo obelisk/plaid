@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use plaid_stl::github::{CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus};
 use serde::Serialize;
 
 use crate::{
@@ -550,6 +551,49 @@ impl Github {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Check a repo's CODEOWNERS file and return whether it is OK, missing or invalid (i.e., contains errors).
+    /// See https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-codeowners-errors for more detail
+    pub async fn check_codeowners_file(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: CheckCodeownersParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(&request.owner)?;
+        let repo = self.validate_repository_name(&request.repo)?;
+
+        info!("Checking CODEOWNERS for repo [{owner}/{repo}] on behalf of [{module}]");
+        let address = format!("/repos/{owner}/{repo}/codeowners/errors");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    // Deserialize the body and see if we had errors
+                    match serde_json::from_str::<CodeownersErrorsResponse>(&body) {
+                        Err(_) => Err(ApiError::GitHubError(GitHubError::BadResponse)),
+                        Ok(response) => {
+                            if response.errors.is_empty() {
+                                Ok(CodeownersStatus::Ok.to_string())
+                            } else {
+                                Ok(CodeownersStatus::Invalid.to_string())
+                            }
+                        }
+                    }
+                } else if status == 404 {
+                    Ok(CodeownersStatus::Missing.to_string())
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,

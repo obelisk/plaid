@@ -324,6 +324,7 @@ impl_new_function_with_error_buffer!(github, list_seats_in_org_copilot, ALLOW_IN
 impl_new_function_with_error_buffer!(github, add_users_to_org_copilot, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, remove_users_from_org_copilot, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_custom_properties_values, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, check_codeowners_file, ALLOW_IN_TEST_MODE);
 impl_new_function!(github, comment_on_pull_request, DISALLOW_IN_TEST_MODE);
 impl_new_function!(
     github,
@@ -585,6 +586,9 @@ pub fn to_api_function(
         }
         "github_get_custom_properties_values" => {
             Function::new_typed_with_env(&mut store, &env, github_get_custom_properties_values)
+        }
+        "github_check_codeowners_file" => {
+            Function::new_typed_with_env(&mut store, &env, github_check_codeowners_file)
         }
         "github_update_branch_protection_rule" => {
             Function::new_typed_with_env(&mut store, &env, github_update_branch_protection_rule)

@@ -151,6 +151,51 @@ pub struct RepositoryCustomProperty {
     pub value: Option<String>,
 }
 
+/// Parameters sent to the runtime when checking a repo's CODEOWNERS file.
+#[derive(Serialize, Deserialize)]
+pub struct CheckCodeownersParams {
+    pub owner: String,
+    pub repo: String,
+}
+
+/// Status for a repo's CODEOWNERS file
+pub enum CodeownersStatus {
+    /// The file is present and has no errors
+    Ok,
+    /// The file is missing
+    Missing,
+    /// The file is present but has at least one error
+    Invalid,
+}
+
+impl From<String> for CodeownersStatus {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "Ok" => Self::Ok,
+            "Missing" => Self::Missing,
+            "Invalid" => Self::Invalid,
+            _ => unreachable!(), // we are receiving this string from the runtime, so it should never happen
+        }
+    }
+}
+
+impl Display for CodeownersStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            Self::Ok => "Ok",
+            Self::Missing => "Missing",
+            Self::Invalid => "Invalid",
+        };
+        write!(f, "{str}")
+    }
+}
+
+/// Response returned by GH API when checking for errors in a repo's CODEOWNERS file
+#[derive(Deserialize)]
+pub struct CodeownersErrorsResponse {
+    pub errors: Vec<serde_json::Value>,
+}
+
 #[derive(Deserialize)]
 /// Number of commits made to a repo in a week
 pub struct WeeklyCommits {
@@ -1901,4 +1946,48 @@ pub fn remove_repo_from_team(
     }
 
     Ok(())
+}
+
+/// Check a repo's CODEOWNERS file
+/// For more details, see https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-codeowners-errors
+pub fn check_codeowners_file(
+    owner: impl Display,
+    repo: impl Display,
+) -> Result<CodeownersStatus, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, check_codeowners_file);
+    }
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = CheckCodeownersParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+    };
+
+    let params = serde_json::to_string(&params).unwrap();
+    let res = unsafe {
+        github_check_codeowners_file(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response_body =
+        String::from_utf8(return_buffer).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    Ok(CodeownersStatus::from(response_body))
 }
