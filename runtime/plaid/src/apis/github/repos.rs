@@ -583,22 +583,29 @@ impl Github {
                 if status == 200 {
                     // Deserialize the body and see if we had errors
                     match serde_json::from_str::<CodeownersErrorsResponse>(&body) {
-                        Err(_) => Err(ApiError::GitHubError(GitHubError::BadResponse)),
+                        Err(_) => {
+                            debug!("Checking CODEOWNERS for repo [{owner}/{repo}] resulted in an error");
+                            Err(ApiError::GitHubError(GitHubError::BadResponse))
+                        }
                         Ok(response) => {
                             if response.errors.is_empty() {
+                                debug!("Checking CODEOWNERS for repo [{owner}/{repo}] returned 200 and no errors");
                                 serde_json::to_string(&CodeownersStatus::Ok)
                                     .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
                             } else {
                                 // Errors have been detected
+                                debug!("Checking CODEOWNERS for repo [{owner}/{repo}] returned 200 but detected errors. The body was [{body}] and the response was [{response:?}]");
                                 serde_json::to_string(&CodeownersStatus::Invalid(response.errors))
                                     .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
                             }
                         }
                     }
                 } else if status == 404 {
+                    debug!("Checking CODEOWNERS for repo [{owner}/{repo}] returned 404");
                     serde_json::to_string(&CodeownersStatus::Missing)
                         .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
                 } else {
+                    debug!("Checking CODEOWNERS for repo [{owner}/{repo}] returned {status}");
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
                     )))

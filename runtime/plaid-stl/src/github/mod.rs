@@ -191,7 +191,7 @@ impl Display for CodeownersStatus {
 }
 
 /// Response returned by GH API when checking for errors in a repo's CODEOWNERS file
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct CodeownersErrorsResponse {
     pub errors: Vec<CodeownersError>,
 }
