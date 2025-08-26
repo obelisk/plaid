@@ -586,14 +586,18 @@ impl Github {
                         Err(_) => Err(ApiError::GitHubError(GitHubError::BadResponse)),
                         Ok(response) => {
                             if response.errors.is_empty() {
-                                Ok(CodeownersStatus::Ok.to_string())
+                                serde_json::to_string(&CodeownersStatus::Ok)
+                                    .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
                             } else {
-                                Ok(CodeownersStatus::Invalid.to_string())
+                                // Errors have been detected
+                                serde_json::to_string(&CodeownersStatus::Invalid(response.errors))
+                                    .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
                             }
                         }
                     }
                 } else if status == 404 {
-                    Ok(CodeownersStatus::Missing.to_string())
+                    serde_json::to_string(&CodeownersStatus::Missing)
+                        .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,

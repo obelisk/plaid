@@ -158,33 +158,33 @@ pub struct CheckCodeownersParams {
     pub repo: String,
 }
 
+/// An error detected in a CODEOWNERS file.
+/// See https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-codeowners-errors for more details.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CodeownersError {
+    pub kind: String,
+    pub message: String,
+    pub path: String,
+    pub source: Option<String>,
+}
+
 /// Status for a repo's CODEOWNERS file
+#[derive(Serialize, Deserialize)]
 pub enum CodeownersStatus {
     /// The file is present and has no errors
     Ok,
     /// The file is missing
     Missing,
     /// The file is present but has at least one error
-    Invalid,
-}
-
-impl From<String> for CodeownersStatus {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "Ok" => Self::Ok,
-            "Missing" => Self::Missing,
-            "Invalid" => Self::Invalid,
-            _ => unreachable!(), // we are receiving this string from the runtime, so it should never happen
-        }
-    }
+    Invalid(Vec<CodeownersError>),
 }
 
 impl Display for CodeownersStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
-            Self::Ok => "Ok",
-            Self::Missing => "Missing",
-            Self::Invalid => "Invalid",
+            Self::Ok => "Ok".to_string(),
+            Self::Missing => "Missing".to_string(),
+            Self::Invalid(errors) => format!("Invalid: {errors:?}"),
         };
         write!(f, "{str}")
     }
@@ -193,7 +193,7 @@ impl Display for CodeownersStatus {
 /// Response returned by GH API when checking for errors in a repo's CODEOWNERS file
 #[derive(Deserialize)]
 pub struct CodeownersErrorsResponse {
-    pub errors: Vec<serde_json::Value>,
+    pub errors: Vec<CodeownersError>,
 }
 
 #[derive(Deserialize)]
@@ -1989,5 +1989,6 @@ pub fn check_codeowners_file(
     let response_body =
         String::from_utf8(return_buffer).map_err(|_| PlaidFunctionError::InternalApiError)?;
 
-    Ok(CodeownersStatus::from(response_body))
+    serde_json::from_str::<CodeownersStatus>(&response_body)
+        .map_err(|_| PlaidFunctionError::InternalApiError)
 }
