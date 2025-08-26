@@ -41,6 +41,8 @@ jobs:
     - name: Run Integration Tests on Cranelift
       run: ./testing/integration.sh cranelift
 
+
+
   ubuntu-llvm:
     runs-on: ubuntu-latest
 
@@ -67,3 +69,104 @@ jobs:
     
     - name: Run Integration Tests on LLVM
       run: ./testing/integration.sh llvm
+
+
+
+  ubuntu-redis:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Setup Rust
+      run: |
+        rustup toolchain install nightly-2024-12-14  # pinning the nightly version should help with caching dependencies
+        rustup default nightly-2024-12-14
+        rustup target add wasm32-unknown-unknown
+
+    - uses: actions/checkout@v4
+
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          runtime/target/
+          modules/target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Start Redis
+      run: |
+        docker run -d \
+          --name redis-test \
+          -p 6379:6379 \
+          redis:8.0-alpine
+
+    - name: Wait for Redis to be ready
+      run: |
+        for i in {1..10}; do
+          if nc -z 127.0.0.1 6379; then
+            echo "Redis is up"; break
+          fi
+          sleep 1
+        done
+
+    - name: Run Integration Tests on Cranelift
+      run: ./testing/integration.sh cranelift redis
+
+    - name: Tear down Redis
+      if: always()
+      run: docker rm -f redis-test
+
+
+
+  ubuntu-redis-auth:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Setup Rust
+      run: |
+        rustup toolchain install nightly-2024-12-14  # pinning the nightly version should help with caching dependencies
+        rustup default nightly-2024-12-14
+        rustup target add wasm32-unknown-unknown
+
+    - uses: actions/checkout@v4
+
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          runtime/target/
+          modules/target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Start Redis
+      run: |
+        docker run -d \
+          --name redis-auth-test \
+          -p 6379:6379 \
+          -e REDIS_USER=testuser \
+          -e REDIS_PASSWORD=testpassword \
+          redis:8.0-alpine \
+          sh -c 'printf "user %s on >%s ~* +@all\n" "$REDIS_USER" "$REDIS_PASSWORD" \
+            > /data/redis.conf \
+            && redis-server /data/redis.conf'
+
+    - name: Wait for Redis to be ready
+      run: |
+        for i in {1..10}; do
+          if nc -z 127.0.0.1 6379; then
+            echo "Redis is up"; break
+          fi
+          sleep 1
+        done
+
+    - name: Run Integration Tests on Cranelift
+      run: ./testing/integration.sh cranelift redis-auth
+
+    - name: Tear down Redis
+      if: always()
+      run: docker rm -f redis-auth-test
