@@ -160,7 +160,7 @@ pub struct CheckCodeownersParams {
 
 /// An error detected in a CODEOWNERS file.
 /// See https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-codeowners-errors for more details.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct CodeownersError {
     pub kind: String,
     pub message: String,
@@ -169,7 +169,7 @@ pub struct CodeownersError {
 }
 
 /// Status for a repo's CODEOWNERS file
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq)]
 pub enum CodeownersStatus {
     /// The file is present and has no errors
     Ok,
