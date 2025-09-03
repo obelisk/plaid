@@ -97,6 +97,10 @@ headers = []
 log_type = "test_aes_enc_dec"
 headers = []
 
+[webhooks."internal".webhooks."test_vec_entrypoint"]
+log_type = "test_vec_entrypoint"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples
