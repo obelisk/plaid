@@ -17,6 +17,7 @@ allowed_rules = [
     "test_shared_db_rule_2.wasm",
     "test_slack.wasm",
     "test_aes_enc_dec.wasm",
+    "test_vec_entrypoint.wasm",
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}

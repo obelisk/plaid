@@ -500,6 +500,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_vec_entrypoint"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"

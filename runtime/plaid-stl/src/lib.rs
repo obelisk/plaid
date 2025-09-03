@@ -283,3 +283,60 @@ macro_rules! entrypoint_with_source_and_response {
         }
     };
 }
+
+#[macro_export]
+macro_rules! entrypoint_vec_with_source {
+    () => {
+        use plaid_stl::{plaid::set_error_context, set_panic_hook};
+
+        #[no_mangle]
+        pub unsafe extern "C" fn entrypoint() -> i32 {
+            extern "C" {
+                fn fetch_data_and_source(data_buffer: *mut u8, buffer_size: u32) -> i32;
+            }
+
+            let buffer_size = fetch_data_and_source(vec![].as_mut_ptr(), 0);
+            let buffer_size = if buffer_size < 4 {
+                return buffer_size;
+            } else {
+                buffer_size as u32
+            };
+
+            let mut data_buffer = vec![0; buffer_size as usize];
+
+            let copied_size = fetch_data_and_source(data_buffer.as_mut_ptr(), buffer_size);
+            let copied_size = if copied_size < 4 {
+                return copied_size;
+            } else {
+                copied_size as u32
+            };
+
+            if copied_size != buffer_size {
+                return -1;
+            }
+
+            let log_length = u32::from_le_bytes(data_buffer[0..4].try_into().unwrap()) as usize;
+
+            let log = &data_buffer[4..4 + log_length];
+
+            // We keep the log as a Vec<u8>
+            let log = log.to_vec();
+
+            let log_source = &data_buffer[4 + log_length..];
+            let source = match serde_json::from_slice::<LogSource>(log_source) {
+                Ok(s) => s,
+                Err(_) => return -2,
+            };
+
+            set_panic_hook!();
+
+            match main(log, source) {
+                Ok(_) => 0,
+                Err(e) => {
+                    set_error_context(&e.to_string());
+                    1
+                }
+            }
+        }
+    };
+}
