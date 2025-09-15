@@ -1,0 +1,75 @@
+name: DynamoDB for Rules Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches:  "**"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  AWS_ACCESS_KEY_ID: test123 # fake for AWS CLI to local dynamo container
+  AWS_SECRET_ACCESS_KEY: test123 # fake for AWS CLI to local dynamo container
+
+
+jobs:
+  ubuntu-cranelift:
+    runs-on: ubuntu-latest
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
+
+    steps:
+    # - name: Setup Rust
+    #   run: |
+    #     rustup toolchain install nightly-2024-12-14  # pinning the nightly version should help with caching dependencies
+    #     rustup default nightly-2024-12-14
+    #     rustup target add wasm32-unknown-unknown
+    #
+    # - uses: actions/checkout@v4
+
+    # - uses: actions/cache@v4
+    #   with:
+    #     path: |
+    #       ~/.cargo/bin/
+    #       ~/.cargo/registry/index/
+    #       ~/.cargo/registry/cache/
+    #       ~/.cargo/git/db/
+    #       runtime/target/
+    #       modules/target/
+    #     key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Run Integration Tests on Cranelift
+      run: aws dynamodb list-tables --endpoint-url http://localhost:8000 --region us-east-1
+
+  # ubuntu-llvm:
+  #   runs-on: ubuntu-latest
+  #
+  #   steps:
+  #   - name: Setup Rust
+  #     run: |
+  #       rustup toolchain install nightly-2024-12-14  # pinning the nightly version should help with caching dependencies
+  #       rustup default nightly-2024-12-14
+  #       rustup target add wasm32-unknown-unknown
+  #       sudo apt install -y libllvm18 llvm-18 llvm-18-dev llvm-18-runtime libpolly-18-dev libclang-common-18-dev
+  #
+  #   - uses: actions/checkout@v4
+  #
+  #   - uses: actions/cache@v4
+  #     with:
+  #       path: |
+  #         ~/.cargo/bin/
+  #         ~/.cargo/registry/index/
+  #         ~/.cargo/registry/cache/
+  #         ~/.cargo/git/db/
+  #         runtime/target/
+  #         modules/target/
+  #       key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #
+  #   - name: Run Integration Tests on LLVM
+  #     run: ./testing/integration.sh llvm
