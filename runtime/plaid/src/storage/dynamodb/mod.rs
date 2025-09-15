@@ -35,7 +35,7 @@ pub struct DynamoDb {
 
 impl DynamoDb {
     pub async fn new(config: Config) -> Result<Self, String> {
-        let sdk_config = get_aws_sdk_config(config.authentication).await;
+        let sdk_config = get_aws_sdk_config(&config.authentication).await;
         let client = aws_sdk_dynamodb::Client::new(&sdk_config);
 
         // Perform schema validation
