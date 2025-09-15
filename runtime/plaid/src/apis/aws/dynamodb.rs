@@ -494,3 +494,11 @@ fn to_json_value(attr_value: &AttributeValue) -> Result<Value, ApiError> {
         ))),
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    #[test]
+    fn it_works() {
+        println!("lmao")
+    }
+}
