@@ -497,8 +497,137 @@ fn to_json_value(attr_value: &AttributeValue) -> Result<Value, ApiError> {
 
 #[cfg(test)]
 pub mod tests {
-    #[test]
-    fn it_works() {
-        println!("lmao")
+    use aws_config::Region;
+    use wasmer::{
+        sys::{Cranelift, EngineBuilder},
+        Module, Store,
+    };
+
+    use crate::loader::LimitValue;
+
+    use super::*;
+
+    fn test_module(name: &str, test_mode: bool) -> Arc<PlaidModule> {
+        let store = Store::default();
+        let wat = r#"
+        (module
+          (func (export "add") (param $x i64) (param $y i64) (result i64) (i64.add (local.get $x) (local.get $y)))
+        )
+        "#;
+        let compiler_config = Cranelift::default();
+        let engine = EngineBuilder::new(compiler_config);
+        let m = Module::new(&store, wat).unwrap();
+
+        Arc::new(PlaidModule {
+            name: name.to_string(),
+            module: m,
+            engine: engine.into(),
+            computation_limit: 0,
+            page_limit: 0,
+            storage_current: Default::default(),
+            storage_limit: LimitValue::Unlimited,
+            accessory_data: Default::default(),
+            secrets: Default::default(),
+            cache: Default::default(),
+            persistent_response: Default::default(),
+            test_mode,
+        })
+    }
+
+    impl DynamoDb {
+        pub async fn local_test() -> Self {
+            let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                .test_credentials()
+                .region(Region::new("us-east-1"))
+                // DynamoDB run locally uses port 8000 by default.
+                .endpoint_url("http://localhost:8000")
+                .load()
+                .await;
+            let dynamodb_local_config = aws_sdk_dynamodb::config::Builder::from(&config).build();
+
+            let client = aws_sdk_dynamodb::Client::from_conf(dynamodb_local_config);
+
+            Self {
+                client,
+                read: HashMap::new(),
+                write: HashMap::new(),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn put_query_delete() {
+        // Initialize the client
+        let client = DynamoDb::local_test().await;
+        let table_name = String::from("local_test");
+        // Example: PutItem with all attribute types
+        let item_json = serde_json::json!({
+            "pk": "124",
+            "timestamp": "124",
+            "name": "Jane Doe",
+            "age": 33,
+            "is_active": true,
+            "null_field": null,
+            "scores": [95, 88, 92], // List
+            "metadata": { // Map
+                "city": "New York",
+                "country": "USA"
+            },
+            "tags": ["dev", "rust", "aws"], // String Set
+            "ratings": [4.5, 3.8, 5.0], // Number Set
+            "binaries": [ // Binary Set (base64-encoded)
+                base64::encode("data1"),
+                base64::encode("data2")
+            ],
+            "binary_field": { "_binary": base64::encode("binary_data") } // Binary
+        });
+        let item_hm = serde_json::from_value::<HashMap<String, Value>>(item_json).unwrap();
+        let input = PutItemInput {
+            table_name: table_name.clone(),
+            item: item_hm,
+            return_values: Some(String::from("ALL_OLD")),
+            ..Default::default()
+        };
+        let parms = serde_json::to_string(&input).unwrap();
+        let m = test_module("test", true);
+        let x = client.put_item(&parms, m.clone()).await.unwrap();
+
+        println!("put_item output {x:?}");
+
+        let input = QueryInput {
+            table_name: table_name.clone(),
+            key_condition_expression: String::from("#pk = :val"),
+            expression_attribute_names: Some(HashMap::from([(
+                "#pk".to_string(),
+                "pk".to_string(),
+            )])),
+            expression_attribute_values: Some(HashMap::from([(
+                ":val".to_string(),
+                Value::String(String::from("124")),
+            )])),
+            ..Default::default()
+        };
+        let params = serde_json::to_string(&input).unwrap();
+        let x = client.query(&params, m.clone()).await.unwrap();
+
+        println!("query output {}", serde_json::to_string_pretty(&x).unwrap());
+
+        let input = DeleteItemInput {
+            table_name: table_name,
+            key: HashMap::from([
+                (String::from("pk"), Value::String(String::from("124"))),
+                (
+                    String::from("timestamp"),
+                    Value::String(String::from("124")),
+                ),
+            ]),
+            return_values: Some(String::from("ALL_OLD")),
+            ..Default::default()
+        };
+
+        let params = serde_json::to_string(&input).unwrap();
+        let x = client.delete_item(&params, m.clone()).await;
+
+        println!("delete {:?}", x);
     }
 }
