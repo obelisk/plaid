@@ -554,9 +554,13 @@ pub mod tests {
             read: HashMap<String, HashSet<String>>,
             write: HashMap<String, HashSet<String>>,
         ) -> Self {
+            let x = std::env::var("AWS_ACCESS_KEY_ID").unwrap();
+            let y = std::env::var("AWS_SECRET_ACCESS_KEY").unwrap();
+            let r = std::env::var("AWS_REGION").unwrap();
+            println!("creds {x} {y} {r}");
             let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                .test_credentials()
-                .region(Region::new("us-east-1"))
+                // .test_credentials()
+                // .region(Region::new("us-east-1"))
                 // DynamoDB run locally uses port 8000 by default.
                 .endpoint_url("http://localhost:8000")
                 .load()
