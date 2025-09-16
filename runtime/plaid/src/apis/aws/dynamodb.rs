@@ -23,9 +23,9 @@ pub struct DynamoDbConfig {
     /// - `IAM`: Uses the IAM role assigned to the instance or environment.
     /// - `ApiKey`: Uses explicit credentials, including an access key ID, secret access key, and region.
     authentication: AwsAuthentication,
-    /// Configured writers - maps a table name to a list of rules that are allowed to READ or WRITE it
+    /// Configured writers - maps a table name to a list of rules that are allowed to READ or WRITE data
     write: HashMap<String, HashSet<String>>,
-    /// Configured readers - maps a table name to a list of rules that are allowed to read it
+    /// Configured readers - maps a table name to a list of rules that are allowed to READ data
     read: HashMap<String, HashSet<String>>,
 }
 
@@ -34,9 +34,9 @@ pub struct DynamoDbConfig {
 pub struct DynamoDb {
     /// The underlying KMS client used to interact with the KMS API.
     client: Client,
-    /// Configured writers - maps a table name to a list of rules that are allowed to write it
+    /// Configured writers - maps a table name to a list of rules that are allowed to READ or WRITE data
     write: HashMap<String, HashSet<String>>,
-    /// Configured readers - maps a table name to a list of rules that are allowed to read it
+    /// Configured readers - maps a table name to a list of rules that are allowed to READ data
     read: HashMap<String, HashSet<String>>,
 }
 
@@ -89,6 +89,9 @@ impl DynamoDb {
                     }
                 }
 
+                trace!(
+                    "[{module}] failed [read] permission check for dynamodb table [{table_name}]"
+                );
                 Err(ApiError::BadRequest)
             }
             AccessScope::Write => {
@@ -100,6 +103,9 @@ impl DynamoDb {
                     };
                 }
 
+                trace!(
+                    "[{module}] failed [write] permission check for dynamodb table [{table_name}]"
+                );
                 Err(ApiError::BadRequest)
             }
         }
@@ -157,7 +163,7 @@ impl DynamoDb {
         let DeleteItemInput {
             table_name,
             key,
-            key_condition_expression,
+            condition_expression: key_condition_expression,
             expression_attribute_names,
             expression_attribute_values,
             return_values,
@@ -226,6 +232,7 @@ impl DynamoDb {
     }
 }
 
+/// Converts DynamoDB Attributes into JSON
 fn attributes_into_json(attrs: &HashMap<String, AttributeValue>) -> Result<Value, ApiError> {
     let mut result = Map::new();
     for (k, v) in attrs.iter() {
@@ -235,6 +242,7 @@ fn attributes_into_json(attrs: &HashMap<String, AttributeValue>) -> Result<Value
     Ok(Value::Object(result))
 }
 
+/// Converts JSON into DynamoDB Attributes
 fn json_into_attributes(
     value: Option<HashMap<String, Value>>,
 ) -> Result<Option<HashMap<String, AttributeValue>>, ApiError> {
@@ -250,6 +258,7 @@ fn json_into_attributes(
     }
 }
 
+/// converts String into Typed ReturnValue enum for use with DynamoDB api
 fn return_value_from_string(value: Option<String>) -> Result<Option<ReturnValue>, ApiError> {
     value
         .as_ref()
@@ -274,6 +283,7 @@ enum ArrayMembers {
     NonUniform,
 }
 
+/// helper function for use when converting JSON array to strongly typed array
 fn inspect_array_members(arr: &Vec<Value>) -> ArrayMembers {
     // Check if all elements are strings (for SS)
     if arr.iter().all(|v| v.is_string()) {
@@ -296,7 +306,7 @@ fn inspect_array_members(arr: &Vec<Value>) -> ArrayMembers {
     ArrayMembers::NonUniform
 }
 
-// helper function to convert JSON Value to DynamoDB AttributeValue, supporting all types
+/// helper function to convert JSON Value to DynamoDB AttributeValue, supporting all types
 fn to_attribute_value(value: Value) -> Result<AttributeValue, ApiError> {
     match value {
         // String: Direct string value
@@ -498,6 +508,7 @@ fn to_json_value(attr_value: &AttributeValue) -> Result<Value, ApiError> {
 #[cfg(test)]
 pub mod tests {
     use aws_config::Region;
+    use serde_json::from_value;
     use wasmer::{
         sys::{Cranelift, EngineBuilder},
         Module, Store,
@@ -507,16 +518,18 @@ pub mod tests {
 
     use super::*;
 
+    // helper function to generate a blank module that does nothing
     fn test_module(name: &str, test_mode: bool) -> Arc<PlaidModule> {
         let store = Store::default();
-        let wat = r#"
-        (module
-          (func (export "add") (param $x i64) (param $y i64) (result i64) (i64.add (local.get $x) (local.get $y)))
-        )
-        "#;
+        // stub wasm module, just enough to pass validation
+        // https://docs.rs/wabt/latest/wabt/fn.wat2wasm.html
+        let wasm = &[
+            0, 97, 115, 109, // \0ASM - magic
+            1, 0, 0, 0, //  0x01 - version
+        ];
         let compiler_config = Cranelift::default();
         let engine = EngineBuilder::new(compiler_config);
-        let m = Module::new(&store, wat).unwrap();
+        let m = Module::new(&store, wasm).unwrap();
 
         Arc::new(PlaidModule {
             name: name.to_string(),
@@ -535,7 +548,11 @@ pub mod tests {
     }
 
     impl DynamoDb {
-        pub async fn local_test() -> Self {
+        // constructor for the local instance of DynamoDB
+        pub async fn local_endpoint(
+            read: HashMap<String, HashSet<String>>,
+            write: HashMap<String, HashSet<String>>,
+        ) -> Self {
             let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
                 .test_credentials()
                 .region(Region::new("us-east-1"))
@@ -549,8 +566,8 @@ pub mod tests {
 
             Self {
                 client,
-                read: HashMap::new(),
-                write: HashMap::new(),
+                read,
+                write,
             }
         }
     }
@@ -558,9 +575,15 @@ pub mod tests {
     #[tokio::test]
     async fn put_query_delete() {
         // Initialize the client
-        let client = DynamoDb::local_test().await;
         let table_name = String::from("local_test");
+        let writers = json!({table_name.clone(): ["test_module"]});
+        let writers = from_value::<HashMap<String, HashSet<String>>>(writers).unwrap();
+        let client = DynamoDb::local_endpoint(HashMap::new(), writers).await;
         // Example: PutItem with all attribute types
+        // NOTE:: The json object represents an item
+        // in a dynamodb table, each key is an attribute (column)
+        // the primary + secondary keys must also be contained
+        // in the object as keys
         let item_json = serde_json::json!({
             "pk": "124",
             "timestamp": "124",
@@ -588,11 +611,11 @@ pub mod tests {
             return_values: Some(String::from("ALL_OLD")),
             ..Default::default()
         };
-        let parms = serde_json::to_string(&input).unwrap();
-        let m = test_module("test", true);
-        let x = client.put_item(&parms, m.clone()).await.unwrap();
+        let input = serde_json::to_string(&input).unwrap();
+        let m = test_module("test_module", true);
+        let output = client.put_item(&input, m.clone()).await.unwrap();
 
-        println!("put_item output {x:?}");
+        println!("put_item output {output:?}");
 
         let input = QueryInput {
             table_name: table_name.clone(),
@@ -607,10 +630,13 @@ pub mod tests {
             )])),
             ..Default::default()
         };
-        let params = serde_json::to_string(&input).unwrap();
-        let x = client.query(&params, m.clone()).await.unwrap();
+        let input = serde_json::to_string(&input).unwrap();
+        let output = client.query(&input, m.clone()).await.unwrap();
 
-        println!("query output {}", serde_json::to_string_pretty(&x).unwrap());
+        println!(
+            "query output {}",
+            serde_json::to_string_pretty(&output).unwrap()
+        );
 
         let input = DeleteItemInput {
             table_name: table_name,
@@ -625,9 +651,9 @@ pub mod tests {
             ..Default::default()
         };
 
-        let params = serde_json::to_string(&input).unwrap();
-        let x = client.delete_item(&params, m.clone()).await;
+        let input = serde_json::to_string(&input).unwrap();
+        let output = client.delete_item(&input, m.clone()).await;
 
-        println!("delete {:?}", x);
+        println!("delete {:?}", output);
     }
 }
