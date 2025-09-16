@@ -16,6 +16,7 @@ env:
   AWS_SECRET_ACCESS_KEY: test123 
   AWS_DEFAULT_REGION: us-east-1
   TABLE_NAME: local_test
+  RUST_LOG: trace
 
 
 jobs:
@@ -64,10 +65,10 @@ jobs:
       run: |
         aws dynamodb list-tables --endpoint-url http://localhost:8000 --region us-east-1
 
-    # - name: Run tests
-    #   working-directory: ./runtime
-    #   run: |
-    #       cargo test apis::aws::dynamodb::tests:: 
+    - name: Run tests
+      working-directory: ./runtime
+      run: |
+          cargo test apis::aws::dynamodb::tests:: 
 
     - name: Delete table
       run: |
