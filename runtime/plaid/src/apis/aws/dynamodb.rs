@@ -129,7 +129,6 @@ impl DynamoDb {
         let expression_attribute_values = json_into_attributes(expression_attribute_values)?;
         let return_values = return_value_from_string(return_values)?;
 
-        println!("table_name {table_name}");
         // Execute PutItem
         let output = self
             .client
@@ -508,8 +507,7 @@ fn to_json_value(attr_value: &AttributeValue) -> Result<Value, ApiError> {
 
 #[cfg(test)]
 pub mod tests {
-    use aws_config::Region;
-    use serde_json::from_value;
+    use serde_json::{from_str, from_value};
     use wasmer::{
         sys::{Cranelift, EngineBuilder},
         Module, Store,
@@ -554,13 +552,7 @@ pub mod tests {
             read: HashMap<String, HashSet<String>>,
             write: HashMap<String, HashSet<String>>,
         ) -> Self {
-            let x = std::env::var("AWS_ACCESS_KEY_ID").unwrap();
-            let y = std::env::var("AWS_SECRET_ACCESS_KEY").unwrap();
-            let r = std::env::var("AWS_REGION").unwrap();
-            println!("creds {x} {y} {r}");
             let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                // .test_credentials()
-                // .region(Region::new("us-east-1"))
                 // DynamoDB run locally uses port 8000 by default.
                 .endpoint_url("http://localhost:8000")
                 .load()
@@ -578,13 +570,66 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn permission_checks() {
+        let table_name = String::from("local_test");
+        // permissions
+        let readers = json!({table_name.clone(): ["module_a"]});
+        let readers = from_value::<HashMap<String, HashSet<String>>>(readers).unwrap();
+
+        let writers = json!({table_name.clone(): ["module_b"]});
+        let writers = from_value::<HashMap<String, HashSet<String>>>(writers).unwrap();
+
+        let client = DynamoDb::local_endpoint(readers, writers).await;
+
+        // modules
+        let module_a = test_module("module_a", true); // reader
+        let module_b = test_module("module_b", true); // writer
+        let module_c = test_module("module_c", true); // no access
+
+        // modules can read table
+        client
+            .check_module_permissions(AccessScope::Read, module_a.clone(), &table_name)
+            .unwrap();
+        client
+            .check_module_permissions(AccessScope::Read, module_b.clone(), &table_name)
+            .unwrap();
+        client
+            .check_module_permissions(AccessScope::Read, module_c.clone(), &table_name)
+            .expect_err("expect to fail with BadRequest");
+
+        // readers can't write
+        client
+            .check_module_permissions(AccessScope::Write, module_a.clone(), &table_name)
+            .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Write, module_b.clone(), &table_name)
+            .unwrap();
+        client
+            .check_module_permissions(AccessScope::Write, module_c.clone(), &table_name)
+            .expect_err("expect to fail with BadRequest");
+
+        // unknown table
+        client
+            .check_module_permissions(AccessScope::Read, module_a.clone(), "unknown_table")
+            .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Read, module_b.clone(), "unknown_table")
+            .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Read, module_c.clone(), "unknown_table")
+            .expect_err("expect to fail with BadRequest");
+    }
+
+    #[tokio::test]
     async fn put_query_delete() {
         // Initialize the client
         let table_name = String::from("local_test");
         let writers = json!({table_name.clone(): ["test_module"]});
         let writers = from_value::<HashMap<String, HashSet<String>>>(writers).unwrap();
         let client = DynamoDb::local_endpoint(HashMap::new(), writers).await;
-        // Example: PutItem with all attribute types
+        let m = test_module("test_module", true);
+
+        // PutItem with all attribute types
         // NOTE:: The json object represents an item
         // in a dynamodb table, each key is an attribute (column)
         // the primary + secondary keys must also be contained
@@ -617,11 +662,11 @@ pub mod tests {
             ..Default::default()
         };
         let input = serde_json::to_string(&input).unwrap();
-        let m = test_module("test_module", true);
         let output = client.put_item(&input, m.clone()).await.unwrap();
+        let output_json = from_str::<Value>(&output).unwrap();
+        assert_eq!(output_json, json!({"attributes":null}));
 
-        println!("put_item output {output:?}");
-
+        // Query
         let input = QueryInput {
             table_name: table_name.clone(),
             key_condition_expression: String::from("#pk = :val"),
@@ -637,12 +682,13 @@ pub mod tests {
         };
         let input = serde_json::to_string(&input).unwrap();
         let output = client.query(&input, m.clone()).await.unwrap();
-
-        println!(
-            "query output {}",
-            serde_json::to_string_pretty(&output).unwrap()
+        let output_json = from_str::<Value>(&output).unwrap();
+        assert_eq!(
+            output_json,
+            json!({"items":[{"age":33,"binaries":["ZGF0YTE=","ZGF0YTI="],"binary_field":{"_binary":"YmluYXJ5X2RhdGE="},"is_active":true,"metadata":{"city":"New York","country":"USA"},"name":"Jane Doe","null_field":null,"pk":"124","ratings":[3.8,4.5,5],"scores":[88,92,95],"tags":["aws","dev","rust"],"timestamp":"124"}]})
         );
 
+        // Delete Item
         let input = DeleteItemInput {
             table_name: table_name,
             key: HashMap::from([
@@ -657,8 +703,11 @@ pub mod tests {
         };
 
         let input = serde_json::to_string(&input).unwrap();
-        let output = client.delete_item(&input, m.clone()).await;
-
-        println!("delete {:?}", output);
+        let output = client.delete_item(&input, m.clone()).await.unwrap();
+        let output_json = from_str::<Value>(&output).unwrap();
+        assert_eq!(
+            output_json,
+            json!({"attributes":{"age":33,"binaries":["ZGF0YTE=","ZGF0YTI="],"binary_field":{"_binary":"YmluYXJ5X2RhdGE="},"is_active":true,"metadata":{"city":"New York","country":"USA"},"name":"Jane Doe","null_field":null,"pk":"124","ratings":[3.8,4.5,5],"scores":[88,92,95],"tags":["aws","dev","rust"],"timestamp":"124"}})
+        );
     }
 }
