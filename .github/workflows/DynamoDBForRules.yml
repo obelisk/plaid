@@ -68,7 +68,7 @@ jobs:
     - name: Run tests
       working-directory: ./runtime
       run: |
-          cargo test apis::aws::dynamodb::tests::put_query_delete -- --no-capture
+          cargo test --lib apis::aws::dynamodb::tests::put_query_delete -- --no-capture
 
     - name: Delete table
       run: |
