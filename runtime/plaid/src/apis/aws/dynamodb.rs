@@ -129,6 +129,7 @@ impl DynamoDb {
         let expression_attribute_values = json_into_attributes(expression_attribute_values)?;
         let return_values = return_value_from_string(return_values)?;
 
+        println!("table_name {table_name}");
         // Execute PutItem
         let output = self
             .client
