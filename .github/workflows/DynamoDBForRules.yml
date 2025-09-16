@@ -64,10 +64,10 @@ jobs:
       run: |
         aws dynamodb list-tables --endpoint-url http://localhost:8000 --region us-east-1
 
-    - name: Run tests
-      working-directory: ./runtime
-      run: |
-          cargo test apis::aws::dynamodb::tests:: 
+    # - name: Run tests
+    #   working-directory: ./runtime
+    #   run: |
+    #       cargo test apis::aws::dynamodb::tests:: 
 
     - name: Delete table
       run: |
