@@ -15,7 +15,7 @@ env:
   # AWS_ACCESS_KEY_ID: test123 
   # AWS_SECRET_ACCESS_KEY: test123 
   # AWS_DEFAULT_REGION: us-east-1
-  # TABLE_NAME: local_test
+  TABLE_NAME: local_test
   RUST_LOG: trace
 
 
