@@ -342,7 +342,7 @@ pub fn create_pull_request(
     draft: bool,
 ) -> Result<(), PlaidFunctionError> {
     extern "C" {
-        new_host_function!(github, create_pull_rquest);
+        new_host_function!(github, create_pull_request);
     }
 
     let request = CreatePullRequestRequest {
@@ -357,8 +357,9 @@ pub fn create_pull_request(
 
     let request = serde_json::to_string(&request).unwrap();
 
-    let res =
-        unsafe { github_create_pull_rquest(request.as_bytes().as_ptr(), request.as_bytes().len()) };
+    let res = unsafe {
+        github_create_pull_request(request.as_bytes().as_ptr(), request.as_bytes().len())
+    };
 
     // There was an error with the Plaid system. Maybe the API is not
     // configured.
