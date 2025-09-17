@@ -332,6 +332,8 @@ impl_new_function!(
     DISALLOW_IN_TEST_MODE
 );
 impl_new_function_with_error_buffer!(github, get_weekly_commit_count, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_reference, ALLOW_IN_TEST_MODE);
+impl_new_function!(github, create_reference, DISALLOW_IN_TEST_MODE);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
@@ -629,6 +631,7 @@ pub fn to_api_function(
         "github_pull_request_request_reviewers" => {
             Function::new_typed_with_env(&mut store, &env, github_pull_request_request_reviewers)
         }
+<<<<<<< HEAD
         "github_require_signed_commits" => {
             Function::new_typed_with_env(&mut store, &env, github_require_signed_commits)
         }
@@ -640,6 +643,13 @@ pub fn to_api_function(
         }
         "github_remove_repo_from_team" => {
             Function::new_typed_with_env(&mut store, &env, github_remove_repo_from_team)
+=======
+        "github_get_reference" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_reference)
+        }
+        "github_create_reference" => {
+            Function::new_typed_with_env(&mut store, &env, github_create_reference)
+>>>>>>> 2460f13 (Implement get_reference and create_reference APIs)
         }
 
         // Slack Calls
