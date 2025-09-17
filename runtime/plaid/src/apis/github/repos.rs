@@ -1,7 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
-use plaid_stl::github::{CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus};
+use plaid_stl::github::{
+    CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus, CreateFileRequest,
+};
 use serde::Serialize;
+use serde_json::json;
 
 use crate::{
     apis::{github::GitHubError, ApiError},
@@ -606,6 +609,49 @@ impl Github {
                         .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
                 } else {
                     debug!("Checking CODEOWNERS for repo [{owner}/{repo}] returned {status}");
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Creates a new file in a repository.
+    pub async fn create_file(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request: CreateFileRequest =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_org(&request.owner)?;
+        let repo = self.validate_repository_name(&request.repo)?;
+        let path = self.validate_path(&request.path)?;
+
+        info!("Creating file at [{path}] in repository [{owner}/{repo}] on behalf of [{module}]");
+        let address = format!("/repos/{owner}/{repo}/contents/{path}");
+
+        let mut body = json!({
+            "message": request.message,
+            "content": base64::encode(request.content),
+        });
+        if let Some(branch) = request.branch {
+            body["branch"] = json!(branch);
+        }
+        let body = body.to_string();
+
+        match self
+            .make_generic_put_request(address, Some(&body), module)
+            .await
+        {
+            Ok((status, Ok(_))) => {
+                if status == 200 || status == 201 {
+                    Ok(0)
+                } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
                     )))

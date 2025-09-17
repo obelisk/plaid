@@ -1,5 +1,9 @@
-use plaid_stl::github::PullRequestRequestReviewers;
+use plaid_stl::github::{
+    CreatePullRequestRequest, GetPullRequestOptions, GetPullRequestRequest,
+    PullRequestRequestReviewers,
+};
 use serde::Serialize;
+use serde_json::json;
 
 use super::Github;
 use crate::{
@@ -64,4 +68,110 @@ impl Github {
             Err(e) => Err(e),
         }
     }
+
+    /// Creates a pull request in a specified repository.
+    pub async fn create_pull_request(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request: CreatePullRequestRequest =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_org(&request.owner)?;
+        let repo = self.validate_repository_name(&request.repo)?;
+
+        let mut request_body = json!({
+            "title": request.title,
+            "head": request.head,
+            "base": request.base,
+            "draft": request.draft,
+        });
+
+        if let Some(body) = request.body {
+            request_body["body"] = json!(body);
+        }
+
+        let serialized = request_body.to_string();
+        let address = format!("/repos/{owner}/{repo}/pulls");
+
+        info!("Creating pull request in [{owner}/{repo}] org on behalf of {module}");
+
+        match self
+            .make_generic_post_request(address, serialized, module)
+            .await
+        {
+            Ok((status, Ok(_))) => {
+                if status == 201 {
+                    Ok(0)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Lists pull requests in a specified repository.
+    pub async fn list_pull_requests(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: GetPullRequestRequest =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_org(&request.owner)?;
+        let repo = self.validate_repository_name(&request.repo)?;
+
+        if request.per_page > 100 {
+            return Err(ApiError::BadRequest);
+        }
+
+        let options = request
+            .options
+            .map_or(Default::default(), query_string_from_options);
+
+        info!("Listing pull requests in [{owner}/{repo}] org on behalf of {module}",);
+        let address = format!("/repos/{owner}/{repo}/pulls?{options}");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// Build a query string for the GitHub "List Pull Requests" API
+/// (`GET /repos/{owner}/{repo}/pulls`) from the given options.
+fn query_string_from_options(options: GetPullRequestOptions) -> String {
+    fn encode(v: &str) -> String {
+        v.replace(':', "%3A").replace(' ', "%20")
+    }
+
+    let mut parts = Vec::new();
+    if let Some(state) = &options.state {
+        parts.push(format!("state={}", state));
+    }
+    if let Some(head) = &options.head {
+        parts.push(format!("head={}", encode(&head.to_string())));
+    }
+    if let Some(base) = &options.base {
+        if !base.is_empty() {
+            parts.push(format!("base={}", encode(base)));
+        }
+    }
+    parts.join("&")
 }

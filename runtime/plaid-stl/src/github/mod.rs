@@ -1,8 +1,12 @@
+mod pull_requests;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{datetime, PlaidFunctionError};
+
+pub use pull_requests::*;
 
 pub enum ReviewPatAction {
     Approve,
@@ -312,6 +316,23 @@ pub struct GitRefTarget {
     pub type_: String,
     /// The SHA-1 hash of the referenced object.
     pub sha: String,
+}
+
+/// Request to create a new file in a repository.
+#[derive(Serialize, Deserialize)]
+pub struct CreateFileRequest {
+    /// Owner of the repository (e.g., GitHub username or org).
+    pub owner: String,
+    /// Name of the repository.
+    pub repo: String,
+    /// Path to create the file at
+    pub path: String,
+    /// The commit message.
+    pub message: String,
+    /// The new file content,
+    pub content: Vec<u8>,
+    /// The branch name. Default: the repository’s default branch.
+    pub branch: Option<String>,
 }
 
 // TODO: Do not use this function, it is deprecated and will be removed soon
@@ -2061,7 +2082,7 @@ pub fn check_codeowners_file(
 /// # Arguments
 /// * `owner` - The account owner of the repository. Case-insensitive.
 /// * `repo` - The name of the repository without the `.git` extension. Case-insensitive.
-/// * `reference` - A [`GitRef`] representing either a branch or a tag, specified by its short name.
+/// * `reference` - A `GitRef` representing either a branch or a tag, specified by its short name.
 ///
 /// # Returns
 /// - `Ok(Some(GitApiRef))` if the reference exists.
@@ -2134,7 +2155,7 @@ pub fn get_reference(
 /// # Arguments
 /// * `owner` - The account owner of the repository. Case-insensitive.
 /// * `repo` - The name of the repository without the `.git` extension. Case-insensitive.
-/// * `reference` - A [`GitRef`] representing either a branch or a tag, specified by its short name.
+/// * `reference` - A `GitRef` representing either a branch or a tag, specified by its short name.
 /// * `sha` - The SHA-1 identifier of the commit or object the new reference should point to.
 ///
 /// # Returns
@@ -2160,6 +2181,66 @@ pub fn create_reference(
     let params = serde_json::to_string(&request).unwrap();
     let res =
         unsafe { github_create_reference(params.as_bytes().as_ptr(), params.as_bytes().len()) };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
+
+/// Creates a new file in a repository (create-only).
+///
+/// Creates a **new** file in the given `owner` and `repo` at the specified `path`.
+/// The `message` will be used as the commit message. The `content` must be
+/// provided as raw bytes (e.g., a UTF-8 string’s `.into()` or a `Vec<u8>`).
+/// **Do not base64-encode the content** — this function will base64-encode it
+/// automatically before sending it to the GitHub API.  
+/// If `branch` is omitted, the repository’s default branch is used.
+///
+/// See the [GitHub API docs](https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28#create-or-update-file-contents)
+/// for protocol details (this function only supports creation; use the separate
+/// update API to modify existing files).
+///
+/// # Arguments
+/// - `owner`: The account or organization that owns the repository.
+/// - `repo`: The name of the repository.
+/// - `path`: The path, including filename, where the file will be created.
+/// - `message`: The commit message to associate with the new file.
+/// - `content`: The raw file contents (not base64-encoded).
+/// - `branch`: The branch where the file will be created. Defaults to the
+///   repository’s default branch if not provided.
+///
+/// # Returns
+/// - `Ok(())` if the file was successfully created, or
+/// - `Err(PlaidFunctionError)` if the request fails (e.g., file already exists,
+///   branch protection, missing configuration).
+pub fn create_file(
+    owner: impl Display,
+    repo: impl Display,
+    path: impl Display,
+    message: impl Display,
+    content: impl Into<Vec<u8>>,
+    branch: Option<impl Display>,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, create_file);
+    }
+
+    let request = CreateFileRequest {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        path: path.to_string(),
+        message: message.to_string(),
+        content: content.into(),
+        branch: branch.map(|b| b.to_string()),
+    };
+
+    let request = serde_json::to_string(&request).unwrap();
+
+    let res = unsafe { github_create_file(request.as_bytes().as_ptr(), request.as_bytes().len()) };
 
     // There was an error with the Plaid system. Maybe the API is not
     // configured.
