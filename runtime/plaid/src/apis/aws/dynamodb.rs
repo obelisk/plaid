@@ -32,7 +32,7 @@ pub struct DynamoDbConfig {
 /// Represents the DynamoDB API client.
 /// NOTE: if Plaid is configured with the DynamoDB database backend, sharing tables here will lead to undefined behaviour
 pub struct DynamoDb {
-    /// The underlying KMS client used to interact with the KMS API.
+    /// The underlying client used to interact with the KMS API.
     client: Client,
     /// Configured writers - maps a table name to a list of rules that are allowed to READ or WRITE data
     write: HashMap<String, HashSet<String>>,
@@ -163,7 +163,7 @@ impl DynamoDb {
         let DeleteItemInput {
             table_name,
             key,
-            condition_expression: key_condition_expression,
+            condition_expression,
             expression_attribute_names,
             expression_attribute_values,
             return_values,
@@ -178,7 +178,7 @@ impl DynamoDb {
             .delete_item()
             .table_name(table_name)
             .set_key(dynamo_key)
-            .set_condition_expression(key_condition_expression)
+            .set_condition_expression(condition_expression)
             .set_expression_attribute_names(expression_attribute_names)
             .set_expression_attribute_values(expression_attribute_values)
             .set_return_values(return_values)
@@ -659,7 +659,9 @@ pub mod tests {
             table_name: table_name.clone(),
             item: item_hm,
             return_values: Some(String::from("ALL_OLD")),
-            ..Default::default()
+            condition_expression: None,
+            expression_attribute_names: None,
+            expression_attribute_values: None,
         };
         let input = serde_json::to_string(&input).unwrap();
         let output = client.put_item(&input, m.clone()).await.unwrap();
@@ -678,7 +680,7 @@ pub mod tests {
                 ":val".to_string(),
                 Value::String(String::from("124")),
             )])),
-            ..Default::default()
+            index_name: None,
         };
         let input = serde_json::to_string(&input).unwrap();
         let output = client.query(&input, m.clone()).await.unwrap();
@@ -699,7 +701,9 @@ pub mod tests {
                 ),
             ]),
             return_values: Some(String::from("ALL_OLD")),
-            ..Default::default()
+            condition_expression: None,
+            expression_attribute_names: None,
+            expression_attribute_values: None,
         };
 
         let input = serde_json::to_string(&input).unwrap();

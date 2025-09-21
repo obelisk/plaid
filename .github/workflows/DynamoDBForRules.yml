@@ -68,8 +68,6 @@ jobs:
     - name: Run tests
       working-directory: ./runtime
       run: |
-          echo $AWS_ACCESS_KEY_ID
-          echo $AWS_SECRET_ACCESS_KEY
           cargo test -p plaid --lib apis::aws::dynamodb::tests::put_query_delete -- --nocapture
 
     - name: Delete table
