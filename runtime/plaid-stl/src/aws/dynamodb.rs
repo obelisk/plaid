@@ -7,7 +7,7 @@ use crate::PlaidFunctionError;
 
 const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 /// <p>Represents the input of a <code>PutItem</code> operation.</p>
 pub struct PutItemInput {
     /// <p>The name of the table to contain the item. You can also provide the Amazon Resource Name (ARN) of the table in this parameter.</p>
@@ -83,14 +83,14 @@ pub struct PutItemInput {
     pub return_values: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 /// <p>Represents the output of a <code>PutItem</code> operation.</p>
 pub struct PutItemOutput {
     /// <p>The attribute values as they appeared before the <code>PutItem</code> operation, but only if <code>ReturnValues</code> is specified as <code>ALL_OLD</code> in the request. Each element consists of an attribute name and an attribute value.</p>
     pub attributes: Option<Value>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 /// <p>Represents the input of a <code>DeleteItem</code> operation.</p>
 pub struct DeleteItemInput {
     /// <p>The name of the table from which to delete the item. You can also provide the Amazon Resource Name (ARN) of the table in this parameter.</p>
@@ -161,13 +161,13 @@ pub struct DeleteItemInput {
     pub return_values: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 pub struct DeleteItemOutput {
     /// <p>A map of attribute names to <code>AttributeValue</code> objects, representing the item as it appeared before the <code>DeleteItem</code> operation. This map appears in the response only if <code>ReturnValues</code> was specified as <code>ALL_OLD</code> in the request.</p>
     pub attributes: Option<Value>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 pub struct QueryInput {
     /// <p>The name of the table containing the requested items. You can also provide the Amazon
     /// Resource Name (ARN) of the table in this parameter.</p>:W
@@ -251,7 +251,7 @@ pub struct QueryInput {
     pub expression_attribute_values: Option<HashMap<String, Value>>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 pub struct QueryOutput {
     pub items: Vec<Value>,
 }
