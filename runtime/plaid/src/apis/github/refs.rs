@@ -5,7 +5,7 @@ use crate::{
     apis::{github::GitHubError, ApiError},
     loader::PlaidModule,
 };
-use plaid_stl::github::GetOrCreateBranchReferenceParams;
+use plaid_stl::github::{GetOrCreateBranchReferenceParams, GitRef};
 
 impl Github {
     /// Returns a single reference from the Git database.
@@ -19,6 +19,12 @@ impl Github {
 
         let owner = self.validate_username(&request.owner)?;
         let repo = self.validate_repository_name(&request.repo)?;
+
+        // Validate the reference. In practice, tags and branches follow the same naming conventions
+        // so we'll use the same validator.
+        match &request.reference {
+            GitRef::Branch(name) | GitRef::Tag(name) => self.validate_branch_name(name)?,
+        };
 
         info!(
             "Fetching reference [{}] for repository [{owner}/{repo}] on behalf of [{module}]",
