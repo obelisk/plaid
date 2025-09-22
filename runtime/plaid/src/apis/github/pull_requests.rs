@@ -11,6 +11,7 @@ use crate::{
     loader::PlaidModule,
 };
 use std::sync::Arc;
+use url::form_urlencoded::Serializer;
 
 impl Github {
     /// Add reviewers to a pull request
@@ -159,21 +160,17 @@ impl Github {
 /// Build a query string for the GitHub "List Pull Requests" API
 /// (`GET /repos/{owner}/{repo}/pulls`) from the given options.
 fn query_string_from_options(options: GetPullRequestOptions) -> String {
-    fn encode(v: &str) -> String {
-        v.replace(':', "%3A").replace(' ', "%20")
+    let mut serializer = Serializer::new(String::new());
+    if let Some(s) = options.state {
+        serializer.append_pair("state", &s.to_string());
     }
-
-    let mut parts = Vec::new();
-    if let Some(state) = &options.state {
-        parts.push(format!("state={}", state));
+    if let Some(h) = options.head.as_deref() {
+        serializer.append_pair("head", h);
     }
-    if let Some(head) = &options.head {
-        parts.push(format!("head={}", encode(&head.to_string())));
-    }
-    if let Some(base) = &options.base {
-        if !base.is_empty() {
-            parts.push(format!("base={}", encode(base)));
+    if let Some(b) = options.base.as_deref() {
+        if !b.is_empty() {
+            serializer.append_pair("base", b);
         }
     }
-    parts.join("&")
+    serializer.finish()
 }
