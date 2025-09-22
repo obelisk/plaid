@@ -2214,7 +2214,7 @@ pub fn create_reference(
 ///   repository’s default branch if not provided.
 ///
 /// # Returns
-/// - `Ok(())` if the file was successfully created, or
+/// - `Ok(String)` with the hash of the created file if the request was successful, or
 /// - `Err(PlaidFunctionError)` if the request fails (e.g., file already exists,
 ///   branch protection, missing configuration).
 pub fn create_file(
@@ -2224,9 +2224,9 @@ pub fn create_file(
     message: impl Display,
     content: impl Into<Vec<u8>>,
     branch: Option<impl Display>,
-) -> Result<(), PlaidFunctionError> {
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
-        new_host_function!(github, create_file);
+        new_host_function_with_error_buffer!(github, create_file);
     }
 
     let request = CreateFileRequest {
@@ -2239,8 +2239,17 @@ pub fn create_file(
     };
 
     let request = serde_json::to_string(&request).unwrap();
+    const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let res = unsafe { github_create_file(request.as_bytes().as_ptr(), request.as_bytes().len()) };
+    let res = unsafe {
+        github_create_file(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
 
     // There was an error with the Plaid system. Maybe the API is not
     // configured.
@@ -2248,5 +2257,12 @@ pub fn create_file(
         return Err(res.into());
     }
 
-    Ok(())
+    return_buffer.truncate(res as usize);
+
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response_body =
+        String::from_utf8(return_buffer).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    Ok(response_body)
 }
