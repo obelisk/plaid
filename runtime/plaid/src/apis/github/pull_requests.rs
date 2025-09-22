@@ -81,6 +81,7 @@ impl Github {
         let owner = self.validate_org(&request.owner)?;
         let repo = self.validate_repository_name(&request.repo)?;
 
+        // Build the request body, omitting optional fields if they are not set.
         let mut request_body = json!({
             "title": request.title,
             "head": request.head,
@@ -88,6 +89,7 @@ impl Github {
             "draft": request.draft,
         });
 
+        // Add the body if it exists
         if let Some(body) = request.body {
             request_body["body"] = json!(body);
         }
