@@ -8,6 +8,7 @@ use serde_json::json;
 
 use crate::{
     apis::{github::GitHubError, ApiError},
+    cryptography::hash::sha256_hex,
     loader::PlaidModule,
 };
 
@@ -624,7 +625,7 @@ impl Github {
         &self,
         params: &str,
         module: Arc<PlaidModule>,
-    ) -> Result<u32, ApiError> {
+    ) -> Result<String, ApiError> {
         let request: CreateFileRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -637,7 +638,7 @@ impl Github {
 
         let mut body = json!({
             "message": request.message,
-            "content": base64::encode(request.content),
+            "content": base64::encode(&request.content),
         });
         if let Some(branch) = request.branch {
             body["branch"] = json!(branch);
@@ -650,7 +651,8 @@ impl Github {
         {
             Ok((status, Ok(_))) => {
                 if status == 200 || status == 201 {
-                    Ok(0)
+                    let file_hash = sha256_hex(&request.content);
+                    Ok(file_hash)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
