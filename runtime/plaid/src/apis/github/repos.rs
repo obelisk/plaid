@@ -632,8 +632,9 @@ impl Github {
         let owner = self.validate_org(&request.owner)?;
         let repo = self.validate_repository_name(&request.repo)?;
         let path = self.validate_path(&request.path)?;
+        let file_hash = sha256_hex(&request.content);
 
-        info!("Creating file at [{path}] in repository [{owner}/{repo}] on behalf of [{module}]");
+        info!("Creating file with hash [{file_hash}] at [{path}] in repository [{owner}/{repo}] on behalf of [{module}]");
         let address = format!("/repos/{owner}/{repo}/contents/{path}");
 
         let mut body = json!({
