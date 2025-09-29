@@ -325,6 +325,7 @@ impl_new_function_with_error_buffer!(github, add_users_to_org_copilot, DISALLOW_
 impl_new_function_with_error_buffer!(github, remove_users_from_org_copilot, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_custom_properties_values, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, check_codeowners_file, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_repo_sbom, ALLOW_IN_TEST_MODE);
 impl_new_function!(github, comment_on_pull_request, DISALLOW_IN_TEST_MODE);
 impl_new_function!(
     github,
@@ -659,6 +660,9 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, github_create_pull_request)
         }
         "github_create_file" => Function::new_typed_with_env(&mut store, &env, github_create_file),
+        "github_get_repo_sbom" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repo_sbom)
+        }
 
         // Slack Calls
         "slack_post_to_named_webhook" => {

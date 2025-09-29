@@ -5,6 +5,7 @@ use serde::Serialize;
 use crate::{
     github::{
         CreateFileRequest, DeleteDeployKeyParams, RepositoryCollaborator, RepositoryCustomProperty,
+        SbomResponse,
     },
     PlaidFunctionError,
 };
@@ -224,6 +225,43 @@ pub fn get_custom_properties_values(
         .map_err(|_| PlaidFunctionError::InternalApiError)?;
 
     Ok(response_body)
+}
+
+/// Get the software bill of materials (SBOM) for a repository in SPDX JSON format.
+pub fn get_repo_sbom(
+    owner: impl Display,
+    repo: impl Display,
+) -> Result<SbomResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_repo_sbom);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("owner", owner.to_string());
+    params.insert("repo", repo.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_get_repo_sbom(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response = String::from_utf8(return_buffer).unwrap();
+    Ok(serde_json::from_str(&response).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?)
 }
 
 /// Gets the contents of a file or directory in a repository.
