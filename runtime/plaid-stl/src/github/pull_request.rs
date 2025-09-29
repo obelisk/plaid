@@ -1,8 +1,123 @@
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
-use crate::PlaidFunctionError;
+use crate::{github::PullRequestRequestReviewers, PlaidFunctionError};
+
+pub fn list_files(
+    organization: &str,
+    repository_name: &str,
+    pull_request: &str,
+    page: &str,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, list_files);
+    }
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+
+    #[derive(Serialize)]
+    struct Request<'a> {
+        organization: &'a str,
+        repository_name: &'a str,
+        pull_request: &'a str,
+        page: &'a str,
+    }
+
+    let request = Request {
+        organization,
+        repository_name,
+        pull_request,
+        page,
+    };
+
+    let request = serde_json::to_string(&request).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_list_files(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
+pub fn comment_on_pull_request(
+    username: impl Display,
+    repository_name: impl Display,
+    pull_request: impl Display,
+    comment: impl Display,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, comment_on_pull_request);
+    }
+
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("username", username.to_string());
+    params.insert("repostory_name", repository_name.to_string());
+    params.insert("pull_request", pull_request.to_string());
+    params.insert("comment", comment.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    let res = unsafe {
+        github_comment_on_pull_request(request.as_bytes().as_ptr(), request.as_bytes().len())
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
+
+/// Request a reviewer on a PR
+/// For more details, see https://docs.github.com/en/rest/pulls/review-requests?apiVersion=2022-11-28#request-reviewers-for-a-pull-request
+pub fn pull_request_request_reviewers(
+    owner: impl Display,
+    repo: impl Display,
+    pull_request: u64,
+    reviewers: &[impl Display],
+    team_reviewers: &[impl Display],
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, pull_request_request_reviewers);
+    }
+
+    let params = PullRequestRequestReviewers {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        pull_number: pull_request,
+        reviewers: reviewers.iter().map(|s| s.to_string()).collect(),
+        team_reviewers: team_reviewers.iter().map(|s| s.to_string()).collect(),
+    };
+
+    let params = serde_json::to_string(&params).unwrap();
+    let res = unsafe {
+        github_pull_request_request_reviewers(params.as_bytes().as_ptr(), params.as_bytes().len())
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
 
 /// Request to fetch pull requests from a repository.
 ///
