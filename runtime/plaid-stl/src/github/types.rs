@@ -40,7 +40,7 @@ pub struct ExternalRef {
 pub struct SbomPackage {
     pub name: String,
     #[serde(rename = "SPXID")]
-    pub spxid: String,
+    pub spxid: Option<String>,
     pub version_info: String,
     pub files_analyzed: bool,
     pub download_location: String,
