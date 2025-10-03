@@ -152,6 +152,9 @@ pub struct Configuration {
     pub module_signing: Option<ModuleSigningConfiguration>,
     /// The compiler backend to use for the modules.
     pub compiler_backend: CompilerBackend,
+    /// If this value is set, Plaid will treat it as an absolute path, create a text file and write "READY"
+    /// when the system is fully up and ready to receive traffic.
+    pub readiness_check_file: Option<String>,
 }
 
 /// This structure defines the parameters required to validate signatures for modules.
@@ -407,14 +410,14 @@ impl PlaidModules {
 
 /// Load all modules, according to Plaid's configuration
 pub async fn load(
-    config: Configuration,
+    config: &Configuration,
     storage: Option<Arc<Storage>>,
 ) -> Result<PlaidModules, ()> {
     let module_paths = fs::read_dir(config.module_dir.clone()).unwrap();
     let mut modules = PlaidModules::default();
     let byte_secrets = read_and_configure_secrets(&config.secrets);
 
-    match &config.compiler_backend {
+    match config.compiler_backend {
         #[cfg(feature = "cranelift")]
         CompilerBackend::Cranelift => {
             info!("Using Cranelift compiler backend");
@@ -504,7 +507,7 @@ pub async fn load(
         plaid_module.cache = cache;
         plaid_module.persistent_response = persistent_response;
         plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
-        plaid_module.accessory_data = module_accessory_data(&config, &plaid_module.name, &type_);
+        plaid_module.accessory_data = module_accessory_data(config, &plaid_module.name, &type_);
 
         // Put it in an Arc because we're going to have multiple references to it
         let plaid_module = Arc::new(plaid_module);
