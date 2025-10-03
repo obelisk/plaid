@@ -145,7 +145,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Loading all the modules");
     // Load all the modules that form our Nanoservices and Plaid rules
-    let modules = Arc::new(loader::load(config.loading, storage.clone()).await.unwrap());
+    let modules = Arc::new(
+        loader::load(&config.loading, storage.clone())
+            .await
+            .unwrap(),
+    );
     let modules_by_name = Arc::new(modules.get_modules());
 
     // Print information about the threads we are starting
@@ -400,6 +404,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
         info!("Starting servers, boot up complete");
+
+        if let Some(readiness_check_path) = config.loading.readiness_check_file {
+            match std::fs::write(&readiness_check_path, "READY") {
+                Ok(_) => {}
+                Err(e) => {
+                    // We did not manage to signal that we are ready. Therefore, whichever system
+                    // is monitoring Plaid's readiness will possibly keep waiting forever.
+                    // There is not much we can do here, so we log an error and continue.
+                    error!("Failed to signal readiness by writing to file [{readiness_check_path}]. Error: [{e}]")
+                }
+            }
+        }
 
         let mut join_set = JoinSet::from_iter(webhook_servers);
 
