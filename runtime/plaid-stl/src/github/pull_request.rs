@@ -455,9 +455,9 @@ pub fn create_pull_request(
     base: impl Display,
     body: Option<impl Display>,
     draft: bool,
-) -> Result<(), PlaidFunctionError> {
+) -> Result<PullRequest, PlaidFunctionError> {
     extern "C" {
-        new_host_function!(github, create_pull_request);
+        new_host_function_with_error_buffer!(github, create_pull_request);
     }
 
     let request = CreatePullRequestRequest {
@@ -472,8 +472,16 @@ pub fn create_pull_request(
 
     let request = serde_json::to_string(&request).unwrap();
 
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 5; // 5 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
     let res = unsafe {
-        github_create_pull_request(request.as_bytes().as_ptr(), request.as_bytes().len())
+        github_create_pull_request(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
     };
 
     // There was an error with the Plaid system. Maybe the API is not
@@ -482,5 +490,10 @@ pub fn create_pull_request(
         return Err(res.into());
     }
 
-    Ok(())
+    return_buffer.truncate(res as usize);
+
+    let pull_request = serde_json::from_slice::<PullRequest>(&return_buffer)
+        .map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    Ok(pull_request)
 }

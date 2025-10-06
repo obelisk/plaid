@@ -75,7 +75,7 @@ impl Github {
         &self,
         params: &str,
         module: Arc<PlaidModule>,
-    ) -> Result<u32, ApiError> {
+    ) -> Result<String, ApiError> {
         let request: CreatePullRequestRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -104,9 +104,9 @@ impl Github {
             .make_generic_post_request(address, serialized, module)
             .await
         {
-            Ok((status, Ok(_))) => {
+            Ok((status, Ok(body))) => {
                 if status == 201 {
-                    Ok(0)
+                    Ok(body)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
