@@ -335,7 +335,7 @@ impl_new_function!(
 impl_new_function_with_error_buffer!(github, get_weekly_commit_count, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_reference, ALLOW_IN_TEST_MODE);
 impl_new_function!(github, create_reference, DISALLOW_IN_TEST_MODE);
-impl_new_function_with_error_buffer!(github, list_pull_requests, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_pull_requests, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, create_pull_request, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, create_file, DISALLOW_IN_TEST_MODE);
 
@@ -653,8 +653,8 @@ pub fn to_api_function(
         "github_create_reference" => {
             Function::new_typed_with_env(&mut store, &env, github_create_reference)
         }
-        "github_list_pull_requests" => {
-            Function::new_typed_with_env(&mut store, &env, github_list_pull_requests)
+        "github_get_pull_requests" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_pull_requests)
         }
         "github_create_pull_request" => {
             Function::new_typed_with_env(&mut store, &env, github_create_pull_request)
