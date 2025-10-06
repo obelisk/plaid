@@ -644,7 +644,6 @@ impl Github {
         if let Some(branch) = request.branch {
             body["branch"] = json!(branch);
         }
-        let body = body.to_string();
 
         match self
             .make_generic_put_request(address, Some(&body), module)
