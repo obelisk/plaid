@@ -305,7 +305,9 @@ impl Display for GitRef {
 /// and its associated SHA.
 #[derive(Deserialize)]
 pub struct GitApiRef {
-    pub target: GitRefTarget,
+    #[serde(rename = "ref")]
+    pub r#ref: String,
+    pub object: GitRefTarget,
 }
 
 /// The target object that a Git reference points to.
@@ -314,7 +316,7 @@ pub struct GitApiRef {
 pub struct GitRefTarget {
     /// The type of the object (e.g., "commit", "tag").
     #[serde(rename = "type")]
-    pub type_: String,
+    pub r#type: String,
     /// The SHA-1 hash of the referenced object.
     pub sha: String,
 }
