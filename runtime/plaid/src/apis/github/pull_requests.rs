@@ -118,7 +118,7 @@ impl Github {
     }
 
     /// Lists pull requests in a specified repository.
-    pub async fn list_pull_requests(
+    pub async fn get_pull_requests(
         &self,
         params: &str,
         module: Arc<PlaidModule>,
