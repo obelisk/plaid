@@ -652,7 +652,6 @@ impl Github {
         {
             Ok((status, Ok(_))) => {
                 if status == 200 || status == 201 {
-                    let file_hash = sha256_hex(&request.content);
                     Ok(file_hash)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
