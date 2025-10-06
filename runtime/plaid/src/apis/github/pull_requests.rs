@@ -95,13 +95,12 @@ impl Github {
             request_body["body"] = json!(body);
         }
 
-        let serialized = request_body.to_string();
         let address = format!("/repos/{owner}/{repo}/pulls");
 
         info!("Creating pull request in [{owner}/{repo}] org on behalf of {module}");
 
         match self
-            .make_generic_post_request(address, serialized, module)
+            .make_generic_post_request(address, request_body, module)
             .await
         {
             Ok((status, Ok(body))) => {
