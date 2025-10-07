@@ -14,9 +14,13 @@ pub struct JwtParams {
     /// Subject
     pub sub: String,
     /// Issued at
-    pub iat: u64,
+    pub iat: Option<u64>,
     /// Expiration
-    pub exp: u64,
+    pub exp: Option<u64>,
+    /// Audience
+    pub aud: Option<String>,
+    /// Additional headers that will be validated before being included in the final JWT
+    pub extra_headers: Option<HashMap<String, Value>>,
     /// Additional fields that will be validated before being included in the final JWT
     pub extra_fields: Option<HashMap<String, Value>>,
 }

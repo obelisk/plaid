@@ -17,8 +17,10 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
     let jwt_params = JwtParams {
         kid: KEY_ID.to_string(),
         sub: "Something".to_string(),
-        iat: plaid_stl::plaid::get_time() as u64,
-        exp: plaid_stl::plaid::get_time() as u64 + 3600,
+        iat: Some(plaid_stl::plaid::get_time() as u64),
+        exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
+        aud: None::<String>,
+        extra_headers: None,
         extra_fields: None,
     };
     if issue_jwt(&jwt_params).is_ok() {
@@ -29,8 +31,10 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
     let jwt_params = JwtParams {
         kid: KEY_ID.to_string(),
         sub: "Something".to_string(),
-        iat: plaid_stl::plaid::get_time() as u64,
-        exp: plaid_stl::plaid::get_time() as u64 + 3600,
+        iat: Some(plaid_stl::plaid::get_time() as u64),
+        exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
+        aud: None::<String>,
+        extra_headers: None,
         extra_fields: Some([("ext".to_string(), Value::String("v".to_string()))].into()),
     };
     if issue_jwt(&jwt_params).is_ok() {
@@ -41,8 +45,10 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
     let jwt_params = JwtParams {
         kid: KEY_ID.to_string(),
         sub: "Something".to_string(),
-        iat: plaid_stl::plaid::get_time() as u64,
-        exp: plaid_stl::plaid::get_time() as u64 + 3600,
+        iat: Some(plaid_stl::plaid::get_time() as u64),
+        exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
+        aud: None::<String>,
+        extra_headers: None,
         extra_fields: Some(
             [
                 ("ext".to_string(), Value::String("v".to_string())),
@@ -59,8 +65,10 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
     let jwt_params = JwtParams {
         kid: "230216b400a90b29f70db61aca97bbca".to_string(),
         sub: "Something".to_string(),
-        iat: plaid_stl::plaid::get_time() as u64,
-        exp: plaid_stl::plaid::get_time() as u64 + 3600,
+        iat: Some(plaid_stl::plaid::get_time() as u64),
+        exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
+        aud: None::<String>,
+        extra_headers: None,
         extra_fields: None,
     };
     if issue_jwt(&jwt_params).is_err() {
@@ -71,8 +79,10 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
     let jwt_params = JwtParams {
         kid: "DOES_NOT_EXIST".to_string(),
         sub: "Something".to_string(),
-        iat: plaid_stl::plaid::get_time() as u64,
-        exp: plaid_stl::plaid::get_time() as u64 + 3600,
+        iat: Some(plaid_stl::plaid::get_time() as u64),
+        exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
+        aud: None::<String>,
+        extra_headers: None,
         extra_fields: None,
     };
     if issue_jwt(&jwt_params).is_err() {
