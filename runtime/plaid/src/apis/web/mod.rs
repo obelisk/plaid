@@ -104,7 +104,7 @@ impl Web {
                         // We found a field that is not allowed: stop immediately instead of dropping
                         // it silently, which could be confusing for the requester.
                         return Err(ApiError::WebError(WebError::UnsupportedField(format!(
-                            "The request contained filed [{k}] but it is not allowed"
+                            "The request contained field [{k}] but it is not allowed"
                         ))));
                     }
                 }
