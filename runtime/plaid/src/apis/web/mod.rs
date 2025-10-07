@@ -1,5 +1,5 @@
 use jsonwebtoken::{encode, EncodingKey, Header};
-use plaid_stl::{plaid::get_time, web::JwtParams};
+use plaid_stl::web::JwtParams;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -67,6 +67,13 @@ where
     EncodingKey::from_ec_pem(raw_key.as_bytes()).map_err(serde::de::Error::custom)
 }
 
+fn get_time() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs()
+}
+
 impl Web {
     pub fn new(config: WebConfig) -> Self {
         Self { config }
@@ -124,8 +131,8 @@ impl Web {
             {
                 if let Some(max_ttl) = key_specs.max_ttl {
                     match request.exp {
-                        None => get_time() as u64 + max_ttl,
-                        Some(t) => std::cmp::min(t, get_time() as u64 + max_ttl),
+                        None => get_time() + max_ttl,
+                        Some(t) => std::cmp::min(t, get_time() + max_ttl),
                     }
                 } else {
                     match request.exp {
