@@ -23,7 +23,8 @@ members = [
     "load_tests/load_test",
     "tests/test_cron",
     "tests/test_aes_enc_dec",
-    "tests/test_vec_entrypoint"
+    "tests/test_vec_entrypoint",
+    "tests/test_jwt"
 ]
 
 [profile.release]

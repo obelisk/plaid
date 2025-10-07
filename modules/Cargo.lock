@@ -398,6 +398,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_jwt"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "test_logback"
 version = "0.1.0"
 dependencies = [

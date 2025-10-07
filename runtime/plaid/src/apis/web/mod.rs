@@ -1,5 +1,7 @@
 use jsonwebtoken::{encode, EncodingKey, Header};
+use plaid_stl::web::JwtParams;
 use serde::Deserialize;
+use serde_json::Value;
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -13,6 +15,7 @@ pub enum WebError {
     FailedToEncodeJwt(String),
     UnsupportedHeaderField(String),
     BadRequest(String),
+    UnsupportedField(String),
 }
 
 #[derive(Deserialize)]
@@ -29,6 +32,11 @@ pub struct WebConfig {
     /// This contains a mapping of available keys that can be used
     /// to sign JWTs
     keys: HashMap<String, JwtConfig>,
+    /// Fields that can be accepted from a requestor and included in a JWT.
+    /// If this is missing, then no extra fields are accepted.
+    /// Note - Be careful when configuring these fields, as including a crucial,
+    /// untrusted field in a claim can impact the security of downstream systems.
+    allowlisted_extra_fields: Option<Vec<String>>,
 }
 
 pub struct Web {
@@ -58,24 +66,10 @@ impl Web {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let mut request: HashMap<&str, serde_json::Value> =
-            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let request: JwtParams = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        if !request.contains_key("exp") {
-            return Err(ApiError::WebError(WebError::BadRequest(
-                "Missing exp in JWT claims".to_string(),
-            )));
-        }
-
-        // Get the kid from the request params
-        let kid = request
-            .get("kid")
-            .map(|x| x.clone())
-            .ok_or(ApiError::MissingParameter("kid".to_owned()))?;
-        // Remove this from request so that only keys for the Claim remains
-        request.remove("kid");
-
-        let kid = kid.as_str().ok_or(ApiError::BadRequest)?;
+        // Get the key ID from the request params
+        let kid = &request.kid;
 
         // Fetch the key object from the Plaid config
         let key_specs =
@@ -93,31 +87,47 @@ impl Web {
             )));
         }
 
+        // TODO Discuss with @obelisk if we want to validate fields like 'iat' and 'exp'
+
+        let mut claims = HashMap::<String, Value>::new();
+        claims.insert("sub".to_string(), Value::String(request.sub.clone()));
+        claims.insert("iat".to_string(), Value::Number(request.iat.into()));
+        claims.insert("exp".to_string(), Value::Number(request.exp.into()));
+
+        // Include extra fields, but only if they are allowlisted in the config
+        if let Some(extra_fields) = request.extra_fields {
+            if let Some(allowlisted_extras) = &self.config.allowlisted_extra_fields {
+                for (k, v) in extra_fields.iter() {
+                    if allowlisted_extras.contains(k) {
+                        claims.insert(k.to_string(), v.clone());
+                    } else {
+                        // We found a field that is not allowed: stop immediately instead of dropping
+                        // it silently, which could be confusing for the requester.
+                        return Err(ApiError::WebError(WebError::UnsupportedField(format!(
+                            "The request contained filed [{k}] but it is not allowed"
+                        ))));
+                    }
+                }
+            } else {
+                // The allowlist is empty
+                return Err(ApiError::WebError(WebError::UnsupportedField(
+                    "The request contains extra fields but none is allowed".to_string(),
+                )));
+            }
+        }
+
         // Build the header for the JWT
-        // The header fields `alg`, `kid`, and `typ` are not configurable
-        // The header field `x5u` is fetched from the request
+        // The header fields `alg`, `kid`, and `typ` are not configurable.
+        // `typ` is set internally to "JWT" when calling Header::default()
         let mut header = Header::default();
         header.alg = jsonwebtoken::Algorithm::ES256;
         header.kid = Some(kid.to_string());
-
-        if let Some(x5u) = request.get("x5u") {
-            header.x5u = Some(x5u.to_string());
-            // Remove this from request so that only keys for the Claim remains
-            request.remove("x5u");
-        };
-
-        // The header field `x5c` is not supported
-        if request.contains_key("x5c") {
-            return Err(ApiError::WebError(WebError::UnsupportedHeaderField(
-                format!("Module [{module}] tried to use unsupported header field x5c"),
-            )));
-        }
 
         // Encode the JWT token
         let jwt = match encode(
             &header,
             // The remaining fields in the request are put in the Claim
-            &request,
+            &claims,
             &key_specs.private_key,
         ) {
             Ok(token) => token,
