@@ -26,6 +26,7 @@ test_mode_exemptions = [
     "test_cron.wasm",
     "test_aes_enc_dec.wasm",
     "test_vec_entrypoint.wasm",
+    "test_jwt.wasm",
 ]
 
 
@@ -79,6 +80,7 @@ test_mode_exemptions = [
 "example_github_graphql.wasm" = "example_github_graphql"
 "test_cron.wasm" = "test_cron"
 "test_aes_enc_dec.wasm" = "test_aes_enc_dec"
+"test_jwt.wasm" = "test_jwt"
 "test_vec_entrypoint.wasm" = "test_vec_entrypoint"
 
 # Configure the computation amount. See the loader module for more
