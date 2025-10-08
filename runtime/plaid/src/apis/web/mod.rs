@@ -34,13 +34,6 @@ pub struct JwtConfig {
     /// If this is set, then all JWTs signed with this key must
     /// have a validity <= this value.
     pub max_ttl: Option<u64>,
-}
-
-#[derive(Deserialize)]
-pub struct WebConfig {
-    /// This contains a mapping of available keys that can be used
-    /// to sign JWTs
-    keys: HashMap<String, JwtConfig>,
     /// Headers that can be accepted from a requestor and included in a JWT.
     /// If this is missing, then no extra headers are accepted.
     /// Only these values are accepted: cty, jku, jwk, x5u, x5c, x5t, x5t_s256.
@@ -53,6 +46,13 @@ pub struct WebConfig {
     /// Note - Be careful when configuring these fields, as including a crucial,
     /// untrusted field in a claim can impact the security of downstream systems.
     allowlisted_extra_fields: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+pub struct WebConfig {
+    /// This contains a mapping of available keys that can be used
+    /// to sign JWTs
+    keys: HashMap<String, JwtConfig>,
 }
 
 pub struct Web {
@@ -81,25 +81,30 @@ const ALLOWLISTABLE_HEADERS: [&str; 5] = ["cty", "jku", "x5u", "x5t", "x5t_s256"
 
 /// Sanitize the configuration before usage
 fn sanitize_config(config: WebConfig) -> WebConfig {
-    match config.allowlisted_extra_headers {
-        None => {
-            // In this case no processing is needed
-            config
-        }
-        Some(configured_headers) => {
-            // Keep only the headers that can be allowlisted
-            let accepted_headers: Vec<_> = configured_headers
-                .iter()
-                .filter(|v| ALLOWLISTABLE_HEADERS.contains(&v.as_str()))
-                .cloned()
-                .collect();
-            WebConfig {
-                keys: config.keys,
-                allowlisted_extra_fields: config.allowlisted_extra_fields,
-                allowlisted_extra_headers: Some(accepted_headers),
+    let keys: HashMap<String, JwtConfig> = config
+        .keys
+        .into_iter()
+        .map(|(kid, config)| {
+            match &config.allowlisted_extra_headers {
+                None => {
+                    // In this case no processing is needed
+                    (kid, config)
+                }
+                Some(configured_headers) => {
+                    // Keep only the headers that can be allowlisted
+                    let accepted_headers: Vec<_> = configured_headers
+                        .iter()
+                        .filter(|v| ALLOWLISTABLE_HEADERS.contains(&v.as_str()))
+                        .cloned()
+                        .collect();
+                    let mut new_config = config;
+                    new_config.allowlisted_extra_headers = Some(accepted_headers);
+                    (kid, new_config)
+                }
             }
-        }
-    }
+        })
+        .collect();
+    WebConfig { keys }
 }
 
 impl Web {
@@ -189,7 +194,7 @@ impl Web {
 
         // Include extra fields, but only if they are allowlisted in the config
         if !request.extra_fields.is_empty() {
-            match &self.config.allowlisted_extra_fields {
+            match &key_specs.allowlisted_extra_fields {
                 Some(allowlisted_extras) => {
                     // We have an allowlist: see if the requested fields can be included
                     for (k, v) in request.extra_fields.iter() {
@@ -222,7 +227,7 @@ impl Web {
 
         // Include extra headers, but only if they are allowlisted in the config
         if !request.extra_headers.is_empty() {
-            match &self.config.allowlisted_extra_headers {
+            match &key_specs.allowlisted_extra_headers {
                 Some(allowlisted_extras) => {
                     // We have an allowlist: see if the requested headers can be included
                     for (k, v) in request.extra_headers.iter() {
