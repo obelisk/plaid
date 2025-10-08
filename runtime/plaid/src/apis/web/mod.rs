@@ -43,6 +43,8 @@ pub struct WebConfig {
     keys: HashMap<String, JwtConfig>,
     /// Headers that can be accepted from a requestor and included in a JWT.
     /// If this is missing, then no extra headers are accepted.
+    /// Only these values are accepted: cty, jku, jwk, x5u, x5c, x5t, x5t_s256.
+    /// Other values will be ignored.
     /// Note - Be careful when configuring these headers, as including a crucial,
     /// untrusted header in a JWT can impact the security of downstream systems.
     allowlisted_extra_headers: Option<Vec<String>>,
@@ -74,9 +76,37 @@ fn get_time() -> u64 {
         .as_secs()
 }
 
+/// The headers that can be allowlisted to be taken from the passed request.
+const ALLOWLISTABLE_HEADERS: [&str; 5] = ["cty", "jku", "x5u", "x5t", "x5t_s256"];
+
+/// Sanitize the configuration before usage
+fn sanitize_config(config: WebConfig) -> WebConfig {
+    match config.allowlisted_extra_headers {
+        None => {
+            // In this case no processing is needed
+            config
+        }
+        Some(configured_headers) => {
+            // Keep only the headers that can be allowlisted
+            let accepted_headers: Vec<_> = configured_headers
+                .iter()
+                .filter(|v| ALLOWLISTABLE_HEADERS.contains(&v.as_str()))
+                .cloned()
+                .collect();
+            WebConfig {
+                keys: config.keys,
+                allowlisted_extra_fields: config.allowlisted_extra_fields,
+                allowlisted_extra_headers: Some(accepted_headers),
+            }
+        }
+    }
+}
+
 impl Web {
     pub fn new(config: WebConfig) -> Self {
-        Self { config }
+        Self {
+            config: sanitize_config(config),
+        }
     }
 
     /// Create, sign, and encode a new JWT with the contents specified in `params`.
@@ -158,24 +188,28 @@ impl Web {
         };
 
         // Include extra fields, but only if they are allowlisted in the config
-        if let Some(extra_fields) = request.extra_fields {
-            if let Some(allowlisted_extras) = &self.config.allowlisted_extra_fields {
-                for (k, v) in extra_fields.iter() {
-                    if allowlisted_extras.contains(k) {
-                        claims.insert(k.to_string(), v.clone());
-                    } else {
-                        // We found a field that is not allowed: stop immediately instead of dropping
-                        // it silently, which could be confusing for the requester.
-                        return Err(ApiError::WebError(WebError::UnsupportedField(format!(
-                            "The request contained field [{k}] but it is not allowed"
-                        ))));
+        if !request.extra_fields.is_empty() {
+            match &self.config.allowlisted_extra_fields {
+                Some(allowlisted_extras) => {
+                    // We have an allowlist: see if the requested fields can be included
+                    for (k, v) in request.extra_fields.iter() {
+                        if allowlisted_extras.contains(k) {
+                            claims.insert(k.to_string(), v.clone());
+                        } else {
+                            // We found a field that is not allowed: stop immediately instead of dropping
+                            // it silently, which could be confusing for the requester.
+                            return Err(ApiError::WebError(WebError::UnsupportedField(format!(
+                                "The request contained field [{k}] but it is not allowed"
+                            ))));
+                        }
                     }
                 }
-            } else {
-                // The allowlist is empty
-                return Err(ApiError::WebError(WebError::UnsupportedField(
-                    "The request contains extra fields but none is allowed".to_string(),
-                )));
+                None => {
+                    // The allowlist is empty
+                    return Err(ApiError::WebError(WebError::UnsupportedField(
+                        "The request contains extra fields but none is allowed".to_string(),
+                    )));
+                }
             }
         }
 
@@ -186,24 +220,44 @@ impl Web {
         header.alg = jsonwebtoken::Algorithm::ES256;
         header.kid = Some(kid.to_string());
 
-        // TODO add extra headers, if allowlisted. Possible headers:
-        /*
-           cty: None,
-           jku: None,
-           jwk: None,
-           x5u: None,
-           x5c: None,
-           x5t: None,
-           x5t_s256: None,
-        */
+        // Include extra headers, but only if they are allowlisted in the config
+        if !request.extra_headers.is_empty() {
+            match &self.config.allowlisted_extra_headers {
+                Some(allowlisted_extras) => {
+                    // We have an allowlist: see if the requested headers can be included
+                    for (k, v) in request.extra_headers.iter() {
+                        if allowlisted_extras.contains(k) {
+                            add_header(
+                                &mut header,
+                                k.to_string(),
+                                v.as_str()
+                                    .ok_or(ApiError::WebError(WebError::UnsupportedHeaderField(
+                                        format!(
+                                            "Could not parse value for header [{k}] as a string"
+                                        ),
+                                    )))?
+                                    .to_string(),
+                            );
+                        } else {
+                            // We found a header that is not allowed: stop immediately instead of dropping
+                            // it silently, which could be confusing for the requester.
+                            return Err(ApiError::WebError(WebError::UnsupportedHeaderField(
+                                format!("The request contained header [{k}] but it is not allowed"),
+                            )));
+                        }
+                    }
+                }
+                None => {
+                    // The allowlist is empty
+                    return Err(ApiError::WebError(WebError::UnsupportedHeaderField(
+                        "The request contains extra headers but none is allowed".to_string(),
+                    )));
+                }
+            }
+        }
 
         // Encode the JWT token
-        let jwt = match encode(
-            &header,
-            // The remaining fields in the request are put in the Claim
-            &claims,
-            &key_specs.private_key,
-        ) {
+        let jwt = match encode(&header, &claims, &key_specs.private_key) {
             Ok(token) => token,
             Err(e) => {
                 return Err(ApiError::WebError(WebError::FailedToEncodeJwt(
@@ -213,5 +267,27 @@ impl Web {
         };
 
         Ok(jwt)
+    }
+}
+
+/// Add a header to a Header object
+fn add_header(headers: &mut Header, k: String, v: String) {
+    match k.as_str() {
+        "cty" => {
+            headers.cty = Some(v);
+        }
+        "jku" => {
+            headers.jku = Some(v);
+        }
+        "x5u" => {
+            headers.x5u = Some(v);
+        }
+        "x5t" => {
+            headers.x5t = Some(v);
+        }
+        "x5t_s256" => {
+            headers.x5t_s256 = Some(v);
+        }
+        _ => unreachable!(),
     }
 }

@@ -20,8 +20,8 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         iat: Some(plaid_stl::plaid::get_time() as u64),
         exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
         aud: None::<String>,
-        extra_headers: None,
-        extra_fields: None,
+        extra_headers: HashMap::<String, Value>::new(),
+        extra_fields: HashMap::<String, Value>::new(),
     };
     if issue_jwt(&jwt_params).is_ok() {
         make_named_request("test-response", "OK", HashMap::new()).unwrap();
@@ -34,8 +34,8 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         iat: Some(plaid_stl::plaid::get_time() as u64),
         exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
         aud: None::<String>,
-        extra_headers: None,
-        extra_fields: Some([("ext".to_string(), Value::String("v".to_string()))].into()),
+        extra_headers: HashMap::<String, Value>::new(),
+        extra_fields: [("ext".to_string(), Value::String("v".to_string()))].into(),
     };
     if issue_jwt(&jwt_params).is_ok() {
         make_named_request("test-response", "OK", HashMap::new()).unwrap();
@@ -48,14 +48,40 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         iat: Some(plaid_stl::plaid::get_time() as u64),
         exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
         aud: None::<String>,
-        extra_headers: None,
-        extra_fields: Some(
-            [
-                ("ext".to_string(), Value::String("v".to_string())),
-                ("hck".to_string(), Value::String("x".to_string())),
-            ]
-            .into(),
-        ),
+        extra_headers: HashMap::<String, Value>::new(),
+        extra_fields: [
+            ("ext".to_string(), Value::String("v".to_string())),
+            ("hck".to_string(), Value::String("x".to_string())),
+        ]
+        .into(),
+    };
+    if issue_jwt(&jwt_params).is_err() {
+        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+    }
+
+    // Add a header which is allowlisted
+    let jwt_params = JwtParams {
+        kid: KEY_ID.to_string(),
+        sub: "Something".to_string(),
+        iat: Some(plaid_stl::plaid::get_time() as u64),
+        exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
+        aud: None::<String>,
+        extra_headers: [("cty".to_string(), Value::String("something".to_string()))].into(),
+        extra_fields: HashMap::<String, Value>::new(),
+    };
+    if issue_jwt(&jwt_params).is_ok() {
+        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+    }
+
+    // Add a header which is NOT allowlisted - should fail
+    let jwt_params = JwtParams {
+        kid: KEY_ID.to_string(),
+        sub: "Something".to_string(),
+        iat: Some(plaid_stl::plaid::get_time() as u64),
+        exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
+        aud: None::<String>,
+        extra_headers: [("smt".to_string(), Value::String("something".to_string()))].into(),
+        extra_fields: HashMap::<String, Value>::new(),
     };
     if issue_jwt(&jwt_params).is_err() {
         make_named_request("test-response", "OK", HashMap::new()).unwrap();
@@ -68,8 +94,8 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         iat: Some(plaid_stl::plaid::get_time() as u64),
         exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
         aud: None::<String>,
-        extra_headers: None,
-        extra_fields: None,
+        extra_headers: HashMap::<String, Value>::new(),
+        extra_fields: HashMap::<String, Value>::new(),
     };
     if issue_jwt(&jwt_params).is_err() {
         make_named_request("test-response", "OK", HashMap::new()).unwrap();
@@ -82,8 +108,8 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         iat: Some(plaid_stl::plaid::get_time() as u64),
         exp: Some(plaid_stl::plaid::get_time() as u64 + 3600),
         aud: None::<String>,
-        extra_headers: None,
-        extra_fields: None,
+        extra_headers: HashMap::<String, Value>::new(),
+        extra_fields: HashMap::<String, Value>::new(),
     };
     if issue_jwt(&jwt_params).is_err() {
         make_named_request("test-response", "OK", HashMap::new()).unwrap();

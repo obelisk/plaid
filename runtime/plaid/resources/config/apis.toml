@@ -132,7 +132,6 @@ test_webhook = "{plaid-secret{test-webhook-secret}}"
 "plaid-testing" = "{plaid-secret{test-slack-bot-token}}"
 
 [apis."web"]
-allowlisted_extra_fields = ["ext"]
 [apis."web".keys]
 [apis."web".keys."46c642b0da02030407c6463c013a8dbd"]
 # To generate the ECDSA256 key PEM, run the following commands:
@@ -150,6 +149,8 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
 """
 
 allowed_rules = ["test_jwt.wasm"]
+allowlisted_extra_fields = ["ext"]
+allowlisted_extra_headers = ["smt", "cty"]
 
 [apis."web".keys."230216b400a90b29f70db61aca97bbca"]
 # This is a test key. Do not use it in production.
