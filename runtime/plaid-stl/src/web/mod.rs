@@ -19,10 +19,12 @@ pub struct JwtParams {
     pub exp: Option<u64>,
     /// Audience
     pub aud: Option<String>,
-    /// Additional headers that will be validated before being included in the final JWT
-    pub extra_headers: Option<HashMap<String, Value>>,
-    /// Additional fields that will be validated before being included in the final JWT
-    pub extra_fields: Option<HashMap<String, Value>>,
+    /// Additional headers that will be validated before being included in the final JWT.
+    /// If none is needed, set to an empty map.
+    pub extra_headers: HashMap<String, Value>,
+    /// Additional fields that will be validated before being included in the final JWT.
+    /// If none is needed, set to an empty map.
+    pub extra_fields: HashMap<String, Value>,
 }
 
 pub fn issue_jwt(request_params: &JwtParams) -> Result<String, PlaidFunctionError> {
