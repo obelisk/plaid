@@ -115,5 +115,19 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         make_named_request("test-response", "OK", HashMap::new()).unwrap();
     }
 
+    // Make a request without exp. Since the key does not enforce a max TTL, this will fail
+    let jwt_params = JwtParams {
+        kid: KEY_ID.to_string(),
+        sub: "Something".to_string(),
+        iat: Some(plaid_stl::plaid::get_time() as u64),
+        exp: None,
+        aud: None::<String>,
+        extra_headers: HashMap::<String, Value>::new(),
+        extra_fields: HashMap::<String, Value>::new(),
+    };
+    if issue_jwt(&jwt_params).is_err() {
+        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+    }
+
     Ok(())
 }
