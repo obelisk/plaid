@@ -98,7 +98,7 @@ pub fn insert(
         .api
         .clone()
         .runtime
-        .block_on(timeout(Duration::from_secs(5), fut))
+        .block_on(async move { timeout(Duration::from_secs(5), fut).await })
     {
         Ok(v) => v,
         Err(_) => FunctionErrors::TimeoutElapsed as i32,
@@ -179,7 +179,7 @@ pub fn get(
         .api
         .clone()
         .runtime
-        .block_on(timeout(Duration::from_secs(5), fut))
+        .block_on(async move { timeout(Duration::from_secs(5), fut).await })
     {
         Ok(v) => v,
         Err(_) => FunctionErrors::TimeoutElapsed as i32,
