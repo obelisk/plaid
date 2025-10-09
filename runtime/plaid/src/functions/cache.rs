@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use tokio::time::timeout;
 use wasmer::{AsStoreRef, FunctionEnvMut, WasmPtr};
 
 use crate::{executor::Env, functions::FunctionErrors};
@@ -60,7 +63,7 @@ pub fn insert(
     };
 
     // Perform a blocking cache put
-    env_data.api.clone().runtime.block_on(async move {
+    let fut = async move {
         match cache.put(&namespace, &key, &value).await {
             Ok(Some(previous_value)) => {
                 match safely_write_data_back(
@@ -90,7 +93,16 @@ pub fn insert(
                 FunctionErrors::CacheDisabled as i32
             }
         }
-    })
+    };
+    match env_data
+        .api
+        .clone()
+        .runtime
+        .block_on(timeout(Duration::from_secs(5), fut))
+    {
+        Ok(v) => v,
+        Err(_) => FunctionErrors::TimeoutElapsed as i32,
+    }
 }
 
 /// Get data from the cache system if one is configured
@@ -132,7 +144,7 @@ pub fn get(
     };
 
     // Perform a blocking cache get
-    env_data.api.clone().runtime.block_on(async move {
+    let fut = async move {
         match cache.get(&namespace, &key).await {
             Ok(Some(value)) => {
                 match safely_write_data_back(
@@ -162,5 +174,14 @@ pub fn get(
                 FunctionErrors::CacheDisabled as i32
             }
         }
-    })
+    };
+    match env_data
+        .api
+        .clone()
+        .runtime
+        .block_on(timeout(Duration::from_secs(5), fut))
+    {
+        Ok(v) => v,
+        Err(_) => FunctionErrors::TimeoutElapsed as i32,
+    }
 }
