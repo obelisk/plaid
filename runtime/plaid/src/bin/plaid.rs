@@ -31,6 +31,20 @@ use std::{
 use crossbeam_channel::TrySendError;
 use warp::{http::HeaderMap, hyper::body::Bytes, path, Filter};
 
+#[derive(Debug)]
+enum Errors {
+    FailedToInitDelayedSender,
+    FailedToLoadModules,
+}
+
+impl std::fmt::Display for Errors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Errors {}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -106,9 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         els.clone(),
         &roles,
     )
-    .await
-    .expect("The data system failed to start")
-    .unwrap();
+    .await?
+    .ok_or(Errors::FailedToInitDelayedSender)?;
 
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
@@ -148,7 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let modules = Arc::new(
         loader::load(&config.loading, storage.clone())
             .await
-            .unwrap(),
+            .map_err(|_| Errors::FailedToLoadModules)?,
     );
     let modules_by_name = Arc::new(modules.get_modules());
 
