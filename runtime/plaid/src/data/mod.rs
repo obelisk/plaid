@@ -58,6 +58,16 @@ pub enum DataError {
     StorageError(StorageError),
 }
 
+impl std::fmt::Display for DataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StorageError(e) => write!(f, "DataError | StorageError: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for DataError {}
+
 impl DataInternal {
     async fn new(
         config: DataConfig,
