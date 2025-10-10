@@ -33,7 +33,7 @@ use warp::{http::HeaderMap, hyper::body::Bytes, path, Filter};
 
 #[derive(Debug)]
 enum Errors {
-    FailedToInitDelayedSender,
+    FailedToStartDataSystem,
     FailedToLoadModules,
 }
 
@@ -121,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &roles,
     )
     .await?
-    .ok_or(Errors::FailedToInitDelayedSender)?;
+    .ok_or(Errors::FailedToStartDataSystem)?;
 
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
