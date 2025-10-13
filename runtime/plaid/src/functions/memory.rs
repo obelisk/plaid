@@ -95,11 +95,9 @@ pub fn safely_write_data_back(
         .slice(&memory_view, data.len() as u32)
         .map_err(|_| FunctionErrors::CouldNotGetAdequateMemory)?;
 
-    for i in 0..data.len() {
-        if let Err(_) = values.index(i as u64).write(data[i]) {
-            return Err(FunctionErrors::FailedToWriteGuestMemory);
-        }
-    }
+    values
+        .write_slice(data)
+        .map_err(|_| FunctionErrors::FailedToWriteGuestMemory)?;
 
     Ok(data.len() as i32)
 }
