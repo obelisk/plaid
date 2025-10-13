@@ -58,6 +58,8 @@ pub struct Request {
     /// if the call has side effects. If it is not set, this will default to false.
     #[serde(default)]
     available_in_test_mode: bool,
+    /// Whether to follow redirects
+    pub enable_redirects: Option<bool>,
 }
 
 /// Deserialize a non‐zero timeout (1–255 seconds) into a `Duration`, erroring on 0.
