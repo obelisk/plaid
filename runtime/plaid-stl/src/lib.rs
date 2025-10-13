@@ -173,7 +173,7 @@ macro_rules! entrypoint_with_source {
 
             let buffer_size = fetch_data_and_source(vec![].as_mut_ptr(), 0);
             let buffer_size = if buffer_size < 4 {
-                return buffer_size;
+                return -3;
             } else {
                 buffer_size as u32
             };
@@ -182,7 +182,7 @@ macro_rules! entrypoint_with_source {
 
             let copied_size = fetch_data_and_source(data_buffer.as_mut_ptr(), buffer_size);
             let copied_size = if copied_size < 4 {
-                return copied_size;
+                return -4;
             } else {
                 copied_size as u32
             };
@@ -232,7 +232,7 @@ macro_rules! entrypoint_with_source_and_response {
 
             let buffer_size = fetch_data_and_source(vec![].as_mut_ptr(), 0);
             let buffer_size = if buffer_size < 4 {
-                return buffer_size;
+                return -3;
             } else {
                 buffer_size as u32
             };
@@ -241,7 +241,7 @@ macro_rules! entrypoint_with_source_and_response {
 
             let copied_size = fetch_data_and_source(data_buffer.as_mut_ptr(), buffer_size);
             let copied_size = if copied_size < 4 {
-                return copied_size;
+                return -4;
             } else {
                 copied_size as u32
             };
