@@ -15,7 +15,8 @@ use thread_pools::ExecutionThreadPools;
 use tokio::sync::oneshot::Sender as OneShotSender;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_with::{serde_as, DeserializeAs, SerializeAs};
 use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedFunction};
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
@@ -35,23 +36,82 @@ pub struct ResponseMessage {
     pub body: String,
 }
 
-/// A message to be processed by one or more modules
+const MAX_BYTES: usize = 5 * 1024 * 1024;
+const MAX_ENTRIES: usize = 20;
+const MAX_KEY_LEN: usize = 100;
+
+// ---- small adapters ----
+
+struct VecMax<const MAX: usize>;
+
+impl SerializeAs<Vec<u8>> for VecMax<MAX_BYTES> {
+    fn serialize_as<S>(value: &Vec<u8>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        s.collect_seq(value)
+    }
+}
+
+impl<'de> DeserializeAs<'de, Vec<u8>> for VecMax<MAX_BYTES> {
+    fn deserialize_as<D>(d: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let v = Vec::<u8>::deserialize(d)?;
+        if v.len() > MAX_BYTES {
+            return Err(serde::de::Error::custom("Vec<u8> exceeds the size limit"));
+        }
+        Ok(v)
+    }
+}
+
+// Enforce map entry count + key length, while using VecMax for values.
+fn map_with_limits<'de, D>(de: D) -> Result<HashMap<String, Vec<u8>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Deserialize values via the VecMax adapter
+    #[serde_as]
+    #[derive(Deserialize)]
+    struct Tmp(#[serde_as(as = "HashMap<_, VecMax<MAX_BYTES>>")] HashMap<String, Vec<u8>>);
+
+    let Tmp(map) = Tmp::deserialize(de)?;
+    if map.len() > MAX_ENTRIES {
+        return Err(serde::de::Error::custom(&format!(
+            "map exceeds {MAX_ENTRIES} entries"
+        )));
+    }
+    for k in map.keys() {
+        if k.chars().count() > MAX_KEY_LEN {
+            return Err(serde::de::Error::custom(&format!(
+                "key exceeds {MAX_KEY_LEN} chars"
+            )));
+        }
+    }
+    Ok(map)
+}
+
+#[serde_as]
 #[derive(Serialize, Deserialize)]
 pub struct Message {
-    /// A unique identifier for this message
     pub id: String,
-    /// The message channel that this message is going to run on
     pub type_: String,
-    /// The data passed to the module
+
+    /// <= 5 MiB
+    #[serde_as(as = "VecMax<MAX_BYTES>")]
     pub data: Vec<u8>,
-    /// Any headers the module will have access to, while processing this message
+
+    /// <= 20 entries; key <= 100 chars; value <= 5 MiB
+    #[serde(deserialize_with = "map_with_limits", default)]
     pub headers: HashMap<String, Vec<u8>>,
-    /// Any query parameters the module will have access to, while processing this message
+
+    /// <= 20 entries; key <= 100 chars; value <= 5 MiB
+    #[serde(deserialize_with = "map_with_limits", default)]
     pub query_params: HashMap<String, Vec<u8>>,
+
     /// Where the message came from
     pub source: LogSource,
-    /// If this message is allowed to trigger additional messages to the same
-    /// or other message channels
     pub logbacks_allowed: LogbacksAllowed,
     /// If a response is should be sent back to the source of the message
     /// This is used in the GET request system to handle responses
