@@ -152,8 +152,21 @@ if [ $? -ne 0 ]; then
 fi
 RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features sled,$1 -- --config ${CONFIG_WORKING_PATH} --secrets $SECRET_WORKING_PATH &
 PLAID_PID=$!
+
+# Wait for Plaid to boot. When it's ready, a file called "plaid_ready" will be created.
+# If Plaid is not ready within 120 seconds, give up and return an error.
+file="plaid_ready"
+timeout=120
+interval=5
+deadline=$((SECONDS + timeout))
+
+until cat "$file" >/dev/null 2>&1; do
+  (( SECONDS >= deadline )) && { echo "Error: '$file' not found within ${timeout}s." >&2; exit 1; }
+  sleep "$interval"
+done
+
+# If we are here, then the file was found, meaning Plaid is fully ready. We can now proceed with our tests.
 cd ..
-sleep 60
 
 # Set the variables the test harnesses will need
 export PLAID_LOCATION="localhost:4554"
