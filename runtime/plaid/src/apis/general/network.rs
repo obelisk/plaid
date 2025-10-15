@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::loader::PlaidModule;
+use plaid_stl::network::{MakeRequestRequest, MnrResponseEncoding};
 use reqwest::{header::HeaderMap, Certificate, Client};
 use serde::{de, Deserialize, Serialize};
 
@@ -11,20 +12,6 @@ use super::General;
 #[derive(Deserialize)]
 pub struct Config {
     pub web_requests: HashMap<String, Request>,
-}
-
-/// Request to make a web request
-#[derive(Deserialize)]
-struct MakeRequestRequest {
-    /// Body of the request
-    body: String,
-    /// Name of the request - defined in the configuration
-    request_name: String,
-    /// Variables to include in the request. Variables take the place of an idenfitifer in the request URI
-    variables: HashMap<String, String>,
-    /// Dynamic headers to include in the request. These are headers that cannot be statically
-    /// defined in the request configuration. They cannot override a request's statically defined headers
-    headers: Option<HashMap<String, String>>,
 }
 
 /// This struct represents a web request and contains information about what the request is about (e.g., verb and URI),
@@ -235,7 +222,15 @@ impl General {
                 }
 
                 if request_specification.return_body {
-                    ret.data = Some(r.text().await.unwrap_or_default());
+                    let data = match request.response_encoding {
+                        MnrResponseEncoding::Utf8 => r.text().await.unwrap_or_default(),
+                        MnrResponseEncoding::Base64 => {
+                            let bytes = r.bytes().await.unwrap_or_default();
+                            base64::encode(bytes)
+                        }
+                    };
+
+                    ret.data = Some(data);
                 }
 
                 if let Ok(r) = serde_json::to_string(&ret) {
