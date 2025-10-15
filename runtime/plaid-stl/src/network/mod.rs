@@ -10,7 +10,7 @@ pub struct MakeRequestRequest {
     pub body: String,
     /// Name of the request - defined in the configuration
     pub request_name: String,
-    /// Variables to include in the request. Variables take the place of an idenfitifer in the request URI
+    /// Variables to include in the request. Variables take the place of an identifier in the request URI
     pub variables: HashMap<String, String>,
     /// Dynamic headers to include in the request. These are headers that cannot be statically
     /// defined in the request configuration. They cannot override a request's statically defined headers
