@@ -3,11 +3,31 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use crate::loader::PlaidModule;
 use plaid_stl::network::{MakeRequestRequest, MnrResponseEncoding};
 use reqwest::{header::HeaderMap, Certificate, Client};
-use serde::{de, Deserialize, Serialize};
+use serde::{
+    de::{self},
+    Deserialize, Serialize,
+};
 
 use crate::apis::ApiError;
 
 use super::General;
+
+/// This enum is used to represent the data returned from a web request. It can be either text or binary data.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ResponseData {
+    Utf8(String),
+    Binary(Vec<u8>),
+}
+
+/// This struct is used to represent the response from a web request. It contains the response code and the response data.
+#[derive(Serialize)]
+struct DynamicWebRequestResponse {
+    /// Response code (e.g., 200, 404, etc.)
+    code: Option<u16>,
+    /// Response data, which can be either text or binary
+    data: Option<ResponseData>,
+}
 
 #[derive(Deserialize)]
 pub struct Config {
@@ -78,13 +98,6 @@ where
             Ok(Some(cert))
         }
     }
-}
-
-/// Data returned by a request.
-#[derive(Serialize)]
-struct ReturnData {
-    code: Option<u16>,
-    data: Option<String>,
 }
 
 impl General {
@@ -212,7 +225,7 @@ impl General {
 
         match request_builder.body(body).send().await {
             Ok(r) => {
-                let mut ret = ReturnData {
+                let mut ret = DynamicWebRequestResponse {
                     code: None,
                     data: None,
                 };
@@ -222,15 +235,16 @@ impl General {
                 }
 
                 if request_specification.return_body {
-                    let data = match request.response_encoding {
-                        MnrResponseEncoding::Utf8 => r.text().await.unwrap_or_default(),
-                        MnrResponseEncoding::Base64 => {
-                            let bytes = r.bytes().await.unwrap_or_default();
-                            base64::encode(bytes)
+                    match request.response_encoding {
+                        MnrResponseEncoding::Utf8 => {
+                            let data = r.text().await.unwrap_or_default();
+                            ret.data = Some(ResponseData::Utf8(data));
+                        }
+                        MnrResponseEncoding::Binary => {
+                            let data = r.bytes().await.unwrap_or_default();
+                            ret.data = Some(ResponseData::Binary(data.to_vec()));
                         }
                     };
-
-                    ret.data = Some(data);
                 }
 
                 if let Ok(r) = serde_json::to_string(&ret) {

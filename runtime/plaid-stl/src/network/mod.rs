@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
 
@@ -23,14 +23,21 @@ pub struct MakeRequestRequest {
 pub enum MnrResponseEncoding {
     /// Response is UTF-8 encoded String
     Utf8,
-    /// Response is binary data encoded as Base64
-    Base64,
+    /// Response is unencoded binary data
+    Binary,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+pub struct WebRequestResponse<T> {
+    pub code: Option<u16>,
+    pub data: Option<T>,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct WebRequestResponse {
+pub struct WebRequestResponseBinary {
     pub code: Option<u16>,
-    pub data: Option<String>,
+    pub data: Option<Vec<u8>>,
 }
 
 const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
@@ -65,14 +72,14 @@ pub fn simple_json_post_request(
     Ok(res as u32)
 }
 
-pub fn make_named_request_with_buf_size(
+pub fn make_named_request_with_buf_size<T: DeserializeOwned>(
     name: &str,
     body: &str,
     variables: HashMap<String, String>,
     headers: Option<HashMap<String, String>>,
     buffer_size: usize,
     response_encoding: MnrResponseEncoding,
-) -> Result<WebRequestResponse, PlaidFunctionError> {
+) -> Result<WebRequestResponse<T>, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(general, make_named_request);
     }
@@ -116,7 +123,7 @@ pub fn make_named_request(
     name: &str,
     body: &str,
     variables: HashMap<String, String>,
-) -> Result<WebRequestResponse, PlaidFunctionError> {
+) -> Result<WebRequestResponse<String>, PlaidFunctionError> {
     return make_named_request_with_buf_size(
         name,
         body,
@@ -133,14 +140,14 @@ pub fn make_named_request_binary(
     name: &str,
     body: &str,
     variables: HashMap<String, String>,
-) -> Result<WebRequestResponse, PlaidFunctionError> {
+) -> Result<WebRequestResponse<Vec<u8>>, PlaidFunctionError> {
     return make_named_request_with_buf_size(
         name,
         body,
         variables,
         None,
         RETURN_BUFFER_SIZE,
-        MnrResponseEncoding::Base64,
+        MnrResponseEncoding::Binary,
     );
 }
 
@@ -152,7 +159,7 @@ pub fn make_named_request_with_headers(
     body: &str,
     variables: HashMap<String, String>,
     headers: HashMap<String, String>,
-) -> Result<WebRequestResponse, PlaidFunctionError> {
+) -> Result<WebRequestResponse<String>, PlaidFunctionError> {
     return make_named_request_with_buf_size(
         name,
         body,
