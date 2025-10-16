@@ -34,12 +34,6 @@ pub struct WebRequestResponse<T> {
     pub data: Option<T>,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct WebRequestResponseBinary {
-    pub code: Option<u16>,
-    pub data: Option<Vec<u8>>,
-}
-
 const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
 
 pub fn simple_json_post_request(
