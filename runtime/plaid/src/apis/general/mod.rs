@@ -22,10 +22,6 @@ pub struct GeneralConfig {
     /// If no value is provided, the result of `default_timeout_seconds()` will be used.
     #[serde(default = "default_timeout_seconds")]
     api_timeout_seconds: u64,
-    /// Whether MNRs can follow redirects.
-    /// This is a global setting that can be fine-tuned for each single MNR.
-    #[serde(default)] // Defaults to false
-    enable_mnr_redirects: bool,
 }
 
 pub struct General {
@@ -54,13 +50,7 @@ impl Clients {
         let default_timeout_duration = Duration::from_secs(config.api_timeout_seconds);
         let default = reqwest::Client::builder()
             .timeout(default_timeout_duration)
-            .redirect({
-                if !config.enable_mnr_redirects {
-                    redirect::Policy::none()
-                } else {
-                    redirect::Policy::default()
-                }
-            })
+            .redirect(redirect::Policy::none()) // by default, no redirects
             .build()
             .unwrap();
 
@@ -72,12 +62,8 @@ impl Clients {
                 // An MNR needs a specialized client if it specifies
                 // * a custom timeout
                 // * a custom root CA
-                // * a custom setting for following redirects which is different from the global one
-                if req.timeout.is_some()
-                    || req.root_certificate.is_some()
-                    || (req.enable_redirects.unwrap_or(config.enable_mnr_redirects)
-                        != config.enable_mnr_redirects)
-                {
+                // * that it allows redirects
+                if req.timeout.is_some() || req.root_certificate.is_some() || req.enable_redirects {
                     let mut builder = reqwest::Client::builder()
                         .timeout(req.timeout.unwrap_or(default_timeout_duration));
 
@@ -85,14 +71,11 @@ impl Clients {
                         builder = builder.add_root_certificate(ca);
                     }
 
-                    // See if redirects should be enabled. We take the request-specific value,
-                    // defaulting to the global value if that's missing.
+                    // See if redirects should be enabled
                     builder = builder.redirect({
-                        if req.enable_redirects.unwrap_or(config.enable_mnr_redirects) {
-                            // Redirects OK
+                        if req.enable_redirects {
                             redirect::Policy::default()
                         } else {
-                            // No redirects
                             redirect::Policy::none()
                         }
                     });
