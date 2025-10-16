@@ -3,7 +3,6 @@
 use crate::cache::CacheError;
 use async_trait::async_trait;
 use redis::{aio::ConnectionManager, AsyncCommands};
-use ring::rand::SecureRandom;
 use serde::Deserialize;
 
 /// How entries are evicted from the Redis cache
@@ -120,41 +119,59 @@ impl super::CacheProvider for RedisCache {
         value: &str,
     ) -> Result<Option<String>, CacheError> {
         let mut connection = self.connection_manager.clone();
-        let old = connection
-            .hget(namespace, key)
-            .await
-            .map_err(|e| CacheError::GetError(e.to_string()))?;
 
         // Check if we need to evict an entry. If so, do it to make space for the upcoming insertion.
         // Note - We do this in an "optimistic" way, without locking anything.
-        match self.eviction_policy {
-            EvictionPolicy::NoEviction => {}
-            EvictionPolicy::RandomEviction(max_entries) => {
-                // Count items
-                let count: usize = connection
-                    .hlen(namespace)
+        let old = match self.eviction_policy {
+            EvictionPolicy::NoEviction => {
+                let (old, ()): (Option<String>, ()) = redis::pipe()
+                    .cmd("HGET")
+                    .arg(namespace)
+                    .arg(key)
+                    .cmd("HSET")
+                    .arg(namespace)
+                    .arg(key)
+                    .arg(value)
+                    .query_async(&mut connection)
                     .await
-                    .map_err(|e| CacheError::GetError(e.to_string()))?;
-                if count >= max_entries {
-                    // Pull all the entries and take one at random
-                    let entries: Vec<String> = connection
-                        .hkeys(namespace)
-                        .await
-                        .map_err(|e| CacheError::GetError(e.to_string()))?;
-                    if let Some(evict) = entries.get(random_usize(0, entries.len()).unwrap_or(0)) {
-                        let () = connection
-                            .hdel(namespace, evict)
-                            .await
-                            .map_err(|e| CacheError::PutError(e.to_string()))?;
-                    }
-                }
-            }
-        }
+                    .map_err(|e| CacheError::PutError(e.to_string()))?;
 
-        let () = connection
-            .hset(namespace, key, value)
-            .await
-            .map_err(|e| CacheError::PutError(e.to_string()))?;
+                old
+            }
+            EvictionPolicy::RandomEviction(max_entries) => {
+                let script = redis::Script::new(
+                    r#"
+local ns  = KEYS[1]
+local fld = ARGV[1]
+local val = ARGV[2]
+local max = tonumber(ARGV[3])
+
+local old = redis.call('HGET', ns, fld)
+
+if max and max > 0 then
+  local count = redis.call('HLEN', ns)
+  if count >= max then
+    -- Redis 6.2+: pick a random field without pulling all keys
+    local evict = redis.call('HRANDFIELD', ns)
+    if evict then redis.call('HDEL', ns, evict) end
+  end
+end
+
+redis.call('HSET', ns, fld, val)
+return old
+"#,
+                );
+
+                script
+                    .key(namespace)
+                    .arg(key)
+                    .arg(value)
+                    .arg(max_entries)
+                    .invoke_async(&mut connection)
+                    .await
+                    .map_err(|e| CacheError::PutError(e.to_string()))?
+            }
+        };
 
         Ok(old)
     }
@@ -167,17 +184,4 @@ impl super::CacheProvider for RedisCache {
             .map_err(|e| CacheError::GetError(e.to_string()))?;
         Ok(r)
     }
-}
-
-/// Return a random `usize` in the half-open range `[start, end)`
-/// using simple modulo reduction (may introduce slight bias).
-fn random_usize(start: usize, end: usize) -> Result<usize, ()> {
-    let rng = ring::rand::SystemRandom::new();
-    let mut buf = [0u8; 8];
-    // We'll pull 8 bytes (u64) and cast down to usize.
-    rng.fill(&mut buf).map_err(|_| ())?;
-    let n = u64::from_be_bytes(buf) as usize;
-
-    let span = end.checked_sub(start).ok_or(())?;
-    Ok(start + (n % span))
 }
