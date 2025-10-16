@@ -59,7 +59,8 @@ pub struct Request {
     #[serde(default)]
     available_in_test_mode: bool,
     /// Whether to follow redirects
-    pub enable_redirects: Option<bool>,
+    #[serde(default)] // default to false
+    pub enable_redirects: bool,
 }
 
 /// Deserialize a non‐zero timeout (1–255 seconds) into a `Duration`, erroring on 0.
