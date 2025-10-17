@@ -151,34 +151,7 @@ impl super::CacheProvider for RedisCache {
                     .map(|v| *v)
                     .unwrap_or(self.max_capacity.default);
 
-                let script = redis::Script::new(
-                    r#"
-local ns  = KEYS[1]
-local fld = ARGV[1]
-local val = ARGV[2]
-local max = tonumber(ARGV[3])
-
-local old = redis.call('HGET', ns, fld)
-local evicted = 0
-
--- Only evict if we're inserting a new field AND the hash is at capacity
-if (not old) and max and max > 0 then
-  local count = redis.call('HLEN', ns)
-  if count >= max then
-    local evict = redis.call('HRANDFIELD', ns) -- Redis 6.2+
-    if evict then
-      redis.call('HDEL', ns, evict)
-      evicted = 1
-    end
-  end
-end
-
-redis.call('HSET', ns, fld, val)
-
--- Return previous value (or nil) and whether we evicted something (0/1)
-return { old, evicted }
-"#,
-                );
+                let script = redis::Script::new(include_str!("./eviction.redis"));
 
                 let (old, evicted): (Option<String>, bool) = script
                     .key(namespace)
