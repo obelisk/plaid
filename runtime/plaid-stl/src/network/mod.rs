@@ -1,13 +1,37 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
 
-#[derive(Deserialize)]
-pub struct WebRequestResponse {
+#[derive(Serialize, Deserialize)]
+pub struct MakeRequestRequest {
+    /// Body of the request
+    pub body: String,
+    /// Name of the request - defined in the configuration
+    pub request_name: String,
+    /// Variables to include in the request. Variables take the place of an identifier in the request URI
+    pub variables: HashMap<String, String>,
+    /// Dynamic headers to include in the request. These are headers that cannot be statically
+    /// defined in the request configuration. They cannot override a request's statically defined headers
+    pub headers: Option<HashMap<String, String>>,
+    /// Response encoding format
+    pub response_encoding: MnrResponseEncoding,
+}
+
+#[derive(Deserialize, Serialize)]
+pub enum MnrResponseEncoding {
+    /// Response is UTF-8 encoded String
+    Utf8,
+    /// Response is unencoded binary data
+    Binary,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+pub struct WebRequestResponse<T> {
     pub code: Option<u16>,
-    pub data: Option<String>,
+    pub data: Option<T>,
 }
 
 const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
@@ -42,23 +66,16 @@ pub fn simple_json_post_request(
     Ok(res as u32)
 }
 
-pub fn make_named_request_with_buf_size(
+pub fn make_named_request_with_buf_size<T: DeserializeOwned>(
     name: &str,
     body: &str,
     variables: HashMap<String, String>,
     headers: Option<HashMap<String, String>>,
     buffer_size: usize,
-) -> Result<WebRequestResponse, PlaidFunctionError> {
+    response_encoding: MnrResponseEncoding,
+) -> Result<WebRequestResponse<T>, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(general, make_named_request);
-    }
-
-    #[derive(Serialize)]
-    struct MakeRequestRequest {
-        request_name: String,
-        body: String,
-        variables: HashMap<String, String>,
-        headers: Option<HashMap<String, String>>,
     }
 
     let request = MakeRequestRequest {
@@ -66,6 +83,7 @@ pub fn make_named_request_with_buf_size(
         body: body.to_owned(),
         variables,
         headers,
+        response_encoding,
     };
 
     let request = serde_json::to_string(&request).unwrap();
@@ -99,8 +117,32 @@ pub fn make_named_request(
     name: &str,
     body: &str,
     variables: HashMap<String, String>,
-) -> Result<WebRequestResponse, PlaidFunctionError> {
-    return make_named_request_with_buf_size(name, body, variables, None, RETURN_BUFFER_SIZE);
+) -> Result<WebRequestResponse<String>, PlaidFunctionError> {
+    return make_named_request_with_buf_size(
+        name,
+        body,
+        variables,
+        None,
+        RETURN_BUFFER_SIZE,
+        MnrResponseEncoding::Utf8,
+    );
+}
+
+/// Makes a named request and returns the response data in binary.
+/// Use this function when expecting binary response data (images, files, etc.).
+pub fn make_named_request_binary(
+    name: &str,
+    body: &str,
+    variables: HashMap<String, String>,
+) -> Result<WebRequestResponse<Vec<u8>>, PlaidFunctionError> {
+    return make_named_request_with_buf_size(
+        name,
+        body,
+        variables,
+        None,
+        RETURN_BUFFER_SIZE,
+        MnrResponseEncoding::Binary,
+    );
 }
 
 /// Enables calling of a named request with dynamic headers. This function should be used
@@ -111,12 +153,13 @@ pub fn make_named_request_with_headers(
     body: &str,
     variables: HashMap<String, String>,
     headers: HashMap<String, String>,
-) -> Result<WebRequestResponse, PlaidFunctionError> {
+) -> Result<WebRequestResponse<String>, PlaidFunctionError> {
     return make_named_request_with_buf_size(
         name,
         body,
         variables,
         Some(headers),
         RETURN_BUFFER_SIZE,
+        MnrResponseEncoding::Utf8,
     );
 }
