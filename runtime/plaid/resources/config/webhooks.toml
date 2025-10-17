@@ -105,6 +105,10 @@ headers = []
 log_type = "test_vec_entrypoint"
 headers = []
 
+[webhooks."internal".webhooks."test_redis_cache_eviction"]
+log_type = "test_redis_cache_eviction"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples

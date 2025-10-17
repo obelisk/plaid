@@ -93,10 +93,13 @@ impl Cache {
                 Box::new(InMemoryCache::new(modules_and_logtypes, config))
             }
             #[cfg(feature = "redis")]
-            Some(CacheBackend::Redis(config)) => {
-                // Note - capacity not taken into account when using redis
-                info!("Using redis cache with config [{}]", config);
-                Box::new(RedisCache::new(config).await.unwrap())
+            Some(CacheBackend::Redis(redis_cfg)) => {
+                info!("Using redis cache with config [{}]", redis_cfg);
+                Box::new(
+                    RedisCache::new(redis_cfg, config.cache_entries)
+                        .await
+                        .unwrap(),
+                )
             }
             _ => return Err(CacheError::NoCacheConfigured),
         };

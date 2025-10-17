@@ -191,6 +191,12 @@ export PLAID_LOCATION="localhost:4554"
 
 # Loop through all test modules in the test_modules directory
 for module in modules/tests/*; do
+  # If the cache backend is not redis, skip modules whose path/name contains "redis"
+  if [[ "$CACHE_BACKEND" != redis* && "$module" == *redis* ]]; then
+    echo "Skipping integration test for module $module"
+    continue
+  fi
+
   # If the module is a directory
   if [ -d "$module" ]; then
     # If the module has a harness.sh file

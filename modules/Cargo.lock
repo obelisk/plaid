@@ -443,6 +443,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_redis_cache_eviction"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "test_regex"
 version = "0.1.0"
 dependencies = [

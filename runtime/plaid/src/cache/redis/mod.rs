@@ -1,6 +1,6 @@
 //! This module provides a way for Plaid to use Redis as a cache layer
 
-use crate::cache::CacheError;
+use crate::{cache::CacheError, loader::LimitedAmount};
 use async_trait::async_trait;
 use redis::{aio::ConnectionManager, AsyncCommands};
 use serde::Deserialize;
@@ -12,14 +12,14 @@ pub enum EvictionPolicy {
     NoEviction,
     /// When the max number of entries is reached, an entry is
     /// evicted at random to make space for new insertions.
-    RandomEviction(usize),
+    RandomEviction,
 }
 
 impl std::fmt::Display for EvictionPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let output = match self {
             Self::NoEviction => "no eviction".to_string(),
-            Self::RandomEviction(max) => format!("random eviction: max {max} entries"),
+            Self::RandomEviction => "random eviction".to_string(),
         };
         write!(f, "{output}")
     }
@@ -35,6 +35,7 @@ impl Default for EvictionPolicy {
 pub struct RedisCache {
     connection_manager: ConnectionManager,
     eviction_policy: EvictionPolicy,
+    max_capacity: LimitedAmount,
 }
 
 /// Configuration for the Redis cache
@@ -92,7 +93,7 @@ impl Config {
 }
 
 impl RedisCache {
-    pub async fn new(config: Config) -> Result<Self, CacheError> {
+    pub async fn new(config: Config, max_capacity: LimitedAmount) -> Result<Self, CacheError> {
         let conn_string = config.build_connection_string();
         let client = redis::Client::open(conn_string).map_err(|e| {
             CacheError::CacheInitError(format!("Could not create redis client: {e}"))
@@ -106,6 +107,7 @@ impl RedisCache {
         Ok(Self {
             connection_manager,
             eviction_policy,
+            max_capacity,
         })
     }
 }
@@ -138,7 +140,17 @@ impl super::CacheProvider for RedisCache {
 
                 old
             }
-            EvictionPolicy::RandomEviction(max_entries) => {
+            EvictionPolicy::RandomEviction => {
+                // Figure out how many entries can be stored in this cache.
+                // If we have a value for this namespace (i.e., this module), use
+                // that; otherwise fallback on the default value.
+                let max_entries = self
+                    .max_capacity
+                    .module_overrides
+                    .get(namespace)
+                    .map(|v| *v)
+                    .unwrap_or(self.max_capacity.default);
+
                 let script = redis::Script::new(
                     r#"
 local ns  = KEYS[1]
@@ -147,29 +159,41 @@ local val = ARGV[2]
 local max = tonumber(ARGV[3])
 
 local old = redis.call('HGET', ns, fld)
+local evicted = 0
 
-if max and max > 0 then
+-- Only evict if we're inserting a new field AND the hash is at capacity
+if (not old) and max and max > 0 then
   local count = redis.call('HLEN', ns)
   if count >= max then
-    -- Redis 6.2+: pick a random field without pulling all keys
-    local evict = redis.call('HRANDFIELD', ns)
-    if evict then redis.call('HDEL', ns, evict) end
+    local evict = redis.call('HRANDFIELD', ns) -- Redis 6.2+
+    if evict then
+      redis.call('HDEL', ns, evict)
+      evicted = 1
+    end
   end
 end
 
 redis.call('HSET', ns, fld, val)
-return old
+
+-- Return previous value (or nil) and whether we evicted something (0/1)
+return { old, evicted }
 "#,
                 );
 
-                script
+                let (old, evicted): (Option<String>, bool) = script
                     .key(namespace)
                     .arg(key)
                     .arg(value)
                     .arg(max_entries)
                     .invoke_async(&mut connection)
                     .await
-                    .map_err(|e| CacheError::PutError(e.to_string()))?
+                    .map_err(|e| CacheError::PutError(e.to_string()))?;
+
+                if evicted {
+                    debug!("An item has been evicted from the Redis cache");
+                }
+
+                old
             }
         };
 
