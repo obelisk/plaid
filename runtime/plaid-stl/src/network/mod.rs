@@ -128,7 +128,7 @@ pub fn make_named_request(
     );
 }
 
-/// Makes a named request and returns the response data as Base64-encoded binary data.
+/// Makes a named request and returns the response data in binary.
 /// Use this function when expecting binary response data (images, files, etc.).
 pub fn make_named_request_binary(
     name: &str,
