@@ -2,6 +2,7 @@ pub mod thread_pools;
 
 use crate::apis::Api;
 
+use crate::cache::Cache;
 use crate::functions::{
     create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
 };
@@ -194,6 +195,8 @@ pub struct Env {
     pub api: Arc<Api>,
     // A handle to the storage system if one is configured
     pub storage: Option<Arc<Storage>>,
+    // A handle to the cache system if one is configured
+    pub cache: Option<Arc<Cache>>,
     // A sender to the external logging system
     pub external_logging_system: Logger,
     /// Memory for host-guest communication
@@ -303,6 +306,7 @@ fn prepare_for_execution(
     plaid_module: Arc<PlaidModule>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
+    cache: Option<Arc<Cache>>,
     els: Logger,
     response: Option<String>,
 ) -> Result<(Store, Instance, TypedFunction<(), i32>, FunctionEnv<Env>), ExecutorError> {
@@ -319,6 +323,7 @@ fn prepare_for_execution(
         message: message.create_duplicate(),
         api: api.clone(),
         storage: storage.clone(),
+        cache: cache.clone(),
         external_logging_system: els.clone(),
         memory: None,
         response,
@@ -468,6 +473,7 @@ fn process_message_with_module(
     module: Arc<PlaidModule>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
+    cache: Option<Arc<Cache>>,
     els: Logger,
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
@@ -482,6 +488,7 @@ fn process_message_with_module(
         module.clone(),
         api.clone(),
         storage.clone(),
+        cache.clone(),
         els.clone(),
         persistent_response,
     ) {
@@ -580,6 +587,7 @@ fn execution_loop(
     modules: HashMap<String, Vec<Arc<PlaidModule>>>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
+    cache: Option<Arc<Cache>>,
     els: Logger,
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
@@ -597,6 +605,7 @@ fn execution_loop(
                     module,
                     api.clone(),
                     storage.clone(),
+                    cache.clone(),
                     els.clone(),
                     performance_monitoring_mode.clone(),
                 )?;
@@ -609,6 +618,7 @@ fn execution_loop(
                         module.clone(),
                         api.clone(),
                         storage.clone(),
+                        cache.clone(),
                         els.clone(),
                         performance_monitoring_mode.clone(),
                     )?;
@@ -654,6 +664,7 @@ impl Executor {
         modules: HashMap<String, Vec<Arc<PlaidModule>>>,
         api: Arc<Api>,
         storage: Option<Arc<Storage>>,
+        cache: Option<Arc<Cache>>,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
     ) -> Self {
@@ -663,6 +674,7 @@ impl Executor {
             let receiver = thread_pools.general_pool.receiver.clone();
             let api = api.clone();
             let storage = storage.clone();
+            let cache = cache.clone();
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
@@ -672,6 +684,7 @@ impl Executor {
                     modules.clone(),
                     api.clone(),
                     storage.clone(),
+                    cache.clone(),
                     els.clone(),
                     performance_sender.clone(),
                 ) {
@@ -688,6 +701,7 @@ impl Executor {
                 let receiver = thread_pool.receiver.clone();
                 let api = api.clone();
                 let storage = storage.clone();
+                let cache = cache.clone();
                 let modules = modules.clone();
                 let els = els.clone();
                 let performance_sender = performance_monitoring_mode.clone();
@@ -697,6 +711,7 @@ impl Executor {
                         modules.clone(),
                         api.clone(),
                         storage.clone(),
+                        cache.clone(),
                         els.clone(),
                         performance_sender.clone(),
                     ) {

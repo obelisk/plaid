@@ -1,0 +1,13 @@
+[cache]
+
+[cache.cache_entries]
+default = 200
+[cache.cache_entries.log_type]
+[cache.cache_entries.module_overrides]
+"test_redis_cache_eviction.wasm" = 50
+
+[cache.backend]
+type = "Redis"
+hostname = "127.0.0.1"
+port = 6379
+eviction_policy = "RandomEviction"

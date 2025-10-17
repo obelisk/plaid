@@ -30,6 +30,7 @@ pub enum FunctionErrors {
     TestMode = -11,
     OperationNotAllowed = -12,
     SharedDbError = -13,
+    TimeoutElapsed = -14,
 }
 
 #[derive(Debug)]

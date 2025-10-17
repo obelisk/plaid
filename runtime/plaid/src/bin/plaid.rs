@@ -3,6 +3,7 @@ extern crate log;
 
 use performance::ModulePerformanceMetadata;
 use plaid::{
+    cache::Cache,
     config::{
         CachingMode, ConfigurationWithRoles, GetMode, ResponseMode, WebhookServerConfiguration,
     },
@@ -165,6 +166,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let modules_by_name = Arc::new(modules.get_modules());
 
+    let modules_and_logtypes = modules.get_module_logtypes();
+
+    let cache = Cache::new(modules_and_logtypes, config.cache).await?;
+    let cache = Arc::new(cache);
+
     // Print information about the threads we are starting
     info!(
         "Starting {} execution threads for general execution. Log queue size = {}",
@@ -191,6 +197,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         modules.get_channels(),
         api,
         storage,
+        Some(cache),
         els.clone(),
         performance_sender.clone(),
     );
