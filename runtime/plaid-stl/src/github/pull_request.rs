@@ -520,6 +520,7 @@ pub struct AddLabelsRequest {
 /// - `owner`: The account or organization that owns the repository.
 /// - `repo`: The name of the repository.
 /// - `number`: The pull request or issue number.
+/// - `labels`: A vector of label names to add to the issue or pull request.
 ///
 /// # Returns
 /// - `Ok(())` if the labels were successfully added, or
@@ -538,7 +539,7 @@ pub fn add_labels(
         owner: owner.to_string(),
         repo: repo.to_string(),
         number,
-        labels: labels.iter().map(|s| s.to_string()).collect(),
+        labels: labels.into_iter().map(|s| s.to_string()).collect(),
     };
 
     let params = serde_json::to_string(&params).unwrap();
