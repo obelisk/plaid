@@ -170,7 +170,7 @@ pub struct DeleteItemOutput {
 #[derive(Serialize, Deserialize)]
 pub struct QueryInput {
     /// <p>The name of the table containing the requested items. You can also provide the Amazon
-    /// Resource Name (ARN) of the table in this parameter.</p>:W
+    /// Resource Name (ARN) of the table in this parameter.</p>
     pub table_name: String,
     /// <p>The name of an index to query. This index can be any local secondary index or global secondary index on the table. Note that if you use the <code>IndexName</code> parameter, you must also provide <code>TableName.</code></p>
     pub index_name: Option<String>,

@@ -825,6 +825,20 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, aws_kms_get_public_key)
         }
 
+        // DynamoDB calls
+        #[cfg(feature = "aws")]
+        "aws_dynamodb_put_item" => {
+            Function::new_typed_with_env(&mut store, &env, aws_dynamodb_put_item)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_dynamodb_delete_item" => {
+            Function::new_typed_with_env(&mut store, &env, aws_dynamodb_delete_item)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_dynamodb_query" => Function::new_typed_with_env(&mut store, &env, aws_dynamodb_query),
+
         // PagerDuty Calls
         "pagerduty_trigger_incident" => {
             Function::new_typed_with_env(&mut store, &env, pagerduty_trigger_incident)
