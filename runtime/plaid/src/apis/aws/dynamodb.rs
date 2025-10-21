@@ -528,6 +528,7 @@ pub mod tests {
 
         Arc::new(PlaidModule {
             name: name.to_string(),
+            logtype: "test".to_string(),
             module: m,
             engine: engine.into(),
             computation_limit: 0,
@@ -536,7 +537,6 @@ pub mod tests {
             storage_limit: LimitValue::Unlimited,
             accessory_data: Default::default(),
             secrets: Default::default(),
-            cache: Default::default(),
             persistent_response: Default::default(),
             test_mode,
         })
