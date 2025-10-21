@@ -24,9 +24,9 @@ pub struct DynamoDbConfig {
     /// - `ApiKey`: Uses explicit credentials, including an access key ID, secret access key, and region.
     authentication: AwsAuthentication,
     /// Configured writers - maps a table name to a list of rules that are allowed to READ or WRITE data
-    write: HashMap<String, HashSet<String>>,
+    rw: HashMap<String, HashSet<String>>,
     /// Configured readers - maps a table name to a list of rules that are allowed to READ data
-    read: HashMap<String, HashSet<String>>,
+    r: HashMap<String, HashSet<String>>,
 }
 
 /// Represents the DynamoDB API client.
@@ -35,9 +35,9 @@ pub struct DynamoDb {
     /// The underlying client used to interact with the KMS API.
     client: Client,
     /// Configured writers - maps a table name to a list of rules that are allowed to READ or WRITE data
-    write: HashMap<String, HashSet<String>>,
+    rw: HashMap<String, HashSet<String>>,
     /// Configured readers - maps a table name to a list of rules that are allowed to READ data
-    read: HashMap<String, HashSet<String>>,
+    r: HashMap<String, HashSet<String>>,
 }
 
 #[derive(PartialEq, PartialOrd)]
@@ -51,17 +51,13 @@ impl DynamoDb {
     pub async fn new(config: DynamoDbConfig) -> Self {
         let DynamoDbConfig {
             authentication,
-            write,
-            read,
+            rw,
+            r,
         } = config;
         let sdk_config = get_aws_sdk_config(authentication).await;
         let client = Client::new(&sdk_config);
 
-        Self {
-            client,
-            write,
-            read,
-        }
+        Self { client, rw, r }
     }
 
     fn check_module_permissions(
@@ -73,7 +69,7 @@ impl DynamoDb {
         match access_scope {
             AccessScope::Read => {
                 // check if read access is configured for this table
-                if let Some(table_readers) = self.read.get(table_name) {
+                if let Some(table_readers) = self.r.get(table_name) {
                     // check if this module has read access to this table
                     if table_readers.contains(&module.to_string()) {
                         return Ok(());
@@ -82,28 +78,28 @@ impl DynamoDb {
 
                 // check if write access is configured for this table
                 // writers can also read
-                if let Some(table_writers) = self.write.get(table_name) {
+                if let Some(table_writers) = self.rw.get(table_name) {
                     // check if this module has write access to this table
                     if table_writers.contains(&module.to_string()) {
                         return Ok(());
                     }
                 }
 
-                trace!(
+                warn!(
                     "[{module}] failed [read] permission check for dynamodb table [{table_name}]"
                 );
                 Err(ApiError::BadRequest)
             }
             AccessScope::Write => {
                 // check if write access is configured for this table
-                if let Some(write_access) = self.write.get(table_name) {
+                if let Some(write_access) = self.rw.get(table_name) {
                     // check if this module has write access to this table
                     if write_access.contains(&module.to_string()) {
                         return Ok(());
                     };
                 }
 
-                trace!(
+                warn!(
                     "[{module}] failed [write] permission check for dynamodb table [{table_name}]"
                 );
                 Err(ApiError::BadRequest)
@@ -549,8 +545,8 @@ pub mod tests {
     impl DynamoDb {
         // constructor for the local instance of DynamoDB
         pub async fn local_endpoint(
-            read: HashMap<String, HashSet<String>>,
-            write: HashMap<String, HashSet<String>>,
+            r: HashMap<String, HashSet<String>>,
+            rw: HashMap<String, HashSet<String>>,
         ) -> Self {
             let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
                 // DynamoDB run locally uses port 8000 by default.
@@ -561,11 +557,7 @@ pub mod tests {
 
             let client = aws_sdk_dynamodb::Client::from_conf(dynamodb_local_config);
 
-            Self {
-                client,
-                read,
-                write,
-            }
+            Self { client, r, rw }
         }
     }
 
