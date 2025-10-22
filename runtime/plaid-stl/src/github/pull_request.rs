@@ -444,7 +444,7 @@ pub fn get_pull_requests(
 /// - `draft`: Whether to create the pull request as a draft (`true`) or a normal PR (`false`).
 ///
 /// # Returns
-/// - `Ok(())` if the pull request was successfully created, or
+/// - `Ok(PullRequest)` if the pull request was successfully created, or
 /// - `Err(PlaidFunctionError)` if the request fails (e.g., invalid branches,
 ///   missing permissions, or Plaid system misconfiguration).
 pub fn create_pull_request(
@@ -496,4 +496,60 @@ pub fn create_pull_request(
         .map_err(|_| PlaidFunctionError::InternalApiError)?;
 
     Ok(pull_request)
+}
+
+/// Request to add labels to a pull request or issue.
+#[derive(Serialize, Deserialize)]
+pub struct AddLabelsRequest {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the `.git` extension. The name is not case sensitive.
+    pub repo: String,
+    /// The number of the pull request or issue to add labels to.
+    pub number: u32,
+    /// The labels to add to the pull request or issue.
+    pub labels: Vec<String>,
+}
+
+/// Adds labels to a pull request or issue. If you provide an empty array of labels, all labels are removed from the issue.
+///
+/// See the [GitHub API docs](https://docs.github.com/en/rest/issues/labels?apiVersion=2022-11-28#add-labels-to-an-issue)
+/// for more details.
+///
+/// # Arguments
+/// - `owner`: The account or organization that owns the repository.
+/// - `repo`: The name of the repository.
+/// - `number`: The pull request or issue number.
+/// - `labels`: A vector of label names to add to the issue or pull request.
+///
+/// # Returns
+/// - `Ok(())` if the labels were successfully added, or
+/// - `Err(PlaidFunctionError)` if the request fails.
+pub fn add_labels(
+    owner: impl Display,
+    repo: impl Display,
+    number: u32,
+    labels: Vec<impl Display>,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, add_labels);
+    }
+
+    let params = AddLabelsRequest {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        number,
+        labels: labels.into_iter().map(|s| s.to_string()).collect(),
+    };
+
+    let params = serde_json::to_string(&params).unwrap();
+    let res = unsafe { github_add_labels(params.as_bytes().as_ptr(), params.as_bytes().len()) };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
 }

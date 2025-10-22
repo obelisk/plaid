@@ -1,5 +1,5 @@
 use plaid_stl::github::{
-    CreatePullRequestRequest, GetPullRequestOptions, GetPullRequestRequest,
+    AddLabelsRequest, CreatePullRequestRequest, GetPullRequestOptions, GetPullRequestRequest,
     PullRequestRequestReviewers,
 };
 use serde::Serialize;
@@ -144,6 +144,41 @@ impl Github {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Add labels to a pull request or issue
+    pub async fn add_labels(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request =
+            serde_json::from_str::<AddLabelsRequest>(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_org(&request.owner)?;
+        let repo = self.validate_repository_name(&request.repo)?;
+
+        info!(
+            "Adding labels to issue/PR #{} in [{owner}/{repo}] org on behalf of {module}",
+            request.number
+        );
+
+        let address = format!("/repos/{owner}/{repo}/issues/{}/labels", request.number);
+        let body = json!({"labels": request.labels});
+
+        match self.make_generic_post_request(address, body, module).await {
+            Ok((status, Ok(_))) => {
+                if status == 200 {
+                    Ok(0)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
