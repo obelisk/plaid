@@ -136,6 +136,9 @@ pub struct DeleteObjectRequest {
 ///   For more information about versioning-suspended buckets, see [Deleting objects from versioning-suspended buckets](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeletingObjectsfromVersioningSuspendedBuckets.html)
 ///
 /// # Arguments
+/// - `bucket_id` - The bucket name of the bucket containing the object.
+/// - `object_key` - Key name of the object to delete.
+/// - `version_id` - (Optional) Version ID used to reference a specific version of the object.
 pub fn delete_object(
     bucket_id: &str,
     object_key: &str,
