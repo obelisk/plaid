@@ -97,15 +97,19 @@ impl S3 {
         let request = serde_json::from_str::<DeleteObjectRequest>(params)
             .map_err(|_| ApiError::BadRequest)?;
 
-        let module = module.to_string();
-        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
-        if !bucket_config.rw.contains(&module) {
+        // Check that caller is allowed to write to this bucket
+        if !self.can_rule_access_bucket(module.clone(), &request.bucket_id, true) {
             error!(
-                "{module} tried to use an S3 bucket which it's not allowed to: {}",
+                "{module} attempted to delete object from S3 bucket [{}] but lacks write permissions",
                 request.bucket_id
             );
             return Err(ApiError::BadRequest);
         }
+
+        info!(
+            "{module} attempting to delete object [{}] from S3 bucket [{}]",
+            request.object_key, request.bucket_id
+        );
 
         let mut delete_request = self
             .client
@@ -134,15 +138,19 @@ impl S3 {
         let request =
             serde_json::from_str::<GetObjectRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        let module = module.to_string();
-        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
-        if !bucket_config.r.contains(&module) && !bucket_config.rw.contains(&module) {
+        // Check that caller is allowed to read from this bucket
+        if !self.can_rule_access_bucket(module.clone(), &request.bucket_id, false) {
             error!(
-                "{module} tried to use an S3 bucket which it's not allowed to: {}",
+                "{module} attempted to get object attributes from S3 bucket [{}] but lacks read permissions",
                 request.bucket_id
             );
             return Err(ApiError::BadRequest);
         }
+
+        info!(
+            "{module} attempting to get object attributes for [{}] from S3 bucket [{}]",
+            request.object_key, request.bucket_id
+        );
 
         let object_attributes = self
             .client
@@ -173,15 +181,19 @@ impl S3 {
         let request = serde_json::from_str::<ListObjectVersionsRequest>(params)
             .map_err(|_| ApiError::BadRequest)?;
 
-        let module = module.to_string();
-        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
-        if !bucket_config.r.contains(&module) && !bucket_config.rw.contains(&module) {
+        // Check that caller is allowed to read from this bucket
+        if !self.can_rule_access_bucket(module.clone(), &request.bucket_id, false) {
             error!(
-                "{module} tried to use an S3 bucket which it's not allowed to: {}",
+                "{module} attempted to list object versions in S3 bucket '{}' but lacks read permissions",
                 request.bucket_id
             );
             return Err(ApiError::BadRequest);
         }
+
+        info!(
+            "{module} attempting to list object versions for [{}] from S3 bucket [{}]",
+            request.object_key, request.bucket_id
+        );
 
         let object_versions = self
             .client
@@ -221,15 +233,19 @@ impl S3 {
         let request =
             serde_json::from_str::<ListObjectsRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        let module = module.to_string();
-        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
-        if !bucket_config.r.contains(&module) && !bucket_config.rw.contains(&module) {
+        // Check that caller is allowed to read from this bucket
+        if !self.can_rule_access_bucket(module.clone(), &request.bucket_id, false) {
             error!(
-                "{module} tried to use an S3 bucket which it's not allowed to: {}",
+                "{module} attempted to list objects in S3 bucket '{}' but lacks read permissions",
                 request.bucket_id
             );
             return Err(ApiError::BadRequest);
         }
+
+        info!(
+            "{module} attempting to list objects in S3 bucket [{}]",
+            request.bucket_id
+        );
 
         let mut list = self
             .client
@@ -268,15 +284,19 @@ impl S3 {
         let request =
             serde_json::from_str::<GetObjectRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        let module = module.to_string();
-        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
-        if !bucket_config.r.contains(&module) && !bucket_config.rw.contains(&module) {
+        // Check that caller is allowed to read from this bucket
+        if !self.can_rule_access_bucket(module.clone(), &request.bucket_id, false) {
             error!(
-                "{module} tried to use an S3 bucket which it's not allowed to: {}",
+                "{module} attempted to get object from S3 bucket '{}' but lacks read permissions",
                 request.bucket_id
             );
             return Err(ApiError::BadRequest);
         }
+
+        info!(
+            "{module} attempting to get object [{}] from S3 bucket [{}]",
+            request.object_key, request.bucket_id
+        );
 
         let request_builder = self
             .client
@@ -335,11 +355,18 @@ impl S3 {
             serde_json::from_str::<PutObjectRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
         // Check that caller is allowed to write to this bucket
-        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
-        if !bucket_config.rw.contains(&module.to_string()) {
-            error!("{module} tried to write to a bucket but is not permitted to");
+        if !self.can_rule_access_bucket(module.clone(), &request.bucket_id, true) {
+            error!(
+                "{module} attempted to put object to S3 bucket [{}] but lacks write permissions",
+                request.bucket_id
+            );
             return Err(ApiError::BadRequest);
         }
+
+        info!(
+            "{module} attempting to put object [{}] to S3 bucket [{}]",
+            request.object_key, request.bucket_id
+        );
 
         self.client
             .put_object()
@@ -364,11 +391,18 @@ impl S3 {
             .map_err(|_| ApiError::BadRequest)?;
 
         // Check that caller is allowed to write to this bucket
-        let bucket_config = self.fetch_bucket_configuration(module.clone(), &request.bucket_id)?;
-        if !bucket_config.rw.contains(&module.to_string()) {
-            error!("{module} tried to write to a bucket but is not permitted to");
+        if !self.can_rule_access_bucket(module.clone(), &request.bucket_id, true) {
+            error!(
+                "{module} attempted to tag object in S3 bucket [{}] but lacks write permissions",
+                request.bucket_id
+            );
             return Err(ApiError::BadRequest);
         }
+
+        info!(
+            "{module} attempting to put tags on object [{}] in S3 bucket [{}]",
+            request.object_key, request.bucket_id
+        );
 
         // S3 allows up to 10 tags per object
         if request.tags.len() > 10 {
@@ -420,17 +454,17 @@ impl S3 {
     }
 
     /// Verifies that the module is authorized to access the specified bucket
-    fn fetch_bucket_configuration<T: Display>(
-        &self,
-        module: T,
-        bucket: &str,
-    ) -> Result<&BucketConfiguration, ApiError> {
-        match self.bucket_configuration.get(bucket) {
-            Some(config) => Ok(config),
-            None => {
-                error!("{module} tried to use a S3 bucket that is not configured: {bucket}");
-                Err(ApiError::BadRequest)
-            }
+    fn can_rule_access_bucket<T: Display>(&self, module: T, bucket: &str, write: bool) -> bool {
+        let Some(bucket_configuration) = &self.bucket_configuration.get(bucket) else {
+            error!("{module} tried to use a S3 bucket that is not configured: {bucket}");
+            return false;
+        };
+
+        if write {
+            bucket_configuration.rw.contains(&module.to_string())
+        } else {
+            bucket_configuration.r.contains(&module.to_string())
+                || bucket_configuration.rw.contains(&module.to_string())
         }
     }
 }
