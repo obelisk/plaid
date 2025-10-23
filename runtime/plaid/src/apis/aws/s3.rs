@@ -184,7 +184,7 @@ impl S3 {
         // Check that caller is allowed to read from this bucket
         if !self.can_rule_access_bucket(module.clone(), &request.bucket_id, false) {
             error!(
-                "{module} attempted to list object versions in S3 bucket '{}' but lacks read permissions",
+                "{module} attempted to list object versions in S3 bucket [{}] but lacks read permissions",
                 request.bucket_id
             );
             return Err(ApiError::BadRequest);
@@ -236,7 +236,7 @@ impl S3 {
         // Check that caller is allowed to read from this bucket
         if !self.can_rule_access_bucket(module.clone(), &request.bucket_id, false) {
             error!(
-                "{module} attempted to list objects in S3 bucket '{}' but lacks read permissions",
+                "{module} attempted to list objects in S3 bucket [{}] but lacks read permissions",
                 request.bucket_id
             );
             return Err(ApiError::BadRequest);
@@ -287,7 +287,7 @@ impl S3 {
         // Check that caller is allowed to read from this bucket
         if !self.can_rule_access_bucket(module.clone(), &request.bucket_id, false) {
             error!(
-                "{module} attempted to get object from S3 bucket '{}' but lacks read permissions",
+                "{module} attempted to get object from S3 bucket [{}] but lacks read permissions",
                 request.bucket_id
             );
             return Err(ApiError::BadRequest);
