@@ -452,7 +452,7 @@ impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key, ALLOW_
 
 // S3
 #[cfg(feature = "aws")]
-impl_new_sub_module_function!(aws, s3, delete_object, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function!(aws, s3, delete_object, DISALLOW_IN_TEST_MODE);
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, s3, get_object_attributes, ALLOW_IN_TEST_MODE);
 #[cfg(feature = "aws")]
