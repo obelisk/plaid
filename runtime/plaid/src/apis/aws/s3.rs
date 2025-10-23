@@ -469,7 +469,15 @@ impl S3 {
     }
 }
 
-// Define the "safe" character predicate
+/// Validates characters allowed in S3 object tag keys and values.
+///
+/// According to Amazon S3 object tagging documentation, tag keys and values can contain:
+/// - Letters (a-z, A-Z)
+/// - Numbers (0-9)
+/// - Spaces
+/// - The following characters: + - = . _ : / @
+///
+/// Reference: https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html
 fn is_safe_tag_char(c: char) -> bool {
     c.is_alphanumeric()
         || c.is_whitespace()
