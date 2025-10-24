@@ -38,7 +38,7 @@ pub enum S3Errors {
     ObjectTooLarge,
 }
 
-/// Configuration for a single S3 bucket, including permissions and the allowed rule.
+/// Configuration for a single S3 bucket, including permissions and the allowed rules.
 #[derive(Deserialize)]
 struct BucketConfiguration {
     #[serde(default)]
@@ -381,11 +381,11 @@ impl S3 {
     }
 
     /// Sets the supplied tag-set to an object that already exists in a bucket. A tag is a key-value pair.
-    pub async fn put_object_tag(
+    pub async fn put_object_tags(
         &self,
         params: &str,
         module: Arc<PlaidModule>,
-    ) -> Result<u32, ApiError> {
+    ) -> Result<String, ApiError> {
         // Parse the information needed to make the request
         let request = serde_json::from_str::<PutObjectTagRequest>(params)
             .map_err(|_| ApiError::BadRequest)?;
@@ -436,6 +436,9 @@ impl S3 {
             })
             .collect::<Vec<_>>();
 
+        // Grab the set of tags that could be applied. We'll return this value to the caller
+        let filtered_tags = tags.iter().map(|t| t.key.clone()).collect::<Vec<_>>();
+
         let tag_set = Tagging::builder()
             .set_tag_set(Some(tags))
             .build()
@@ -450,7 +453,8 @@ impl S3 {
             .await
             .map_err(S3Errors::TagObjectError)?;
 
-        Ok(0)
+        let serialized = serde_json::to_string(&filtered_tags).map_err(|_| ApiError::BadRequest)?;
+        Ok(serialized)
     }
 
     /// Verifies that the module is authorized to access the specified bucket

@@ -34,13 +34,14 @@ pub struct GetObjectRequest {
     pub expires_in: Option<u64>,
 }
 
-/// Request payload for retrieving an object from S3.
+/// Request payload for listing objects in S3.
 #[derive(Deserialize, Serialize)]
 pub struct ListObjectsRequest {
     /// The bucket name from which the object is requested.
     pub bucket_id: String,
     /// The key identifying the object to fetch.
     pub prefix: String,
+    /// An optional token to continue pagination from a previous response.
     pub continuation_key: Option<String>,
 }
 
@@ -270,13 +271,13 @@ pub fn put_object(
 /// replication behavior, and how tags interact with bucket versioning—see the AWS S3
 /// Object Tagging documentation:
 /// <https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html>
-pub fn put_object_tag(
+pub fn put_object_tags(
     bucket_id: &str,
     object_key: &str,
     tags: HashMap<String, String>,
-) -> Result<(), PlaidFunctionError> {
+) -> Result<Vec<String>, PlaidFunctionError> {
     extern "C" {
-        new_host_function!(aws_s3, put_object_tag);
+        new_host_function_with_error_buffer!(aws_s3, put_object_tags);
     }
 
     let request = PutObjectTagRequest {
@@ -288,12 +289,26 @@ pub fn put_object_tag(
     let request =
         serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
 
-    let res = unsafe { aws_s3_put_object_tag(request.as_ptr(), request.len()) };
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        aws_s3_put_object_tags(
+            request.as_ptr(),
+            request.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
 
     if res < 0 {
-        Err(res.into())
-    } else {
-        Ok(())
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match serde_json::from_slice(&return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
     }
 }
 

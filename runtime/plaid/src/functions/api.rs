@@ -464,7 +464,7 @@ impl_new_sub_module_function_with_error_buffer!(aws, s3, list_object_versions, A
 #[cfg(feature = "aws")]
 impl_new_sub_module_function!(aws, s3, put_object, DISALLOW_IN_TEST_MODE);
 #[cfg(feature = "aws")]
-impl_new_sub_module_function!(aws, s3, put_object_tag, DISALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(aws, s3, put_object_tags, DISALLOW_IN_TEST_MODE);
 
 // Npm Functions
 impl_new_function_with_error_buffer!(npm, publish_empty_stub, DISALLOW_IN_TEST_MODE);
@@ -848,8 +848,8 @@ pub fn to_api_function(
         "aws_s3_put_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_put_object),
 
         #[cfg(feature = "aws")]
-        "aws_s3_put_object_tag" => {
-            Function::new_typed_with_env(&mut store, &env, aws_s3_put_object_tag)
+        "aws_s3_put_object_tags" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_put_object_tags)
         }
 
         // Splunk Calls
