@@ -39,7 +39,7 @@ pub struct GetObjectRequest {
 pub struct ListObjectsRequest {
     /// The bucket name from which the object is requested.
     pub bucket_id: String,
-    /// The key identifying the object to fetch.
+    /// Filters the listed objects to those with keys that begin with this prefix.
     pub prefix: String,
     /// An optional token to continue pagination from a previous response.
     pub continuation_key: Option<String>,
