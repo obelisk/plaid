@@ -395,9 +395,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sqs"
-version = "1.81.0"
+version = "1.82.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b17688adfe7471c885396c7f314736f349c425cb3536e8f80233ddebe64269cd"
+checksum = "fe6858d5bd13b69709fe602f62e8a0be7f43ba0e71bfae1c65a638ffac5123e6"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -538,9 +538,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-eventstream"
-version = "0.60.9"
+version = "0.60.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "338a3642c399c0a5d157648426110e199ca7fd1c689cc395676b81aa563700c4"
+checksum = "182b03393e8c677347fb5705a04a9392695d47d20ef0a2f8cfe28c8e6b9b9778"
 dependencies = [
  "aws-smithy-types",
  "bytes",
@@ -794,7 +794,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",

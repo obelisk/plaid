@@ -78,7 +78,7 @@ pub struct S3 {
 impl S3 {
     /// Creates a new `S3` instance using the provided configuration.
     pub async fn new(config: S3Config) -> Self {
-        let sdk_config = get_aws_sdk_config(config.authentication).await;
+        let sdk_config = get_aws_sdk_config(&config.authentication).await;
         let client = aws_sdk_s3::Client::new(&sdk_config);
 
         Self {
