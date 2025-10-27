@@ -240,7 +240,7 @@ macro_rules! impl_new_sub_module_function_with_error_buffer {
 
                 // Check that AWS API is configured
                 let aws = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
-                let sub_module = &aws.$sub_module;
+                let sub_module = aws.$sub_module.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
 
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
@@ -276,6 +276,94 @@ macro_rules! impl_new_sub_module_function_with_error_buffer {
             fn [< $api _ $sub_module _ $function_name >] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> i32 {
                 let name = env.data().module.name.clone();
                 match [< $api _ $sub_module _ $function_name _impl>](env, params_buffer, params_buffer_len, ret_buffer, ret_buffer_len) {
+                    Ok(res) => res,
+                    Err(e) => {
+                        error!("{} experienced an issue calling {}: {:?}", name,  stringify!([< $api _ $sub_module _ $function_name >]), e);
+                        e as i32
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Macro to implement a new host function in a given API. The function does not fill a data buffer with returned values.
+///
+/// This macro generates two functions:
+/// - A private implementation function (`_impl`) that handles the actual logic:
+///   - Accessing and validating memory from the guest
+///   - Checking that the API is configured.
+///   - Running the function + returning the result (as an i32)
+/// - A public wrapper function that calls the implementation function and returns the result as an integer.
+///
+/// # Parameters
+/// - `$api`: The name of the API (e.g., `aws`).
+/// - `$sub_module`: The name of the submodule (e.g., `s3`).
+/// - `$function_name`: The name of the function to be implemented.
+///
+/// # Error Handling
+/// The generated implementation function returns `FunctionErrors` in case of failures, which are then
+/// converted to int error codes by the wrapper function. These errors include:
+/// - `FunctionErrors::InternalApiError`: For internal API-related errors.
+/// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
+macro_rules! impl_new_sub_module_function {
+    ($api:ident, $sub_module:ident, $function_name:ident, $allow_in_test_mode:expr) => {
+        paste::item! {
+            fn [< $api _ $sub_module _ $function_name _impl>] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> Result<i32, FunctionErrors> {
+                let store = env.as_store_ref();
+                let env_data = env.data();
+
+                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string(), env_data.module.test_mode) {
+                    error!("Logging system is not working!!: {:?}", e);
+                    return Err(FunctionErrors::InternalApiError);
+                }
+
+
+                // Disallow this function call from continuing if the module is in test mode
+                if !$allow_in_test_mode && env_data.module.test_mode {
+                    return Err(FunctionErrors::TestMode);
+                }
+
+                let memory_view = match get_memory(&env, &store) {
+                    Ok(memory_view) => memory_view,
+                    Err(e) => {
+                        error!("{}: Memory error in {}: {:?}", env_data.module.name, stringify!([< $api _ $function_name >]), e);
+                        return Err(FunctionErrors::InternalApiError);
+                    },
+                };
+
+                let params = safely_get_string(&memory_view, params_buffer, params_buffer_len)?;
+
+                // Check that API is configured
+                let api = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
+                let sub_module = api.$sub_module.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
+
+                // Clone the APIs Arc to use in Tokio closure
+                let env_api = env_data.api.clone();
+                let module = env_data.module.clone();
+                // Run the function on the Tokio runtime and wait for the result
+                let result = env_api.runtime.block_on(async move {
+                    sub_module.$function_name(&params, module).await
+                });
+
+                let return_data = match result {
+                    Ok(return_data) => return_data,
+                    Err(ApiError::TestMode) => {
+                        return Err(FunctionErrors::TestMode);
+                    }
+                    Err(e) => {
+                        error!("{} experienced an issue calling {}: {:?}", env_data.module.name, stringify!([< $api _ $function_name >]), e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+                };
+
+                trace!("{} is calling {} got a return data of {}", env_data.module.name, stringify!([< $api _ $function_name >]), return_data);
+                return Ok(return_data as i32);
+            }
+
+            fn [< $api _ $sub_module _ $function_name >] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> i32 {
+                let name = env.data().module.name.clone();
+                match [< $api _ $sub_module _ $function_name _impl>](env, params_buffer, params_buffer_len) {
                     Ok(res) => res,
                     Err(e) => {
                         error!("{} experienced an issue calling {}: {:?}", name,  stringify!([< $api _ $sub_module _ $function_name >]), e);
@@ -325,6 +413,7 @@ impl_new_function_with_error_buffer!(github, add_users_to_org_copilot, DISALLOW_
 impl_new_function_with_error_buffer!(github, remove_users_from_org_copilot, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_custom_properties_values, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, check_codeowners_file, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_repo_sbom, ALLOW_IN_TEST_MODE);
 impl_new_function!(github, comment_on_pull_request, DISALLOW_IN_TEST_MODE);
 impl_new_function!(
     github,
@@ -332,6 +421,12 @@ impl_new_function!(
     DISALLOW_IN_TEST_MODE
 );
 impl_new_function_with_error_buffer!(github, get_weekly_commit_count, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_reference, ALLOW_IN_TEST_MODE);
+impl_new_function!(github, create_reference, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_pull_requests, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, create_pull_request, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, create_file, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, add_labels, DISALLOW_IN_TEST_MODE);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
@@ -343,6 +438,8 @@ impl_new_function_with_error_buffer!(cryptography, aes_128_cbc_encrypt, ALLOW_IN
 impl_new_function_with_error_buffer!(cryptography, aes_128_cbc_decrypt, ALLOW_IN_TEST_MODE);
 
 // AWS functions
+
+// KMS
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(
     aws,
@@ -352,6 +449,22 @@ impl_new_sub_module_function_with_error_buffer!(
 );
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key, ALLOW_IN_TEST_MODE);
+
+// S3
+#[cfg(feature = "aws")]
+impl_new_sub_module_function!(aws, s3, delete_object, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, s3, get_object_attributes, ALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, s3, get_object, ALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, s3, list_objects, ALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, s3, list_object_versions, ALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function!(aws, s3, put_object, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, s3, put_object_tags, DISALLOW_IN_TEST_MODE);
 
 // Npm Functions
 impl_new_function_with_error_buffer!(npm, publish_empty_stub, DISALLOW_IN_TEST_MODE);
@@ -641,6 +754,23 @@ pub fn to_api_function(
         "github_remove_repo_from_team" => {
             Function::new_typed_with_env(&mut store, &env, github_remove_repo_from_team)
         }
+        "github_get_reference" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_reference)
+        }
+        "github_create_reference" => {
+            Function::new_typed_with_env(&mut store, &env, github_create_reference)
+        }
+        "github_get_pull_requests" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_pull_requests)
+        }
+        "github_create_pull_request" => {
+            Function::new_typed_with_env(&mut store, &env, github_create_pull_request)
+        }
+        "github_create_file" => Function::new_typed_with_env(&mut store, &env, github_create_file),
+        "github_get_repo_sbom" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repo_sbom)
+        }
+        "github_add_labels" => Function::new_typed_with_env(&mut store, &env, github_add_labels),
 
         // Slack Calls
         "slack_post_to_named_webhook" => {
@@ -689,6 +819,38 @@ pub fn to_api_function(
 
         // Yubikey Calls
         "yubikey_verify_otp" => Function::new_typed_with_env(&mut store, &env, yubikey_verify_otp),
+
+        // S3 Calls
+        #[cfg(feature = "aws")]
+        "aws_s3_delete_object" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_delete_object)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_s3_get_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_get_object),
+
+        #[cfg(feature = "aws")]
+        "aws_s3_get_object_attributes" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_get_object_attributes)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_s3_list_objects" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_list_objects)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_s3_list_object_versions" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_list_object_versions)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_s3_put_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_put_object),
+
+        #[cfg(feature = "aws")]
+        "aws_s3_put_object_tags" => {
+            Function::new_typed_with_env(&mut store, &env, aws_s3_put_object_tags)
+        }
 
         // Splunk Calls
         "splunk_post_hec" => Function::new_typed_with_env(&mut store, &env, splunk_post_hec),

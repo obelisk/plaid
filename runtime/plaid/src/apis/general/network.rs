@@ -1,30 +1,37 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::loader::PlaidModule;
+use plaid_stl::network::{MakeRequestRequest, MnrResponseEncoding};
 use reqwest::{header::HeaderMap, Certificate, Client};
-use serde::{de, Deserialize, Serialize};
+use serde::{
+    de::{self},
+    Deserialize, Serialize,
+};
 
 use crate::apis::ApiError;
 
 use super::General;
 
+/// This enum is used to represent the data returned from a web request. It can be either text or binary data.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ResponseData {
+    Utf8(String),
+    Binary(Vec<u8>),
+}
+
+/// This struct is used to represent the response from a web request. It contains the response code and the response data.
+#[derive(Serialize)]
+struct DynamicWebRequestResponse {
+    /// Response code (e.g., 200, 404, etc.)
+    code: Option<u16>,
+    /// Response data, which can be either text or binary
+    data: Option<ResponseData>,
+}
+
 #[derive(Deserialize)]
 pub struct Config {
     pub web_requests: HashMap<String, Request>,
-}
-
-/// Request to make a web request
-#[derive(Deserialize)]
-struct MakeRequestRequest {
-    /// Body of the request
-    body: String,
-    /// Name of the request - defined in the configuration
-    request_name: String,
-    /// Variables to include in the request. Variables take the place of an idenfitifer in the request URI
-    variables: HashMap<String, String>,
-    /// Dynamic headers to include in the request. These are headers that cannot be statically
-    /// defined in the request configuration. They cannot override a request's statically defined headers
-    headers: Option<HashMap<String, String>>,
 }
 
 /// This struct represents a web request and contains information about what the request is about (e.g., verb and URI),
@@ -58,6 +65,9 @@ pub struct Request {
     /// if the call has side effects. If it is not set, this will default to false.
     #[serde(default)]
     available_in_test_mode: bool,
+    /// Whether to follow redirects
+    #[serde(default)] // default to false
+    pub enable_redirects: bool,
 }
 
 /// Deserialize a non‐zero timeout (1–255 seconds) into a `Duration`, erroring on 0.
@@ -91,13 +101,6 @@ where
             Ok(Some(cert))
         }
     }
-}
-
-/// Data returned by a request.
-#[derive(Serialize)]
-struct ReturnData {
-    code: Option<u16>,
-    data: Option<String>,
 }
 
 impl General {
@@ -225,7 +228,7 @@ impl General {
 
         match request_builder.body(body).send().await {
             Ok(r) => {
-                let mut ret = ReturnData {
+                let mut ret = DynamicWebRequestResponse {
                     code: None,
                     data: None,
                 };
@@ -235,7 +238,16 @@ impl General {
                 }
 
                 if request_specification.return_body {
-                    ret.data = Some(r.text().await.unwrap_or_default());
+                    match request.response_encoding {
+                        MnrResponseEncoding::Utf8 => {
+                            let data = r.text().await.unwrap_or_default();
+                            ret.data = Some(ResponseData::Utf8(data));
+                        }
+                        MnrResponseEncoding::Binary => {
+                            let data = r.bytes().await.unwrap_or_default();
+                            ret.data = Some(ResponseData::Binary(data.to_vec()));
+                        }
+                    };
                 }
 
                 if let Ok(r) = serde_json::to_string(&ret) {

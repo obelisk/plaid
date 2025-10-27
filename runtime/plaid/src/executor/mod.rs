@@ -2,6 +2,7 @@ pub mod thread_pools;
 
 use crate::apis::Api;
 
+use crate::cache::Cache;
 use crate::functions::{
     create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
 };
@@ -15,7 +16,8 @@ use thread_pools::ExecutionThreadPools;
 use tokio::sync::oneshot::Sender as OneShotSender;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_with::{serde_as, DeserializeAs, SerializeAs};
 use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedFunction};
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
@@ -35,23 +37,82 @@ pub struct ResponseMessage {
     pub body: String,
 }
 
-/// A message to be processed by one or more modules
+const MAX_BYTES: usize = 5 * 1024 * 1024;
+const MAX_ENTRIES: usize = 20;
+const MAX_KEY_LEN: usize = 100;
+
+// ---- small adapters ----
+
+struct VecMax<const MAX: usize>;
+
+impl SerializeAs<Vec<u8>> for VecMax<MAX_BYTES> {
+    fn serialize_as<S>(value: &Vec<u8>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        s.collect_seq(value)
+    }
+}
+
+impl<'de> DeserializeAs<'de, Vec<u8>> for VecMax<MAX_BYTES> {
+    fn deserialize_as<D>(d: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let v = Vec::<u8>::deserialize(d)?;
+        if v.len() > MAX_BYTES {
+            return Err(serde::de::Error::custom("Vec<u8> exceeds the size limit"));
+        }
+        Ok(v)
+    }
+}
+
+// Enforce map entry count + key length, while using VecMax for values.
+fn map_with_limits<'de, D>(de: D) -> Result<HashMap<String, Vec<u8>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Deserialize values via the VecMax adapter
+    #[serde_as]
+    #[derive(Deserialize)]
+    struct Tmp(#[serde_as(as = "HashMap<_, VecMax<MAX_BYTES>>")] HashMap<String, Vec<u8>>);
+
+    let Tmp(map) = Tmp::deserialize(de)?;
+    if map.len() > MAX_ENTRIES {
+        return Err(serde::de::Error::custom(&format!(
+            "map exceeds {MAX_ENTRIES} entries"
+        )));
+    }
+    for k in map.keys() {
+        if k.chars().count() > MAX_KEY_LEN {
+            return Err(serde::de::Error::custom(&format!(
+                "key exceeds {MAX_KEY_LEN} chars"
+            )));
+        }
+    }
+    Ok(map)
+}
+
+#[serde_as]
 #[derive(Serialize, Deserialize)]
 pub struct Message {
-    /// A unique identifier for this message
     pub id: String,
-    /// The message channel that this message is going to run on
     pub type_: String,
-    /// The data passed to the module
+
+    /// <= 5 MiB
+    #[serde_as(as = "VecMax<MAX_BYTES>")]
     pub data: Vec<u8>,
-    /// Any headers the module will have access to, while processing this message
+
+    /// <= 20 entries; key <= 100 chars; value <= 5 MiB
+    #[serde(deserialize_with = "map_with_limits", default)]
     pub headers: HashMap<String, Vec<u8>>,
-    /// Any query parameters the module will have access to, while processing this message
+
+    /// <= 20 entries; key <= 100 chars; value <= 5 MiB
+    #[serde(deserialize_with = "map_with_limits", default)]
     pub query_params: HashMap<String, Vec<u8>>,
+
     /// Where the message came from
     pub source: LogSource,
-    /// If this message is allowed to trigger additional messages to the same
-    /// or other message channels
     pub logbacks_allowed: LogbacksAllowed,
     /// If a response is should be sent back to the source of the message
     /// This is used in the GET request system to handle responses
@@ -134,6 +195,8 @@ pub struct Env {
     pub api: Arc<Api>,
     // A handle to the storage system if one is configured
     pub storage: Option<Arc<Storage>>,
+    // A handle to the cache system if one is configured
+    pub cache: Option<Arc<Cache>>,
     // A sender to the external logging system
     pub external_logging_system: Logger,
     /// Memory for host-guest communication
@@ -243,6 +306,7 @@ fn prepare_for_execution(
     plaid_module: Arc<PlaidModule>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
+    cache: Option<Arc<Cache>>,
     els: Logger,
     response: Option<String>,
 ) -> Result<(Store, Instance, TypedFunction<(), i32>, FunctionEnv<Env>), ExecutorError> {
@@ -259,6 +323,7 @@ fn prepare_for_execution(
         message: message.create_duplicate(),
         api: api.clone(),
         storage: storage.clone(),
+        cache: cache.clone(),
         external_logging_system: els.clone(),
         memory: None,
         response,
@@ -408,6 +473,7 @@ fn process_message_with_module(
     module: Arc<PlaidModule>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
+    cache: Option<Arc<Cache>>,
     els: Logger,
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
@@ -422,6 +488,7 @@ fn process_message_with_module(
         module.clone(),
         api.clone(),
         storage.clone(),
+        cache.clone(),
         els.clone(),
         persistent_response,
     ) {
@@ -520,6 +587,7 @@ fn execution_loop(
     modules: HashMap<String, Vec<Arc<PlaidModule>>>,
     api: Arc<Api>,
     storage: Option<Arc<Storage>>,
+    cache: Option<Arc<Cache>>,
     els: Logger,
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
 ) -> Result<(), ExecutorError> {
@@ -537,6 +605,7 @@ fn execution_loop(
                     module,
                     api.clone(),
                     storage.clone(),
+                    cache.clone(),
                     els.clone(),
                     performance_monitoring_mode.clone(),
                 )?;
@@ -549,6 +618,7 @@ fn execution_loop(
                         module.clone(),
                         api.clone(),
                         storage.clone(),
+                        cache.clone(),
                         els.clone(),
                         performance_monitoring_mode.clone(),
                     )?;
@@ -594,6 +664,7 @@ impl Executor {
         modules: HashMap<String, Vec<Arc<PlaidModule>>>,
         api: Arc<Api>,
         storage: Option<Arc<Storage>>,
+        cache: Option<Arc<Cache>>,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
     ) -> Self {
@@ -603,6 +674,7 @@ impl Executor {
             let receiver = thread_pools.general_pool.receiver.clone();
             let api = api.clone();
             let storage = storage.clone();
+            let cache = cache.clone();
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
@@ -612,6 +684,7 @@ impl Executor {
                     modules.clone(),
                     api.clone(),
                     storage.clone(),
+                    cache.clone(),
                     els.clone(),
                     performance_sender.clone(),
                 ) {
@@ -628,6 +701,7 @@ impl Executor {
                 let receiver = thread_pool.receiver.clone();
                 let api = api.clone();
                 let storage = storage.clone();
+                let cache = cache.clone();
                 let modules = modules.clone();
                 let els = els.clone();
                 let performance_sender = performance_monitoring_mode.clone();
@@ -637,6 +711,7 @@ impl Executor {
                         modules.clone(),
                         api.clone(),
                         storage.clone(),
+                        cache.clone(),
                         els.clone(),
                         performance_sender.clone(),
                     ) {

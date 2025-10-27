@@ -1,14 +1,33 @@
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::PlaidFunctionError;
 
 const RETURN_BUFFER_SIZE: usize = 4 * 1024; // 4 KiB
 
-pub fn issue_jwt<T: Serialize>(
-    request_params: &HashMap<String, T>,
-) -> Result<String, PlaidFunctionError> {
+#[derive(Serialize, Deserialize)]
+pub struct JwtParams {
+    /// The ID of the key used to sign the JWT
+    pub kid: String,
+    /// Subject
+    pub sub: String,
+    /// Issued at
+    pub iat: Option<u64>,
+    /// Expiration
+    pub exp: Option<u64>,
+    /// Audience
+    pub aud: Option<String>,
+    /// Additional headers that will be validated before being included in the final JWT.
+    /// If none is needed, set to an empty map.
+    pub extra_headers: HashMap<String, Value>,
+    /// Additional fields that will be validated before being included in the final JWT.
+    /// If none is needed, set to an empty map.
+    pub extra_fields: HashMap<String, Value>,
+}
+
+pub fn issue_jwt(request_params: &JwtParams) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(web, issue_jwt);
     }

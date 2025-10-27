@@ -3,7 +3,7 @@ mod network;
 mod random;
 
 use crossbeam_channel::Sender;
-use reqwest::Client;
+use reqwest::{redirect, Client};
 
 use ring::rand::SystemRandom;
 use serde::Deserialize;
@@ -50,6 +50,7 @@ impl Clients {
         let default_timeout_duration = Duration::from_secs(config.api_timeout_seconds);
         let default = reqwest::Client::builder()
             .timeout(default_timeout_duration)
+            .redirect(redirect::Policy::none()) // by default, no redirects
             .build()
             .unwrap();
 
@@ -58,13 +59,26 @@ impl Clients {
             .web_requests
             .iter()
             .filter_map(|(name, req)| {
-                if req.timeout.is_some() || req.root_certificate.is_some() {
+                // An MNR needs a specialized client if it specifies
+                // * a custom timeout
+                // * a custom root CA
+                // * that it allows redirects
+                if req.timeout.is_some() || req.root_certificate.is_some() || req.enable_redirects {
                     let mut builder = reqwest::Client::builder()
                         .timeout(req.timeout.unwrap_or(default_timeout_duration));
 
                     if let Some(ca) = req.root_certificate.clone() {
                         builder = builder.add_root_certificate(ca);
                     }
+
+                    // See if redirects should be enabled
+                    builder = builder.redirect({
+                        if req.enable_redirects {
+                            redirect::Policy::default()
+                        } else {
+                            redirect::Policy::none()
+                        }
+                    });
 
                     let client = builder.build().unwrap();
                     Some((name.clone(), client))

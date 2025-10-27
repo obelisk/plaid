@@ -1,10 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
-use plaid_stl::github::{CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus};
+use plaid_stl::github::{
+    CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus, CreateFileRequest,
+};
 use serde::Serialize;
+use serde_json::json;
 
 use crate::{
     apis::{github::GitHubError, ApiError},
+    cryptography::hash::sha256_hex,
     loader::PlaidModule,
 };
 
@@ -606,6 +610,81 @@ impl Github {
                         .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
                 } else {
                     debug!("Checking CODEOWNERS for repo [{owner}/{repo}] returned {status}");
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Creates a new file in a repository.
+    pub async fn create_file(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: CreateFileRequest =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_org(&request.owner)?;
+        let repo = self.validate_repository_name(&request.repo)?;
+        let path = self.validate_path(&request.path)?;
+        let file_hash = sha256_hex(&request.content);
+
+        info!("Creating file with hash [{file_hash}] at [{path}] in repository [{owner}/{repo}] on behalf of [{module}]");
+        let address = format!("/repos/{owner}/{repo}/contents/{path}");
+
+        let mut body = json!({
+            "message": request.message,
+            "content": base64::encode(&request.content),
+        });
+        if let Some(branch) = request.branch {
+            body["branch"] = json!(branch);
+        }
+
+        match self
+            .make_generic_put_request(address, Some(&body), module)
+            .await
+        {
+            Ok((status, Ok(_))) => {
+                if status == 200 || status == 201 {
+                    Ok(file_hash)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fetches the software bill of materials (SBOM) for a repository in SPDX JSON format.
+    /// See https://docs.github.com/en/rest/dependency-graph/sboms?apiVersion=2022-11-28#export-a-software-bill-of-materials-sbom-for-a-repository for more detail
+    pub async fn get_repo_sbom(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
+        let repo =
+            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+
+        info!("Fetching SBOM for repo [{owner}/{repo}] on behalf of [{module}]");
+        let address = format!("/repos/{owner}/{repo}/dependency-graph/sbom");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
                     )))

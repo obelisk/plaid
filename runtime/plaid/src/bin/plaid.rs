@@ -3,6 +3,7 @@ extern crate log;
 
 use performance::ModulePerformanceMetadata;
 use plaid::{
+    cache::Cache,
     config::{
         CachingMode, ConfigurationWithRoles, GetMode, ResponseMode, WebhookServerConfiguration,
     },
@@ -30,6 +31,20 @@ use std::{
 
 use crossbeam_channel::TrySendError;
 use warp::{http::HeaderMap, hyper::body::Bytes, path, Filter};
+
+#[derive(Debug)]
+enum Errors {
+    FailedToStartDataSystem,
+    FailedToLoadModules,
+}
+
+impl std::fmt::Display for Errors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Errors {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -106,9 +121,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         els.clone(),
         &roles,
     )
-    .await
-    .expect("The data system failed to start")
-    .unwrap();
+    .await?
+    .ok_or(Errors::FailedToStartDataSystem)?;
 
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
@@ -145,8 +159,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Loading all the modules");
     // Load all the modules that form our Nanoservices and Plaid rules
-    let modules = Arc::new(loader::load(config.loading, storage.clone()).await.unwrap());
+    let modules = Arc::new(
+        loader::load(&config.loading, storage.clone())
+            .await
+            .map_err(|_| Errors::FailedToLoadModules)?,
+    );
     let modules_by_name = Arc::new(modules.get_modules());
+
+    let modules_and_logtypes = modules.get_module_logtypes();
+
+    let cache = Cache::new(modules_and_logtypes, config.cache).await?;
+    let cache = Arc::new(cache);
 
     // Print information about the threads we are starting
     info!(
@@ -174,6 +197,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         modules.get_channels(),
         api,
         storage,
+        Some(cache),
         els.clone(),
         performance_sender.clone(),
     );
@@ -400,6 +424,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
         info!("Starting servers, boot up complete");
+
+        if let Some(readiness_check_path) = config.loading.readiness_check_file {
+            match std::fs::write(&readiness_check_path, "READY") {
+                Ok(_) => {}
+                Err(e) => {
+                    // We did not manage to signal that we are ready. Therefore, whichever system
+                    // is monitoring Plaid's readiness will possibly keep waiting forever.
+                    // There is not much we can do here, so we log an error and continue.
+                    error!("Failed to signal readiness by writing to file [{readiness_check_path}]. Error: [{e}]")
+                }
+            }
+        }
 
         let mut join_set = JoinSet::from_iter(webhook_servers);
 

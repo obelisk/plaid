@@ -18,6 +18,8 @@ allowed_rules = [
     "test_slack.wasm",
     "test_aes_enc_dec.wasm",
     "test_vec_entrypoint.wasm",
+    "test_jwt.wasm",
+    "test_redis_cache_eviction.wasm"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
@@ -132,11 +134,11 @@ test_webhook = "{plaid-secret{test-webhook-secret}}"
 
 [apis."web"]
 [apis."web".keys]
-[apis."web".keys."5d313aea523d41569469e4abd72028d2"]
+[apis."web".keys."46c642b0da02030407c6463c013a8dbd"]
 # To generate the ECDSA256 key PEM, run the following commands:
 # openssl ecparam -genkey -name prime256v1 -out ec-params.key
 # openssl pkcs8 -topk8 -nocrypt -in ec-params.key -out private-key.pem
-# openssl ec -in ec-params.pem -pubout
+# openssl ec -in ec-params.key -pubout
 
 # This is the example private key from JWT.io. Do not use it in production.
 private_key = """
@@ -144,6 +146,20 @@ private_key = """
 MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
 OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
 1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
+-----END PRIVATE KEY-----
+"""
+
+allowed_rules = ["test_jwt.wasm"]
+allowlisted_extra_fields = ["ext"]
+allowlisted_extra_headers = ["smt", "cty"]
+
+[apis."web".keys."230216b400a90b29f70db61aca97bbca"]
+# This is a test key. Do not use it in production.
+private_key = """
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgO7Efw+K7iAHg6+E2
+ClqcPgx7lsGbpkrbVDO7kzT8MfChRANCAARjZdpuBQmWKxr+CFwiWQcXo8qeZvBr
+sa5i5Zy6yHszl8nBOEWDUOx2RC6UKaCPT+dgr8O4OZ/d0PKGMo0a4a69
 -----END PRIVATE KEY-----
 """
 
@@ -170,6 +186,18 @@ secret_key = ""
 # region = "asdf"
 # [apis."aws"."kms".key_configuration]
 # "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
+
+
+# S3 (using IAM)
+# top‐level bucket_configuration map
+# [apis."aws"]
+# [apis."aws"."s3"]
+# [apis."aws"."s3".authentication]
+# [apis."aws"."s3".bucket_configuration]
+# for bucket named "my-bucket"
+# [apis."aws"."s3".bucket_configuration."my-bucket"]
+# r = ["some_rule.wasm"]
+# rw = ["another_rule.wasm"]
 
 #[apis."github"]
 #[apis."github".authentication]

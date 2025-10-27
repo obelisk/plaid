@@ -4,8 +4,8 @@
 # contains underscores.
 [loading]
 module_dir = "../compiled_modules/"
-lru_cache_size = 200
 compiler_backend = "cranelift"
+readiness_check_file = "./plaid_ready"
 
 test_mode = true
 test_mode_exemptions = [
@@ -26,8 +26,9 @@ test_mode_exemptions = [
     "test_cron.wasm",
     "test_aes_enc_dec.wasm",
     "test_vec_entrypoint.wasm",
+    "test_jwt.wasm",
+    "test_redis_cache_eviction.wasm",
 ]
-
 
 [loading.persistent_response_size]
 "test_persistent_response.wasm" = 1024
@@ -79,7 +80,9 @@ test_mode_exemptions = [
 "example_github_graphql.wasm" = "example_github_graphql"
 "test_cron.wasm" = "test_cron"
 "test_aes_enc_dec.wasm" = "test_aes_enc_dec"
+"test_jwt.wasm" = "test_jwt"
 "test_vec_entrypoint.wasm" = "test_vec_entrypoint"
+"test_redis_cache_eviction.wasm" = "test_redis_cache_eviction"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
@@ -92,6 +95,7 @@ okta = 9_000_000
 "test_shared_db_rule_1.wasm" = 1_000_000_000
 "test_shared_db_rule_2.wasm" = 1_000_000_000
 "test_aes_enc_dec.wasm" = 1_000_000_000
+"test_jwt.wasm" = 1_000_000_000
 
 [loading.memory_page_count]
 default = 300

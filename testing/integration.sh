@@ -17,6 +17,15 @@ if [ -z "$1" ]; then
 fi
 echo "Testing runtime with compiler: $1"
 
+# Cache backend should be passed in as the second argument
+if [ -z "$2" ]; then
+  echo "No cache backend specified. Defaulting to in-memory cache."
+  CACHE_BACKEND="inmemory"
+else
+  CACHE_BACKEND="$2"
+fi
+echo "Testing runtime with cache backend: $CACHE_BACKEND"
+
 # Set up the working directory
 rm -rf $CONFIG_WORKING_PATH
 mkdir -p $CONFIG_WORKING_PATH
@@ -24,6 +33,9 @@ mkdir -p $CONFIG_WORKING_PATH
 # Copy the configuration and secrets to the tmp directory
 cp -r $CONFIG_PATH/* $CONFIG_WORKING_PATH
 cp $SECRET_PATH $SECRET_WORKING_PATH
+
+# Use the correct config file for the chosen cache backend
+mv $CONFIG_WORKING_PATH/cache.toml.$CACHE_BACKEND $CONFIG_WORKING_PATH/cache.toml
 
 # On macOS, we need to install a brew provided version of LLVM
 # so that we can compile WASM binaries.
@@ -144,22 +156,47 @@ if [ "$1" == "llvm" ]; then
   fi
 fi
 
-cargo build --release --no-default-features --features sled,$1
+if [[ "$CACHE_BACKEND" == redis* ]]; then
+  FEATURES="sled,$1,redis"
+else
+  FEATURES="sled,$1"
+fi
+
+cargo build --release --no-default-features --features $FEATURES
 if [ $? -ne 0 ]; then
   echo "Failed to build Plaid with $1 compiler"
   # Exit with an error
   exit 1
 fi
-RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features sled,$1 -- --config ${CONFIG_WORKING_PATH} --secrets $SECRET_WORKING_PATH &
+RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features $FEATURES -- --config ${CONFIG_WORKING_PATH} --secrets $SECRET_WORKING_PATH &
 PLAID_PID=$!
+
+# Wait for Plaid to boot. When it's ready, a file called "plaid_ready" will be created.
+# If Plaid is not ready within 120 seconds, give up and return an error.
+file="plaid_ready"
+timeout=120
+interval=5
+deadline=$((SECONDS + timeout))
+
+until cat "$file" >/dev/null 2>&1; do
+  (( SECONDS >= deadline )) && { echo "Error: '$file' not found within ${timeout}s." >&2; exit 1; }
+  sleep "$interval"
+done
+
+# If we are here, then the file was found, meaning Plaid is fully ready. We can now proceed with our tests.
 cd ..
-sleep 60
 
 # Set the variables the test harnesses will need
 export PLAID_LOCATION="localhost:4554"
 
 # Loop through all test modules in the test_modules directory
 for module in modules/tests/*; do
+  # If the cache backend is not redis, skip modules whose path/name contains "redis"
+  if [[ "$CACHE_BACKEND" != redis* && "$module" == *redis* ]]; then
+    echo "Skipping integration test for module $module"
+    continue
+  fi
+
   # If the module is a directory
   if [ -d "$module" ]; then
     # If the module has a harness.sh file
