@@ -167,6 +167,20 @@ impl Data {
                 });
             }
 
+            // Start the SQS task if there is one
+            #[cfg(feature = "aws")]
+            if let Some(mut sqs) = di.sqs {
+                handle.spawn(async move {
+                    loop {
+                        if let Err(err) = sqs.drain_queue().await {
+                            error!("{err}");
+                        };
+
+                        tokio::time::sleep(Duration::from_secs(sqs.config.sleep_duration)).await;
+                    }
+                });
+            }
+
             if let Some(websocket) = di.websocket_external {
                 handle.spawn(async move {
                     websocket.start().await;
@@ -191,20 +205,6 @@ impl Data {
         } else {
             None
         };
-
-        // Start the SQS task if there is one
-        #[cfg(feature = "aws")]
-        if let Some(mut sqs) = di.sqs {
-            handle.spawn(async move {
-                loop {
-                    if let Err(err) = sqs.drain_queue().await {
-                        error!("{err}");
-                    };
-
-                    tokio::time::sleep(Duration::from_secs(sqs.config.sleep_duration)).await;
-                }
-            });
-        }
 
         // Start the internal log processor. This doesn't need to be a tokio task,
         // but we make it one incase we need the runtime in the future. Perhaps it
