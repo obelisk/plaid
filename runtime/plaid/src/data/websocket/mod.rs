@@ -1,5 +1,6 @@
 mod selector;
 
+use super::parse_duration;
 use crate::{executor::Message, logging::Logger};
 use crossbeam_channel::Sender;
 use futures_util::{
@@ -62,11 +63,11 @@ pub struct WebSocket {
     /// The number of Logbacks this generator is allowed to trigger
     #[serde(default)]
     logbacks_allowed: LogbacksAllowed,
-    /// The minimum amount of time (in milliseconds) to wait before retrying a connection to a WebSocket
+    /// The minimum amount of time to wait before retrying a connection to a WebSocket
     #[serde(default = "min_retry_duration")]
     #[serde(deserialize_with = "parse_duration")]
     min_retry_duration: Duration,
-    /// The maximum amount of time (in milliseconds) to wait before retrying a connection to a WebSocket
+    /// The maximum amount of time to wait before retrying a connection to a WebSocket
     #[serde(default = "max_retry_duration")]
     #[serde(deserialize_with = "parse_duration")]
     max_retry_duration: Duration,
@@ -147,17 +148,6 @@ where
     } else {
         Ok(None)
     }
-}
-
-/// Custom parser to convert user provided duration (in milliseconds) to a `Duration`.
-/// Returns an error if deserialization to `u64` fails.
-fn parse_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let duration: u64 = u64::deserialize(deserializer)?;
-
-    Ok(Duration::from_millis(duration))
 }
 
 /// A generator that manages multiple WebSocket clients for data generation.

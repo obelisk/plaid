@@ -2,6 +2,8 @@ pub mod github;
 pub mod internal;
 mod interval;
 mod okta;
+#[cfg(feature = "aws")]
+mod sqs;
 mod websocket;
 
 use crate::{
@@ -35,6 +37,8 @@ pub struct DataConfig {
     github: Option<github::GithubConfig>,
     okta: Option<okta::OktaConfig>,
     interval: Option<interval::IntervalConfig>,
+    #[cfg(feature = "aws")]
+    sqs: Option<sqs::SQSConfig>,
     websocket: Option<websocket::WebSocketDataGenerator>,
 }
 
@@ -47,6 +51,9 @@ struct DataInternal {
     internal: Option<internal::Internal>,
     /// Interval manages tracking and execution of jobs that are executed on a defined interval
     interval: Option<interval::Interval>,
+    /// SQS pulls messages from AWS SQS queue
+    #[cfg(feature = "aws")]
+    sqs: Option<sqs::SQS>,
     /// Websocket manages the creation and maintenance of WebSockets that provide data to the executor
     websocket_external: Option<websocket::WebsocketGenerator>,
 }
@@ -89,6 +96,13 @@ impl DataInternal {
             .interval
             .map(|config| interval::Interval::new(config, logger.clone()));
 
+        #[cfg(feature = "aws")]
+        let sqs = if let Some(cfg) = config.sqs {
+            Some(sqs::SQS::new(cfg, logger.clone()).await)
+        } else {
+            None
+        };
+
         let websocket_external = config
             .websocket
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
@@ -98,6 +112,8 @@ impl DataInternal {
             okta,
             internal: Some(internal?),
             interval,
+            #[cfg(feature = "aws")]
+            sqs,
             websocket_external,
         })
     }
@@ -147,6 +163,20 @@ impl Data {
                         }
 
                         tokio::time::sleep(Duration::from_secs(10)).await;
+                    }
+                });
+            }
+
+            // Start the SQS task if there is one
+            #[cfg(feature = "aws")]
+            if let Some(mut sqs) = di.sqs {
+                handle.spawn(async move {
+                    loop {
+                        if let Err(err) = sqs.drain_queue().await {
+                            error!("{err}");
+                        };
+
+                        tokio::time::sleep(sqs.config.sleep_duration).await;
                     }
                 });
             }
@@ -222,8 +252,8 @@ pub trait DataGenerator {
     /// Get a name for the data generator (useful e.g., for logging)
     fn get_name(&self) -> String;
 
-    /// Get the duration (in milliseconds) the thread will sleep for, after fetching a page of logs
-    fn get_sleep_duration(&self) -> u64;
+    /// Get the duration the thread will sleep for, after fetching a page of logs
+    fn get_sleep_duration(&self) -> Duration;
 
     /// Get the number of seconds after which we assume the external API we are querying for logs
     /// reaches stability. This means that we assume all events that have happened at least these many
@@ -417,7 +447,7 @@ pub async fn get_and_process_dg_logs(
     dg: &mut impl DataGenerator,
     storage: Option<Arc<Storage>>,
 ) -> Result<(), ()> {
-    let sleep_duration = Duration::from_millis(dg.get_sleep_duration());
+    let sleep_duration = dg.get_sleep_duration();
 
     let storage_namespace = &get_dg_storage_namespace(&dg.get_name());
 
@@ -567,6 +597,17 @@ pub async fn get_and_process_dg_logs(
         // Wait for the specified period before making another request
         tokio::time::sleep(sleep_duration).await
     }
+}
+
+/// Custom parser to convert user provided duration (in milliseconds) to a `Duration`.
+/// Returns an error if deserialization to `u64` fails.
+fn parse_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let duration: u64 = u64::deserialize(deserializer)?;
+
+    Ok(Duration::from_millis(duration))
 }
 
 /// Parse the `link` header returned by GitHub or Okta and extract the URL for `next` page.
