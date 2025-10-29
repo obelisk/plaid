@@ -26,6 +26,10 @@ pub struct SQSConfig {
     #[serde(default = "default_sleep")]
     #[serde(deserialize_with = "parse_duration")]
     pub sleep_duration: Duration,
+    #[serde(default = "default_max_num_messages")]
+    pub max_num_messages: i32,
+    #[serde(default = "default_wait_time_seconds")]
+    pub wait_time_seconds: i32,
 }
 
 /// This function provides the default sleep duration.
@@ -33,6 +37,16 @@ pub struct SQSConfig {
 /// of `SQSConfig` in the event that no value is provided.
 fn default_sleep() -> Duration {
     Duration::from_millis(10000)
+}
+
+/// Default value for the max number of messages we will try to retrieve with each request.
+fn default_max_num_messages() -> i32 {
+    10
+}
+
+/// Default value for the number of seconds to wait in between requests.
+fn default_wait_time_seconds() -> i32 {
+    1
 }
 
 /// Represents the entire SQS data generator set up
@@ -72,8 +86,8 @@ impl SQS {
                 .client
                 .receive_message()
                 .queue_url(&self.config.queue_url)
-                .max_number_of_messages(10) // just get max if available
-                .wait_time_seconds(1) // no long polling
+                .max_number_of_messages(self.config.max_num_messages) // just get max if available
+                .wait_time_seconds(self.config.wait_time_seconds) // no long polling
                 .send()
                 .await
                 .map_err(|e| {
