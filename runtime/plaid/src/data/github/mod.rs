@@ -1,3 +1,4 @@
+use super::parse_duration;
 use crate::apis::github::{build_github_client, Authentication};
 use crate::executor::Message;
 use crossbeam_channel::Sender;
@@ -8,6 +9,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::num::NonZeroUsize;
+use std::time::Duration;
 use time::OffsetDateTime;
 
 use super::{DataGenerator, DataGeneratorLog};
@@ -72,10 +74,11 @@ pub struct GithubConfig {
     /// Canonicalization time, i.e., after how many seconds we can consider logs as "stable"
     #[serde(default = "default_canon_time")]
     canon_time: u64,
-    /// Number of milliseconds to wait in between calls to the GH API.
+    /// Time to wait in between calls to the GH API.
     /// If no value is provided here, we will use a default value (1 second).
-    #[serde(default = "default_sleep_milliseconds")]
-    sleep_duration: u64,
+    #[serde(default = "default_sleep")]
+    #[serde(deserialize_with = "parse_duration")]
+    sleep_duration: Duration,
     /// Size of the LRU cache that we use to deduplicate logs
     #[serde(default = "default_lru_cache_size")]
     lru_cache_size: usize,
@@ -96,7 +99,7 @@ impl GithubConfig {
             log_type,
             logbacks_allowed: LogbacksAllowed::default(),
             canon_time: 20,
-            sleep_duration: 1000,
+            sleep_duration: Duration::from_millis(1000),
             lru_cache_size: default_lru_cache_size(),
             max_since_until: default_since_until(),
             max_catchup: default_max_catchup(),
@@ -104,11 +107,11 @@ impl GithubConfig {
     }
 }
 
-/// This function provides the default sleep duration in milliseconds.
+/// This function provides the default sleep duration.
 /// It is used as the default value for deserialization of the `sleep_duration` field,
 /// of `GithubConfig` in the event that no value is provided.
-fn default_sleep_milliseconds() -> u64 {
-    1000
+fn default_sleep() -> Duration {
+    Duration::from_millis(1000)
 }
 
 /// This function provides the default max value for the since..until time span, in seconds.
@@ -318,7 +321,7 @@ impl DataGenerator for Github {
         "GitHub".to_string()
     }
 
-    fn get_sleep_duration(&self) -> u64 {
+    fn get_sleep_duration(&self) -> Duration {
         self.config.sleep_duration
     }
 

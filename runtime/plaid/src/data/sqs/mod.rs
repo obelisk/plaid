@@ -1,10 +1,12 @@
-use std::num::NonZeroUsize;
+use super::parse_duration;
 
 use aws_sdk_sqs::Client;
 use crossbeam_channel::Sender;
 use lru::LruCache;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use serde::Deserialize;
+use std::num::NonZeroUsize;
+use std::time::Duration;
 
 use crate::{executor::Message, get_aws_sdk_config, AwsAuthentication};
 
@@ -19,17 +21,18 @@ pub struct SQSConfig {
     /// Denotes if logs produced by this generator are allowed to initiate log backs
     #[serde(default)]
     logbacks_allowed: LogbacksAllowed,
-    /// Number of milliseconds to wait in between calls to the API.
+    /// Time to wait in between calls to the API.
     /// If no value is provided here, we will use a default value (10 second).
-    #[serde(default = "default_sleep_milliseconds")]
-    pub sleep_duration: u64,
+    #[serde(default = "default_sleep")]
+    #[serde(deserialize_with = "parse_duration")]
+    pub sleep_duration: Duration,
 }
 
-/// This function provides the default sleep duration in milliseconds.
+/// This function provides the default sleep duration.
 /// It is used as the default value for deserialization of the `sleep_duration` field,
 /// of `SQSConfig` in the event that no value is provided.
-fn default_sleep_milliseconds() -> u64 {
-    10000
+fn default_sleep() -> Duration {
+    Duration::from_millis(10000)
 }
 
 /// Represents the entire SQS data generator set up

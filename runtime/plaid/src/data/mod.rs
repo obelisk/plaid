@@ -176,7 +176,7 @@ impl Data {
                             error!("{err}");
                         };
 
-                        tokio::time::sleep(Duration::from_secs(sqs.config.sleep_duration)).await;
+                        tokio::time::sleep(sqs.config.sleep_duration).await;
                     }
                 });
             }
@@ -252,8 +252,8 @@ pub trait DataGenerator {
     /// Get a name for the data generator (useful e.g., for logging)
     fn get_name(&self) -> String;
 
-    /// Get the duration (in milliseconds) the thread will sleep for, after fetching a page of logs
-    fn get_sleep_duration(&self) -> u64;
+    /// Get the duration the thread will sleep for, after fetching a page of logs
+    fn get_sleep_duration(&self) -> Duration;
 
     /// Get the number of seconds after which we assume the external API we are querying for logs
     /// reaches stability. This means that we assume all events that have happened at least these many
@@ -447,7 +447,7 @@ pub async fn get_and_process_dg_logs(
     dg: &mut impl DataGenerator,
     storage: Option<Arc<Storage>>,
 ) -> Result<(), ()> {
-    let sleep_duration = Duration::from_millis(dg.get_sleep_duration());
+    let sleep_duration = dg.get_sleep_duration();
 
     let storage_namespace = &get_dg_storage_namespace(&dg.get_name());
 
@@ -597,6 +597,17 @@ pub async fn get_and_process_dg_logs(
         // Wait for the specified period before making another request
         tokio::time::sleep(sleep_duration).await
     }
+}
+
+/// Custom parser to convert user provided duration (in milliseconds) to a `Duration`.
+/// Returns an error if deserialization to `u64` fails.
+fn parse_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let duration: u64 = u64::deserialize(deserializer)?;
+
+    Ok(Duration::from_millis(duration))
 }
 
 /// Parse the `link` header returned by GitHub or Okta and extract the URL for `next` page.
