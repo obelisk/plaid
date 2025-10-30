@@ -191,7 +191,7 @@ impl Kms {
         let request =
             serde_json::from_str::<GenerateMacRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        // Fetch rules that are allowd to use this key
+        // Fetch rules that are allowed to use this key
         let allowed_rules = self.fetch_key_configuration(module.to_string(), &request.key_id)?;
 
         // Verify that caller is allowed to use this key
@@ -237,7 +237,7 @@ impl Kms {
         let request =
             serde_json::from_str::<VerifyMacRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        // Fetch rules that are allowd to use this key
+        // Fetch rules that are allowed to use this key
         let allowed_rules = self.fetch_key_configuration(module.to_string(), &request.key_id)?;
 
         // Verify that caller is allowed to use this key
@@ -280,7 +280,7 @@ impl Kms {
         let request: SignRequestRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        // Fetch rules that are allowd to use this key
+        // Fetch rules that are allowed to use this key
         let allowed_rules = self.fetch_key_configuration(module.to_string(), &request.key_id)?;
 
         // Verify that caller is allowed to use this key
@@ -324,7 +324,7 @@ impl Kms {
             .ok_or(ApiError::MissingParameter("key_id".to_string()))?
             .to_string();
 
-        // Fetch rules that are allowd to use this key
+        // Fetch rules that are allowed to use this key
         let allowed_rules = self.fetch_key_configuration(module.clone(), &key_id)?;
 
         // Verify that caller is allowed to use this key
