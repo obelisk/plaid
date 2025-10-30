@@ -249,14 +249,11 @@ impl Kms {
             return Err(ApiError::BadRequest);
         }
 
-        // Parse MAC
-        let mac = base64::decode(request.mac).map_err(|_| ApiError::BadRequest)?;
-
         self.client
             .verify_mac()
             .key_id(request.key_id)
             .message(Blob::new(request.message))
-            .mac(Blob::new(mac))
+            .mac(Blob::new(request.mac))
             .mac_algorithm(to_aws_algo(request.algorithm))
             .send()
             .await
