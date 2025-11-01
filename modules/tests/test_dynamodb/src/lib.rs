@@ -52,14 +52,14 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
     match dynamodb::put_item(input) {
         Err(err) => {
             plaid::print_debug_string(&format!("put_item error: {err}"));
-            return Err(1); // TODO: proper error code
+            return Err(1);
         }
         Ok(output) => {
             let json = serde_json::to_string(&output).unwrap();
             plaid::print_debug_string(&format!("put_item output: {json}"));
             if json != json!({"attributes":null}) {
                 plaid::print_debug_string(&format!("error: put_item output_json mismatch: {json}"));
-                return Err(1); // TODO: proper error code
+                return Err(1);
             }
         }
     };
@@ -81,7 +81,7 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
         != json!({"items":[{"age":33,"binaries":["ZGF0YTE=","ZGF0YTI="],"binary_field":{"_binary":"YmluYXJ5X2RhdGE="},"is_active":true,"metadata":{"city":"New York","country":"USA"},"name":"Jane Doe","null_field":null,"pk":"124","ratings":[3.8,4.5,5],"scores":[88,92,95],"tags":["aws","dev","rust"],"timestamp":"124"}]})
     {
         plaid::print_debug_string(&format!("error: query output_json mismatch: {output_json}"));
-        return Err(1); // TODO: proper error code
+        return Err(1);
     }
 
     // Delete Item
@@ -108,7 +108,7 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
         plaid::print_debug_string(&format!(
             "error: delete_item output_json mismatch: {output_json}"
         ));
-        return Err(1); // TODO: proper error code
+        return Err(1);
     }
 
     Ok(())

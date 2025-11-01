@@ -199,6 +199,13 @@ secret_key = ""
 # r = ["some_rule.wasm"]
 # rw = ["another_rule.wasm"]
 
+# DynamoDB (using IAM)
+# [apis."aws"]
+# [apis."aws"."dynamodb"]
+# r = ["some_rule.wasm"]
+# rw = ["another_rule.wasm"]
+# [apis."aws"."dynamodb".authentication]
+
 #[apis."github"]
 #[apis."github".authentication]
 #logbacks_allowed = "Unlimited"
