@@ -54,7 +54,7 @@ impl DynamoDb {
             rw,
             r,
         } = config;
-        let sdk_config = get_aws_sdk_config(authentication).await;
+        let sdk_config = get_aws_sdk_config(&authentication).await;
         let client = Client::new(&sdk_config);
 
         Self { client, rw, r }
