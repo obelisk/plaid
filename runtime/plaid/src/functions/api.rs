@@ -437,6 +437,12 @@ impl_new_function_with_error_buffer!(github, get_repos_for_fpat, ALLOW_IN_TEST_M
 impl_new_function_with_error_buffer!(cryptography, aes_128_cbc_encrypt, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(cryptography, aes_128_cbc_decrypt, ALLOW_IN_TEST_MODE);
 
+// Jira functions
+impl_new_function_with_error_buffer!(jira, create_issue, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(jira, get_issue, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(jira, get_user_id, ALLOW_IN_TEST_MODE);
+impl_new_function!(jira, post_comment, DISALLOW_IN_TEST_MODE);
+
 // AWS functions
 
 // KMS
@@ -805,6 +811,12 @@ pub fn to_api_function(
         "general_make_named_request" => {
             Function::new_typed_with_env(&mut store, &env, general_make_named_request)
         }
+
+        // Jira Calls
+        "jira_create_issue" => Function::new_typed_with_env(&mut store, &env, jira_create_issue),
+        "jira_get_issue" => Function::new_typed_with_env(&mut store, &env, jira_get_issue),
+        "jira_get_user_id" => Function::new_typed_with_env(&mut store, &env, jira_get_user_id),
+        "jira_post_comment" => Function::new_typed_with_env(&mut store, &env, jira_post_comment),
 
         // KMS calls
         #[cfg(feature = "aws")]
