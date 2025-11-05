@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::PlaidFunctionError;
 
+/// Request sent to the runtime to create a Jira issue
 #[derive(Serialize, Deserialize)]
 pub struct CreateIssueRequest {
     pub project_key: String,
@@ -20,6 +21,7 @@ pub struct CreateIssueRequest {
     pub other_fields: HashMap<String, Value>,
 }
 
+/// Response received from the runtime when creating a Jira issue
 #[derive(Serialize, Deserialize)]
 pub struct CreateIssueResponse {
     pub id: String,
@@ -28,11 +30,13 @@ pub struct CreateIssueResponse {
     pub self_: String,
 }
 
+/// Request sent to the runtime to fetch a Jira issue
 #[derive(Serialize, Deserialize)]
 pub struct GetIssueRequest {
     pub id: String,
 }
 
+/// Response received from the runtime when fetching a Jira issue
 #[derive(Serialize, Deserialize)]
 pub struct GetIssueResponse {
     pub id: String,
@@ -42,17 +46,20 @@ pub struct GetIssueResponse {
     pub fields: Value,
 }
 
+/// Request sent to the runtime to fetch info about a Jira user
 #[derive(Serialize, Deserialize)]
-pub struct GetUserAccountIdRequest {
+pub struct GetUserRequest {
     pub email: String,
 }
 
+/// Response received from the runtime when fetching info about a Jira user
 #[derive(Serialize, Deserialize)]
-pub struct GetUserAccountIdResponse {
+pub struct GetUserResponse {
     pub display_name: Option<String>,
     pub id: String,
 }
 
+/// Request sent to the runtime to post a comment to a Jira issue
 #[derive(Serialize, Deserialize)]
 pub struct PostCommentRequest {
     pub issue_id: String,
@@ -61,6 +68,7 @@ pub struct PostCommentRequest {
 
 // ==============================================================================================================
 
+/// Create a Jira issue
 pub fn create_issue(
     payload: CreateIssueRequest,
 ) -> Result<CreateIssueResponse, PlaidFunctionError> {
@@ -90,6 +98,7 @@ pub fn create_issue(
     Ok(serde_json::from_str(&String::from_utf8(return_buffer).unwrap()).unwrap())
 }
 
+/// Fetch a Jira issue
 pub fn get_issue(payload: GetIssueRequest) -> Result<GetIssueResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(jira, get_issue);
@@ -117,11 +126,10 @@ pub fn get_issue(payload: GetIssueRequest) -> Result<GetIssueResponse, PlaidFunc
     Ok(serde_json::from_str(&String::from_utf8(return_buffer).unwrap()).unwrap())
 }
 
-pub fn get_user_id(
-    payload: GetUserAccountIdRequest,
-) -> Result<GetUserAccountIdResponse, PlaidFunctionError> {
+/// Get information about a Jira user
+pub fn get_user(payload: GetUserRequest) -> Result<GetUserResponse, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(jira, get_user_id);
+        new_host_function_with_error_buffer!(jira, get_user);
     }
 
     let request = serde_json::to_string(&payload).unwrap();
@@ -130,7 +138,7 @@ pub fn get_user_id(
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let res = unsafe {
-        jira_get_user_id(
+        jira_get_user(
             request.as_bytes().as_ptr(),
             request.as_bytes().len(),
             return_buffer.as_mut_ptr(),
@@ -146,6 +154,7 @@ pub fn get_user_id(
     Ok(serde_json::from_str(&String::from_utf8(return_buffer).unwrap()).unwrap())
 }
 
+/// Post a comment to a Jira issue
 pub fn post_comment(payload: PostCommentRequest) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(jira, post_comment);

@@ -3,8 +3,8 @@ mod errors;
 use std::{sync::Arc, time::Duration};
 
 use plaid_stl::jira::{
-    CreateIssueRequest, CreateIssueResponse, GetIssueRequest, GetIssueResponse,
-    GetUserAccountIdRequest, GetUserAccountIdResponse, PostCommentRequest,
+    CreateIssueRequest, CreateIssueResponse, GetIssueRequest, GetIssueResponse, GetUserRequest,
+    GetUserResponse, PostCommentRequest,
 };
 use reqwest::Client;
 use serde::Deserialize;
@@ -43,18 +43,11 @@ pub struct JiraConfig {
     base_url: String,
 }
 
+/// A representation of the Plaid Jira API
 pub struct Jira {
     authentication: JiraAuthentication,
     base_url: String,
     client: Client,
-}
-
-#[derive(Deserialize)]
-struct JiraUser {
-    #[serde(rename = "accountId")]
-    account_id: String,
-    #[serde(rename = "displayName")]
-    display_name: String,
 }
 
 impl Jira {
@@ -75,6 +68,7 @@ impl Jira {
         }
     }
 
+    /// Create a new Jira issue
     pub async fn create_issue(
         &self,
         params: &str,
@@ -90,9 +84,9 @@ impl Jira {
         // Build the payload
         let payload = request.to_payload();
 
-        // Make the call
         info!("Creating a Jira issue on behalf of [{module}]");
 
+        // Make the call
         match self
             .client
             .post(url)
@@ -128,6 +122,7 @@ impl Jira {
         }
     }
 
+    /// Get a Jira issue
     pub async fn get_issue(
         &self,
         params: &str,
@@ -140,12 +135,12 @@ impl Jira {
 
         let url = format!("{}/issue/{}", self.base_url, request.id);
 
-        // Make the call
         info!(
             "Getting Jira issue [{}] on behalf of [{module}]",
             request.id
         );
 
+        // Make the call
         match self
             .client
             .get(url)
@@ -180,13 +175,14 @@ impl Jira {
         }
     }
 
-    pub async fn get_user_id(
+    /// Get a Jira user
+    pub async fn get_user(
         &self,
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request = serde_json::from_str::<GetUserAccountIdRequest>(params)
-            .map_err(|_| ApiError::BadRequest)?;
+        let request =
+            serde_json::from_str::<GetUserRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
         // TODO Validate the request
 
@@ -215,6 +211,15 @@ impl Jira {
                     )));
                 }
 
+                // Internal struct used to deserialize the response from the REST API
+                #[derive(Deserialize)]
+                struct JiraUser {
+                    #[serde(rename = "accountId")]
+                    account_id: String,
+                    #[serde(rename = "displayName")]
+                    display_name: String,
+                }
+
                 let users: Vec<JiraUser> = resp
                     .json()
                     .await
@@ -228,7 +233,7 @@ impl Jira {
 
                 let display_name = users.get(0).map(|u| u.display_name.clone());
 
-                let res = GetUserAccountIdResponse {
+                let res = GetUserResponse {
                     id: account_id,
                     display_name,
                 };
@@ -242,6 +247,7 @@ impl Jira {
         }
     }
 
+    /// Post a comment to a Jira issue
     pub async fn post_comment(
         &self,
         params: &str,
@@ -254,10 +260,9 @@ impl Jira {
 
         let url = format!("{}/issue/{}/comment", self.base_url, request.issue_id);
 
-        // Build the payload
+        // Build the payload and make the call
         let payload = request.to_payload();
 
-        // Make the call
         info!(
             "Posting a comment to Jira issue [{}] on behalf of [{module}]",
             request.issue_id
