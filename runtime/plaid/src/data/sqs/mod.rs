@@ -1,5 +1,3 @@
-use super::parse_duration;
-
 use aws_sdk_sqs::Client;
 use crossbeam_channel::Sender;
 use lru::LruCache;
@@ -8,7 +6,7 @@ use serde::Deserialize;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use crate::{executor::Message, get_aws_sdk_config, AwsAuthentication};
+use crate::{executor::Message, get_aws_sdk_config, parse_duration, AwsAuthentication};
 
 #[derive(Deserialize)]
 pub struct SQSConfig {

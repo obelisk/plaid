@@ -10,6 +10,7 @@ use crate::{
         ApiError,
     },
     loader::PlaidModule,
+    parse_duration,
 };
 use http::StatusCode;
 use plaid_stl::blockchain::evm::types::{
@@ -17,10 +18,14 @@ use plaid_stl::blockchain::evm::types::{
     GetTransactionRequest, SendRawTransactionRequest,
 };
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{de, Deserialize};
 use serde_json::{json, Value};
 use serde_with::{serde_as, DisplayFromStr};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{atomic::AtomicUsize, Arc},
+    time::Duration,
+};
 
 #[derive(Debug)]
 pub enum EvmCallError {
@@ -54,6 +59,7 @@ pub struct EvmConfig {
     chains: HashMap<ChainId, ChainConfig>,
     /// Timeout duration for EVM client requests in milliseconds
     #[serde(default = "default_timeout")]
+    #[serde(deserialize_with = "parse_duration")]
     timeout_millis: Duration,
     /// The maximum number of retries for EVM client requests
     #[serde(default = "default_max_retries")]
@@ -65,7 +71,25 @@ pub struct ChainConfig {
     /// The list of nodes for this chain
     pub nodes: Vec<NodeConfig>,
     /// The selection strategy for this chain
+    #[serde(deserialize_with = "selection_strategy_deserializer")]
     pub selection_strategy: SelectionStrategy,
+}
+
+/// Deserialized for a webhook's response mode
+fn selection_strategy_deserializer<'de, D>(deserializer: D) -> Result<SelectionStrategy, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let strategy = String::deserialize(deserializer)?;
+    match strategy.to_lowercase().as_str() {
+        "roundrobin" => Ok(SelectionStrategy::RoundRobin {
+            current_index: AtomicUsize::new(0),
+        }),
+        "random" => Ok(SelectionStrategy::Random),
+        _ => Err(de::Error::custom(format!(
+            "Unknown selection strategy: {strategy}",
+        ))),
+    }
 }
 
 #[derive(Deserialize, Clone)]
