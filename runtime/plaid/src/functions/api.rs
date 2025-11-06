@@ -532,6 +532,36 @@ impl_new_function_with_error_buffer!(yubikey, verify_otp, ALLOW_IN_TEST_MODE);
 // Web Functions
 impl_new_function_with_error_buffer!(web, issue_jwt, DISALLOW_IN_TEST_MODE);
 
+// Blockchain functions
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    get_transaction_by_hash,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    get_transaction_receipt,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    send_raw_transaction,
+    DISALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    get_transaction_count,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_balance, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, estimate_gas, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, eth_call, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, gas_price, ALLOW_IN_TEST_MODE);
+
 pub fn to_api_function(
     name: &str,
     mut store: &mut Store,
@@ -903,6 +933,32 @@ pub fn to_api_function(
 
         // Web Calls
         "web_issue_jwt" => Function::new_typed_with_env(&mut store, &env, web_issue_jwt),
+
+        // Blockchain calls
+        "blockchain_evm_get_transaction_by_hash" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_transaction_by_hash)
+        }
+        "blockchain_evm_get_transaction_receipt" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_transaction_receipt)
+        }
+        "blockchain_evm_send_raw_transaction" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_send_raw_transaction)
+        }
+        "blockchain_evm_get_transaction_count" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_transaction_count)
+        }
+        "blockchain_evm_get_balance" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_balance)
+        }
+        "blockchain_evm_estimate_gas" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_estimate_gas)
+        }
+        "blockchain_evm_eth_call" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_eth_call)
+        }
+        "blockchain_evm_gas_price" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_gas_price)
+        }
 
         // No match
         _ => return None,
