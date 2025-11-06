@@ -46,6 +46,7 @@ impl EvmCallError {
             Self::CallFailed { status, .. } => {
                 status.is_server_error() || *status == StatusCode::TOO_MANY_REQUESTS
             }
+            Self::NetworkError(_) => true,
             _ => false,
         }
     }
