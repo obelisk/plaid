@@ -3,6 +3,7 @@ pub mod aws;
 pub mod cryptography;
 pub mod general;
 pub mod github;
+pub mod jira;
 pub mod npm;
 pub mod okta;
 pub mod pagerduty;
@@ -14,6 +15,7 @@ pub mod yubikey;
 
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
+use crate::apis::jira::{Jira, JiraConfig};
 #[cfg(feature = "aws")]
 use aws::s3::S3Errors;
 #[cfg(feature = "aws")]
@@ -45,6 +47,7 @@ pub struct Api {
     pub aws: Option<Aws>,
     pub general: Option<General>,
     pub github: Option<Github>,
+    pub jira: Option<Jira>,
     pub npm: Option<Npm>,
     pub okta: Option<Okta>,
     pub pagerduty: Option<PagerDuty>,
@@ -63,6 +66,7 @@ pub struct ApiConfigs {
     pub cryptography: Option<CryptographyConfig>,
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
+    pub jira: Option<JiraConfig>,
     pub npm: Option<NpmConfig>,
     pub okta: Option<OktaConfig>,
     pub pagerduty: Option<PagerDutyConfig>,
@@ -95,6 +99,7 @@ pub enum ApiError {
     YubikeyError(yubikey::YubikeyError),
     WebError(web::WebError),
     TestMode,
+    JiraError(jira::JiraError),
 }
 
 #[cfg(feature = "aws")]
@@ -135,6 +140,11 @@ impl Api {
 
         let github = match config.github {
             Some(gh) => Some(Github::new(gh)),
+            _ => None,
+        };
+
+        let jira = match config.jira {
+            Some(j) => Some(Jira::new(j)),
             _ => None,
         };
 
@@ -191,6 +201,7 @@ impl Api {
             cryptography,
             general,
             github,
+            jira,
             npm,
             okta,
             pagerduty,

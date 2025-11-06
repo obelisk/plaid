@@ -5,6 +5,7 @@
 /compiled_modules
 /runtime/performance-monitoring/*
 /module_signatures
+runtime/plaid_ready
 
 # Private items
 /runtime/plaid/private-resources
