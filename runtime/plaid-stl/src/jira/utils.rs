@@ -3,7 +3,7 @@ use std::fmt::Display;
 use serde_json::{json, Value};
 
 /// Takes a string-like description and turns it into the JSON format that Jira expects
-pub fn create_simple_jira_description(description: impl Display) -> Value {
+fn create_simple_jira_description(description: impl Display) -> Value {
     serde_json::json!({
         "version":1,
         "type":"doc",
@@ -61,5 +61,32 @@ impl super::PostCommentRequest {
             ]
           }
         })
+    }
+}
+
+impl super::UpdateIssueRequest {
+    pub fn to_payload(&self) -> Value {
+        // When we are here, we know that at least one between `fields` and `update` is Some
+        match (&self.fields, &self.update) {
+            (Some(f), Some(u)) => {
+                json!({
+                    "fields": f,
+                    "update": u
+                })
+            }
+            (Some(f), None) => {
+                json!({
+                    "fields": f
+                })
+            }
+            (None, Some(u)) => {
+                json!({
+                    "update": u
+                })
+            }
+            _ => unreachable!(
+                "Both fields and update are missing: this should not have passed validation!"
+            ),
+        }
     }
 }

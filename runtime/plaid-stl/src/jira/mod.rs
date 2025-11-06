@@ -46,6 +46,17 @@ pub struct GetIssueResponse {
     pub fields: Value,
 }
 
+/// Request sent to the runtime to update a Jira issue
+#[derive(Serialize, Deserialize)]
+pub struct UpdateIssueRequest {
+    pub id: String,
+    /// This is used to overwrite values
+    pub fields: Option<Value>,
+    /// This is more granular and can be used to update values
+    /// (e.g., adding/removing items from arrays)
+    pub update: Option<Value>,
+}
+
 /// Request sent to the runtime to fetch info about a Jira user
 #[derive(Serialize, Deserialize)]
 pub struct GetUserRequest {
@@ -124,6 +135,21 @@ pub fn get_issue(payload: GetIssueRequest) -> Result<GetIssueResponse, PlaidFunc
 
     return_buffer.truncate(res as usize);
     Ok(serde_json::from_str(&String::from_utf8(return_buffer).unwrap()).unwrap())
+}
+
+/// Update a Jira issue
+pub fn update_issue(payload: UpdateIssueRequest) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(jira, update_issue);
+    }
+
+    let request = serde_json::to_string(&payload).unwrap();
+    let res = unsafe { jira_update_issue(request.as_bytes().as_ptr(), request.as_bytes().len()) };
+
+    match res {
+        0 => Ok(()),
+        x => Err(x.into()),
+    }
 }
 
 /// Get information about a Jira user
