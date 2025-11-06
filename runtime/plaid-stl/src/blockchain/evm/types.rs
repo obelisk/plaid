@@ -157,6 +157,7 @@ pub struct TransactionReceipt {
     #[serde(rename = "logsBloom")]
     pub logs_bloom: String,
     /// Block number this transaction was included in
+    #[serde(rename = "blockNumber")]
     pub block_number: String,
     /// Address of the sender
     pub from: String,
@@ -164,6 +165,7 @@ pub struct TransactionReceipt {
     /// `None` when its a contract creation transaction
     pub to: Option<String>,
     /// The contract address created, if the transaction was a contract creation, otherwise `None`
+    #[serde(rename = "contractAddress")]
     pub contract_address: Option<String>,
 }
 
