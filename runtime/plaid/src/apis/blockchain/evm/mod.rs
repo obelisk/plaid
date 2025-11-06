@@ -76,7 +76,7 @@ pub struct ChainConfig {
     pub selection_strategy: SelectionStrategy,
 }
 
-/// Deserialized for a webhook's response mode
+/// Deserializes a selection strategy for blockchain nodes from a string
 fn selection_strategy_deserializer<'de, D>(deserializer: D) -> Result<SelectionStrategy, D::Error>
 where
     D: de::Deserializer<'de>,

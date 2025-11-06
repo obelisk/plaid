@@ -88,7 +88,7 @@ pub enum BlockTag {
     /// The most recent block in the canonical chain observed by the client,
     /// this block may be re-orged out of the canonical chain even under healthy/normal conditions
     Latest,
-    /// A sample next block built by the client on top of `latest` and containing the set of transactions usually taken from local mempoo
+    /// A sample next block built by the client on top of `latest` and containing the set of transactions usually taken from local mempool
     Pending,
     /// The most recent block that is safe from re-orgs under honest majority and certain synchronicity assumptions
     Safe,
