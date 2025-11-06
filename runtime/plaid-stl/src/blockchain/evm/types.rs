@@ -3,7 +3,7 @@ use std::{
     str::FromStr,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct ChainId(u64);
@@ -147,7 +147,57 @@ pub struct Transaction {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub struct TransactionReceipt {}
+pub struct TransactionReceipt {
+    /// Status of the transaction
+    #[serde(deserialize_with = "deserialize_transaction_status")]
+    pub status: TransactionStatus,
+    /// Array of log objects, which this transaction generated
+    pub logs: Vec<Log>,
+    /// Bloom filter for light clients to quickly retrieve related logs
+    #[serde(rename = "logsBloom")]
+    pub logs_bloom: String,
+    /// Block number this transaction was included in
+    pub block_number: String,
+    /// Address of the sender
+    pub from: String,
+    /// Address of the receiver.
+    /// `None` when its a contract creation transaction
+    pub to: Option<String>,
+    /// The contract address created, if the transaction was a contract creation, otherwise `None`
+    pub contract_address: Option<String>,
+}
+
+/// Represents the statuses a tx on chain can have
+#[derive(Deserialize, Debug, Clone)]
+pub enum TransactionStatus {
+    Success,
+    Failure,
+}
+
+fn deserialize_transaction_status<'de, D>(deserializer: D) -> Result<TransactionStatus, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let status = String::deserialize(deserializer)?;
+
+    match status.as_str() {
+        "0x0" => Ok(TransactionStatus::Failure),
+        "0x1" => Ok(TransactionStatus::Success),
+        _ => Err(serde::de::Error::custom(format!(
+            "{status} is not a valid status. Expected one of 0x0 or 0x1"
+        ))),
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Log {
+    /// Address from which this log originated
+    pub address: String,
+    /// Array of topics provided by the contract
+    pub topics: Vec<String>,
+    /// Data provided by the contract
+    pub data: String,
+}
 
 /// Request structure for broadcasting a transaction.
 #[derive(Deserialize, Serialize)]
