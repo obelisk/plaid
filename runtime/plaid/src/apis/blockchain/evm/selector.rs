@@ -1,23 +1,13 @@
 use crate::apis::blockchain::evm::NodeConfig;
 use rand::seq::SliceRandom;
-use serde::Deserialize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Selection strategy for choosing EVM nodes
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
 pub enum SelectionStrategy {
     /// Select nodes in a round-robin fashion
-    RoundRobin {
-        #[serde(skip, default = "default_atomic")]
-        current_index: AtomicUsize,
-    },
+    RoundRobin { current_index: AtomicUsize },
     /// Select nodes randomly
     Random,
-}
-
-fn default_atomic() -> AtomicUsize {
-    AtomicUsize::new(0)
 }
 
 /// Selector for EVM nodes based on a selection strategy

@@ -2,6 +2,8 @@
 use aws_config::{BehaviorVersion, Region, SdkConfig};
 #[cfg(feature = "aws")]
 use aws_sdk_kms::config::Credentials;
+use serde::de;
+use std::time::Duration;
 
 #[macro_use]
 extern crate log;
@@ -94,4 +96,14 @@ impl Default for InstanceRoles {
             non_concurrent_rules: true,
         }
     }
+}
+
+/// Custom parser to convert user provided duration (in milliseconds) to a `Duration`.
+/// Returns an error if deserialization to `u64` fails.
+fn parse_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let duration: u64 = de::Deserialize::deserialize(deserializer)?;
+    Ok(Duration::from_millis(duration))
 }
