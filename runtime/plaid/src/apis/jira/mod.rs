@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Duration};
 
 use plaid_stl::jira::{
     CreateIssueRequest, CreateIssueResponse, GetIssueRequest, GetIssueResponse, GetUserRequest,
-    GetUserResponse, PostCommentRequest,
+    GetUserResponse, PostCommentRequest, UpdateIssueRequest,
 };
 use reqwest::Client;
 use serde::Deserialize;
@@ -168,6 +168,60 @@ impl Jira {
 
                 serde_json::to_string(&body)
                     .map_err(|_| ApiError::JiraError(JiraError::InvalidResponse))
+            }
+            Err(e) => {
+                return Err(ApiError::JiraError(JiraError::NetworkError(e)));
+            }
+        }
+    }
+
+    /// Update a Jira issue
+    pub async fn update_issue(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request =
+            serde_json::from_str::<UpdateIssueRequest>(params).map_err(|_| ApiError::BadRequest)?;
+
+        // TODO Validate the request
+
+        let url = format!("{}/issue/{}", self.base_url, request.id);
+
+        // Build the payload
+        let payload = request.to_payload();
+
+        info!(
+            "Updating Jira issue [{}] on behalf of [{module}]",
+            request.id
+        );
+
+        // Make the call
+        match self
+            .client
+            .put(url)
+            .header(
+                "Authorization",
+                self.authentication.to_authorization_header(),
+            )
+            .json(&payload)
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                // Here technically we should always get a 204 because we do not pass the query parameter
+                // `returnIssue=true`. However, it would seem odd to error on a 200, so we accept that as well.
+                // If for some reason we do get a 200, we simply ignore the response.
+                if resp.status() != 200 && resp.status() != 204 {
+                    let status = resp.status();
+                    let text = resp.text().await.unwrap_or_else(|_| "N/A".to_string());
+                    error!("Jira returned {}: {}", status, text);
+                    return Err(ApiError::JiraError(JiraError::UnexpectedStatusCode(
+                        status.as_u16(),
+                    )));
+                }
+
+                Ok(0)
             }
             Err(e) => {
                 return Err(ApiError::JiraError(JiraError::NetworkError(e)));
