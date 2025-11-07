@@ -1,6 +1,9 @@
 pub mod types;
+mod utils;
 
 use std::fmt::Display;
+
+pub use utils::{parse_basic_rpc_response, parse_detailed_rpc_response, EvmError};
 
 use crate::{
     blockchain::evm::types::{
