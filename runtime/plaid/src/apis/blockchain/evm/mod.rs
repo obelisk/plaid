@@ -324,8 +324,18 @@ impl EvmClient {
             Value::String(request.to_block.to_string()),
         );
 
-        if let Some(address) = request.address {
-            object.insert("address".to_string(), Value::String(address.to_string()));
+        if let Some(addresses) = request.address {
+            let val = if addresses.len() == 1 {
+                Value::String(addresses[0].to_string())
+            } else {
+                Value::Array(
+                    addresses
+                        .iter()
+                        .map(|a| Value::String(a.to_string()))
+                        .collect(),
+                )
+            };
+            object.insert("address".to_string(), val);
         }
 
         if let Some(topics) = request.topics {

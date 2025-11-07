@@ -335,8 +335,8 @@ pub struct GetLogsRequest {
     pub from_block: BlockTag,
     /// The ending block tag
     pub to_block: BlockTag,
-    /// The address to filter logs by
-    pub address: Option<String>,
+    /// The addresses to filter logs by
+    pub address: Option<Vec<String>>,
     /// The topics to filter logs by
     pub topics: Option<Vec<String>>,
 }
