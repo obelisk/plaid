@@ -79,7 +79,7 @@ pub struct DetailedRpcResponse {
     pub result: Option<serde_json::Value>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum BlockTag {
     /// The lowest numbered block the client has available
     Earliest,
