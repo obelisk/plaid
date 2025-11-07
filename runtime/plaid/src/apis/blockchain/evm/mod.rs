@@ -329,19 +329,15 @@ impl EvmClient {
         }
 
         if let Some(topics) = request.topics {
-            let topics_value = if topics.len() == 1 {
-                Value::String(topics[0].to_string())
-            } else {
-                Value::Array(
-                    topics
-                        .iter()
-                        .map(|t| Value::String(t.to_string()))
-                        .collect(),
-                )
-            };
+            let topics_value = Value::Array(
+                topics
+                    .iter()
+                    .map(|t| Value::String(t.to_string()))
+                    .collect(),
+            );
             object.insert("topics".to_string(), topics_value);
-        }
-        let params = serde_json::Value::Object(object);
+        };
+        let params = serde_json::Value::Array(vec![Value::Object(object)]);
 
         let request = JsonRpcRequest::new(RpcMethods::GetLogs, Some(params));
 
