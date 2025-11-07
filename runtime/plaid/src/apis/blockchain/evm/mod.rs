@@ -15,7 +15,7 @@ use crate::{
 use http::StatusCode;
 use plaid_stl::blockchain::evm::types::{
     ChainId, EstimateGasRequest, EthCallRequest, GetAddressMetadataRequest, GetGasPriceRequest,
-    GetTransactionRequest, SendRawTransactionRequest,
+    GetLogsRequest, GetTransactionRequest, SendRawTransactionRequest,
 };
 use reqwest::Client;
 use serde::{de, Deserialize};
@@ -299,6 +299,51 @@ impl EvmClient {
         let selector = self.get_node_selector(request.chain_id)?;
 
         let request = JsonRpcRequest::new(RpcMethods::GasPrice, None);
+
+        self.execute_rpc_call(selector, request, module).await
+    }
+
+    /// Returns an array of all logs matching a given filter object.
+    pub async fn get_logs(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request =
+            serde_json::from_str::<GetLogsRequest>(params).map_err(EvmCallError::SerdeError)?;
+
+        let selector = self.get_node_selector(request.chain_id)?;
+
+        let mut object = serde_json::Map::new();
+        object.insert(
+            "fromBlock".to_string(),
+            Value::String(request.from_block.to_string()),
+        );
+        object.insert(
+            "toBlock".to_string(),
+            Value::String(request.to_block.to_string()),
+        );
+
+        if let Some(address) = request.address {
+            object.insert("address".to_string(), Value::String(address.to_string()));
+        }
+
+        if let Some(topics) = request.topics {
+            let topics_value = if topics.len() == 1 {
+                Value::String(topics[0].to_string())
+            } else {
+                Value::Array(
+                    topics
+                        .iter()
+                        .map(|t| Value::String(t.to_string()))
+                        .collect(),
+                )
+            };
+            object.insert("topics".to_string(), topics_value);
+        }
+        let params = serde_json::Value::Object(object);
+
+        let request = JsonRpcRequest::new(RpcMethods::GetLogs, Some(params));
 
         self.execute_rpc_call(selector, request, module).await
     }

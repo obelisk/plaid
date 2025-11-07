@@ -16,6 +16,7 @@ pub enum RpcMethods {
     GetTransactionByHash,
     GetBalance,
     EstimateGas,
+    GetLogs,
 }
 
 impl Display for RpcMethods {
@@ -29,6 +30,7 @@ impl Display for RpcMethods {
             Self::GetTransactionByHash => write!(f, "eth_getTransactionByHash"),
             Self::GetBalance => write!(f, "eth_getBalance"),
             Self::EstimateGas => write!(f, "eth_estimateGas"),
+            Self::GetLogs => write!(f, "eth_getLogs"),
         }
     }
 }

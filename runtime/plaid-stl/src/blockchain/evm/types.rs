@@ -326,3 +326,17 @@ pub struct GetGasPriceRequest {
     /// The chain ID to query
     pub chain_id: ChainId,
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct GetLogsRequest {
+    /// The chain ID to query
+    pub chain_id: ChainId,
+    /// The starting block tag
+    pub from_block: BlockTag,
+    /// The ending block tag
+    pub to_block: BlockTag,
+    /// The address to filter logs by
+    pub address: Option<String>,
+    /// The topics to filter logs by
+    pub topics: Option<Vec<String>>,
+}

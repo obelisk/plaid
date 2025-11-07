@@ -5,7 +5,8 @@ use std::fmt::Display;
 use crate::{
     blockchain::evm::types::{
         BasicRpcResponse, BlockTag, ChainId, DetailedRpcResponse, EstimateGasRequest,
-        EthCallRequest, GetAddressMetadataRequest, GetGasPriceRequest, GetTransactionRequest,
+        EthCallRequest, GetAddressMetadataRequest, GetGasPriceRequest, GetLogsRequest,
+        GetTransactionRequest,
     },
     PlaidFunctionError,
 };
@@ -327,6 +328,52 @@ pub fn gas_price(chain_id: impl Into<ChainId>) -> Result<BasicRpcResponse, Plaid
             request.len(),
             return_buffer.as_mut_ptr(),
             BASIC_RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match std::str::from_utf8(&return_buffer) {
+        Ok(x) => Ok(serde_json::from_str(x).map_err(|_| PlaidFunctionError::InternalApiError)?),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
+/// Returns an array of all logs matching a given filter object.
+pub fn get_logs(
+    chain_id: impl Into<ChainId>,
+    from_block: BlockTag,
+    to_block: BlockTag,
+    address: Option<String>,
+    topics: Option<Vec<String>>,
+) -> Result<DetailedRpcResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(blockchain_evm, get_logs);
+    }
+
+    let request = GetLogsRequest {
+        chain_id: chain_id.into(),
+        from_block,
+        to_block,
+        address,
+        topics,
+    };
+
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    let mut return_buffer = vec![0; DETAILED_RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        blockchain_evm_get_logs(
+            request.as_ptr(),
+            request.len(),
+            return_buffer.as_mut_ptr(),
+            DETAILED_RETURN_BUFFER_SIZE,
         )
     };
 
