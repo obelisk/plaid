@@ -14,8 +14,11 @@ use serde::Deserialize;
 use std::{collections::HashMap, str::FromStr, time::Duration};
 use tokio::{net::TcpStream, task::JoinHandle};
 use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{client::IntoClientRequest, protocol::Message as WSMessage},
+    connect_async_with_config,
+    tungstenite::{
+        client::IntoClientRequest,
+        protocol::{Message as WSMessage, WebSocketConfig},
+    },
     MaybeTlsStream, WebSocketStream,
 };
 
@@ -31,17 +34,27 @@ pub struct WebSocketDataGenerator {
     /// A map of WebSocket configurations, identified by its name.
     websockets: HashMap<String, WebSocket>,
     /// The maximum size of a message received from a socket that will be processed.
-    /// If not specified, the default value from `default_message_size` is used (`64 kB`)
+    /// If not specified, the default value from `default_message_size` is used (`64 KiB`)
     #[serde(default = "default_message_size")]
     max_message_size: usize,
+    /// The maximum size of a frame received from a socket that will be processed.
+    /// If not specified, the default value from `default_frame_size` is used (`16 KiB`)
+    #[serde(default = "default_frame_size")]
+    max_frame_size: usize,
 }
 
 /// Returns the default maximum size, in bytes, for a message received from a WebSocket
-/// that will be processed. The default value is set to 64 KB (65,536 bytes).
+/// that will be processed. The default value is set to 64 KiB (65,536 bytes).
 ///
 /// This default is used if no specific maximum message size is provided in the configuration.
 fn default_message_size() -> usize {
     65536
+}
+
+/// Returns the default maximum size, in bytes, for a frame received from a WebSocket
+/// that will be processed. The default value is set to 16 KiB (16,384 bytes).
+fn default_frame_size() -> usize {
+    16384
 }
 
 /// Represents the configuration for a WebSocket connection.
@@ -117,7 +130,7 @@ where
                 Some((name, valid_uri))
             },
             Err(e) => {
-                error!("Invalid URI provided: {}. Error: {}", uri, e);
+                error!("Invalid URI provided: {uri}. Error: {e}");
                 None
             }
         })
@@ -180,7 +193,13 @@ impl WebsocketGenerator {
             .websockets
             .into_iter()
             .map(|(name, socket_config)| {
-                WebSocketClient::new(socket_config, sender.clone(), name, config.max_message_size)
+                WebSocketClient::new(
+                    socket_config,
+                    sender.clone(),
+                    name,
+                    config.max_message_size,
+                    config.max_frame_size,
+                )
             })
             .collect();
 
@@ -236,6 +255,7 @@ struct WebSocketClient {
     /// The maximum size of a message received from a socket that will be processed.
     /// If not specified, the default value from `default_message_size` is used (`64 kB`)
     max_message_size: usize,
+    max_frame_size: usize,
 }
 
 impl WebSocketClient {
@@ -246,6 +266,7 @@ impl WebSocketClient {
         sender: Sender<Message>,
         name: String,
         max_message_size: usize,
+        max_frame_size: usize,
     ) -> Self {
         let uri_selector = UriSelector::new(
             configuration.uris.clone(),
@@ -259,6 +280,7 @@ impl WebSocketClient {
             name,
             uri_selector,
             max_message_size,
+            max_frame_size,
         }
     }
 
@@ -285,7 +307,14 @@ impl WebSocketClient {
             return None;
         };
 
-        if let Ok(socket) = establish_connection(&uri, &self.configuration.headers).await {
+        if let Ok(socket) = establish_connection(
+            &uri,
+            &self.configuration.headers,
+            self.max_message_size,
+            self.max_frame_size,
+        )
+        .await
+        {
             // Mark the WebSocket as healthy again
             self.uri_selector.reset_failure();
 
@@ -376,17 +405,11 @@ impl WebSocketClient {
         let log_type = self.configuration.log_type.clone();
         let log_source = LogSource::Generator(Generator::WebSocketExternal(generator_name.clone()));
         let logbacks_allowed = self.configuration.logbacks_allowed.clone();
-        let max_message_size = self.max_message_size.clone();
 
         tokio::spawn(async move {
             while let Some(message) = read.next().await {
                 match message {
                     Ok(msg) => {
-                        if msg.len() > max_message_size {
-                            warn!("Message of size {} bytes exceeded the maximum allowed size of {max_message_size} bytes and was not processed.", msg.len());
-                            continue;
-                        }
-
                         let log_message = Message::new(
                             log_type.clone(),
                             msg.into_data(),
@@ -394,8 +417,8 @@ impl WebSocketClient {
                             logbacks_allowed.clone(),
                         );
 
-                        if sender.send(log_message).is_err() {
-                            error!("Failed to send log to executor");
+                        if let Err(e) = sender.send(log_message) {
+                            error!("Failed to send log to executor: {e}");
                         }
                     }
                     Err(e) => {
@@ -434,17 +457,17 @@ impl WebSocketClient {
             Some(write_handle) => {
                 tokio::select! {
                     _ = write_handle => {
-                        error!("Write task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Write task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
                     },
                     _ = read_handle => {
-                        error!("Read task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Read task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
                     },
                 }
             }
             None => {
                 tokio::select! {
                     _ = read_handle => {
-                        error!("Read task for WebSocket: [{}] using socket [{}] finished unexpectedly", &self.name, uri_name);
+                        error!("Read task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
                     },
                 }
             }
@@ -452,9 +475,9 @@ impl WebSocketClient {
     }
 }
 
-/// Establishes a WebSocket connection to the specified URI with optional custom headers.
+/// Establishes a WebSocket connection to the specified URI with optional custom headers and message size limit.
 ///
-/// This function attempts to establish a WebSocket connection to the given URI using `connect_async`.
+/// This function attempts to establish a WebSocket connection to the given URI using `connect_async_with_config`.
 /// If successful, it returns the WebSocket stream. If the connection attempt fails, it logs an error
 /// message and returns `Errors::SocketCreationFailure`. Optionally, custom headers can be provided
 /// to be included in the connection request.
@@ -462,6 +485,8 @@ impl WebSocketClient {
 /// # Parameters
 /// - `uri`: A reference to the URI of the WebSocket.
 /// - `user_configured_headers`: An optional reference to a hashmap containing custom headers to be included in the request.
+/// - `max_message_size`: The maximum size of an incoming message
+/// - `max_frame_size`: The maximum size of a single incoming message frame
 ///
 /// # Returns
 /// A `Result` containing the WebSocket stream on success, or an `Errors` enum variant on failure.
@@ -476,6 +501,8 @@ impl WebSocketClient {
 async fn establish_connection(
     uri: &Uri,
     user_configured_headers: &Option<HeaderMap>,
+    max_message_size: usize,
+    max_frame_size: usize,
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Errors> {
     let mut request = uri
         .into_client_request()
@@ -488,10 +515,17 @@ async fn establish_connection(
         }
     }
 
-    let (socket, _) = connect_async(request).await.map_err(|e| {
-        error!("Failed to establish connection to [{uri}]. Error: {e}");
-        Errors::SocketCreationFailure
-    })?;
+    // Configure WebSocket with message size limit
+    let mut config = WebSocketConfig::default();
+    config.max_message_size = Some(max_message_size);
+    config.max_frame_size = Some(max_frame_size);
+
+    let (socket, _) = connect_async_with_config(request, Some(config), false)
+        .await
+        .map_err(|e| {
+            error!("Failed to establish connection to [{uri}]. Error: {e}");
+            Errors::SocketCreationFailure
+        })?;
 
     Ok(socket)
 }
