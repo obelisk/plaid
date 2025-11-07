@@ -340,3 +340,41 @@ pub struct GetLogsRequest {
     /// The topics to filter logs by
     pub topics: Option<Vec<String>>,
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct GetBlockRequest {
+    /// The chain ID to query
+    pub chain_id: ChainId,
+    /// The block tag to query
+    pub block_tag: BlockTag,
+    /// If true, returns full transaction objects; if false, returns only transaction hashes.
+    pub hydrated_transactions: bool,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Block {
+    /// The base fee per gas for this block (EIP-1559). None for pre-EIP-1559 blocks.
+    #[serde(rename = "baseFeePerGas")]
+    pub base_fee_per_gas: Option<String>,
+    /// Hash of the block
+    pub hash: String,
+    /// Bloom filter for light clients to quickly retrieve related logs
+    #[serde(rename = "logsBloom")]
+    pub logs_bloom: String,
+    /// Block number
+    pub number: String,
+    /// Timestamp of the block
+    pub timestamp: String,
+    /// Transactions included in the block
+    pub transactions: BlockTransactions,
+}
+
+/// Representation of an Ethereum block with full transaction objects.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum BlockTransactions {
+    /// Only transaction hashes
+    Hashes(Vec<String>),
+    /// Full transaction objects
+    Full(Vec<Transaction>),
+}

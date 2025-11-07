@@ -14,8 +14,8 @@ use crate::{
 };
 use http::StatusCode;
 use plaid_stl::blockchain::evm::types::{
-    ChainId, EstimateGasRequest, EthCallRequest, GetAddressMetadataRequest, GetGasPriceRequest,
-    GetLogsRequest, GetTransactionRequest, SendRawTransactionRequest,
+    ChainId, EstimateGasRequest, EthCallRequest, GetAddressMetadataRequest, GetBlockRequest,
+    GetGasPriceRequest, GetLogsRequest, GetTransactionRequest, SendRawTransactionRequest,
 };
 use reqwest::Client;
 use serde::{de, Deserialize};
@@ -350,6 +350,26 @@ impl EvmClient {
         let params = serde_json::Value::Array(vec![Value::Object(object)]);
 
         let request = JsonRpcRequest::new(RpcMethods::GetLogs, Some(params));
+
+        self.execute_rpc_call(selector, request, module).await
+    }
+
+    /// Returns information about a block by block number or tag.
+    pub async fn get_block(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request =
+            serde_json::from_str::<GetBlockRequest>(params).map_err(EvmCallError::SerdeError)?;
+
+        let selector = self.get_node_selector(request.chain_id)?;
+
+        let params = serde_json::Value::Array(vec![
+            Value::String(request.block_tag.to_string()),
+            Value::Bool(request.hydrated_transactions),
+        ]);
+        let request = JsonRpcRequest::new(RpcMethods::GetBlock, Some(params));
 
         self.execute_rpc_call(selector, request, module).await
     }
