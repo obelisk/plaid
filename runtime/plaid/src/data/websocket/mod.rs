@@ -253,8 +253,10 @@ struct WebSocketClient {
     /// Manages a list of URI entries and handles the selection and retry logic for connection attempts.
     uri_selector: UriSelector,
     /// The maximum size of a message received from a socket that will be processed.
-    /// If not specified, the default value from `default_message_size` is used (`64 kB`)
+    /// If not specified, the default value from `default_message_size` is used (`64 KiB`)
     max_message_size: usize,
+    /// The maximum size of a frame received from a socket that will be processed.
+    /// If not specified, the default value from `default_frame_size` is used (`16 KiB`)
     max_frame_size: usize,
 }
 
