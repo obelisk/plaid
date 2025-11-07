@@ -17,6 +17,7 @@ pub enum RpcMethods {
     GetBalance,
     EstimateGas,
     GetLogs,
+    GetBlock,
 }
 
 impl Display for RpcMethods {
@@ -31,6 +32,7 @@ impl Display for RpcMethods {
             Self::GetBalance => write!(f, "eth_getBalance"),
             Self::EstimateGas => write!(f, "eth_estimateGas"),
             Self::GetLogs => write!(f, "eth_getLogs"),
+            Self::GetBlock => write!(f, "eth_getBlockByNumber"),
         }
     }
 }
