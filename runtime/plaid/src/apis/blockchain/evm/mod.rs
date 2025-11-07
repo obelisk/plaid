@@ -395,7 +395,7 @@ impl EvmClient {
     ) -> Result<String, ApiError> {
         let mut last_error = EvmCallError::AllNodesFailed;
 
-        for attempt in 0..=self.max_retries {
+        for attempt in 0..self.max_retries {
             // Get the next node to try
             let Some(node) = selector.select_node() else {
                 return Err(EvmCallError::NoNodesForChain { id: selector.id }.into());
