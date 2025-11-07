@@ -348,7 +348,7 @@ pub fn get_logs(
     chain_id: impl Into<ChainId>,
     from_block: BlockTag,
     to_block: BlockTag,
-    address: Option<String>,
+    address: Option<Vec<String>>,
     topics: Option<Vec<String>>,
 ) -> Result<DetailedRpcResponse, PlaidFunctionError> {
     extern "C" {
