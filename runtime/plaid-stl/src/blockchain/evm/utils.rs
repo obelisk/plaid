@@ -2,6 +2,7 @@ use serde::de::DeserializeOwned;
 
 use crate::blockchain::evm::types::{BasicRpcResponse, DetailedRpcResponse};
 
+#[derive(Debug)]
 pub enum EvmError {
     FailedToDeserialize(serde_json::Error),
     RpcError {
