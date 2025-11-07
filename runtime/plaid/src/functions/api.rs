@@ -561,6 +561,7 @@ impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_balance, AL
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, estimate_gas, ALLOW_IN_TEST_MODE);
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, eth_call, ALLOW_IN_TEST_MODE);
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, gas_price, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_logs, ALLOW_IN_TEST_MODE);
 
 pub fn to_api_function(
     name: &str,
@@ -958,6 +959,9 @@ pub fn to_api_function(
         }
         "blockchain_evm_gas_price" => {
             Function::new_typed_with_env(&mut store, &env, blockchain_evm_gas_price)
+        }
+        "blockchain_evm_get_logs" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_logs)
         }
 
         // No match
