@@ -3,7 +3,7 @@
 set -e
 
 # Define what webhook within Plaid we're going to call
-URL="dynamodbtest"
+URL="test_dynamodb"
 FILE="received_data.$URL.txt"
 
 # Start the webhook

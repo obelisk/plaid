@@ -19,7 +19,8 @@ allowed_rules = [
     "test_aes_enc_dec.wasm",
     "test_vec_entrypoint.wasm",
     "test_jwt.wasm",
-    "test_redis_cache_eviction.wasm"
+    "test_redis_cache_eviction.wasm",
+    "test_dynamodb"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
