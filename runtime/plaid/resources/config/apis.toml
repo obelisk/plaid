@@ -201,12 +201,14 @@ secret_key = ""
 # rw = ["another_rule.wasm"]
 
 # DynamoDB (using IAM)
-# [apis."aws"]
-# [apis."aws"."dynamodb"]
-# local_endpoint = false
-# r = ["some_rule.wasm"]
-# rw = ["another_rule.wasm"]
-# [apis."aws"."dynamodb".authentication]
+[apis."aws"]
+[apis."aws"."dynamodb"]
+[apis."aws"."dynamodb".authentication]
+local_endpoint = true
+[rw]
+local_test = ["test_dynamodb.wasm"]
+
+[r]
 
 #[apis."github"]
 #[apis."github".authentication]

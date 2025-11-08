@@ -11,24 +11,25 @@ use std::{
     sync::Arc,
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::apis::ApiError;
 use crate::{get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
 
 /// Defines configuration for the DynamoDB API
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct DynamoDbConfig {
+    /// Enable dynamodb local endpoint for testing
+    local_endpoint: bool,
     /// This can either be:
     /// - `IAM`: Uses the IAM role assigned to the instance or environment.
     /// - `ApiKey`: Uses explicit credentials, including an access key ID, secret access key, and region.
+    #[serde(skip_serializing)]
     authentication: AwsAuthentication,
     /// Configured writers - maps a table name to a list of rules that are allowed to READ or WRITE data
     rw: HashMap<String, HashSet<String>>,
     /// Configured readers - maps a table name to a list of rules that are allowed to READ data
     r: HashMap<String, HashSet<String>>,
-    /// Enable dynamodb local endpoint for testing
-    local_endpoint: bool,
 }
 
 /// Represents the DynamoDB API client.
@@ -567,24 +568,28 @@ pub mod tests {
         })
     }
 
-    // impl DynamoDb {
-    //     // constructor for the local instance of DynamoDB
-    //     pub async fn local_endpoint(
-    //         r: HashMap<String, HashSet<String>>,
-    //         rw: HashMap<String, HashSet<String>>,
-    //     ) -> Self {
-    //         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-    //             // DynamoDB run locally uses port 8000 by default.
-    //             .endpoint_url("http://localhost:8000")
-    //             .load()
-    //             .await;
-    //         let dynamodb_local_config = aws_sdk_dynamodb::config::Builder::from(&config).build();
-    //
-    //         let client = aws_sdk_dynamodb::Client::from_conf(dynamodb_local_config);
-    //
-    //         Self { client, r, rw }
-    //     }
-    // }
+    #[test]
+    fn serialize_config() {
+        let readers = json!({
+           "table_1": ["module_a"],
+           "table_2": ["module_b"]
+        });
+        let readers = from_value::<HashMap<String, HashSet<String>>>(readers).unwrap();
+        let writers = json!({
+           "table_1": ["module_a"],
+           "table_2": ["module_b"]
+        });
+        let writers = from_value::<HashMap<String, HashSet<String>>>(writers).unwrap();
+
+        let cfg = DynamoDbConfig {
+            authentication: AwsAuthentication::Iam {},
+            local_endpoint: true,
+            r: readers,
+            rw: writers,
+        };
+
+        println!("{}", toml::to_string(&cfg).unwrap());
+    }
 
     #[tokio::test]
     async fn permission_checks() {
