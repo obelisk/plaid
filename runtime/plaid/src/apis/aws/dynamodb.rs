@@ -27,6 +27,8 @@ pub struct DynamoDbConfig {
     rw: HashMap<String, HashSet<String>>,
     /// Configured readers - maps a table name to a list of rules that are allowed to READ data
     r: HashMap<String, HashSet<String>>,
+    /// enable dynamodb local mode for testing
+    local_endpoint: bool,
 }
 
 /// Represents the DynamoDB API client.
@@ -53,11 +55,34 @@ impl DynamoDb {
             authentication,
             rw,
             r,
+            local_endpoint,
         } = config;
+
+        if local_endpoint {
+            return DynamoDb::local_endpoint(r, rw).await;
+        }
+
         let sdk_config = get_aws_sdk_config(&authentication).await;
         let client = Client::new(&sdk_config);
 
         Self { client, rw, r }
+    }
+
+    /// constructor for the local instance of DynamoDB
+    async fn local_endpoint(
+        r: HashMap<String, HashSet<String>>,
+        rw: HashMap<String, HashSet<String>>,
+    ) -> Self {
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            // DynamoDB run locally uses port 8000 by default.
+            .endpoint_url("http://localhost:8000")
+            .load()
+            .await;
+        let dynamodb_local_config = aws_sdk_dynamodb::config::Builder::from(&config).build();
+
+        let client = aws_sdk_dynamodb::Client::from_conf(dynamodb_local_config);
+
+        Self { client, r, rw }
     }
 
     fn check_module_permissions(
@@ -542,24 +567,24 @@ pub mod tests {
         })
     }
 
-    impl DynamoDb {
-        // constructor for the local instance of DynamoDB
-        pub async fn local_endpoint(
-            r: HashMap<String, HashSet<String>>,
-            rw: HashMap<String, HashSet<String>>,
-        ) -> Self {
-            let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                // DynamoDB run locally uses port 8000 by default.
-                .endpoint_url("http://localhost:8000")
-                .load()
-                .await;
-            let dynamodb_local_config = aws_sdk_dynamodb::config::Builder::from(&config).build();
-
-            let client = aws_sdk_dynamodb::Client::from_conf(dynamodb_local_config);
-
-            Self { client, r, rw }
-        }
-    }
+    // impl DynamoDb {
+    //     // constructor for the local instance of DynamoDB
+    //     pub async fn local_endpoint(
+    //         r: HashMap<String, HashSet<String>>,
+    //         rw: HashMap<String, HashSet<String>>,
+    //     ) -> Self {
+    //         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+    //             // DynamoDB run locally uses port 8000 by default.
+    //             .endpoint_url("http://localhost:8000")
+    //             .load()
+    //             .await;
+    //         let dynamodb_local_config = aws_sdk_dynamodb::config::Builder::from(&config).build();
+    //
+    //         let client = aws_sdk_dynamodb::Client::from_conf(dynamodb_local_config);
+    //
+    //         Self { client, r, rw }
+    //     }
+    // }
 
     #[tokio::test]
     async fn permission_checks() {
