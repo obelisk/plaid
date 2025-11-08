@@ -27,7 +27,7 @@ pub struct DynamoDbConfig {
     rw: HashMap<String, HashSet<String>>,
     /// Configured readers - maps a table name to a list of rules that are allowed to READ data
     r: HashMap<String, HashSet<String>>,
-    /// enable dynamodb local mode for testing
+    /// enable dynamodb local endpoint for testing
     local_endpoint: bool,
 }
 
