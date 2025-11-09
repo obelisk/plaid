@@ -85,7 +85,7 @@ mod tests {
         // Create async HTTP client
         let client = Client::new();
 
-        // Exchange JWT for access token asynchronously
+        // Exchange JWT for access token
         let token_res = client
             .post("https://oauth2.googleapis.com/token")
             .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
@@ -98,7 +98,7 @@ mod tests {
             .unwrap();
         let token: TokenResponse = token_res.json().await.unwrap();
 
-        // Create new Google Doc via Drive API asynchronously
+        // Create new Google Doc via Drive API
         let create_body = json!({
             "name": doc_title,
             "mimeType": "application/vnd.google-apps.document",
@@ -117,7 +117,7 @@ mod tests {
         let file: FileResponse = from_value(file).unwrap();
         println!("Created new Doc with ID: {}", file.id);
 
-        // Add sample text via Docs API asynchronously
+        // Add sample text via Docs API
         let update_body = json!({
             "requests": [{
                 "insertText": {
