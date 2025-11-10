@@ -63,13 +63,22 @@ impl Yubikey {
             .remove("h")
             .ok_or(ApiError::YubikeyError(YubikeyError::NoSignature))?;
 
-        // Rebuild the signed response
-        let mut signed_data = String::new();
-        for (key, value) in response_items.iter() {
-            let param = format!("{}={}&", key, value);
-            signed_data.push_str(param.as_ref());
+        // This should never happen if the Yubico API behaves appropriately but,
+        // out of an abundance of caution, we check that after removing the signature
+        // we have some fields left. If not, we would be checking a signature over an
+        // empty string, which could cause false positives.
+        if response_items.is_empty() {
+            return Err(ApiError::YubikeyError(YubikeyError::Other(
+                "Nothing but a signature was returned".to_string(),
+            )));
         }
-        signed_data.pop();
+
+        // Rebuild the signed response
+        let signed_data = response_items
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join("&");
 
         // Validate the signature matches what we calculated
         if let Err(_) = hmac::verify(
