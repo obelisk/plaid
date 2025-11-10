@@ -203,7 +203,6 @@ secret_key = ""
 # DynamoDB (using IAM)
 [apis."aws"]
 [apis."aws"."dynamodb"]
-[apis."aws"."dynamodb".authentication]
 local_endpoint = true
 [rw]
 local_test = ["test_dynamodb.wasm"]
