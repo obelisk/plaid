@@ -19,7 +19,6 @@ use aws::s3::S3Errors;
 #[cfg(feature = "aws")]
 use aws::{Aws, AwsConfig};
 
-use crate::{data::DelayedMessage, executor::Message};
 #[cfg(feature = "aws")]
 use aws_sdk_dynamodb::operation::delete_item::DeleteItemError;
 #[cfg(feature = "aws")]
