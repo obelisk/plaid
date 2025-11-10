@@ -204,10 +204,11 @@ secret_key = ""
 [apis."aws"]
 [apis."aws"."dynamodb"]
 local_endpoint = true
-[rw]
+[apis."aws"."dynamodb".authentication]
+[apis."aws"."dynamodb".rw]
 local_test = ["test_dynamodb.wasm"]
 
-[r]
+[apis."aws"."dynamodb".r]
 
 #[apis."github"]
 #[apis."github".authentication]
