@@ -305,6 +305,9 @@ impl PlaidModule {
         // Get the computation limit for the module
         let computation_limit =
             get_module_computation_limit(computation_amount, &filename, log_type);
+        if computation_limit == 0 {
+            return Err(Errors::InvalidComputationLimit(computation_limit));
+        }
 
         // Get the memory limit for the module
         let page_limit = get_module_page_count(memory_page_count, &filename, log_type);
