@@ -17,6 +17,11 @@ env:
 jobs:
   ubuntu-cranelift:
     runs-on: ubuntu-latest
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
 
     steps:
     - name: Setup Rust
