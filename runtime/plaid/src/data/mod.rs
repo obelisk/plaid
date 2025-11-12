@@ -599,17 +599,6 @@ pub async fn get_and_process_dg_logs(
     }
 }
 
-/// Custom parser to convert user provided duration (in milliseconds) to a `Duration`.
-/// Returns an error if deserialization to `u64` fails.
-fn parse_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let duration: u64 = u64::deserialize(deserializer)?;
-
-    Ok(Duration::from_millis(duration))
-}
-
 /// Parse the `link` header returned by GitHub or Okta and extract the URL for `next` page.
 /// More info: https://docs.github.com/en/enterprise-cloud@latest/rest/using-the-rest-api/using-pagination-in-the-rest-api?apiVersion=2022-11-28#using-link-headers
 /// https://developer.okta.com/docs/api/#link-header

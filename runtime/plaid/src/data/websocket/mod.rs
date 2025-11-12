@@ -1,7 +1,6 @@
 mod selector;
 
-use super::parse_duration;
-use crate::{executor::Message, logging::Logger};
+use crate::{executor::Message, logging::Logger, parse_duration};
 use crossbeam_channel::Sender;
 use futures_util::{
     stream::{SplitSink, SplitStream},
