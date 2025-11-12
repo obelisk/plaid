@@ -646,9 +646,15 @@ pub mod tests {
     async fn put_query_delete() {
         // Initialize the client
         let table_name = String::from("local_test");
-        let writers = json!({table_name.clone(): ["test_module"]});
-        let writers = from_value::<HashMap<String, HashSet<String>>>(writers).unwrap();
-        let client = DynamoDb::local_endpoint(HashMap::new(), writers).await;
+        let rw = json!({table_name.clone(): ["test_module"]});
+        let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
+        let cfg = DynamoDbConfig {
+            local_endpoint: true,
+            authentication: AwsAuthentication::Iam {},
+            rw,
+            r: HashMap::new(),
+        };
+        let client = DynamoDb::new(cfg).await;
         let m = test_module("test_module", true);
 
         // PutItem with all attribute types
