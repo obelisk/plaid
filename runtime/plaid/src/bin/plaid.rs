@@ -49,6 +49,10 @@ impl std::error::Error for Errors {}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install default rustls crypto provider");
+
     info!("Plaid is booting up, please standby...");
 
     info!("Reading configuration");
