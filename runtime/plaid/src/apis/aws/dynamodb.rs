@@ -76,6 +76,7 @@ impl DynamoDb {
     ) -> Self {
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             // DynamoDB run locally uses port 8000 by default.
+            .test_credentials()
             .endpoint_url("http://localhost:8000")
             .load()
             .await;
