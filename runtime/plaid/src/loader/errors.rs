@@ -7,7 +7,6 @@ pub enum Errors {
     SigningError(sshcerts::error::Error),
     NotEnoughValidSignatures(usize, usize),
     FileError(std::io::Error),
-    InvalidComputationLimit(u64),
 }
 
 impl Display for Errors {
@@ -24,9 +23,6 @@ impl Display for Errors {
                 "Expected {expected} valid signatures but only received {received}"
             ),
             Self::FileError(error) => write!(f, "IO error: {error}"),
-            Self::InvalidComputationLimit(v) => {
-                write!(f, "The value [{v}] is not a valid computation limit")
-            }
         }
     }
 }
