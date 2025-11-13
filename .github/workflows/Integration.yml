@@ -13,6 +13,11 @@ env:
   CARGO_TERM_COLOR: always
   SLACK_TEST_WEBHOOK: ${{ secrets.SLACK_TEST_WEBHOOK }}
   SLACK_TEST_BOT_TOKEN: ${{ secrets.SLACK_TEST_BOT_TOKEN }}
+  # fake for AWS CLI to work with local dynamodb container
+  AWS_ACCESS_KEY_ID: test123 
+  AWS_SECRET_ACCESS_KEY: test123 
+  AWS_REGION: us-east-1
+  TABLE_NAME: local_test
 
 jobs:
   ubuntu-cranelift:
