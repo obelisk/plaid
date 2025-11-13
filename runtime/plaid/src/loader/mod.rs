@@ -106,8 +106,10 @@ pub struct Configuration {
     /// What the log type of a module should be if it's not the first part of the filename
     pub log_type_overrides: HashMap<String, String>,
     /// How much computation a module is allowed to do
+    #[serde(deserialize_with = "deserialize_limited_amount")]
     pub computation_amount: LimitedAmount,
     /// How much memory a module is allowed to use
+    #[serde(deserialize_with = "deserialize_limited_amount")]
     pub memory_page_count: LimitedAmount,
     /// How many bytes a module is allowed to store in persistent storage
     pub storage_size: LimitableAmount,
@@ -151,6 +153,35 @@ pub struct Configuration {
     /// If this value is set, Plaid will treat it as an absolute path, create a text file and write "READY"
     /// when the system is fully up and ready to receive traffic.
     pub readiness_check_file: Option<String>,
+}
+
+/// Deserializer for a LimitedAmount where none of the provided values can be 0.
+fn deserialize_limited_amount<'de, D>(deserializer: D) -> Result<LimitedAmount, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let raw = LimitedAmount::deserialize(deserializer)?;
+
+    // Validate: no zeros allowed anywhere
+    if raw.default == 0 {
+        return Err(de::Error::custom("`default` cannot be zero"));
+    }
+
+    if let Some((k, _)) = raw.log_type.iter().find(|(_, &v)| v == 0) {
+        return Err(de::Error::custom(format!("`log_type.{k}` cannot be zero")));
+    }
+
+    if let Some((k, _)) = raw.module_overrides.iter().find(|(_, &v)| v == 0) {
+        return Err(de::Error::custom(format!(
+            "`module_overrides.{k}` cannot be zero"
+        )));
+    }
+
+    Ok(LimitedAmount {
+        default: raw.default,
+        log_type: raw.log_type,
+        module_overrides: raw.module_overrides,
+    })
 }
 
 /// This structure defines the parameters required to validate signatures for modules.
