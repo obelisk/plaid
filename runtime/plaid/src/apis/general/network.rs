@@ -27,6 +27,9 @@ struct DynamicWebRequestResponse {
     code: Option<u16>,
     /// Response data, which can be either text or binary
     data: Option<ResponseData>,
+    /// Certificate chain from the server
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cert_chain: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -48,6 +51,9 @@ pub struct Request {
     return_body: bool,
     /// Flag to return the code from the request
     return_code: bool,
+    /// Flag to return the certificate chain from the server
+    #[serde(default)] // default to false
+    return_cert_chain: bool,
     /// Optional root TLS certificate to use for this request.  
     /// When set, the request will be sent via a special HTTP client configured with this certificate.
     #[serde(default, deserialize_with = "certificate_deserializer")]
@@ -231,6 +237,7 @@ impl General {
                 let mut ret = DynamicWebRequestResponse {
                     code: None,
                     data: None,
+                    cert_chain: None,
                 };
 
                 if request_specification.return_code {
