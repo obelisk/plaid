@@ -22,3 +22,11 @@ curl -X POST -H "Content-Type: application/json" -d '' http://$PLAID_LOCATION/we
 sleep 1
 kill $RH_PID 2>&1 > /dev/null
 
+RESULT=$(head -n 1 $FILE)
+rm -f $FILE
+
+if [[ $RESULT == "OK" ]]; then
+    exit 0
+else
+    exit 1
+fi

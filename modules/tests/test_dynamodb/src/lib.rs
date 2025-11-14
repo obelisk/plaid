@@ -6,6 +6,7 @@ use plaid_stl::{
     aws::dynamodb::{self, DeleteItemInput, PutItemInput, QueryInput},
     entrypoint_with_source,
     messages::LogSource,
+    network::make_named_request,
     plaid,
 };
 
@@ -113,6 +114,9 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
         ));
         return Err(1);
     }
+
+    // If we are here, then everything worked fine (no unwraps or early returns), so we send an OK
+    make_named_request("test-response", "OK", HashMap::new()).unwrap();
 
     Ok(())
 }
