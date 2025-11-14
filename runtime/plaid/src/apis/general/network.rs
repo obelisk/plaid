@@ -53,7 +53,7 @@ pub struct Request {
     return_code: bool,
     /// Flag to return the certificate chain from the server
     #[serde(default)] // default to false
-    return_cert_chain: bool,
+    pub return_cert_chain: bool,
     /// Optional root TLS certificate to use for this request.  
     /// When set, the request will be sent via a special HTTP client configured with this certificate.
     #[serde(default, deserialize_with = "certificate_deserializer")]
