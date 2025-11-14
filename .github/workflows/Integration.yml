@@ -29,7 +29,7 @@ jobs:
           - 8000:8000
 
     steps:
-    - name: Create Table
+    - name: Create DynamoDB Table
       run: |
         aws dynamodb create-table \
           --table-name $TABLE_NAME \
@@ -64,7 +64,7 @@ jobs:
     - name: Run Integration Tests on Cranelift
       run: ./testing/integration.sh cranelift
 
-    - name: Delete table
+    - name: Delete DynamoDB Table
       run: |
         aws dynamodb delete-table \
           --table-name $TABLE_NAME \
@@ -74,9 +74,14 @@ jobs:
 
   ubuntu-llvm:
     runs-on: ubuntu-latest
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
 
     steps:
-    - name: Create Table
+    - name: Create DynamoDB Table
       run: |
         aws dynamodb create-table \
           --table-name $TABLE_NAME \
@@ -112,7 +117,7 @@ jobs:
     - name: Run Integration Tests on LLVM
       run: ./testing/integration.sh llvm
 
-    - name: Delete table
+    - name: Delete DynamoDB Table
       run: |
         aws dynamodb delete-table \
           --table-name $TABLE_NAME \
@@ -122,9 +127,14 @@ jobs:
 
   ubuntu-redis:
     runs-on: ubuntu-latest
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
 
     steps:
-    - name: Create Table
+    - name: Create DynamoDB Table
       run: |
         aws dynamodb create-table \
           --table-name $TABLE_NAME \
@@ -179,7 +189,7 @@ jobs:
       if: always()
       run: docker rm -f redis-test
 
-    - name: Delete table
+    - name: Delete DynamoDB Table
       run: |
         aws dynamodb delete-table \
           --table-name $TABLE_NAME \
@@ -189,9 +199,14 @@ jobs:
 
   ubuntu-redis-auth:
     runs-on: ubuntu-latest
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
 
     steps:
-    - name: Create Table
+    - name: Create DynamoDB Table
       run: |
         aws dynamodb create-table \
           --table-name $TABLE_NAME \
@@ -251,7 +266,7 @@ jobs:
       if: always()
       run: docker rm -f redis-auth-test
 
-    - name: Delete table
+    - name: Delete DynamoDB Table
       run: |
         aws dynamodb delete-table \
           --table-name $TABLE_NAME \

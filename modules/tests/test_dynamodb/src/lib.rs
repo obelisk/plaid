@@ -55,10 +55,13 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
             return Err(1);
         }
         Ok(output) => {
-            let json = serde_json::to_string(&output).unwrap();
-            plaid::print_debug_string(&format!("put_item output: {json}"));
-            if json != json!({"attributes":null}) {
-                plaid::print_debug_string(&format!("error: put_item output_json mismatch: {json}"));
+            let output_json = to_value(&output).unwrap();
+            let expected = json!({"attributes":null});
+            plaid::print_debug_string(&format!("put_item output: {output_json}"));
+            if output_json != expected {
+                plaid::print_debug_string(&format!(
+                    "error: put_item output_json mismatch. expected {expected} got {output_json}"
+                ));
                 return Err(1);
             }
         }
@@ -77,10 +80,11 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
     };
     let output = dynamodb::query(input).unwrap();
     let output_json = to_value(&output).unwrap();
-    if output_json
-        != json!({"items":[{"age":33,"binaries":["ZGF0YTE=","ZGF0YTI="],"binary_field":{"_binary":"YmluYXJ5X2RhdGE="},"is_active":true,"metadata":{"city":"New York","country":"USA"},"name":"Jane Doe","null_field":null,"pk":"124","ratings":[3.8,4.5,5],"scores":[88,92,95],"tags":["aws","dev","rust"],"timestamp":"124"}]})
-    {
-        plaid::print_debug_string(&format!("error: query output_json mismatch: {output_json}"));
+    let expected = json!({"items":[{"age":33,"binaries":["ZGF0YTE=","ZGF0YTI="],"binary_field":{"_binary":"YmluYXJ5X2RhdGE="},"is_active":true,"metadata":{"city":"New York","country":"USA"},"name":"Jane Doe","null_field":null,"pk":"124","ratings":[3.8,4.5,5],"scores":[88,92,95],"tags":["aws","dev","rust"],"timestamp":"124"}]});
+    if output_json != expected {
+        plaid::print_debug_string(&format!(
+            "error: query output_json mismatch. expected {expected} got {output_json}"
+        ));
         return Err(1);
     }
 
@@ -102,11 +106,10 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
 
     let output = dynamodb::delete_item(input).unwrap();
     let output_json = to_value(&output).unwrap();
-    if output_json
-        != json!({"attributes":{"age":33,"binaries":["ZGF0YTE=","ZGF0YTI="],"binary_field":{"_binary":"YmluYXJ5X2RhdGE="},"is_active":true,"metadata":{"city":"New York","country":"USA"},"name":"Jane Doe","null_field":null,"pk":"124","ratings":[3.8,4.5,5],"scores":[88,92,95],"tags":["aws","dev","rust"],"timestamp":"124"}})
-    {
+    let expected = json!({"attributes":{"age":33,"binaries":["ZGF0YTE=","ZGF0YTI="],"binary_field":{"_binary":"YmluYXJ5X2RhdGE="},"is_active":true,"metadata":{"city":"New York","country":"USA"},"name":"Jane Doe","null_field":null,"pk":"124","ratings":[3.8,4.5,5],"scores":[88,92,95],"tags":["aws","dev","rust"],"timestamp":"124"}});
+    if output_json != expected {
         plaid::print_debug_string(&format!(
-            "error: delete_item output_json mismatch: {output_json}"
+            "error: delete_item output_json mismatch. expected {expected} got {output_json}"
         ));
         return Err(1);
     }
