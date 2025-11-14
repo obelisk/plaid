@@ -453,6 +453,12 @@ impl_new_sub_module_function_with_error_buffer!(
 );
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, kms, get_public_key, ALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, dynamodb, put_item, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, dynamodb, delete_item, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "aws")]
+impl_new_sub_module_function_with_error_buffer!(aws, dynamodb, query, ALLOW_IN_TEST_MODE);
 
 // S3
 #[cfg(feature = "aws")]
@@ -818,6 +824,20 @@ pub fn to_api_function(
         "aws_kms_get_public_key" => {
             Function::new_typed_with_env(&mut store, &env, aws_kms_get_public_key)
         }
+
+        // DynamoDB calls
+        #[cfg(feature = "aws")]
+        "aws_dynamodb_put_item" => {
+            Function::new_typed_with_env(&mut store, &env, aws_dynamodb_put_item)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_dynamodb_delete_item" => {
+            Function::new_typed_with_env(&mut store, &env, aws_dynamodb_delete_item)
+        }
+
+        #[cfg(feature = "aws")]
+        "aws_dynamodb_query" => Function::new_typed_with_env(&mut store, &env, aws_dynamodb_query),
 
         // PagerDuty Calls
         "pagerduty_trigger_incident" => {

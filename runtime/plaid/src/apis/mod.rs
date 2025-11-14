@@ -19,6 +19,17 @@ use aws::s3::S3Errors;
 #[cfg(feature = "aws")]
 use aws::{Aws, AwsConfig};
 
+#[cfg(feature = "aws")]
+use aws_sdk_dynamodb::operation::delete_item::DeleteItemError;
+#[cfg(feature = "aws")]
+use aws_sdk_dynamodb::operation::put_item::PutItemError;
+#[cfg(feature = "aws")]
+use aws_sdk_dynamodb::operation::query::QueryError;
+#[cfg(feature = "aws")]
+use aws_sdk_kms::operation::get_public_key::GetPublicKeyError;
+#[cfg(feature = "aws")]
+use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
+
 use crate::{data::DelayedMessage, executor::Message};
 use crossbeam_channel::Sender;
 use general::{General, GeneralConfig};
@@ -81,6 +92,18 @@ pub enum ApiError {
     ConfigurationError(String),
     MissingParameter(String),
     GitHubError(github::GitHubError),
+    #[cfg(feature = "aws")]
+    SerdeError(String),
+    #[cfg(feature = "aws")]
+    DynamoDbPutItemError(SdkError<PutItemError>),
+    #[cfg(feature = "aws")]
+    DynamoDbDeleteItemError(SdkError<DeleteItemError>),
+    #[cfg(feature = "aws")]
+    DynamoDbQueryError(SdkError<QueryError>),
+    #[cfg(feature = "aws")]
+    KmsSignError(SdkError<SignError>),
+    #[cfg(feature = "aws")]
+    KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
     #[cfg(feature = "aws")]
     S3Error(aws::s3::S3Errors),
     #[cfg(feature = "aws")]
