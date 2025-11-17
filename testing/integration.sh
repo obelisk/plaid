@@ -157,9 +157,9 @@ if [ "$1" == "llvm" ]; then
 fi
 
 if [[ "$CACHE_BACKEND" == redis* ]]; then
-  FEATURES="sled,$1,redis"
+  FEATURES="sled,$1,redis,aws"
 else
-  FEATURES="sled,$1"
+  FEATURES="sled,$1,aws"
 fi
 
 cargo build --release --no-default-features --features $FEATURES
@@ -168,7 +168,7 @@ if [ $? -ne 0 ]; then
   # Exit with an error
   exit 1
 fi
-RUST_LOG=plaid=debug cargo run --bin=plaid --release --no-default-features --features $FEATURES -- --config ${CONFIG_WORKING_PATH} --secrets $SECRET_WORKING_PATH &
+RUST_LOG=plaid=debug,aws_config=debug,aws_sdk_dynamodb=debug cargo run --bin=plaid --release --no-default-features --features $FEATURES -- --config ${CONFIG_WORKING_PATH} --secrets $SECRET_WORKING_PATH &
 PLAID_PID=$!
 
 # Wait for Plaid to boot. When it's ready, a file called "plaid_ready" will be created.
