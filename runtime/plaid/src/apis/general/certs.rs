@@ -8,26 +8,12 @@ use rustls::{
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub fn der_to_pem(der: &[u8]) -> String {
-    let b64 = base64::encode(der);
-    let mut pem = String::new();
-    pem.push_str("-----BEGIN CERTIFICATE-----\n");
-    for (i, char) in b64.chars().enumerate() {
-        pem.push(char);
-        if (i + 1) % 64 == 0 {
-            pem.push('\n');
-        }
-    }
-    if !b64.is_empty() && b64.len() % 64 != 0 {
-        pem.push('\n');
-    }
-    pem.push_str("-----END CERTIFICATE-----\n");
-    pem
-}
-
 #[derive(Debug)]
+/// Custom rustls::ServerCertVerifier which captures certificates during verification
 pub struct CapturingVerifier {
+    /// A standard WebPkiServerVerifier used for verification
     inner: Arc<WebPkiServerVerifier>,
+    /// A list of captured certificates in DER format
     captured_chain: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
 }
 
@@ -81,6 +67,8 @@ impl ServerCertVerifier for CapturingVerifier {
     }
 }
 
+/// Builds a custom rustls ClientConfig using the CapturingVerifier
+/// To be used with Reqwest::Client
 pub fn capturing_verifier_tls_config(
     captured_chain: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
 ) -> Result<ClientConfig, Box<dyn std::error::Error>> {
@@ -117,6 +105,24 @@ pub fn capturing_verifier_tls_config(
         .set_certificate_verifier(Arc::new(custom_verifier));
 
     Ok(config)
+}
+
+/// Converts DER encoded certificate bytes to PEM encoded certificate string
+pub fn der_to_pem(der: &[u8]) -> String {
+    let b64 = base64::encode(der);
+    let mut pem = String::new();
+    pem.push_str("-----BEGIN CERTIFICATE-----\n");
+    for (i, char) in b64.chars().enumerate() {
+        pem.push(char);
+        if (i + 1) % 64 == 0 {
+            pem.push('\n');
+        }
+    }
+    if !b64.is_empty() && b64.len() % 64 != 0 {
+        pem.push('\n');
+    }
+    pem.push_str("-----END CERTIFICATE-----\n");
+    pem
 }
 
 #[cfg(test)]
