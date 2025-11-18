@@ -16,8 +16,9 @@ use rustls::{
     ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
 };
 
-use std::{collections::HashMap, error::Error, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use crate::apis::ApiError;
 use crate::{data::DelayedMessage, executor::Message};
 
 use super::default_timeout_seconds;
@@ -99,7 +100,7 @@ impl Clients {
                     // return cert chain
                     builder = if req.return_cert_chain {
                         // build custom tls config with capturing verifier
-                        let config = custom_tls_config(captured_certs.clone()).unwrap();
+                        let config = capturing_verifier_tls_config(captured_certs.clone()).unwrap();
 
                         // set custom tls config on client
                         builder.use_rustls_tls().use_preconfigured_tls(config)
@@ -119,6 +120,24 @@ impl Clients {
             default,
             specialized,
             captured_certs,
+        }
+    }
+
+    pub fn get_captured_certs(&self) -> Result<Option<Vec<String>>, ApiError> {
+        // TODO: retry if try_lock fails
+        let certs = self
+            .captured_certs
+            .try_lock()
+            .map_err(|_err| ApiError::ImpossibleError)?;
+
+        if let Some(chain_bytes) = &*certs {
+            // Convert each DER to PEM
+            let chain_pem: Vec<String> =
+                chain_bytes.iter().map(|bytes| der_to_pem(bytes)).collect();
+
+            Ok(Some(chain_pem))
+        } else {
+            Ok(None)
         }
     }
 }
@@ -210,7 +229,7 @@ impl ServerCertVerifier for CapturingVerifier {
     }
 }
 
-pub fn custom_tls_config(
+pub fn capturing_verifier_tls_config(
     captured_chain: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
 ) -> Result<ClientConfig, Box<dyn std::error::Error>> {
     // Set up root certificates using webpki-roots
@@ -248,6 +267,8 @@ pub fn custom_tls_config(
     Ok(config)
 }
 
+// TODO impl method to convert stored certs to option Vec<String>
+
 #[cfg(test)]
 mod tests {
 
@@ -259,7 +280,7 @@ mod tests {
         let captured_chain: Arc<Mutex<Option<Vec<Vec<u8>>>>> = Arc::new(Mutex::new(None));
 
         // build custom tls config with capturing verifier
-        let config = custom_tls_config(captured_chain.clone()).unwrap();
+        let config = capturing_verifier_tls_config(captured_chain.clone()).unwrap();
 
         // Create the reqwest client with the custom TLS config
         let client = Client::builder()

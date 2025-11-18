@@ -257,6 +257,11 @@ impl General {
                     };
                 }
 
+                if request_specification.return_cert_chain {
+                    let captured_certs = self.clients.get_captured_certs()?;
+                    ret.cert_chain = captured_certs
+                }
+
                 if let Ok(r) = serde_json::to_string(&ret) {
                     Ok(r)
                 } else {
