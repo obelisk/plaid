@@ -30,6 +30,10 @@ pub struct DynamoDbConfig {
     rw: HashMap<String, HashSet<String>>,
     /// Configured readers - maps a table name to a list of rules that are allowed to READ data
     r: HashMap<String, HashSet<String>>,
+    /// Reserved tables - list of 'reserved' table names which rules cannot access
+    /// For the purpose of preventing rules rule accessing 'storage' tables in
+    #[serde(default)]
+    reserved_tables: Option<HashSet<String>>,
 }
 
 /// Represents the DynamoDB API client.
@@ -41,9 +45,13 @@ pub struct DynamoDb {
     rw: HashMap<String, HashSet<String>>,
     /// Configured readers - maps a table name to a list of rules that are allowed to READ data
     r: HashMap<String, HashSet<String>>,
+    /// Reserved tables - list of 'reserved' table names which rules cannot access
+    /// For the purpose of preventing rules rule accessing 'storage' tables in
+    reserved_tables: Option<HashSet<String>>,
 }
 
 #[derive(PartialEq, PartialOrd)]
+/// Represents an access scope for a rule has to modify a DynamoDB table
 enum AccessScope {
     Read,
     Write,
@@ -57,22 +65,29 @@ impl DynamoDb {
             rw,
             r,
             local_endpoint,
+            reserved_tables,
         } = config;
 
         if local_endpoint {
-            return DynamoDb::local_endpoint(r, rw).await;
+            return DynamoDb::local_endpoint(r, rw, reserved_tables).await;
         }
 
         let sdk_config = get_aws_sdk_config(&authentication).await;
         let client = Client::new(&sdk_config);
 
-        Self { client, rw, r }
+        Self {
+            client,
+            rw,
+            r,
+            reserved_tables,
+        }
     }
 
-    /// constructor for the local instance of DynamoDB
+    /// Constructor for the local instance of DynamoDB
     async fn local_endpoint(
         r: HashMap<String, HashSet<String>>,
         rw: HashMap<String, HashSet<String>>,
+        reserved_tables: Option<HashSet<String>>,
     ) -> Self {
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             // DynamoDB run locally uses port 8000 by default.
@@ -83,9 +98,16 @@ impl DynamoDb {
 
         let client = aws_sdk_dynamodb::Client::from_conf(dynamodb_local_config);
 
-        Self { client, r, rw }
+        Self {
+            client,
+            r,
+            rw,
+            reserved_tables,
+        }
     }
 
+    /// Checks if module can perform given action
+    /// TODO: need to check if table is a 'reserved_table'
     fn check_module_permissions(
         &self,
         access_scope: AccessScope,
@@ -133,6 +155,15 @@ impl DynamoDb {
         }
     }
 
+    /// Creates a new item, or replaces an old item with a new item.
+    /// If an item that has the same primary key as the new item already exists in the specified table,
+    /// the new item completely replaces the existing item. You can perform a conditional put operation
+    /// (add a new item if one with the specified primary key doesn't exist),
+    /// or replace an existing item if it has certain attribute values.
+    /// You can return the item's attribute values in the same operation, using the ReturnValues parameter.
+    ///
+    /// More Info:
+    /// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_PutItem.html
     pub async fn put_item(
         &self,
         params: &str,
@@ -177,6 +208,13 @@ impl DynamoDb {
         serde_json::to_string(&out).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 
+    /// Deletes a single item in a table by primary key. You can perform a conditional delete operation that deletes the item if it exists, or if it has an expected attribute value.
+    /// In addition to deleting an item, you can also return the item's attribute values in the same operation, using the ReturnValues parameter.
+    /// Unless you specify conditions, the DeleteItem is an idempotent operation; running it multiple times on the same item or attribute does not result in an error response.
+    /// Conditional deletes are useful for deleting items only if specific conditions are met. If those conditions are met, DynamoDB performs the delete. Otherwise, the item is not deleted.
+    ///
+    /// More Info
+    /// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_DeleteItem.html
     pub async fn delete_item(
         &self,
         params: &str,
@@ -220,6 +258,15 @@ impl DynamoDb {
         serde_json::to_string(&out).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 
+    /// You must provide the name of the partition key attribute and a single value for that attribute.
+    /// Query returns all items with that partition key value.
+    /// Optionally, you can provide a sort key attribute and use a comparison operator to refine the search results.
+    ///
+    /// Use the KeyConditionExpression parameter to provide a specific value for the partition key.
+    /// The Query operation will return all of the items from the table or index with that partition key value.
+    ///
+    /// More Info
+    /// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_Query.html
     pub async fn query(&self, params: &str, module: Arc<PlaidModule>) -> Result<String, ApiError> {
         let QueryInput {
             table_name,
@@ -586,6 +633,7 @@ pub mod tests {
             local_endpoint: true,
             r: readers,
             rw: writers,
+            reserved_tables: None,
         };
 
         println!("{}", toml::to_string(&cfg).unwrap());
@@ -601,7 +649,7 @@ pub mod tests {
         let writers = json!({table_name.clone(): ["module_b"]});
         let writers = from_value::<HashMap<String, HashSet<String>>>(writers).unwrap();
 
-        let client = DynamoDb::local_endpoint(readers, writers).await;
+        let client = DynamoDb::local_endpoint(readers, writers, None).await;
 
         // modules
         let module_a = test_module("module_a", true); // reader
@@ -640,6 +688,8 @@ pub mod tests {
         client
             .check_module_permissions(AccessScope::Read, module_c.clone(), "unknown_table")
             .expect_err("expect to fail with BadRequest");
+
+        // TODO: add test case for reserved table names
     }
 
     #[tokio::test]
@@ -653,6 +703,7 @@ pub mod tests {
             authentication: AwsAuthentication::Iam {},
             rw,
             r: HashMap::new(),
+            reserved_tables: None,
         };
         let client = DynamoDb::new(cfg).await;
         let m = test_module("test_module", true);
