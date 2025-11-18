@@ -42,7 +42,7 @@ pub fn json_into_attributes(
     }
 }
 
-/// converts String into Typed ReturnValue DynamoDB API
+/// converts String into ReturnValue for DynamoDB API
 pub fn return_value_from_string(value: Option<String>) -> Result<Option<ReturnValue>, ApiError> {
     value
         .as_ref()

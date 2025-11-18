@@ -93,19 +93,57 @@ pub struct DeleteItemInput {
     /// A map of attribute names to AttributeValue objects, representing the primary key of the item to delete.
     /// For the primary key, you must provide all of the key attributes. For example, with a simple primary key, you only need to provide a value for the partition key. For a composite primary key, you must provide values for both the partition key and the sort key.
     pub key: HashMap<String, Value>,
+    /// One or more substitution tokens for attribute names in an expression. The following are some use cases for using ExpressionAttributeNames:
+    /// * To access an attribute whose name conflicts with a DynamoDB reserved word.
+    /// * To create a placeholder for repeating occurrences of an attribute name in an expression.
+    /// * To prevent special characters in an attribute name from being misinterpreted in an expression.
+    /// Use the # character in an expression to dereference an attribute name. For example, consider the following attribute name:
+    ///
+    ///     Percentile
+    ///
+    /// The name of this attribute conflicts with a reserved word, so it cannot be used directly in an expression. (For the complete list of reserved words, see Reserved Words in the Amazon DynamoDB Developer Guide). To work around this, you could specify the following for ExpressionAttributeNames:
+    ///
+    ///     {"#P":"Percentile"}
+    ///
+    /// You could then use this substitution in an expression, as in this example:
+    ///
+    ///     #P = :val
+    ///
+    /// More Info
+    /// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.AccessingItemAttributes.html
+    pub expression_attribute_names: Option<HashMap<String, String>>,
+    /// One or more values that can be substituted in an expression.
+    ///
+    /// Use the : (colon) character in an expression to dereference an attribute value. For example, suppose that you wanted to check whether the value of the ProductStatus attribute was one of the following:
+    ///
+    ///     Available | Backordered | Discontinued
+    ///
+    /// You would first need to specify ExpressionAttributeValues as follows:
+    ///
+    ///     { ":avail":{"S":"Available"}, ":back":{"S":"Backordered"}, ":disc":{"S":"Discontinued"} }
+    ///
+    /// You could then use these values in an expression, such as this:
+    ///
+    ///     ProductStatus IN (:avail, :back, :disc)
+    ///
+    /// More info
+    /// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.SpecifyingConditions.html
+    pub expression_attribute_values: Option<HashMap<String, Value>>,
     /// A condition that must be satisfied in order for a conditional PutItem operation to succeed.
+    ///
+    /// An expression can contain any of the following:
+    ///
+    /// Functions: attribute_exists | attribute_not_exists | attribute_type | contains | begins_with | size
+    ///
+    /// These function names are case-sensitive.
+    ///
+    /// Comparison operators: = | <> | < | > | <= | >= | BETWEEN | IN
+    ///
+    /// Logical operators: AND | OR | NOT
+    ///
     /// More Info
     /// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.SpecifyingConditions.html
     pub condition_expression: Option<String>,
-    /// One or more values that can be substituted in an expression.
-    /// Use the : (colon) character in an expression to dereference an attribute value.
-    /// More Info
-    /// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ExpressionAttributeNames.html
-    pub expression_attribute_names: Option<HashMap<String, String>>,
-    /// One or more substitution tokens for attribute names in an expression. The following are some use cases for using
-    /// More Info
-    /// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ExpressionAttributeValues.html
-    pub expression_attribute_values: Option<HashMap<String, Value>>,
     /// Use ReturnValues if you want to get the item attributes as they appeared before they were updated with the PutItem request. For PutItem, the valid values are:
     /// NONE - If ReturnValues is not specified, or if its value is NONE, then nothing is returned. (This setting is the default for ReturnValues.)
     /// ALL_OLD - If PutItem overwrote an attribute name-value pair, then the content of the old item is returned.
@@ -143,7 +181,41 @@ pub struct QueryInput {
     /// More Info
     /// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_Query.html#DDB-Query-request-KeyConditionExpression
     pub key_condition_expression: String,
+    /// One or more substitution tokens for attribute names in an expression. The following are some use cases for using ExpressionAttributeNames:
+    /// * To access an attribute whose name conflicts with a DynamoDB reserved word.
+    /// * To create a placeholder for repeating occurrences of an attribute name in an expression.
+    /// * To prevent special characters in an attribute name from being misinterpreted in an expression.
+    /// Use the # character in an expression to dereference an attribute name. For example, consider the following attribute name:
+    ///
+    ///     Percentile
+    ///
+    /// The name of this attribute conflicts with a reserved word, so it cannot be used directly in an expression. (For the complete list of reserved words, see Reserved Words in the Amazon DynamoDB Developer Guide). To work around this, you could specify the following for ExpressionAttributeNames:
+    ///
+    ///     {"#P":"Percentile"}
+    ///
+    /// You could then use this substitution in an expression, as in this example:
+    ///
+    ///     #P = :val
+    ///
+    /// More Info
+    /// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.AccessingItemAttributes.html
     pub expression_attribute_names: Option<HashMap<String, String>>,
+    /// One or more values that can be substituted in an expression.
+    ///
+    /// Use the : (colon) character in an expression to dereference an attribute value. For example, suppose that you wanted to check whether the value of the ProductStatus attribute was one of the following:
+    ///
+    ///     Available | Backordered | Discontinued
+    ///
+    /// You would first need to specify ExpressionAttributeValues as follows:
+    ///
+    ///     { ":avail":{"S":"Available"}, ":back":{"S":"Backordered"}, ":disc":{"S":"Discontinued"} }
+    ///
+    /// You could then use these values in an expression, such as this:
+    ///
+    ///     ProductStatus IN (:avail, :back, :disc)
+    ///
+    /// More info
+    /// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.SpecifyingConditions.html
     pub expression_attribute_values: Option<HashMap<String, Value>>,
 }
 
