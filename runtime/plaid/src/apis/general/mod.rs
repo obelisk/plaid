@@ -64,6 +64,7 @@ impl Clients {
             .build()
             .unwrap();
 
+        let captured_certs = Arc::new(Mutex::new(Option::None));
         let specialized = config
             .network
             .web_requests
@@ -73,6 +74,7 @@ impl Clients {
                 // * a custom timeout
                 // * a custom root CA
                 // * that it allows redirects
+                // * capturing the server certificate chain
                 if req.timeout.is_some()
                     || req.root_certificate.is_some()
                     || req.enable_redirects
@@ -95,9 +97,15 @@ impl Clients {
                     });
 
                     // return cert chain
-                    if req.return_cert_chain {
-                        // set capturing verifier
-                    }
+                    builder = if req.return_cert_chain {
+                        // build custom tls config with capturing verifier
+                        let config = custom_tls_config(captured_certs.clone()).unwrap();
+
+                        // set custom tls config on client
+                        builder.use_rustls_tls().use_preconfigured_tls(config)
+                    } else {
+                        builder
+                    };
 
                     let client = builder.build().unwrap();
                     Some((name.clone(), client))
@@ -107,18 +115,12 @@ impl Clients {
             })
             .collect::<HashMap<String, Client>>();
 
-        let captured_certs = Arc::new(Mutex::new(Option::None));
-
         Self {
             default,
             specialized,
             captured_certs,
         }
     }
-}
-
-pub fn get_verifier() -> Result<(), Box<dyn Error>> {
-    todo!()
 }
 
 impl General {
@@ -208,6 +210,44 @@ impl ServerCertVerifier for CapturingVerifier {
     }
 }
 
+pub fn custom_tls_config(
+    captured_chain: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
+) -> Result<ClientConfig, Box<dyn std::error::Error>> {
+    // Set up root certificates using webpki-roots
+    let mut root_store = RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    let crypto_provider = default_provider();
+    let provider_arc = Arc::new(crypto_provider);
+
+    // Create the default verifier with explicit provider
+    let default_verifier = WebPkiServerVerifier::builder_with_provider(
+        Arc::new(root_store.clone()),
+        provider_arc.clone(),
+    )
+    .build()
+    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+    // Custom verifier that captures the entire chain
+    let custom_verifier = CapturingVerifier {
+        inner: default_verifier,
+        captured_chain: captured_chain.clone(),
+    };
+
+    // Build the ClientConfig with the custom verifier
+    let mut config = ClientConfig::builder_with_provider(provider_arc)
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    config
+        .dangerous()
+        .set_certificate_verifier(Arc::new(custom_verifier));
+
+    Ok(config)
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -215,40 +255,11 @@ mod tests {
 
     #[tokio::test]
     async fn run() -> Result<(), Box<dyn std::error::Error>> {
-        // Set up root certificates using webpki-roots
-        let mut root_store = RootCertStore::empty();
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-        let crypto_provider = default_provider();
-        let provider_arc = Arc::new(crypto_provider);
-
-        // Create the default verifier with explicit provider
-        let default_verifier = WebPkiServerVerifier::builder_with_provider(
-            Arc::new(root_store.clone()),
-            provider_arc.clone(),
-        )
-        .build()
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
         // Shared storage for the captured certificate chain (Vec<Vec<u8>> for DER bytes)
         let captured_chain: Arc<Mutex<Option<Vec<Vec<u8>>>>> = Arc::new(Mutex::new(None));
 
-        // Custom verifier that captures the entire chain
-        let custom_verifier = CapturingVerifier {
-            inner: default_verifier,
-            captured_chain: captured_chain.clone(),
-        };
-
-        // Build the ClientConfig with the custom verifier
-        let mut config = ClientConfig::builder_with_provider(provider_arc)
-            .with_protocol_versions(&[&rustls::version::TLS13])
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-
-        config
-            .dangerous()
-            .set_certificate_verifier(Arc::new(custom_verifier));
+        // build custom tls config with capturing verifier
+        let config = custom_tls_config(captured_chain.clone()).unwrap();
 
         // Create the reqwest client with the custom TLS config
         let client = Client::builder()
