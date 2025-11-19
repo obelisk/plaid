@@ -9,10 +9,18 @@ fn main(log: String, _source: LogSource) -> Result<(), i32> {
 
     let output = make_named_request("test_mnr_return_certs", "", HashMap::new()).unwrap();
 
-    plaid::print_debug_string(&format!(
-        "output {}",
-        serde_json::to_string_pretty(&output).unwrap()
-    ));
+    if let Some(certs) = output.cert_chain {
+        plaid::print_debug_string(&format!("cert chain len = {}", certs.len()));
+        for (i, c) in certs.iter().enumerate() {
+            plaid::print_debug_string(&format!("Cert {i}"));
+            plaid::print_debug_string(&format!("{c}"));
+        }
+
+        // If we are here, then everything worked fine (no unwraps or early returns), so we send an OK
+        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+    } else {
+        plaid::print_debug_string(&format!("output.cert_chain was empty. something is wrong",));
+    }
 
     Ok(())
 }
