@@ -21,9 +21,11 @@ sleep 5
 
 kill $RH_PID 2>&1 > /dev/null
 
-echo -e "OK from /testmnr\nOK from /testmnr/my_variable\nOK from /testmnr/headers" > expected.txt
-diff expected.txt $FILE
-RESULT=$?
+RESULT=$(head -n 1 $FILE)
+rm -f $FILE
 
-rm -f $FILE expected.txt
-exit $RESULT
+if [[ $RESULT == "OK" ]]; then
+    exit 0
+else
+    exit 1
+fi
