@@ -13,6 +13,7 @@ members = [
     "tests/test_get_everything",
     "tests/test_logback",
     "tests/test_mnr",
+    "tests/test_mnr_return_certs",
     "tests/test_persistent_response",
     "tests/test_random",
     "tests/test_regex",
