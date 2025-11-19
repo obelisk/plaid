@@ -107,6 +107,7 @@ return_body = true
 return_code = true
 return_cert_chain = true
 allowed_rules = ["test_mnr_return_certs.wasm"]
+[apis."general"."network"."web_requests"."test_mnr_return_certs"."headers"]
 
 # [apis."general"."network"."web_requests"."list_deploy_keys"]
 # verb = "get"
