@@ -12,7 +12,8 @@ use crate::PlaidFunctionError;
 pub struct CreateIssueRequest {
     pub project_key: String,
     pub summary: String,
-    pub description: String,
+    /// This is a JSON payload in the format expected by Jira
+    pub description: Value,
     // The caller might decide to use issuetype.id
     #[serde(skip_serializing_if = "Option::is_none")]
     pub issuetype_name: Option<String>,

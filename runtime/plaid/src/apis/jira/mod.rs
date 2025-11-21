@@ -1,6 +1,6 @@
 mod errors;
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use plaid_stl::jira::{
     CreateIssueRequest, CreateIssueResponse, GetIssueRequest, GetIssueResponse, GetUserRequest,
@@ -41,6 +41,8 @@ pub struct JiraConfig {
     api_timeout_seconds: u64,
     /// The base URL for the Jira API
     base_url: String,
+    /// Mapping between Plaid modules and Jira projects the module is allowed to interact with
+    module_permissions: HashMap<String, Vec<String>>,
 }
 
 /// A representation of the Plaid Jira API
@@ -48,6 +50,20 @@ pub struct Jira {
     authentication: JiraAuthentication,
     base_url: String,
     client: Client,
+    module_permissions: HashMap<String, Vec<String>>,
+}
+
+/// Return whether a string is a valid email address
+fn is_valid_email(email: &str) -> bool {
+    let email_regex = regex::Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
+    email_regex.is_match(email)
+}
+
+/// Return whether a string is a valid Jira issue ID (e.g., ABC-123)
+fn is_valid_issue_id(s: &str) -> bool {
+    // Up to 10 letters, one dash, up to 10 digits
+    let re = regex::Regex::new(r"^[A-Za-z]{1,10}-\d{1,10}$").unwrap();
+    re.is_match(s)
 }
 
 impl Jira {
@@ -65,6 +81,15 @@ impl Jira {
             authentication: config.authentication,
             base_url,
             client,
+            module_permissions: config.module_permissions,
+        }
+    }
+
+    /// Return whether a module is allowed to interact with a Jira project
+    fn can_module_access_jira_project(&self, module: &str, project: &str) -> bool {
+        match self.module_permissions.get(module) {
+            Some(v) => v.contains(&project.to_string()),
+            _ => false,
         }
     }
 
@@ -77,7 +102,10 @@ impl Jira {
         let request =
             serde_json::from_str::<CreateIssueRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        // TODO Validate the request
+        // Validate the request: ensure the calling module has permission to interact with the requested Jira project
+        if !self.can_module_access_jira_project(&module.name, &request.project_key) {
+            return Err(ApiError::BadRequest);
+        }
 
         let url = format!("{}/issue", self.base_url);
 
@@ -131,7 +159,16 @@ impl Jira {
         let request =
             serde_json::from_str::<GetIssueRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        // TODO Validate the request
+        // Validate the request: verify the issue ID is in the form ABC...-1234..., get the project key and ensure the module can access it
+        if !is_valid_issue_id(&request.id) {
+            return Err(ApiError::BadRequest);
+        }
+        // We are sure we can extract a project key because the string has passed validation
+        let project = request.id.split("-").collect::<Vec<&str>>()[0];
+
+        if !self.can_module_access_jira_project(&module.name, project) {
+            return Err(ApiError::BadRequest);
+        }
 
         let url = format!("{}/issue/{}", self.base_url, request.id);
 
@@ -184,7 +221,16 @@ impl Jira {
         let request =
             serde_json::from_str::<UpdateIssueRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        // TODO Validate the request
+        // Validate the request: verify the issue ID is in the form ABC...-1234..., get the project key and ensure the module can access it
+        if !is_valid_issue_id(&request.id) {
+            return Err(ApiError::BadRequest);
+        }
+        // We are sure we can extract a project key because the string has passed validation
+        let project = request.id.split("-").collect::<Vec<&str>>()[0];
+
+        if !self.can_module_access_jira_project(&module.name, project) {
+            return Err(ApiError::BadRequest);
+        }
 
         let url = format!("{}/issue/{}", self.base_url, request.id);
 
@@ -238,7 +284,9 @@ impl Jira {
         let request =
             serde_json::from_str::<GetUserRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        // TODO Validate the request
+        if !is_valid_email(&request.email) {
+            return Err(ApiError::BadRequest);
+        }
 
         let url = format!("{}/user/search?query={}", self.base_url, request.email);
 
@@ -310,7 +358,16 @@ impl Jira {
         let request =
             serde_json::from_str::<PostCommentRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
-        // TODO Validate the request
+        // Validate the request: verify the issue ID is in the form ABC...-1234..., get the project key and ensure the module can access it
+        if !is_valid_issue_id(&request.issue_id) {
+            return Err(ApiError::BadRequest);
+        }
+        // We are sure we can extract a project key because the string has passed validation
+        let project = request.issue_id.split("-").collect::<Vec<&str>>()[0];
+
+        if !self.can_module_access_jira_project(&module.name, project) {
+            return Err(ApiError::BadRequest);
+        }
 
         let url = format!("{}/issue/{}/comment", self.base_url, request.issue_id);
 

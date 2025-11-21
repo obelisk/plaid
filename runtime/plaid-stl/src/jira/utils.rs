@@ -1,32 +1,11 @@
-use std::fmt::Display;
-
 use serde_json::{json, Value};
-
-/// Takes a string-like description and turns it into the JSON format that Jira expects
-fn create_simple_jira_description(description: impl Display) -> Value {
-    serde_json::json!({
-        "version":1,
-        "type":"doc",
-        "content":[
-            {
-                "type":"paragraph",
-                "content":[
-                    {
-                        "type":"text",
-                        "text":description.to_string()
-                    }
-                ]
-            }
-        ]
-    })
-}
 
 impl super::CreateIssueRequest {
     pub fn to_payload(&self) -> Value {
         let mut fields = json!({
             "project": { "key": self.project_key },
             "summary": self.summary,
-            "description": create_simple_jira_description(&self.description),
+            "description": self.description,
         });
 
         if let Some(name) = &self.issuetype_name {
