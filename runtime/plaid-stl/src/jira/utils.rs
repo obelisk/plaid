@@ -44,28 +44,21 @@ impl super::PostCommentRequest {
 }
 
 impl super::UpdateIssueRequest {
-    pub fn to_payload(&self) -> Value {
-        // When we are here, we know that at least one between `fields` and `update` is Some
+    pub fn to_payload(&self) -> Result<Value, String> {
+        // Serialize to JSON, if at least one between `fields` and `update` is Some.
+        // Otherwise return an error because Jira won't accept it anyway.
         match (&self.fields, &self.update) {
-            (Some(f), Some(u)) => {
-                json!({
-                    "fields": f,
-                    "update": u
-                })
-            }
-            (Some(f), None) => {
-                json!({
-                    "fields": f
-                })
-            }
-            (None, Some(u)) => {
-                json!({
-                    "update": u
-                })
-            }
-            _ => unreachable!(
-                "Both fields and update are missing: this should not have passed validation!"
-            ),
+            (Some(f), Some(u)) => Ok(json!({
+                "fields": f,
+                "update": u
+            })),
+            (Some(f), None) => Ok(json!({
+                "fields": f
+            })),
+            (None, Some(u)) => Ok(json!({
+                "update": u
+            })),
+            _ => Err("Both fields and update are missing".to_string()),
         }
     }
 }

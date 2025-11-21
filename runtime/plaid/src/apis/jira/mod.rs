@@ -235,7 +235,12 @@ impl Jira {
         let url = format!("{}/issue/{}", self.base_url, request.id);
 
         // Build the payload
-        let payload = request.to_payload();
+        let payload = request
+            .to_payload()
+            .inspect_err(|e| {
+                error!("Module [{}] sent an invalid payload: {e}", module.name);
+            })
+            .map_err(|_| ApiError::BadRequest)?;
 
         info!(
             "Updating Jira issue [{}] on behalf of [{module}]",
