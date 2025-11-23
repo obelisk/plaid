@@ -45,7 +45,7 @@ pub struct Clients {
     default: Client,
     /// Named `Client` instances configured with custom timeouts or root certificates.
     specialized: HashMap<String, Client>,
-    /// Captured certificate chain from the server
+    /// Captured certificate chain from the server in DER format
     captured_certs: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
 }
 
@@ -119,7 +119,7 @@ impl Clients {
 
     pub fn get_captured_certs(&self) -> Result<Option<Vec<String>>, ApiError> {
         let certs = self.captured_certs.try_lock().map_err(|err| {
-            warn!("General.Clients.get_captured_certs try_lock failed {err}");
+            warn!("get_captured_certs try_lock failed {err}");
             ApiError::ImpossibleError
         })?;
 
