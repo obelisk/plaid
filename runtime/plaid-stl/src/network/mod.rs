@@ -33,7 +33,7 @@ pub struct WebRequestResponse<T> {
     pub code: Option<u16>,
     pub data: Option<T>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cert_chain: Option<Vec<String>>,
+    pub certs: Option<Vec<String>>,
 }
 
 const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB

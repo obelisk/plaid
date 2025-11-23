@@ -14,7 +14,7 @@ pub struct CapturingVerifier {
     /// A standard WebPkiServerVerifier used for verification
     inner: Arc<WebPkiServerVerifier>,
     /// A list of captured certificates in DER format
-    captured_chain: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
+    captured_certs: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
 }
 
 impl ServerCertVerifier for CapturingVerifier {
@@ -33,10 +33,10 @@ impl ServerCertVerifier for CapturingVerifier {
             chain.push(intermediate.as_ref().to_vec());
         }
 
-        if let Ok(mut lock) = self.captured_chain.try_lock() {
+        if let Ok(mut lock) = self.captured_certs.try_lock() {
             *lock = Some(chain);
         } else {
-            warn!("CaputuringVerifier.verify_server_cert try_lock failed")
+            warn!("CaputuringVerifier.verify_server_cert() try_lock self.captured_certs failed")
         }
 
         // Delegate to the inner verifier
@@ -70,7 +70,7 @@ impl ServerCertVerifier for CapturingVerifier {
 /// Builds a custom rustls ClientConfig using the CapturingVerifier
 /// To be used with Reqwest::Client
 pub fn capturing_verifier_tls_config(
-    captured_chain: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
+    captured_certs: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
 ) -> Result<ClientConfig, Box<dyn std::error::Error>> {
     // Set up root certificates using webpki-roots
     let mut root_store = RootCertStore::empty();
@@ -90,7 +90,7 @@ pub fn capturing_verifier_tls_config(
     // Custom verifier that captures the entire chain
     let custom_verifier = CapturingVerifier {
         inner: default_verifier,
-        captured_chain: captured_chain.clone(),
+        captured_certs: captured_certs.clone(),
     };
 
     // Build the ClientConfig with the custom verifier
