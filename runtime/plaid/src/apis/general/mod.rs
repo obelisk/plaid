@@ -72,7 +72,7 @@ impl Clients {
                 if req.timeout.is_some()
                     || req.root_certificate.is_some()
                     || req.enable_redirects
-                    || req.return_cert_chain
+                    || req.return_certs
                 {
                     let mut builder = reqwest::Client::builder()
                         .timeout(req.timeout.unwrap_or(default_timeout_duration));
@@ -91,7 +91,7 @@ impl Clients {
                     });
 
                     // return cert chain
-                    builder = if req.return_cert_chain {
+                    builder = if req.return_certs {
                         // build custom tls config with capturing verifier
                         let config =
                             certs::capturing_verifier_tls_config(captured_certs.clone()).unwrap();

@@ -105,7 +105,7 @@ verb = "get"
 uri = "https://chain.link"
 return_body = true
 return_code = true
-return_cert_chain = true
+return_certs = true
 allowed_rules = ["test_mnr_return_certs.wasm"]
 [apis."general"."network"."web_requests"."test_mnr_return_certs"."headers"]
 
