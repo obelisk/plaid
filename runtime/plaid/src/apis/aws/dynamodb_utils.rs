@@ -5,7 +5,7 @@ use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
 /// Converts DynamoDB Attributes into JSON Object
-/// Convience method so the caller of the plaid DynamoDB can submit items in simple
+/// Convience method so the caller of the plaid DynamoDB API can submit items in simple
 /// JSON format and we will automatically convert into DynamoDB attributes which
 /// is the internal representation of the Item data.
 /// More Info
@@ -21,7 +21,7 @@ pub fn attributes_into_json(attrs: &HashMap<String, AttributeValue>) -> Result<V
 }
 
 /// Converts JSON Object into DynamoDB Attributes
-/// Convience method so the caller of the plaid DynamoDB can submit items in simple
+/// Convience method so the caller of the plaid DynamoDB API can submit items in simple
 /// JSON format and we will automatically convert into DynamoDB attributes which
 /// is the internal representation of the Item data.
 /// More Info
