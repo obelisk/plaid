@@ -1,6 +1,6 @@
 mod utils;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -30,12 +30,6 @@ pub struct CreateIssueResponse {
     pub self_: String,
 }
 
-/// Request sent to the runtime to fetch a Jira issue
-#[derive(Serialize, Deserialize)]
-pub struct GetIssueRequest {
-    pub id: String,
-}
-
 /// Response received from the runtime when fetching a Jira issue
 #[derive(Serialize, Deserialize)]
 pub struct GetIssueResponse {
@@ -55,12 +49,6 @@ pub struct UpdateIssueRequest {
     /// This is more granular and can be used to update values
     /// (e.g., adding/removing items from arrays)
     pub update: Option<Value>,
-}
-
-/// Request sent to the runtime to fetch info about a Jira user
-#[derive(Serialize, Deserialize)]
-pub struct GetUserRequest {
-    pub email: String,
 }
 
 /// Response received from the runtime when fetching info about a Jira user
@@ -110,12 +98,12 @@ pub fn create_issue(
 }
 
 /// Fetch a Jira issue
-pub fn get_issue(payload: GetIssueRequest) -> Result<GetIssueResponse, PlaidFunctionError> {
+pub fn get_issue(id: impl Display) -> Result<GetIssueResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(jira, get_issue);
     }
 
-    let request = serde_json::to_string(&payload).unwrap();
+    let request = id.to_string();
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -153,12 +141,12 @@ pub fn update_issue(payload: UpdateIssueRequest) -> Result<(), PlaidFunctionErro
 }
 
 /// Get information about a Jira user
-pub fn get_user(payload: GetUserRequest) -> Result<GetUserResponse, PlaidFunctionError> {
+pub fn get_user(email: impl Display) -> Result<GetUserResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(jira, get_user);
     }
 
-    let request = serde_json::to_string(&payload).unwrap();
+    let request = email.to_string();
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];

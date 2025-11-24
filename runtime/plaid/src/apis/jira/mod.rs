@@ -3,8 +3,8 @@ mod errors;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use plaid_stl::jira::{
-    CreateIssueRequest, CreateIssueResponse, GetIssueRequest, GetIssueResponse, GetUserRequest,
-    GetUserResponse, PostCommentRequest, UpdateIssueRequest,
+    CreateIssueRequest, CreateIssueResponse, GetIssueResponse, GetUserResponse, PostCommentRequest,
+    UpdateIssueRequest,
 };
 use reqwest::Client;
 use serde::Deserialize;
@@ -162,24 +162,20 @@ impl Jira {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request =
-            serde_json::from_str::<GetIssueRequest>(params).map_err(|_| ApiError::BadRequest)?;
+        let issue_id = params.to_string();
 
         // Validate the request: verify the issue ID is in the form ABC...-1234..., get the project key and ensure the module can access it
-        if !is_valid_issue_id(&request.id) {
+        if !is_valid_issue_id(&issue_id) {
             return Err(ApiError::BadRequest);
         }
         // We are sure we can extract a project key because the string has passed validation
-        let project = request.id.split("-").collect::<Vec<&str>>()[0];
+        let project = issue_id.split("-").collect::<Vec<&str>>()[0];
 
         self.validate_module_permission(&module.name, project)?;
 
-        let url = format!("{}/issue/{}", self.base_url, request.id);
+        let url = format!("{}/issue/{}", self.base_url, issue_id);
 
-        info!(
-            "Getting Jira issue [{}] on behalf of [{module}]",
-            request.id
-        );
+        info!("Getting Jira issue [{issue_id}] on behalf of [{module}]");
 
         // Make the call
         match self
@@ -288,14 +284,13 @@ impl Jira {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request =
-            serde_json::from_str::<GetUserRequest>(params).map_err(|_| ApiError::BadRequest)?;
+        let email = params.to_string();
 
-        if !is_valid_email(&request.email) {
+        if !is_valid_email(&email) {
             return Err(ApiError::BadRequest);
         }
 
-        let url = format!("{}/user/search?query={}", self.base_url, request.email);
+        let url = format!("{}/user/search?query={}", self.base_url, email);
 
         // Make the call
         info!("Fetching a Jira user account ID on behalf of [{module}]");
