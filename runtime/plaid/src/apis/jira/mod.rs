@@ -2,6 +2,7 @@ mod errors;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use http::{HeaderMap, HeaderValue};
 use plaid_stl::jira::{
     CreateIssueRequest, CreateIssueResponse, GetIssueResponse, GetUserResponse, PostCommentRequest,
     UpdateIssueRequest,
@@ -47,7 +48,6 @@ pub struct JiraConfig {
 
 /// A representation of the Plaid Jira API
 pub struct Jira {
-    authentication: JiraAuthentication,
     base_url: String,
     client: Client,
     module_permissions: HashMap<String, Vec<String>>,
@@ -67,9 +67,17 @@ fn is_valid_issue_id(s: &str) -> bool {
 }
 
 impl Jira {
-    pub fn new(config: JiraConfig) -> Self {
+    pub fn new(config: JiraConfig) -> Result<Self, String> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&config.authentication.to_authorization_header())
+                .map_err(|e| e.to_string())?,
+        );
+
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.api_timeout_seconds))
+            .default_headers(headers)
             .build()
             .unwrap();
 
@@ -77,12 +85,11 @@ impl Jira {
         // building the URLs to call
         let base_url = config.base_url.trim_end_matches("/").to_string();
 
-        Self {
-            authentication: config.authentication,
+        Ok(Self {
             base_url,
             client,
             module_permissions: config.module_permissions,
-        }
+        })
     }
 
     /// Validate that a module is allowed to interact with a Jira project
@@ -121,17 +128,7 @@ impl Jira {
         );
 
         // Make the call
-        match self
-            .client
-            .post(url)
-            .header(
-                "Authorization",
-                self.authentication.to_authorization_header(),
-            )
-            .json(&payload)
-            .send()
-            .await
-        {
+        match self.client.post(url).json(&payload).send().await {
             Ok(resp) => {
                 if resp.status() != 201 {
                     let status = resp.status();
@@ -178,16 +175,7 @@ impl Jira {
         info!("Getting Jira issue [{issue_id}] on behalf of [{module}]");
 
         // Make the call
-        match self
-            .client
-            .get(url)
-            .header(
-                "Authorization",
-                self.authentication.to_authorization_header(),
-            )
-            .send()
-            .await
-        {
+        match self.client.get(url).send().await {
             Ok(resp) => {
                 if resp.status() != 200 {
                     let status = resp.status();
@@ -246,17 +234,7 @@ impl Jira {
         );
 
         // Make the call
-        match self
-            .client
-            .put(url)
-            .header(
-                "Authorization",
-                self.authentication.to_authorization_header(),
-            )
-            .json(&payload)
-            .send()
-            .await
-        {
+        match self.client.put(url).json(&payload).send().await {
             Ok(resp) => {
                 // Here technically we should always get a 204 because we do not pass the query parameter
                 // `returnIssue=true`. However, it would seem odd to error on a 200, so we accept that as well.
@@ -295,16 +273,7 @@ impl Jira {
         // Make the call
         info!("Fetching a Jira user account ID on behalf of [{module}]");
 
-        match self
-            .client
-            .get(url)
-            .header(
-                "Authorization",
-                self.authentication.to_authorization_header(),
-            )
-            .send()
-            .await
-        {
+        match self.client.get(url).send().await {
             Ok(resp) => {
                 if resp.status() != 200 {
                     let status = resp.status();
@@ -375,17 +344,7 @@ impl Jira {
             request.issue_id
         );
 
-        match self
-            .client
-            .post(url)
-            .header(
-                "Authorization",
-                self.authentication.to_authorization_header(),
-            )
-            .json(&payload)
-            .send()
-            .await
-        {
+        match self.client.post(url).json(&payload).send().await {
             Ok(resp) => {
                 if resp.status() != 201 {
                     let status = resp.status();

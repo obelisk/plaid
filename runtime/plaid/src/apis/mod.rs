@@ -167,7 +167,13 @@ impl Api {
         };
 
         let jira = match config.jira {
-            Some(j) => Some(Jira::new(j)),
+            Some(j) => match Jira::new(j) {
+                Ok(jira) => Some(jira),
+                Err(e) => {
+                    error!("Something went wrong while initializing the Jira API: proceeding without. This should be investigated! The error was {e}");
+                    None
+                }
+            },
             _ => None,
         };
 
