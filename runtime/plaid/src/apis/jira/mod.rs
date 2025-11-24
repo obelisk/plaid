@@ -85,12 +85,17 @@ impl Jira {
         }
     }
 
-    /// Return whether a module is allowed to interact with a Jira project
-    fn can_module_access_jira_project(&self, module: &str, project: &str) -> bool {
-        match self.module_permissions.get(module) {
+    /// Validate that a module is allowed to interact with a Jira project
+    fn validate_module_permission(&self, module: &str, project: &str) -> Result<(), ApiError> {
+        let res = match self.module_permissions.get(module) {
             Some(v) => v.contains(&project.to_string()),
             _ => false,
+        };
+        if !res {
+            error!("Module [{module}] tried to access Jira project [{project}], but doesn't have permission to");
+            return Err(ApiError::BadRequest);
         }
+        Ok(())
     }
 
     /// Create a new Jira issue
@@ -103,16 +108,17 @@ impl Jira {
             serde_json::from_str::<CreateIssueRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
         // Validate the request: ensure the calling module has permission to interact with the requested Jira project
-        if !self.can_module_access_jira_project(&module.name, &request.project_key) {
-            return Err(ApiError::BadRequest);
-        }
+        self.validate_module_permission(&module.name, &request.project_key)?;
 
         let url = format!("{}/issue", self.base_url);
 
         // Build the payload
         let payload = request.to_payload();
 
-        info!("Creating a Jira issue on behalf of [{module}]");
+        info!(
+            "Creating a Jira issue in project [{}] on behalf of [{module}]",
+            request.project_key
+        );
 
         // Make the call
         match self
@@ -166,9 +172,7 @@ impl Jira {
         // We are sure we can extract a project key because the string has passed validation
         let project = request.id.split("-").collect::<Vec<&str>>()[0];
 
-        if !self.can_module_access_jira_project(&module.name, project) {
-            return Err(ApiError::BadRequest);
-        }
+        self.validate_module_permission(&module.name, project)?;
 
         let url = format!("{}/issue/{}", self.base_url, request.id);
 
@@ -228,9 +232,7 @@ impl Jira {
         // We are sure we can extract a project key because the string has passed validation
         let project = request.id.split("-").collect::<Vec<&str>>()[0];
 
-        if !self.can_module_access_jira_project(&module.name, project) {
-            return Err(ApiError::BadRequest);
-        }
+        self.validate_module_permission(&module.name, project)?;
 
         let url = format!("{}/issue/{}", self.base_url, request.id);
 
@@ -366,9 +368,7 @@ impl Jira {
         // We are sure we can extract a project key because the string has passed validation
         let project = request.issue_id.split("-").collect::<Vec<&str>>()[0];
 
-        if !self.can_module_access_jira_project(&module.name, project) {
-            return Err(ApiError::BadRequest);
-        }
+        self.validate_module_permission(&module.name, project)?;
 
         let url = format!("{}/issue/{}/comment", self.base_url, request.issue_id);
 
