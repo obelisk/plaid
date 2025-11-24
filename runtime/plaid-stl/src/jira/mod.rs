@@ -18,7 +18,6 @@ pub struct CreateIssueRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub issuetype_name: Option<String>,
     // We use Value because sometimes Jira expects arrays or other objects
-    #[serde(flatten)]
     pub other_fields: HashMap<String, Value>,
 }
 
