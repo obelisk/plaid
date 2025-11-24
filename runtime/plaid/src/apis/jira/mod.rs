@@ -3,6 +3,7 @@ mod errors;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use http::{HeaderMap, HeaderValue};
+use lazy_static::lazy_static;
 use plaid_stl::jira::{
     CreateIssueRequest, CreateIssueResponse, GetIssueResponse, GetUserResponse, PostCommentRequest,
     UpdateIssueRequest,
@@ -32,6 +33,18 @@ impl JiraAuthentication {
     }
 }
 
+lazy_static! {
+    /// Regex to check if a string is a valid email address.
+    /// This regex is not perfect in the sense that it won't accept all compliant email
+    /// addresses. But it should be more than sufficient for the job here.
+    static ref EMAIL_REGEX: regex::Regex =
+        regex::Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
+    /// Regex to check if a string is a valid Jira issue ID.
+    /// We accept up to 10 letters, one dash, up to 10 digits
+    static ref ISSUE_ID_REGEX: regex::Regex =
+        regex::Regex::new(r"^[A-Za-z]{1,10}-\d{1,10}$").unwrap();
+}
+
 #[derive(Deserialize)]
 pub struct JiraConfig {
     /// How to authenticate to the Jira API
@@ -55,15 +68,12 @@ pub struct Jira {
 
 /// Return whether a string is a valid email address
 fn is_valid_email(email: &str) -> bool {
-    let email_regex = regex::Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
-    email_regex.is_match(email)
+    EMAIL_REGEX.is_match(email)
 }
 
 /// Return whether a string is a valid Jira issue ID (e.g., ABC-123)
 fn is_valid_issue_id(s: &str) -> bool {
-    // Up to 10 letters, one dash, up to 10 digits
-    let re = regex::Regex::new(r"^[A-Za-z]{1,10}-\d{1,10}$").unwrap();
-    re.is_match(s)
+    ISSUE_ID_REGEX.is_match(s)
 }
 
 impl Jira {
