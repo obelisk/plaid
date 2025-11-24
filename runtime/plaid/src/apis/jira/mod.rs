@@ -324,7 +324,7 @@ impl Jira {
                     #[serde(rename = "accountId")]
                     account_id: String,
                     #[serde(rename = "displayName")]
-                    display_name: String,
+                    display_name: Option<String>,
                 }
 
                 let users: Vec<JiraUser> = resp
@@ -332,18 +332,14 @@ impl Jira {
                     .await
                     .map_err(|_| ApiError::JiraError(JiraError::InvalidResponse))?;
 
-                let account_id = users
+                // A search-by-email should return a single user: we take the first item in the vec
+                let res = users
                     .get(0)
-                    .ok_or(ApiError::JiraError(JiraError::InvalidResponse))?
-                    .account_id
-                    .clone();
-
-                let display_name = users.get(0).map(|u| u.display_name.clone());
-
-                let res = GetUserResponse {
-                    id: account_id,
-                    display_name,
-                };
+                    .map(|u| GetUserResponse {
+                        id: u.account_id.clone(),
+                        display_name: u.display_name.clone(),
+                    })
+                    .ok_or(ApiError::JiraError(JiraError::InvalidResponse))?;
 
                 serde_json::to_string(&res)
                     .map_err(|_| ApiError::JiraError(JiraError::InvalidResponse))
