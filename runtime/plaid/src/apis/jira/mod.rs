@@ -3,7 +3,6 @@ mod errors;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use http::{HeaderMap, HeaderValue};
-use lazy_static::lazy_static;
 use plaid_stl::jira::{
     CreateIssueRequest, CreateIssueResponse, GetIssueResponse, GetUserResponse, PostCommentRequest,
     UpdateIssueRequest,
@@ -16,6 +15,9 @@ use crate::{apis::ApiError, loader::PlaidModule};
 use super::default_timeout_seconds;
 
 pub use errors::JiraError;
+
+const EMAIL_REGEX: &str = "email_regex";
+const JIRA_ISSUE_ID_REGEX: &str = "jira_issue_id_regex";
 
 /// Defines methods to authenticate to Jira with
 #[derive(serde::Deserialize)]
@@ -31,18 +33,6 @@ impl JiraAuthentication {
             Self::Token { token } => format!("Basic {token}"),
         }
     }
-}
-
-lazy_static! {
-    /// Regex to check if a string is a valid email address.
-    /// This regex is not perfect in the sense that it won't accept all compliant email
-    /// addresses. But it should be more than sufficient for the job here.
-    static ref EMAIL_REGEX: regex::Regex =
-        regex::Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
-    /// Regex to check if a string is a valid Jira issue ID.
-    /// We accept up to 10 letters, one dash, up to 10 digits
-    static ref ISSUE_ID_REGEX: regex::Regex =
-        regex::Regex::new(r"^[A-Za-z]{1,10}-\d{1,10}$").unwrap();
 }
 
 #[derive(Deserialize)]
@@ -63,17 +53,8 @@ pub struct JiraConfig {
 pub struct Jira {
     base_url: String,
     client: Client,
+    validators: HashMap<String, regex::Regex>,
     module_permissions: HashMap<String, Vec<String>>,
-}
-
-/// Return whether a string is a valid email address
-fn is_valid_email(email: &str) -> bool {
-    EMAIL_REGEX.is_match(email)
-}
-
-/// Return whether a string is a valid Jira issue ID (e.g., ABC-123)
-fn is_valid_issue_id(s: &str) -> bool {
-    ISSUE_ID_REGEX.is_match(s)
 }
 
 impl Jira {
@@ -95,11 +76,53 @@ impl Jira {
         // building the URLs to call
         let base_url = config.base_url.trim_end_matches("/").to_string();
 
+        // Build regex's for input validation
+        let validators: HashMap<String, regex::Regex> = [
+            (
+                EMAIL_REGEX.to_string(),
+                regex::Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+                    .expect("Failed to build email regex"),
+            ),
+            (
+                JIRA_ISSUE_ID_REGEX.to_string(),
+                regex::Regex::new(r"^[A-Za-z]{1,10}-\d{1,10}$")
+                    .expect("Failed to build Jira issue ID regex"),
+            ),
+        ]
+        .into();
+
         Ok(Self {
             base_url,
             client,
+            validators,
             module_permissions: config.module_permissions,
         })
+    }
+
+    /// Return whether a string is a valid email address
+    fn is_valid_email(&self, s: &str) -> bool {
+        match self.validators.get(EMAIL_REGEX) {
+            Some(v) => v.is_match(s),
+            None => {
+                // The validator has not been found, this should be impossible.
+                // Log an error and continue by rejecting the value, in order to fail in a safe way.
+                error!("[Jira API] Validator for email address not found - this should be impossible! Will continue by rejecting all values.");
+                false
+            }
+        }
+    }
+
+    /// Return whether a string is a valid Jira issue ID (e.g., ABC-123)
+    fn is_valid_issue_id(&self, s: &str) -> bool {
+        match self.validators.get(JIRA_ISSUE_ID_REGEX) {
+            Some(v) => v.is_match(s),
+            None => {
+                // The validator has not been found, this should be impossible.
+                // Log an error and continue by rejecting the value, in order to fail in a safe way.
+                error!("[Jira API] Validator for Jira issue ID not found - this should be impossible! Will continue by rejecting all values.");
+                false
+            }
+        }
     }
 
     /// Validate that a module is allowed to interact with a Jira project
@@ -172,7 +195,7 @@ impl Jira {
         let issue_id = params.to_string();
 
         // Validate the request: verify the issue ID is in the form ABC...-1234..., get the project key and ensure the module can access it
-        if !is_valid_issue_id(&issue_id) {
+        if !self.is_valid_issue_id(&issue_id) {
             return Err(ApiError::BadRequest);
         }
         // We are sure we can extract a project key because the string has passed validation
@@ -220,7 +243,7 @@ impl Jira {
             serde_json::from_str::<UpdateIssueRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
         // Validate the request: verify the issue ID is in the form ABC...-1234..., get the project key and ensure the module can access it
-        if !is_valid_issue_id(&request.id) {
+        if !self.is_valid_issue_id(&request.id) {
             return Err(ApiError::BadRequest);
         }
         // We are sure we can extract a project key because the string has passed validation
@@ -274,7 +297,7 @@ impl Jira {
     ) -> Result<String, ApiError> {
         let email = params.to_string();
 
-        if !is_valid_email(&email) {
+        if !self.is_valid_email(&email) {
             return Err(ApiError::BadRequest);
         }
 
@@ -336,7 +359,7 @@ impl Jira {
             serde_json::from_str::<PostCommentRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
         // Validate the request: verify the issue ID is in the form ABC...-1234..., get the project key and ensure the module can access it
-        if !is_valid_issue_id(&request.issue_id) {
+        if !self.is_valid_issue_id(&request.issue_id) {
             return Err(ApiError::BadRequest);
         }
         // We are sure we can extract a project key because the string has passed validation

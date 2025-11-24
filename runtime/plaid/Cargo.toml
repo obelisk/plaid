@@ -46,7 +46,6 @@ jsonwebtoken = { version = "9.2" }
 jwt-simple = { version = "0.12.10", default-features = false, features = [
     "pure-rust",
 ] }
-lazy_static = "1.5"
 log = "0.4"
 lru = "0.12"
 octocrab = "0.37"
