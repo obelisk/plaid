@@ -86,7 +86,7 @@ where
         "roundrobin" => Ok(SelectionStrategy::RoundRobin {
             current_index: AtomicUsize::new(0),
         }),
-        "random" => Ok(SelectionStrategy::Random),
+        "random" => Ok(SelectionStrategy::Random(rand::thread_rng())),
         _ => Err(de::Error::custom(format!(
             "Unknown selection strategy: {strategy}",
         ))),
