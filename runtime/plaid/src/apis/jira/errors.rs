@@ -5,6 +5,7 @@ pub enum JiraError {
     UnexpectedStatusCode(u16),
     NetworkError(reqwest::Error),
     InvalidResponse,
+    InvalidInput(String),
 }
 
 impl Display for JiraError {

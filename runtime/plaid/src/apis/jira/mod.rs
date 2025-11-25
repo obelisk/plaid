@@ -1,4 +1,5 @@
 mod errors;
+mod validators;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -15,9 +16,6 @@ use crate::{apis::ApiError, loader::PlaidModule};
 use super::default_timeout_seconds;
 
 pub use errors::JiraError;
-
-const EMAIL_REGEX: &str = "email_regex";
-const JIRA_ISSUE_ID_REGEX: &str = "jira_issue_id_regex";
 
 /// Defines methods to authenticate to Jira with
 #[derive(serde::Deserialize)]
@@ -53,7 +51,7 @@ pub struct JiraConfig {
 pub struct Jira {
     base_url: String,
     client: Client,
-    validators: HashMap<String, regex::Regex>,
+    validators: HashMap<&'static str, regex::Regex>,
     module_permissions: HashMap<String, Vec<String>>,
 }
 
@@ -76,20 +74,7 @@ impl Jira {
         // building the URLs to call
         let base_url = config.base_url.trim_end_matches("/").to_string();
 
-        // Build regex's for input validation
-        let validators: HashMap<String, regex::Regex> = [
-            (
-                EMAIL_REGEX.to_string(),
-                regex::Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-                    .expect("Failed to build email regex"),
-            ),
-            (
-                JIRA_ISSUE_ID_REGEX.to_string(),
-                regex::Regex::new(r"^[A-Za-z]{1,10}-\d{1,10}$")
-                    .expect("Failed to build Jira issue ID regex"),
-            ),
-        ]
-        .into();
+        let validators = validators::create_validators();
 
         Ok(Self {
             base_url,
@@ -99,32 +84,6 @@ impl Jira {
         })
     }
 
-    /// Return whether a string is a valid email address
-    fn is_valid_email(&self, s: &str) -> bool {
-        match self.validators.get(EMAIL_REGEX) {
-            Some(v) => v.is_match(s),
-            None => {
-                // The validator has not been found, this should be impossible.
-                // Log an error and continue by rejecting the value, in order to fail in a safe way.
-                error!("[Jira API] Validator for email address not found - this should be impossible! Will continue by rejecting all values.");
-                false
-            }
-        }
-    }
-
-    /// Return whether a string is a valid Jira issue ID (e.g., ABC-123)
-    fn is_valid_issue_id(&self, s: &str) -> bool {
-        match self.validators.get(JIRA_ISSUE_ID_REGEX) {
-            Some(v) => v.is_match(s),
-            None => {
-                // The validator has not been found, this should be impossible.
-                // Log an error and continue by rejecting the value, in order to fail in a safe way.
-                error!("[Jira API] Validator for Jira issue ID not found - this should be impossible! Will continue by rejecting all values.");
-                false
-            }
-        }
-    }
-
     /// Validate that a module is allowed to interact with a Jira project
     fn validate_module_permission(&self, module: &str, project: &str) -> Result<(), ApiError> {
         let res = match self.module_permissions.get(module) {
@@ -132,7 +91,7 @@ impl Jira {
             _ => false,
         };
         if !res {
-            error!("Module [{module}] tried to access Jira project [{project}], but doesn't have permission to");
+            warn!("Module [{module}] tried to access Jira project [{project}], but doesn't have permission to");
             return Err(ApiError::BadRequest);
         }
         Ok(())
@@ -166,7 +125,7 @@ impl Jira {
                 if resp.status() != 201 {
                     let status = resp.status();
                     let text = resp.text().await.unwrap_or_else(|_| "N/A".to_string());
-                    error!("Jira returned {}: {}", status, text);
+                    warn!("When creating issue in project [{}] on behalf of [{module}], Jira returned {status}: {text}", request.project_key);
                     return Err(ApiError::JiraError(JiraError::UnexpectedStatusCode(
                         status.as_u16(),
                     )));
@@ -195,15 +154,14 @@ impl Jira {
         let issue_id = params.to_string();
 
         // Validate the request: verify the issue ID is in the form ABC...-1234..., get the project key and ensure the module can access it
-        if !self.is_valid_issue_id(&issue_id) {
-            return Err(ApiError::BadRequest);
-        }
+        let issue_id = self.validate_issue_id(&issue_id)?;
+
         // We are sure we can extract a project key because the string has passed validation
         let project = issue_id.split("-").collect::<Vec<&str>>()[0];
 
         self.validate_module_permission(&module.name, project)?;
 
-        let url = format!("{}/issue/{}", self.base_url, issue_id);
+        let url = format!("{}/issue/{issue_id}", self.base_url);
 
         info!("Getting Jira issue [{issue_id}] on behalf of [{module}]");
 
@@ -213,7 +171,7 @@ impl Jira {
                 if resp.status() != 200 {
                     let status = resp.status();
                     let text = resp.text().await.unwrap_or_else(|_| "N/A".to_string());
-                    error!("Jira returned {}: {}", status, text);
+                    warn!("Jira returned {status}: {text}");
                     return Err(ApiError::JiraError(JiraError::UnexpectedStatusCode(
                         status.as_u16(),
                     )));
@@ -243,28 +201,24 @@ impl Jira {
             serde_json::from_str::<UpdateIssueRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
         // Validate the request: verify the issue ID is in the form ABC...-1234..., get the project key and ensure the module can access it
-        if !self.is_valid_issue_id(&request.id) {
-            return Err(ApiError::BadRequest);
-        }
+        let issue_id = self.validate_issue_id(&request.id)?;
+
         // We are sure we can extract a project key because the string has passed validation
-        let project = request.id.split("-").collect::<Vec<&str>>()[0];
+        let project = issue_id.split("-").collect::<Vec<&str>>()[0];
 
         self.validate_module_permission(&module.name, project)?;
 
-        let url = format!("{}/issue/{}", self.base_url, request.id);
+        let url = format!("{}/issue/{issue_id}", self.base_url);
 
         // Build the payload
         let payload = request
             .to_payload()
             .inspect_err(|e| {
-                error!("Module [{}] sent an invalid payload: {e}", module.name);
+                warn!("Module [{}] sent an invalid payload: {e}", module.name);
             })
             .map_err(|_| ApiError::BadRequest)?;
 
-        info!(
-            "Updating Jira issue [{}] on behalf of [{module}]",
-            request.id
-        );
+        info!("Updating Jira issue [{issue_id}] on behalf of [{module}]");
 
         // Make the call
         match self.client.put(url).json(&payload).send().await {
@@ -275,7 +229,7 @@ impl Jira {
                 if resp.status() != 200 && resp.status() != 204 {
                     let status = resp.status();
                     let text = resp.text().await.unwrap_or_else(|_| "N/A".to_string());
-                    error!("Jira returned {}: {}", status, text);
+                    warn!("Jira returned {status}: {text}");
                     return Err(ApiError::JiraError(JiraError::UnexpectedStatusCode(
                         status.as_u16(),
                     )));
@@ -296,12 +250,9 @@ impl Jira {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let email = params.to_string();
+        let email = self.validate_email(&email)?;
 
-        if !self.is_valid_email(&email) {
-            return Err(ApiError::BadRequest);
-        }
-
-        let url = format!("{}/user/search?query={}", self.base_url, email);
+        let url = format!("{}/user/search?query={email}", self.base_url);
 
         // Make the call
         info!("Fetching a Jira user account ID on behalf of [{module}]");
@@ -311,7 +262,7 @@ impl Jira {
                 if resp.status() != 200 {
                     let status = resp.status();
                     let text = resp.text().await.unwrap_or_else(|_| "N/A".to_string());
-                    error!("Jira returned {}: {}", status, text);
+                    warn!("Jira returned {status}: {text}");
                     return Err(ApiError::JiraError(JiraError::UnexpectedStatusCode(
                         status.as_u16(),
                     )));
@@ -359,30 +310,26 @@ impl Jira {
             serde_json::from_str::<PostCommentRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
         // Validate the request: verify the issue ID is in the form ABC...-1234..., get the project key and ensure the module can access it
-        if !self.is_valid_issue_id(&request.issue_id) {
-            return Err(ApiError::BadRequest);
-        }
+        let issue_id = self.validate_issue_id(&request.issue_id)?;
+
         // We are sure we can extract a project key because the string has passed validation
-        let project = request.issue_id.split("-").collect::<Vec<&str>>()[0];
+        let project = issue_id.split("-").collect::<Vec<&str>>()[0];
 
         self.validate_module_permission(&module.name, project)?;
 
-        let url = format!("{}/issue/{}/comment", self.base_url, request.issue_id);
+        let url = format!("{}/issue/{issue_id}/comment", self.base_url);
 
         // Build the payload and make the call
         let payload = request.to_payload();
 
-        info!(
-            "Posting a comment to Jira issue [{}] on behalf of [{module}]",
-            request.issue_id
-        );
+        info!("Posting a comment to Jira issue [{issue_id}] on behalf of [{module}]");
 
         match self.client.post(url).json(&payload).send().await {
             Ok(resp) => {
                 if resp.status() != 201 {
                     let status = resp.status();
                     let text = resp.text().await.unwrap_or_else(|_| "N/A".to_string());
-                    error!("Jira returned {}: {}", status, text);
+                    warn!("Jira returned {status}: {text}");
                     return Err(ApiError::JiraError(JiraError::UnexpectedStatusCode(
                         status.as_u16(),
                     )));
