@@ -170,6 +170,24 @@ allowed_rules = ["testing_test.wasm"]
 client_id = 99999
 secret_key = ""
 
+# BLOCKCHAIN EVM EXAMPLE CONFIGURATION
+# [apis."blockchain"]
+# [apis."blockchain"."evm"]
+# max_retries = 5
+# timeout_millis = 10000
+
+# [apis."blockchain"."evm".chains.1] # Ethereum 
+# selection_strategy = "RoundRobin"
+
+# [[apis."blockchain"."evm".chains.1.nodes]]
+# uri = "https://some-node"
+# name = "Node 1"
+
+# [[apis."blockchain"."evm".chains.1.nodes]]
+# uri = "https://some-other-node"
+# name = "Node 2"
+
+
 # KMS USING IAM
 
 # [apis."aws"]

@@ -1,5 +1,6 @@
 #[cfg(feature = "aws")]
 pub mod aws;
+pub mod blockchain;
 pub mod cryptography;
 pub mod general;
 pub mod github;
@@ -15,6 +16,7 @@ pub mod yubikey;
 
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
+use crate::apis::blockchain::{evm, Blockchain, BlockchainConfig};
 use crate::apis::jira::{Jira, JiraConfig};
 #[cfg(feature = "aws")]
 use aws::s3::S3Errors;
@@ -67,6 +69,7 @@ pub struct Api {
     pub splunk: Option<Splunk>,
     pub yubikey: Option<Yubikey>,
     pub web: Option<Web>,
+    pub blockchain: Option<Blockchain>,
 }
 
 /// Configurations for all the APIs Plaid can use
@@ -86,6 +89,7 @@ pub struct ApiConfigs {
     pub splunk: Option<SplunkConfig>,
     pub yubikey: Option<YubikeyConfig>,
     pub web: Option<WebConfig>,
+    pub blockchain: Option<BlockchainConfig>,
 }
 
 #[derive(Debug)]
@@ -121,8 +125,15 @@ pub enum ApiError {
     SplunkError(splunk::SplunkError),
     YubikeyError(yubikey::YubikeyError),
     WebError(web::WebError),
+    BlockchainError(blockchain::BlockchainError),
     TestMode,
     JiraError(jira::JiraError),
+}
+
+impl From<evm::EvmCallError> for ApiError {
+    fn from(e: evm::EvmCallError) -> Self {
+        ApiError::BlockchainError(blockchain::BlockchainError::EvmError(e))
+    }
 }
 
 #[cfg(feature = "aws")]
@@ -153,6 +164,11 @@ impl Api {
         #[cfg(feature = "aws")]
         let aws = match config.aws {
             Some(aws) => Some(Aws::new(aws).await),
+            _ => None,
+        };
+
+        let blockchain = match config.blockchain {
+            Some(blockchain) => Some(Blockchain::new(blockchain)),
             _ => None,
         };
 
@@ -227,6 +243,7 @@ impl Api {
             runtime: Runtime::new().unwrap(),
             #[cfg(feature = "aws")]
             aws,
+            blockchain,
             cryptography,
             general,
             github,
