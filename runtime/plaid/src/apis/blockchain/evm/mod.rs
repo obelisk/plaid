@@ -395,18 +395,21 @@ impl EvmClient {
     ) -> Result<String, ApiError> {
         let mut last_error = EvmCallError::AllNodesFailed;
 
+        debug!(
+            "Module [{module}] is attempting to call [{}] on node [{}] on chain with ID [{}]",
+            json_rpc_request.method, node.name, selector.id,
+        );
         for attempt in 1..=self.max_retries {
+            trace!(
+                "Attempt {attempt}/{} for RPC call [{}] on behalf of module [{module}]",
+                self.max_retries,
+                json_rpc_request.method
+            );
+
             // Get the next node to try
             let Some(node) = selector.select_node() else {
                 return Err(EvmCallError::NoNodesForChain { id: selector.id }.into());
             };
-            debug!(
-                "Module [{module}] is attempting to call [{}] on node [{}] on chain with ID [{}] (attempt {attempt}/{})",
-                json_rpc_request.method,
-                node.name,
-                selector.id,
-                self.max_retries
-            );
 
             // Make the RPC call using the existing utility
             match json_rpc_request.execute(&self.client, &node.uri).await {
