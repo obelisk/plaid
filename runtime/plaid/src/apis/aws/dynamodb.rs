@@ -31,7 +31,6 @@ pub struct DynamoDbConfig {
     /// Configured readers - maps a table name to a list of rules that are allowed to READ data
     r: HashMap<String, HashSet<String>>,
     /// Reserved tables - list of 'reserved' table names which rules cannot access
-    /// For the purpose of preventing rules rule accessing 'storage' tables in
     #[serde(default)]
     reserved_tables: Option<HashSet<String>>,
 }
@@ -46,12 +45,11 @@ pub struct DynamoDb {
     /// Configured readers - maps a table name to a list of rules that are allowed to READ data
     r: HashMap<String, HashSet<String>>,
     /// Reserved tables - list of 'reserved' table names which rules cannot access
-    /// For the purpose of preventing rules rule accessing 'storage' tables in
     reserved_tables: Option<HashSet<String>>,
 }
 
 #[derive(PartialEq, PartialOrd, Debug)]
-/// Represents an access scope for a rule has to modify a DynamoDB table
+/// Represents an access scope that a rule has to modify a DynamoDB table
 enum AccessScope {
     Read,
     Write,
@@ -106,8 +104,8 @@ impl DynamoDb {
         }
     }
 
-    /// Checks if module can perform given give action
-    /// Modules are registerd as as read (R) or write (RW) under self.
+    /// Checks if a module can perform a given action
+    /// Modules are registered as as read (R) or write (RW) under self.
     /// This function checks:
     /// * If the table is a reserved table i.e. no Module is allowed to access reserved tables.
     /// * If the module is configured as a Reader or Writer of a given table
@@ -151,6 +149,14 @@ impl DynamoDb {
                 Err(ApiError::BadRequest)
             }
             AccessScope::Write => {
+                // check if write access is configured for this table
+                if let Some(write_access) = self.rw.get(table_name) {
+                    // check if this module has write access to this table
+                    if write_access.contains(&module.to_string()) {
+                        return Ok(());
+                    };
+                }
+
                 // check if read access is configured for this table
                 if let Some(table_readers) = self.r.get(table_name) {
                     // check if this module has read access to this table
@@ -160,14 +166,6 @@ impl DynamoDb {
                         );
                         return Err(ApiError::BadRequest);
                     }
-                }
-
-                // check if write access is configured for this table
-                if let Some(write_access) = self.rw.get(table_name) {
-                    // check if this module has write access to this table
-                    if write_access.contains(&module.to_string()) {
-                        return Ok(());
-                    };
                 }
 
                 warn!(
