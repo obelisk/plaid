@@ -9,6 +9,7 @@ use ring::rand::SystemRandom;
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
+use std::collections::VecDeque;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::apis::ApiError;
@@ -46,7 +47,7 @@ pub struct Clients {
     /// Named `Client` instances configured with custom timeouts or root certificates.
     specialized: HashMap<String, Client>,
     /// Captured certificate chain from the server in DER format
-    captured_certs: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
+    captured_certs: Arc<Mutex<Option<VecDeque<Vec<u8>>>>>,
 }
 
 impl Clients {
