@@ -5,6 +5,7 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{
     ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
 };
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -14,7 +15,7 @@ pub struct CapturingVerifier {
     /// A standard WebPkiServerVerifier used for verification
     inner: Arc<WebPkiServerVerifier>,
     /// A list of captured certificates in DER format
-    captured_certs: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
+    cert_chain_lock: Arc<Mutex<Option<VecDeque<Vec<u8>>>>>,
 }
 
 impl ServerCertVerifier for CapturingVerifier {
@@ -27,13 +28,13 @@ impl ServerCertVerifier for CapturingVerifier {
         now: UnixTime,
     ) -> Result<ServerCertVerified, RustlsError> {
         // Capture the entire chain: end_entity + intermediates
-        let mut chain: Vec<Vec<u8>> = Vec::with_capacity(1 + intermediates.len());
-        chain.push(end_entity.as_ref().to_vec());
-        for intermediate in intermediates {
-            chain.push(intermediate.as_ref().to_vec());
-        }
+        let mut chain: VecDeque<Vec<u8>> = intermediates.iter().map(|i| i.to_vec()).collect();
+        chain.push_front(end_entity.to_vec());
 
-        if let Ok(mut lock) = self.captured_certs.try_lock() {
+        // Try to acquire the lock synchronously
+        // This should never fail unless the lock
+        // is held by another task.
+        if let Ok(mut lock) = self.cert_chain_lock.try_lock() {
             *lock = Some(chain);
         } else {
             warn!("CaputuringVerifier.verify_server_cert() try_lock self.captured_certs failed")
@@ -70,7 +71,7 @@ impl ServerCertVerifier for CapturingVerifier {
 /// Builds a custom rustls ClientConfig using the CapturingVerifier
 /// To be used with Reqwest::Client
 pub fn capturing_verifier_tls_config(
-    captured_certs: Arc<Mutex<Option<Vec<Vec<u8>>>>>,
+    captured_certs: Arc<Mutex<Option<VecDeque<Vec<u8>>>>>,
 ) -> Result<ClientConfig, Box<dyn std::error::Error>> {
     // Set up root certificates using webpki-roots
     let mut root_store = RootCertStore::empty();
@@ -90,7 +91,7 @@ pub fn capturing_verifier_tls_config(
     // Custom verifier that captures the entire chain
     let custom_verifier = CapturingVerifier {
         inner: default_verifier,
-        captured_certs: captured_certs.clone(),
+        cert_chain_lock: captured_certs.clone(),
     };
 
     // Build the ClientConfig with the custom verifier
@@ -100,6 +101,10 @@ pub fn capturing_verifier_tls_config(
         .with_root_certificates(root_store)
         .with_no_client_auth();
 
+    // This is marked as dangerous because implementing
+    // custom TLS verifier is not advisable.
+    // We are not trying to reimplement TLS verification,
+    // just using to get access to the raw certificates.
     config
         .dangerous()
         .set_certificate_verifier(Arc::new(custom_verifier));
