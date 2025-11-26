@@ -4,6 +4,7 @@ use s3::{S3Config, S3};
 use serde::Deserialize;
 
 pub mod dynamodb;
+pub mod dynamodb_utils;
 pub mod kms;
 pub mod s3;
 
