@@ -193,6 +193,18 @@ where
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Log {
+    /// Index of this log in the transaction's log array
+    #[serde(rename = "logIndex")]
+    pub log_index: String,
+    /// Index of the transaction this log was emitted in
+    #[serde(rename = "transactionIndex")]
+    pub transaction_index: String,
+    /// Block number this log was included in
+    #[serde(rename = "blockNumber")]
+    pub block_number: String,
+    /// The transaction hash this log was created from
+    #[serde(rename = "transactionHash")]
+    pub transaction_hash: String,
     /// Address from which this log originated
     pub address: String,
     /// Array of topics provided by the contract
