@@ -1,15 +1,18 @@
+mod certs;
 mod logback;
 mod network;
 mod random;
 
 use crossbeam_channel::Sender;
 use reqwest::{redirect, Client};
-
 use ring::rand::SystemRandom;
 use serde::Deserialize;
+use tokio::sync::Mutex;
 
-use std::{collections::HashMap, time::Duration};
+use std::collections::VecDeque;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use crate::apis::ApiError;
 use crate::{data::DelayedMessage, executor::Message};
 
 use super::default_timeout_seconds;
@@ -43,6 +46,8 @@ pub struct Clients {
     default: Client,
     /// Named `Client` instances configured with custom timeouts or root certificates.
     specialized: HashMap<String, Client>,
+    /// Captured certificate chain from the server in DER format
+    captured_certs: Arc<Mutex<Option<VecDeque<Vec<u8>>>>>,
 }
 
 impl Clients {
@@ -54,6 +59,7 @@ impl Clients {
             .build()
             .unwrap();
 
+        let captured_certs = Arc::new(Mutex::new(Option::None));
         let specialized = config
             .network
             .web_requests
@@ -63,7 +69,12 @@ impl Clients {
                 // * a custom timeout
                 // * a custom root CA
                 // * that it allows redirects
-                if req.timeout.is_some() || req.root_certificate.is_some() || req.enable_redirects {
+                // * capturing the server certificate chain
+                if req.timeout.is_some()
+                    || req.root_certificate.is_some()
+                    || req.enable_redirects
+                    || req.return_certs
+                {
                     let mut builder = reqwest::Client::builder()
                         .timeout(req.timeout.unwrap_or(default_timeout_duration));
 
@@ -80,6 +91,18 @@ impl Clients {
                         }
                     });
 
+                    // return cert chain
+                    builder = if req.return_certs {
+                        // build custom tls config with capturing verifier
+                        let config =
+                            certs::capturing_verifier_tls_config(captured_certs.clone()).unwrap();
+
+                        // set custom tls config on client
+                        builder.use_rustls_tls().use_preconfigured_tls(config)
+                    } else {
+                        builder
+                    };
+
                     let client = builder.build().unwrap();
                     Some((name.clone(), client))
                 } else {
@@ -91,6 +114,26 @@ impl Clients {
         Self {
             default,
             specialized,
+            captured_certs,
+        }
+    }
+
+    pub fn get_captured_certs(&self) -> Result<Option<Vec<String>>, ApiError> {
+        let certs = self.captured_certs.try_lock().map_err(|err| {
+            error!("get_captured_certs try_lock failed {err}");
+            ApiError::ImpossibleError
+        })?;
+
+        if let Some(chain_bytes) = &*certs {
+            // Convert each DER to PEM
+            let chain_pem: Vec<String> = chain_bytes
+                .iter()
+                .map(|bytes| certs::der_to_pem(bytes))
+                .collect();
+
+            Ok(Some(chain_pem))
+        } else {
+            Ok(None)
         }
     }
 }
