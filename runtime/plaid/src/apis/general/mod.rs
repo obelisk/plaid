@@ -120,7 +120,7 @@ impl Clients {
 
     pub fn get_captured_certs(&self) -> Result<Option<Vec<String>>, ApiError> {
         let certs = self.captured_certs.try_lock().map_err(|err| {
-            warn!("get_captured_certs try_lock failed {err}");
+            error!("get_captured_certs try_lock failed {err}");
             ApiError::ImpossibleError
         })?;
 
