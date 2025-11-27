@@ -37,7 +37,7 @@ impl ServerCertVerifier for CapturingVerifier {
         if let Ok(mut lock) = self.cert_chain_lock.try_lock() {
             *lock = Some(chain);
         } else {
-            warn!("CaputuringVerifier.verify_server_cert() try_lock self.captured_certs failed")
+            error!("CaputuringVerifier.verify_server_cert() try_lock self.captured_certs failed")
         }
 
         // Delegate to the inner verifier
