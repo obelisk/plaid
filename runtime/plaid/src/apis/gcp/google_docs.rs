@@ -1,146 +1,237 @@
-use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::fs::File;
-use std::io::Read;
+use serde_json::{json, Value};
+use thiserror::Error;
 
-// Structs for service account key JSON (partial—add fields if needed)
-#[derive(Deserialize)]
-struct ServiceAccountKey {
-    client_email: String,
-    private_key: String,
-    token_uri: String,
+#[derive(Error, Debug)]
+pub enum GoogleDocsError {
+    #[error("HTTP error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+    #[error("Missing field in response: {0}")]
+    MissingField(&'static str),
+    #[error("OAuth error: {description}")]
+    OAuth { description: String },
+    #[error("Google API error: {0}")]
+    GoogleApi(String),
 }
 
-// Struct for JWT claims
-#[derive(Serialize)]
-struct Claims {
-    iss: String,
-    scope: String,
-    aud: String,
-    iat: i64,
-    exp: i64,
+// Google API Endpoints
+const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const DRIVE_API_URL: &str = "https://www.googleapis.com/drive/v3/files";
+const DOCS_API_URL_BASE: &str = "https://docs.googleapis.com/v1/documents";
+
+/// Swaps a long-lived Refresh Token for a short-lived Access Token
+async fn refresh_access_token(
+    client: &Client,
+    client_id: &str,
+    client_secret: &str,
+    refresh_token: &str,
+) -> Result<String, GoogleDocsError> {
+    let params = [
+        ("client_id", client_id),
+        ("client_secret", client_secret),
+        ("refresh_token", refresh_token),
+        ("grant_type", "refresh_token"),
+    ];
+
+    let response = client.post(TOKEN_URL).form(&params).send().await?; // Automatically converted to GoogleDocsError::Reqwest
+
+    if !response.status().is_success() {
+        let error_text = response.text().await?;
+        return Err(GoogleDocsError::OAuth {
+            description: format!("Token refresh failed: {}", error_text),
+        });
+    }
+
+    let json: Value = response.json().await?;
+
+    json.get("access_token")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or(GoogleDocsError::MissingField("access_token"))
 }
 
-// Struct for token response
-#[derive(Deserialize)]
-struct TokenResponse {
-    access_token: String,
+/// Creates a blank Google Doc inside a specific folder
+async fn create_google_doc(
+    client: &Client,
+    access_token: &str,
+    folder_id: &str,
+    doc_title: &str,
+) -> Result<String, GoogleDocsError> {
+    let body = json!({
+        "name": doc_title,
+        "mimeType": "application/vnd.google-apps.document",
+        "parents": [folder_id]
+    });
+
+    let response = client
+        .post(DRIVE_API_URL)
+        .bearer_auth(access_token)
+        .json(&body)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await?;
+        return Err(GoogleDocsError::GoogleApi(format!(
+            "Drive API request failed: {}",
+            error_text
+        )));
+    }
+
+    let json: Value = response.json().await?;
+
+    let file_id = json
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or(GoogleDocsError::MissingField("id"))?;
+
+    println!(
+        "Successfully created file: Name='{}', ID='{}'",
+        json.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown"),
+        file_id
+    );
+
+    Ok(file_id.to_string())
 }
 
-// Struct for Drive file creation response
-#[derive(Deserialize)]
-struct FileResponse {
-    id: String,
+/// Appends text to an existing Google Doc using the batchUpdate endpoint
+async fn update_google_doc(
+    client: &Client,
+    access_token: &str,
+    doc_id: &str,
+    content: &str,
+) -> Result<(), GoogleDocsError> {
+    let url = format!("{}/{}:batchUpdate", DOCS_API_URL_BASE, doc_id);
+
+    let body = json!({
+        "requests": [
+            {
+                "insertText": {
+                    "text": content,
+                    "endOfSegmentLocation": {
+                        "segmentId": ""
+                    }
+                }
+            }
+        ]
+    });
+
+    let response = client
+        .post(&url)
+        .bearer_auth(access_token)
+        .json(&body)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await?;
+        return Err(GoogleDocsError::GoogleApi(format!(
+            "Docs API update failed: {}",
+            error_text
+        )));
+    }
+
+    println!("Successfully appended content to document.");
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{from_value, Value};
-
     use super::*;
+    use http::header::CONTENT_TYPE;
+    use serde_json::Value;
+    use std::io::BufRead;
+    use urlencoding::encode as url_encode;
+
+    #[tokio::test]
+    async fn get_refresh_token() {
+        let client_id = std::env::var("CLIENT_ID").unwrap();
+        let client_secret = std::env::var("CLIENT_SECRET").unwrap();
+        // From your client-secret.json
+        let redirect_uri = "http://localhost:8080".to_string(); // Must match what you set in console
+
+        // Scopes (use space-separated for multiple)
+        let scope =
+            "https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive.file";
+
+        // Generate auth URL
+        let auth_url = format!(
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&scope={}&response_type=code&access_type=offline&prompt=consent",
+            url_encode(&client_id),
+            url_encode(&redirect_uri),
+            url_encode(scope)
+        );
+
+        println!("Open this URL in your browser and authorize:\n{}", auth_url);
+        println!("After authorization, copy the 'code' from the redirect URL (e.g., http://localhost:8080/?code=XXXX).");
+
+        // Read code from stdin
+        let stdin = std::io::stdin();
+        let mut code = String::new();
+        stdin.lock().read_line(&mut code).unwrap();
+        let code = code.trim().to_string();
+
+        // Exchange code for tokens
+        let client = reqwest::Client::new();
+        let params = [
+            ("code", code),
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+            ("redirect_uri", redirect_uri),
+            ("grant_type", "authorization_code".to_string()),
+        ];
+
+        let response: Value = client
+            .post("https://oauth2.googleapis.com/token")
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .form(&params)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        println!("Refresh token: {}", response["refresh_token"]);
+        println!("Save this securely—use it in your main code.");
+    }
 
     #[tokio::test]
     async fn create_doc() {
-        let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        println!("it works {}/runtime/plaid/src/apis/gcp", dir);
+        // From client-secret.json and the refresh token you obtained
+        let client_id = std::env::var("CLIENT_ID").unwrap();
+        let client_secret = std::env::var("CLIENT_SECRET").unwrap();
+        let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
+        let folder_id = std::env::var("FOLDER_ID").unwrap();
 
-        // Constants—update these
-        let key_file = format!("{dir}/src/apis/gcp/sa.json");
-        let folder_id = "";
-        // From folder URL
-        let doc_title = "New Document";
-        let scopes =
-            "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents";
-
-        // Load service account key (sync for simplicity)
-        let mut file = File::open(key_file).unwrap();
-        let mut contents = String::new();
-        file.read_to_string(&mut contents).unwrap();
-        let key: ServiceAccountKey = serde_json::from_str(&contents).unwrap();
-
-        // Create JWT claims
-        let now = Utc::now().timestamp();
-        let claims = Claims {
-            iss: key.client_email,
-            scope: scopes.to_string(),
-            aud: key.token_uri,
-            iat: now,
-            exp: now + Duration::hours(1).num_seconds(),
-        };
-
-        // Sign JWT using ring internally via from_rsa_pem (handles PKCS8 PEM)
-        let mut header = Header::new(Algorithm::RS256);
-        header.typ = Some("JWT".to_string());
-        let jwt = encode(
-            &header,
-            &claims,
-            &EncodingKey::from_rsa_pem(key.private_key.as_bytes()).unwrap(),
-        )
-        .unwrap();
-
-        // Create async HTTP client
-        let client = Client::new();
-
-        // Exchange JWT for access token
-        let token_res = client
-            .post("https://oauth2.googleapis.com/token")
-            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(format!(
-                "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion={}",
-                jwt
-            ))
-            .send()
+        let client = reqwest::Client::new();
+        let access_token =
+            refresh_access_token(&client, &client_id, &client_secret, &refresh_token)
+                .await
+                .unwrap();
+        let doc_id = create_google_doc(&client, &access_token, &folder_id, "hello from plaid 2")
             .await
             .unwrap();
-        let token: TokenResponse = token_res.json().await.unwrap();
 
-        // Create new Google Doc via Drive API
-        let create_body = json!({
-            "name": doc_title,
-            "mimeType": "application/vnd.google-apps.document",
-            "parents": [folder_id]
-        });
-        let create_res = client
-            .post("https://www.googleapis.com/drive/v3/files")
-            .header(AUTHORIZATION, format!("Bearer {}", token.access_token))
-            .header(CONTENT_TYPE, "application/json")
-            .json(&create_body)
-            .send()
+        // 5. Update the Document
+        println!("Appending text to document...");
+        let content = "Hello! This text was inserted by Rust via the Google Docs API.\n";
+        update_google_doc(&client, &access_token, &doc_id, content)
             .await
             .unwrap();
-        let file: Value = create_res.json().await.unwrap();
-        println!("{file}");
-        let file: FileResponse = from_value(file).unwrap();
-        println!("Created new Doc with ID: {}", file.id);
 
-        // Add sample text via Docs API
-        let update_body = json!({
-            "requests": [{
-                "insertText": {
-                    "location": { "index": 1 },
-                    "text": "Hello, world!"
-                }
-            }]
-        });
-        let update_res = client
-            .post(format!(
-                "https://docs.googleapis.com/v1/documents/{}:batchUpdate",
-                file.id
-            ))
-            .header(AUTHORIZATION, format!("Bearer {}", token.access_token))
-            .header(CONTENT_TYPE, "application/json")
-            .json(&update_body)
-            .send()
-            .await
-            .unwrap();
-        if update_res.status().is_success() {
-            println!("Added sample text to the Doc.");
-        } else {
-            println!("Error updating Doc: {}", update_res.text().await.unwrap());
-        }
+        println!("doc_id {}", doc_id)
     }
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct TokenResponse {
+    access_token: String,
+    expires_in: u32,
+    refresh_token: Option<String>, // Only on first grant
+    scope: String,
+    token_type: String,
 }
