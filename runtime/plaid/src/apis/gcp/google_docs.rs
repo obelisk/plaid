@@ -196,7 +196,6 @@ mod tests {
             .unwrap();
 
         println!("Refresh token: {}", response["refresh_token"]);
-        println!("Save this securely—use it in your main code.");
     }
 
     #[tokio::test]
