@@ -27,6 +27,9 @@ pub enum PlaidFunctionError {
     FailedToWriteGuestMemory,
     StorageLimitReached,
     TestMode,
+    OperationNotAllowed,
+    SharedDbError,
+    TimeoutElapsed,
     Unknown,
 }
 
@@ -44,6 +47,9 @@ impl core::fmt::Display for PlaidFunctionError {
             PlaidFunctionError::FailedToWriteGuestMemory => write!(f, "Plaid could not write to guest memory"),
             PlaidFunctionError::StorageLimitReached => write!(f, "The storage limit has been reached"),
             PlaidFunctionError::TestMode => write!(f, "The function is not allowed in test mode"),
+            PlaidFunctionError::OperationNotAllowed => write!(f, "Operation not allowed"),
+            PlaidFunctionError::SharedDbError => write!(f, "Error encountered on a shared DB"),
+            PlaidFunctionError::TimeoutElapsed => write!(f, "A timeout has elapsed"),
             PlaidFunctionError::Unknown => write!(f, "An unknown error occurred. This can happen if the Plaid runtime is newer than the STL this rule was compiled against."),
 
         }
@@ -64,6 +70,9 @@ impl From<i32> for PlaidFunctionError {
             -9 => Self::FailedToWriteGuestMemory,
             -10 => Self::StorageLimitReached,
             -11 => Self::TestMode,
+            -12 => Self::OperationNotAllowed,
+            -13 => Self::SharedDbError,
+            -14 => Self::TimeoutElapsed,
             _ => Self::Unknown,
         }
     }
