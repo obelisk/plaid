@@ -1,6 +1,8 @@
-use reqwest::Client;
+use pulldown_cmark::{html, Options, Parser};
+use reqwest::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tera::{Context, Tera};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -13,11 +15,16 @@ pub enum GoogleDocsError {
     OAuth { description: String },
     #[error("Google API error: {0}")]
     GoogleApi(String),
+    #[error("Template error: {0}")]
+    Template(String),
 }
 
 // Google API Endpoints
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const DRIVE_API_URL: &str = "https://www.googleapis.com/drive/v3/files";
+// we use the 'upload' subdomain for multipart uploads
+const DRIVE_UPLOAD_URL: &str =
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 const DOCS_API_URL_BASE: &str = "https://docs.googleapis.com/v1/documents";
 
 /// Swaps a long-lived Refresh Token for a short-lived Access Token
@@ -138,6 +145,75 @@ async fn update_google_doc(
     Ok(())
 }
 
+/// Converts Markdown to HTML and uploads it as a Google Doc
+async fn create_doc_from_markdown(
+    client: &Client,
+    access_token: &str,
+    folder_id: &str,
+    doc_title: &str,
+    markdown_content: &str,
+) -> Result<String, GoogleDocsError> {
+    // Convert Markdown to HTML
+    // We enable tables and footnotes for better compatibility
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_FOOTNOTES);
+
+    let parser = Parser::new_ext(markdown_content, options);
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+
+    println!(
+        "Converted Markdown to HTML payload ({} bytes)",
+        html_output.len()
+    );
+
+    // Prepare Multipart Body
+    // Part A: JSON Metadata (defines target folder and file name)
+    // We set mimeType to Google Docs to trigger the conversion
+    let metadata = json!({
+        "name": doc_title,
+        "mimeType": "application/vnd.google-apps.document",
+        "parents": [folder_id]
+    });
+
+    // Part B: The Content (HTML)
+    // We upload it as text/html, and Drive converts it because of the metadata mimeType above
+    let metadata_part =
+        multipart::Part::text(metadata.to_string()).mime_str("application/json; charset=UTF-8")?;
+
+    let content_part = multipart::Part::text(html_output).mime_str("text/html")?;
+
+    let form = multipart::Form::new()
+        .part("metadata", metadata_part)
+        .part("media", content_part);
+
+    // Send Request
+    let response = client
+        .post(DRIVE_UPLOAD_URL)
+        .bearer_auth(access_token)
+        .multipart(form)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await?;
+        return Err(GoogleDocsError::GoogleApi(format!(
+            "Drive Upload failed: {}",
+            error_text
+        )));
+    }
+
+    let json: Value = response.json().await?;
+
+    let file_id = json
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or(GoogleDocsError::MissingField("id"))?;
+
+    Ok(file_id.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,6 +299,87 @@ mod tests {
             .unwrap();
 
         println!("doc_id {}", doc_id)
+    }
+
+    #[tokio::test]
+    async fn create_markdown_doc() {
+        // From client-secret.json and the refresh token you obtained
+        let client_id = std::env::var("CLIENT_ID").unwrap();
+        let client_secret = std::env::var("CLIENT_SECRET").unwrap();
+        let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
+        let folder_id = std::env::var("FOLDER_ID").unwrap();
+
+        let client = reqwest::Client::new();
+        let access_token =
+            refresh_access_token(&client, &client_id, &client_secret, &refresh_token)
+                .await
+                .unwrap();
+
+        // Define Markdown Template with Tera placeholders
+        let template_input = r#"
+# Project: {{ project_name }}
+
+This document was created by **{{ author }}** on {{ date }}.
+
+## Status Report
+* **Priority**: {{ priority }}
+* **Department**: {{ department }}
+
+## Financials
+
+| Item | Cost |
+|------|------|
+| Server | ${{ cost_server }} |
+| License | ${{ cost_license }} |
+| **Total** | **${{ cost_server + cost_license }}** |
+
+## Conclusion
+{{ conclusion_text }}
+"#;
+
+        // Initialize Tera and render
+        let mut tera = Tera::default();
+        tera.add_raw_template("markdown_doc", template_input)
+            .map_err(|e| GoogleDocsError::Template(e.to_string()))
+            .unwrap();
+
+        let mut context = Context::new();
+        // Create a JSON object to store all parameters
+        let data = json!({
+            "project_name": "Omega Red",
+            "author": "Rust Bot",
+            "date": "2023-10-27",
+            "priority": "Critical",
+            "department": "Engineering",
+            "cost_server": 1500,
+            "cost_license": 500,
+            "conclusion_text": "Automated template rendering successful. Math operations in table verified."
+        });
+
+        // Loop through the JSON object and insert each key-value pair into the Tera context
+        if let Some(map) = data.as_object() {
+            for (key, value) in map {
+                context.insert(key, value);
+            }
+        }
+
+        let rendered_markdown = tera
+            .render("markdown_doc", &context)
+            .map_err(|e| GoogleDocsError::Template(e.to_string()))
+            .unwrap();
+
+        // Create document
+        let doc_id = create_doc_from_markdown(
+            &client,
+            &access_token,
+            &folder_id,
+            "markdown test",
+            &rendered_markdown,
+        )
+        .await
+        .unwrap();
+        println!("Success! Document ID: {}", doc_id);
+        println!("View at: https://docs.google.com/document/d/{}", doc_id);
     }
 }
 
