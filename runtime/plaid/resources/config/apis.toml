@@ -110,6 +110,9 @@ allowed_rules = ["test_mnr_return_certs.wasm"]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
 """
+root_certificate_raw = """
+{plaid-secret{integration-test-root-ca}}
+"""
 [apis."general"."network"."web_requests"."test_mnr_return_certs"."headers"]
 
 # [apis."general"."network"."web_requests"."list_deploy_keys"]

@@ -94,8 +94,11 @@ impl Clients {
                     // return cert chain
                     builder = if req.return_certs {
                         // build custom tls config with capturing verifier
-                        let config =
-                            certs::capturing_verifier_tls_config(captured_certs.clone()).unwrap();
+                        let config = certs::capturing_verifier_tls_config(
+                            &req.root_certificate_raw,
+                            captured_certs.clone(),
+                        )
+                        .unwrap();
 
                         // set custom tls config on client
                         builder.use_rustls_tls().use_preconfigured_tls(config)

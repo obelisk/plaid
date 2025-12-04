@@ -1,13 +1,14 @@
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::WebPkiServerVerifier;
 use rustls::crypto::ring::default_provider;
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::pki_types::{pem::PemObject, CertificateDer, ServerName, TrustAnchor, UnixTime};
 use rustls::{
     ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use webpki::anchor_from_trusted_cert;
 
 #[derive(Debug)]
 /// Custom rustls::ServerCertVerifier which captures certificates during verification
@@ -71,10 +72,20 @@ impl ServerCertVerifier for CapturingVerifier {
 /// Builds a custom rustls ClientConfig using the CapturingVerifier
 /// To be used with Reqwest::Client
 pub fn capturing_verifier_tls_config(
+    root_certificate_raw: &Option<String>,
     captured_certs: Arc<Mutex<Option<VecDeque<Vec<u8>>>>>,
 ) -> Result<ClientConfig, Box<dyn std::error::Error>> {
-    // Set up root certificates using webpki-roots
+    // Set up root store for trusted certificates
     let mut root_store = RootCertStore::empty();
+    // Custom CA
+    // if provided, include root_certificate as a trust anchor
+    if let Some(pem) = root_certificate_raw {
+        let cert = CertificateDer::from_pem_slice(pem.as_bytes())?;
+        root_store.add(cert)?;
+    }
+
+    // Default CAs
+    // include default public trust anchors
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
     let crypto_provider = default_provider();
