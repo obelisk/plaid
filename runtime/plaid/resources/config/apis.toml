@@ -101,8 +101,8 @@ available_in_test_mode = false
 [apis."general"."network"."web_requests"."testmode_deny"."headers"]
 
 [apis."general"."network"."web_requests"."test_mnr_return_certs"]
-verb = "get"
-uri = "https://chain.link"
+verb = "post"
+uri = "https://localhost:8998/testmnr"
 return_body = true
 return_code = true
 return_certs = true
