@@ -7,7 +7,8 @@ entrypoint_with_source!();
 fn main(log: String, _source: LogSource) -> Result<(), i32> {
     plaid::print_debug_string(&format!("testing test_mnr_return_certs: [{log}]"));
 
-    let output = make_named_request("test_mnr_return_certs", "", HashMap::new()).unwrap();
+    // TODO: need another test where MNR is calling localhost with custom root CA
+    let output = make_named_request("test_mnr_return_certs", "OK", HashMap::new()).unwrap();
 
     if let Some(certs) = output.certs {
         plaid::print_debug_string(&format!("cert chain len = {}", certs.len()));
