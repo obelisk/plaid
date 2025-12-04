@@ -228,7 +228,7 @@ impl Github {
         );
 
         match self
-            .make_get_request_with_headers(address, headers, module)
+            .make_get_request_with_headers(address, Some(headers), module)
             .await
         {
             Ok((status, Ok(body))) => {
