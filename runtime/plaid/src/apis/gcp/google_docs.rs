@@ -137,7 +137,7 @@ async fn create_sheet_from_csv(
 ) -> Result<String, GoogleDocsError> {
     println!("Preparing CSV payload ({} bytes)", csv_content.len());
 
-    // 1. Prepare Multipart Body
+    // Prepare Multipart Body
     // mimeType here tells Google what to convert the file TO
     let metadata = json!({
         "name": sheet_title,
@@ -155,7 +155,7 @@ async fn create_sheet_from_csv(
         .part("metadata", metadata_part)
         .part("media", content_part);
 
-    // 2. Send Request
+    // Send Request
     let response = client
         .post(DRIVE_UPLOAD_URL)
         .bearer_auth(access_token)
@@ -201,6 +201,7 @@ mod tests {
             "https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive.file";
 
         // Generate auth URL
+        // TODO: use request form style
         let auth_url = format!(
             "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&scope={}&response_type=code&access_type=offline&prompt=consent",
             url_encode(&client_id),
@@ -385,13 +386,4 @@ Total,{{ cost_server + cost_license }},"#;
             sheet_id
         );
     }
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-struct TokenResponse {
-    access_token: String,
-    expires_in: u32,
-    refresh_token: Option<String>, // Only on first grant
-    scope: String,
-    token_type: String,
 }
