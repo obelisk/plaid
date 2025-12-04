@@ -102,7 +102,7 @@ available_in_test_mode = false
 
 [apis."general"."network"."web_requests"."test_mnr_return_certs"]
 verb = "post"
-uri = "https://localhost:8998/testmnr"
+uri = "https://localhost:8998/test_mnr_return_certs"
 return_body = true
 return_code = true
 return_certs = true
