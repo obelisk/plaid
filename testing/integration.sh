@@ -68,6 +68,10 @@ openssl req -x509 -new -nodes \
   -addext "basicConstraints = CA:TRUE,pathlen:1" \
   -out ca.pem
 
+# print CA cert
+echo "CA Certificate"
+echo ca.pem
+
 # Generate a server key + CSR
 openssl genrsa -out server.key 4096
 openssl req -new -key server.key \
