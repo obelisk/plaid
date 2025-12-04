@@ -1,14 +1,13 @@
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::WebPkiServerVerifier;
 use rustls::crypto::ring::default_provider;
-use rustls::pki_types::{pem::PemObject, CertificateDer, ServerName, TrustAnchor, UnixTime};
+use rustls::pki_types::{pem::PemObject, CertificateDer, ServerName, UnixTime};
 use rustls::{
     ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use webpki::anchor_from_trusted_cert;
 
 #[derive(Debug)]
 /// Custom rustls::ServerCertVerifier which captures certificates during verification
