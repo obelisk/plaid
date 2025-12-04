@@ -222,11 +222,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let webhooks = config.webhooks.clone();
             let exec = executor.clone();
             let post_route = warp::post()
-                .and(warp::body::content_length_limit(1024 * 256))
+                .and(warp::header::optional("Content-Length"))
                 .and(path!("webhook" / String))
                 .and(warp::body::bytes())
                 .and(warp::header::headers_cloned())
-                .map(move |webhook: String, data: Bytes, headers: HeaderMap| {
+                .map(move |content_length: Option<String>, webhook: String, data: Bytes, headers: HeaderMap| {
+                    // If we got a Content-Length header, parse it and validate it's below a certain threshold.
+                    // If we did not get a Content-Length header, assume the body was empty and just return without any further processing.
+                    if let Some(cl) = content_length {
+                        match cl.parse::<usize>() {
+                            Ok(len) => {
+                                // Enforce a max size of 256 KB
+                                if len > 1024 * 256 {
+                                    // Too big: reject and stop processing
+                                    return Box::new(warp::reply());
+                                }
+                            }
+                            Err(_) => {
+                                // Invalid header: reject early
+                                return Box::new(warp::reply());
+                            }
+                        }
+                    } else {
+                        // No Content-Length header: assume empty body and stop processing
+                        return Box::new(warp::reply());
+                    }
+                    // If we are here, keep processing
+
                     // If this is a webhook that is configured
                     if let Some(webhook_configuration) = webhooks.get(&webhook) {
 

@@ -8,7 +8,7 @@ use crate::{
     functions::{get_memory, safely_get_string},
 };
 
-use super::{safely_get_memory, safely_write_data_back, calculate_max_buffer_size, FunctionErrors};
+use super::{calculate_max_buffer_size, safely_get_memory, safely_write_data_back, FunctionErrors};
 
 /// Implement a way for a module to print to env_logger
 pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log_buffer_size: u32) {
