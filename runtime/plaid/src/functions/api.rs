@@ -403,7 +403,11 @@ impl_new_function_with_error_buffer!(github, make_graphql_query, ALLOW_IN_TEST_M
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, fetch_commit, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, list_files, ALLOW_IN_TEST_MODE);
-impl_new_function_with_error_buffer!(github, fetch_file, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(
+    github,
+    fetch_file_with_custom_media_type,
+    ALLOW_IN_TEST_MODE
+);
 impl_new_function_with_error_buffer!(github, get_branch_protection_rules, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_branch_protection_ruleset, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_repository_collaborators, ALLOW_IN_TEST_MODE);
@@ -727,7 +731,9 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, github_fetch_commit)
         }
         "github_list_files" => Function::new_typed_with_env(&mut store, &env, github_list_files),
-        "github_fetch_file" => Function::new_typed_with_env(&mut store, &env, github_fetch_file),
+        "github_fetch_file_with_custom_media_type" => {
+            Function::new_typed_with_env(&mut store, &env, github_fetch_file_with_custom_media_type)
+        }
         "github_list_fpat_requests_for_org" => {
             Function::new_typed_with_env(&mut store, &env, github_list_fpat_requests_for_org)
         }

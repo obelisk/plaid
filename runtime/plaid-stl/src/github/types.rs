@@ -322,6 +322,41 @@ pub struct GitRefTarget {
 }
 
 /*******************************************************************************************
+   FETCHING FILES
+*******************************************************************************************/
+
+/// Request sent to the runtime to fetch a file
+#[derive(Serialize, Deserialize)]
+pub struct FetchFileRequest {
+    pub organization: String,
+    pub repository_name: String,
+    pub file_path: String,
+    pub reference: String,
+    pub media_type: FetchFileCustomMediaType,
+}
+
+/// Custom media type passed when fetching a file.
+/// For more info, see https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28#get-repository-content
+#[derive(Serialize, Deserialize)]
+pub enum FetchFileCustomMediaType {
+    Default,
+    Raw,
+    Html,
+    Object,
+}
+
+impl Display for FetchFileCustomMediaType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Default => write!(f, "default"),
+            Self::Raw => write!(f, "raw"),
+            Self::Html => write!(f, "html"),
+            Self::Object => write!(f, "object"),
+        }
+    }
+}
+
+/*******************************************************************************************
    MISCELLANEA
 *******************************************************************************************/
 
