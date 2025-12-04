@@ -70,7 +70,7 @@ openssl req -x509 -new -nodes \
 
 # print CA cert
 echo "CA Certificate"
-echo ca.pem
+cat ca.pem
 
 # Generate a server key + CSR
 openssl genrsa -out server.key 4096
