@@ -104,20 +104,7 @@ impl Github {
         uri: String,
         module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
-        info!("Making a get request to {uri} on behalf of {module}");
-
-        let request = self.client._get(uri).await;
-
-        match request {
-            Ok(r) => {
-                let status = r.status().as_u16();
-                let body = self.client.body_to_string(r).await.map_err(|e| {
-                    ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                });
-                Ok((status, body))
-            }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
-        }
+        self.make_get_request_with_headers(uri, None, module).await
     }
 
     /// Make a GET request with custom headers to the GitHub API using the GitHub app library.
@@ -127,16 +114,23 @@ impl Github {
     async fn make_get_request_with_headers(
         &self,
         uri: String,
-        headers: HeaderMap,
+        headers: Option<HeaderMap>,
         module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         // We log the header names we are passing but not the values, in case they are sensitive.
         info!(
             "Making a get request to {uri} on behalf of {module}. Provided headers: {:?}",
-            headers.keys().map(|v| v.as_str()).collect::<Vec<&str>>()
+            match headers {
+                Some(ref headers) => headers
+                    .keys()
+                    .map(|v| v.as_str())
+                    .collect::<Vec<&str>>()
+                    .join(", "),
+                None => "None".to_string(),
+            }
         );
 
-        let request = self.client._get_with_headers(uri, Some(headers)).await;
+        let request = self.client._get_with_headers(uri, headers).await;
 
         match request {
             Ok(r) => {
