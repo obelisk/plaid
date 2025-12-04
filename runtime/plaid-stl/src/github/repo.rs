@@ -4,8 +4,8 @@ use serde::Serialize;
 
 use crate::{
     github::{
-        CreateFileRequest, DeleteDeployKeyParams, RepositoryCollaborator, RepositoryCustomProperty,
-        SbomResponse,
+        CreateFileRequest, DeleteDeployKeyParams, FetchFileCustomMediaType, FetchFileRequest,
+        RepositoryCollaborator, RepositoryCustomProperty, SbomResponse,
     },
     PlaidFunctionError,
 };
@@ -277,32 +277,48 @@ pub fn fetch_file(
     file_path: &str,
     reference: &str,
 ) -> Result<String, PlaidFunctionError> {
-    extern "C" {
-        new_host_function_with_error_buffer!(github, fetch_file);
-    }
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
-
-    #[derive(Serialize)]
-    struct Request<'a> {
-        organization: &'a str,
-        repository_name: &'a str,
-        file_path: &'a str,
-        reference: &'a str,
-    }
-
-    let request = Request {
+    fetch_file_with_custom_media_type(
         organization,
         repository_name,
         file_path,
         reference,
-    };
+        FetchFileCustomMediaType::Default,
+    )
+}
 
+/// Gets the contents of a file or directory in a repository.
+/// ## Arguments:
+///
+/// * `organization`: The account owner of the repository. The name is not case sensitive.
+/// * `repository_name`: The name of the repository without the .git extension. The name is not case sensitive.
+/// * `file_path`: Path of the file or directory to read
+/// * `reference`: The name of the commit/branch/tag
+/// * `media_type`: The media type to fetch
+pub fn fetch_file_with_custom_media_type(
+    organization: &str,
+    repository_name: &str,
+    file_path: &str,
+    reference: &str,
+    media_type: FetchFileCustomMediaType,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, fetch_file_with_custom_media_type);
+    }
+    const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
+
+    let request = FetchFileRequest {
+        organization: organization.to_string(),
+        repository_name: repository_name.to_string(),
+        file_path: file_path.to_string(),
+        reference: reference.to_string(),
+        media_type,
+    };
     let request = serde_json::to_string(&request).unwrap();
 
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let res = unsafe {
-        github_fetch_file(
+        github_fetch_file_with_custom_media_type(
             request.as_bytes().as_ptr(),
             request.as_bytes().len(),
             return_buffer.as_mut_ptr(),
