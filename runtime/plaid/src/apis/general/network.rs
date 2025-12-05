@@ -27,6 +27,9 @@ struct DynamicWebRequestResponse {
     code: Option<u16>,
     /// Response data, which can be either text or binary
     data: Option<ResponseData>,
+    /// Certificate chain from the server
+    #[serde(skip_serializing_if = "Option::is_none")]
+    certs: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -48,10 +51,17 @@ pub struct Request {
     return_body: bool,
     /// Flag to return the code from the request
     return_code: bool,
+    /// Flag to return the certificate chain from the server
+    #[serde(default)] // default to false
+    pub return_certs: bool,
     /// Optional root TLS certificate to use for this request.  
     /// When set, the request will be sent via a special HTTP client configured with this certificate.
     #[serde(default, deserialize_with = "certificate_deserializer")]
     pub root_certificate: Option<Certificate>,
+    /// Optional root TLS certificate (raw PEM encoded version). Assume same as above.
+    /// If return_certs is set, this value will be set as a trust store for certificate verification
+    #[serde(default)]
+    pub root_certificate_raw: Option<String>,
     /// Optional per‐request timeout.  
     /// When set, the request will be sent via a special HTTP client configured with this timeout;  
     /// if unset, the default timeout from the API config is used.
@@ -231,6 +241,7 @@ impl General {
                 let mut ret = DynamicWebRequestResponse {
                     code: None,
                     data: None,
+                    certs: None,
                 };
 
                 if request_specification.return_code {
@@ -248,6 +259,11 @@ impl General {
                             ret.data = Some(ResponseData::Binary(data.to_vec()));
                         }
                     };
+                }
+
+                if request_specification.return_certs {
+                    let captured_certs = self.clients.get_captured_certs()?;
+                    ret.certs = captured_certs
                 }
 
                 if let Ok(r) = serde_json::to_string(&ret) {
