@@ -17,3 +17,6 @@ runtime/plaid_ready
 /modules/target
 /target
 /plaid-stl/target
+
+# Scratch items
+/modules/jrp/
