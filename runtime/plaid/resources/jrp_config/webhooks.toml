@@ -1,0 +1,10 @@
+[webhooks."internal"]
+listen_address = "0.0.0.0:4554"
+
+
+# Additional webhook examples
+[webhooks."internal".webhooks."jrp"]
+log_type = "justrunplease"
+headers = []
+[webhooks."internal".webhooks."jrp".get_mode]
+response_mode = "static:just run please"

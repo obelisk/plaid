@@ -5,6 +5,8 @@ resolver = "2"
 members = [
     "examples/example_github_graphql",
 
+    "jrp/just_run_please",
+
     "tests/test_crashtest",
     "tests/test_db",
     "tests/test_fileopen",
@@ -26,7 +28,7 @@ members = [
     "tests/test_aes_enc_dec",
     "tests/test_vec_entrypoint",
     "tests/test_jwt",
-    "tests/test_redis_cache_eviction"
+    "tests/test_redis_cache_eviction",
 ]
 
 [profile.release]

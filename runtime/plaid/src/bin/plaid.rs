@@ -1,11 +1,13 @@
 #[macro_use]
 extern crate log;
 
+use futures_util::{Stream, StreamExt};
 use performance::ModulePerformanceMetadata;
 use plaid::{
     cache::Cache,
     config::{
-        CachingMode, ConfigurationWithRoles, GetMode, ResponseMode, WebhookServerConfiguration,
+        CachingMode, ConfigurationWithRoles, GetMode, ResponseMode, WebhookConfig,
+        WebhookServerConfiguration,
     },
     loader::PlaidModule,
     logging::Logger,
@@ -18,7 +20,7 @@ use executor::*;
 use plaid_stl::messages::LogSource;
 use storage::Storage;
 use tokio::{signal, sync::RwLock, task::JoinSet};
-use tokio_util::sync::CancellationToken;
+use tokio_util::{bytes::Buf, sync::CancellationToken};
 
 use std::{
     collections::HashMap,
@@ -45,6 +47,117 @@ impl std::fmt::Display for Errors {
 }
 
 impl std::error::Error for Errors {}
+
+const MAX_WEBHOOK_BODY_SIZE: usize = 1024 * 256; // 256KiB
+
+async fn post_handler(
+    webhook: String,
+    mut body: impl Stream<Item = Result<impl Buf, warp::Error>> + Unpin + Send + Sync,
+    headers: HeaderMap,
+    webhooks: HashMap<String, WebhookConfig>,
+    exec: Arc<Executor>,
+) -> impl warp::Reply {
+    // If this is a webhook that is configured
+    if let Some(webhook_configuration) = webhooks.get(&webhook) {
+        // If the webhook has a label, use that as the source, otherwise use the webhook address
+        let source = match webhook_configuration.label {
+            Some(ref label) => LogSource::WebhookPost(label.to_string()),
+            None => LogSource::WebhookPost(webhook.to_string()),
+        };
+
+        let logbacks_allowed = webhook_configuration.logbacks_allowed.clone();
+
+        // Keep a vector of references to avoid doing too many allocations
+        // before doing a final copy into a single buffer
+        let mut buffers = Vec::new();
+        // We reserve space for 32 chunk pointers to also avoid reallocating this pointer
+        // buffer
+        buffers.reserve(32);
+        let mut total_bytes_count = 0usize;
+
+        // Read a maximum of 256KB from the request
+        // I'm trying to find a source to get proof that this
+        // next() call is not going to read possibly gigabytes into memory but for now
+        // I'm going to trust it.
+        while let Some(buf) = body.next().await {
+            match buf {
+                Ok(buf) => {
+                    // Immiedately exit if this chunk is going to exceed our maximum allowed size
+                    if buf.remaining() + total_bytes_count > MAX_WEBHOOK_BODY_SIZE {
+                        error!(
+                            "Webhook body for webhook: {webhook} exceeded maximum allowed size of {} bytes",
+                            MAX_WEBHOOK_BODY_SIZE
+                        );
+                        // We still return a 200 to avoid leaking information
+                        return Box::new(warp::reply());
+                    }
+                    // Consider these bytes read
+                    total_bytes_count += buf.remaining();
+
+                    // Get all the pieces of this buffer into our vec of vecs
+                    buffers.push(buf);
+                }
+                Err(e) => {
+                    error!("Error reading webhook body for webhook: {webhook}: {e}");
+                    // We still return a 200 to avoid leaking information
+                    return Box::new(warp::reply());
+                }
+            }
+        }
+
+        let mut full_body = Vec::with_capacity(total_bytes_count);
+
+        let total_buffers = buffers.len();
+        let mut total_chunks = 0;
+        for mut buffer in buffers {
+            while buffer.remaining() > 0 {
+                let chunk = buffer.chunk();
+                let chunk_len = chunk.len();
+                full_body.extend_from_slice(chunk);
+                buffer.advance(chunk_len);
+                total_chunks += 1;
+            }
+        }
+        trace!(
+            "Read {total_bytes_count} bytes from webhook body across {total_buffers} buffers and {total_chunks} chunks"
+        );
+
+        // Create the message we're going to send into the execution system.
+        let mut message = Message::new(
+            webhook_configuration.log_type.to_owned(),
+            full_body,
+            source,
+            logbacks_allowed,
+        );
+
+        for requested_header in webhook_configuration.headers.iter() {
+            // TODO: Investigate if this should be get_all?
+            // Without this we don't support receiving multiple headers with the same name
+            // I don't know if this is an issue or not, practically, or if there are security implications.
+            if let Some(value) = headers.get(requested_header) {
+                message
+                    .headers
+                    .insert(requested_header.to_string(), value.as_bytes().to_vec());
+            }
+        }
+
+        // Webhook exists, buffer log
+        if let Err(e) = exec.execute_webhook_message(message) {
+            match e {
+                TrySendError::Full(_) => error!(
+                    "Queue Full! [{}] log dropped!",
+                    webhook_configuration.log_type
+                ),
+                // TODO: Have this actually cause Plaid to exit
+                TrySendError::Disconnected(_) => panic!(
+                    "The execution system is no longer accepting messages. Nothing can continue."
+                ),
+            }
+        }
+    }
+    // Always Empty Response
+    Box::new(warp::reply())
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -224,44 +337,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let post_route = warp::post()
                 .and(warp::body::content_length_limit(1024 * 256))
                 .and(path!("webhook" / String))
-                .and(warp::body::bytes())
+                .and(warp::body::stream())
                 .and(warp::header::headers_cloned())
-                .map(move |webhook: String, data: Bytes, headers: HeaderMap| {
-                    // If this is a webhook that is configured
-                    if let Some(webhook_configuration) = webhooks.get(&webhook) {
-
-                        // If the webhook has a label, use that as the source, otherwise use the webhook address
-                        let source = match webhook_configuration.label {
-                            Some(ref label) => LogSource::WebhookPost(label.to_string()),
-                            None => LogSource::WebhookPost(webhook.to_string()),
-                        };
-
-                        let logbacks_allowed = webhook_configuration.logbacks_allowed.clone();
-
-                        // Create the message we're going to send into the execution system.
-                        let mut message = Message::new(webhook_configuration.log_type.to_owned(), data[..].to_vec(), source, logbacks_allowed);
-
-                        for requested_header in webhook_configuration.headers.iter() {
-                            // TODO: Investigate if this should be get_all?
-                            // Without this we don't support receiving multiple headers with the same name
-                            // I don't know if this is an issue or not, practically, or if there are security implications.
-                            if let Some(value) = headers.get(requested_header) {
-                                message.headers.insert(requested_header.to_string(), value.as_bytes().to_vec());
-                            }
-                        }
-
-                        // Webhook exists, buffer log
-                        if let Err(e) = exec.execute_webhook_message(message) {
-                            match e {
-                                TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
-                                // TODO: Have this actually cause Plaid to exit
-                                TrySendError::Disconnected(_) => panic!("The execution system is no longer accepting messages. Nothing can continue."),
-                            }
-                        }
-                    }
-                    // Always Empty Response
-                    Box::new(warp::reply())
-                });
+                .and(with(webhooks))
+                .and(with(exec.clone()))
+                .then(post_handler);
 
             // This is a cache for get requests that are configured to be cached
             // Webhook -> (timestamp, response)
