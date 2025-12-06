@@ -335,7 +335,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let webhooks = config.webhooks.clone();
             let exec = executor.clone();
             let post_route = warp::post()
-                .and(warp::body::content_length_limit(1024 * 256))
                 .and(path!("webhook" / String))
                 .and(warp::body::stream())
                 .and(warp::header::headers_cloned())
