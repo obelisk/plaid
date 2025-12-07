@@ -1,3 +1,4 @@
+use crate::apis::general::network::RootCertificate;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::WebPkiServerVerifier;
 use rustls::crypto::ring::default_provider;
@@ -71,15 +72,15 @@ impl ServerCertVerifier for CapturingVerifier {
 /// Builds a custom rustls ClientConfig using the CapturingVerifier
 /// To be used with Reqwest::Client
 pub fn capturing_verifier_tls_config(
-    root_certificate_raw: &Option<String>,
+    root_certificate: &Option<RootCertificate>,
     captured_certs: Arc<Mutex<Option<VecDeque<Vec<u8>>>>>,
 ) -> Result<ClientConfig, Box<dyn std::error::Error>> {
     // Set up root store for trusted certificates
     let mut root_store = RootCertStore::empty();
     // Custom CA
     // if provided, include root_certificate as a trust anchor
-    if let Some(pem) = root_certificate_raw {
-        let cert = CertificateDer::from_pem_slice(pem.as_bytes())?;
+    if let Some(cert) = root_certificate {
+        let cert = CertificateDer::from_pem_slice(cert.pem.as_bytes())?;
         root_store.add(cert)?;
     }
 
