@@ -78,8 +78,8 @@ impl Clients {
                     let mut builder = reqwest::Client::builder()
                         .timeout(req.timeout.unwrap_or(default_timeout_duration));
 
-                    if let Some(ca) = req.root_certificate.clone() {
-                        builder = builder.add_root_certificate(ca);
+                    if let Some(ref ca) = req.root_certificate {
+                        builder = builder.add_root_certificate(ca.inner.clone());
                     }
 
                     // See if redirects should be enabled
@@ -95,7 +95,7 @@ impl Clients {
                     builder = if req.return_certs {
                         // build custom tls config with capturing verifier
                         let config = certs::capturing_verifier_tls_config(
-                            &req.root_certificate_raw,
+                            &req.root_certificate,
                             captured_certs.clone(),
                         )
                         .unwrap();

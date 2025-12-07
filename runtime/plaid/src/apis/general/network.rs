@@ -37,6 +37,12 @@ pub struct Config {
     pub web_requests: HashMap<String, Request>,
 }
 
+/// A wrapper around request::Certificate so that we can also store raw certificate bytes
+pub struct RootCertificate {
+    pub inner: reqwest::Certificate,
+    pub pem: String,
+}
+
 /// This struct represents a web request and contains information about what the request is about (e.g., verb and URI),
 /// how it should be processed, and which modules are allowed to make it.
 #[derive(Deserialize)]
@@ -57,11 +63,7 @@ pub struct Request {
     /// Optional root TLS certificate to use for this request.  
     /// When set, the request will be sent via a special HTTP client configured with this certificate.
     #[serde(default, deserialize_with = "certificate_deserializer")]
-    pub root_certificate: Option<Certificate>,
-    /// Optional root TLS certificate (raw PEM encoded version). Assume same as above.
-    /// If return_certs is set, this value will be set as a trust store for certificate verification
-    #[serde(default)]
-    pub root_certificate_raw: Option<String>,
+    pub root_certificate: Option<RootCertificate>,
     /// Optional per‐request timeout.  
     /// When set, the request will be sent via a special HTTP client configured with this timeout;  
     /// if unset, the default timeout from the API config is used.
@@ -96,7 +98,7 @@ where
 }
 
 /// Deserialize a PEM‐encoded string into a `Certificate`, erroring on parse failure.
-fn certificate_deserializer<'de, D>(deserializer: D) -> Result<Option<Certificate>, D::Error>
+fn certificate_deserializer<'de, D>(deserializer: D) -> Result<Option<RootCertificate>, D::Error>
 where
     D: de::Deserializer<'de>,
 {
@@ -104,11 +106,11 @@ where
     match pem {
         None => Ok(None),
         Some(pem) => {
-            let cert = Certificate::from_pem(pem.as_bytes()).map_err(|e| {
+            let inner = Certificate::from_pem(pem.as_bytes()).map_err(|e| {
                 serde::de::Error::custom(format!("Invalid certificate provided. Error: {e}"))
             })?;
 
-            Ok(Some(cert))
+            Ok(Some(RootCertificate { inner, pem }))
         }
     }
 }

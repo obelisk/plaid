@@ -12,8 +12,8 @@ fn main(log: String, _source: LogSource) -> Result<(), i32> {
     if let Some(certs) = output.certs {
         plaid::print_debug_string(&format!("cert chain len = {}", certs.len()));
         for (i, c) in certs.iter().enumerate() {
-            plaid::print_debug_string(&format!("Cert {i}"));
-            plaid::print_debug_string(&format!("{c}"));
+            plaid::print_debug_string(&format!("\nCert {i}"));
+            plaid::print_debug_string(&format!("\n{c}\n"));
         }
 
         // If we are here, then everything worked fine (no unwraps or early returns), so we send an OK
