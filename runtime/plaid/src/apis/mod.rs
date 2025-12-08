@@ -2,6 +2,7 @@
 pub mod aws;
 pub mod blockchain;
 pub mod cryptography;
+pub mod gcp;
 pub mod general;
 pub mod github;
 pub mod jira;
