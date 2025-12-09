@@ -15,6 +15,7 @@ use std::collections::BinaryHeap;
 use super::DataError;
 
 const LOGBACK_NS: &str = "logback_internal";
+const CHANNEL_CAPACITY: usize = 4096;
 
 #[derive(Serialize, Deserialize)]
 pub struct DelayedMessage {
@@ -93,7 +94,7 @@ impl Internal {
         log_sender: Sender<Message>,
         storage: Arc<Storage>,
     ) -> Result<Self, DataError> {
-        let (internal_sender, receiver) = bounded(4096);
+        let (internal_sender, receiver) = bounded(CHANNEL_CAPACITY);
 
         Ok(Self {
             sender: log_sender,
@@ -127,6 +128,8 @@ impl Internal {
                 {
                     error!("Storage system could not persist a message: {e}");
                 }
+            } else {
+                error!("Failed to serialize a DelayedMessage");
             }
         }
 
