@@ -323,9 +323,6 @@ impl WebSocketClient {
         )
         .await
         {
-            // Mark the WebSocket as healthy and get the entry back
-            let healthy_entry = self.uri_selector.reset_failure(uri_entry);
-
             let (write, read) = socket.split();
 
             let write_handle = self
@@ -338,7 +335,10 @@ impl WebSocketClient {
 
             self.await_tasks(write_handle, read_handle, &uri_name).await;
 
-            // We only reach this point if the connection dropped - return the updated entry so it can be marked as failed
+            // We only reach this point if the connection dropped. Since the connection was successful, we reset its failure state first.
+            // Then we return it so the caller can mark it as failed. This prevents the scenario where a URI that was previously marked as
+            // failed is never reset if it later connects successfully.
+            let healthy_entry = self.uri_selector.reset_failure(uri_entry);
             Some(healthy_entry)
         } else {
             // Connection failed, return the entry so caller can mark it as failed

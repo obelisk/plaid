@@ -14,7 +14,7 @@ use tokio::time::sleep_until;
 /// This entry must be passed back to `mark_failed()` or `reset_failure()` to ensure
 /// the correct URI entry is updated. This design prevents silent bugs where the heap
 /// state might change between selection and update.
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct UriEntry {
     name: String,
     /// The URI to connect to.
