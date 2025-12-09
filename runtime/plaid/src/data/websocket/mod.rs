@@ -8,7 +8,7 @@ use futures_util::{
 };
 use http::{HeaderMap, Uri};
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
-use selector::UriSelector;
+use selector::{UriEntry, UriSelector};
 use serde::Deserialize;
 use std::{collections::HashMap, str::FromStr, time::Duration};
 use tokio::{net::TcpStream, task::JoinHandle};
@@ -222,11 +222,13 @@ impl WebsocketGenerator {
             tokio::spawn(async move {
                 loop {
                     // This will only return if an error occurred - indicating that we need to reopen the connection with a new URI
-                    let Some(socket_name) = client.start().await else {
+                    let Some(uri_entry) = client.start().await else {
                         // If this ever returns None - it means that there are no remaining URIs in the heap. In this case, we can exit as there is no point in
                         // trying to reconnect.
                         return;
                     };
+
+                    let socket_name = uri_entry.name().to_string();
 
                     if let Err(e) = logger.log_websocket_dropped(socket_name.clone()) {
                         error!(
@@ -234,7 +236,8 @@ impl WebsocketGenerator {
                         );
                     };
 
-                    client.uri_selector.mark_failed();
+                    // Mark the URI as failed since the connection dropped after being established
+                    client.uri_selector.mark_failed(uri_entry);
                 }
             });
         }
@@ -273,6 +276,7 @@ impl WebSocketClient {
             configuration.uris.clone(),
             configuration.min_retry_duration,
             configuration.max_retry_duration,
+            configuration.log_type.clone(),
         );
 
         Self {
@@ -302,11 +306,15 @@ impl WebSocketClient {
     /// - The WebSocket is split into write and read halves.
     /// - Separate asynchronous tasks are spawned to handle writing to and reading from the WebSocket.
     /// - The function waits for both tasks to complete, handling any unexpected terminations.
-    async fn start(&mut self) -> Option<String> {
-        let Some((uri_name, uri)) = self.uri_selector.next_uri().await else {
+    /// - Returns the UriEntry so the caller can mark it as failed if needed.
+    async fn start(&mut self) -> Option<UriEntry> {
+        let Some(uri_entry) = self.uri_selector.next_uri().await else {
             error!("No URIs found in heap for: {}", self.name);
             return None;
         };
+
+        let uri_name = uri_entry.name().to_string();
+        let uri = uri_entry.uri().clone();
 
         if let Ok(socket) = establish_connection(
             &uri,
@@ -316,9 +324,6 @@ impl WebSocketClient {
         )
         .await
         {
-            // Mark the WebSocket as healthy again
-            self.uri_selector.reset_failure();
-
             let (write, read) = socket.split();
 
             let write_handle = self
@@ -330,9 +335,16 @@ impl WebSocketClient {
                 .await;
 
             self.await_tasks(write_handle, read_handle, &uri_name).await;
-        }
 
-        Some(uri_name)
+            // We only reach this point if the connection dropped. Since the connection was successful, we reset its failure state first.
+            // Then we return it so the caller can mark it as failed. This prevents the scenario where a URI that was previously marked as
+            // failed is never reset if it later connects successfully.
+            let healthy_entry = self.uri_selector.reset_failure(uri_entry);
+            Some(healthy_entry)
+        } else {
+            // Connection failed, return the entry so caller can mark it as failed
+            Some(uri_entry)
+        }
     }
 
     /// Spawns a task to periodically send a predefined message to the WebSocket.
