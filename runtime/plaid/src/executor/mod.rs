@@ -571,12 +571,11 @@ fn process_message_with_module(
 
     // Update the persistent response
     if let Err(e) = update_persistent_response(&module, &env, &mut store, message.response_sender) {
-        els.log_module_error(
+        let _ = els.log_module_error(
             module.name.clone(),
             format!("Failed to update persistent response: {e}"),
             message.data.clone(),
-        )
-        .unwrap();
+        );
     }
 
     Ok(())

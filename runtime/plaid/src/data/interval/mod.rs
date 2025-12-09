@@ -166,7 +166,9 @@ impl Interval {
             }
 
             // Send job to executor
+            // safe unwrap because if the job_heap was empty, the call to `peek()` above would have returned None
             let job = self.job_heap.pop().unwrap();
+            // TODO double check this unwrap
             self.sender.send(job.0.message.create_duplicate()).unwrap();
 
             // Try to get next execution time. If there are no more scheduled executions for this job, we'll exit early.
