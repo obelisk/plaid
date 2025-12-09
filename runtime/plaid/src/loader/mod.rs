@@ -50,7 +50,7 @@ pub struct LimitedAmount {
 /// * { Limited = value }
 ///
 /// E.g.,
-/// ```
+/// ```toml
 /// [loading.storage_size]
 /// default = "Unlimited"
 /// [loading.storage_size.log_type]

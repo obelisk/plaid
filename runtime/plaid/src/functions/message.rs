@@ -14,7 +14,7 @@ pub fn fetch_data_and_source(
         Ok(memory_view) => memory_view,
         Err(e) => {
             error!(
-                "{}: Memory error in fetch_from_module: {:?}",
+                "{}: Memory error in fetch_data_and_source: {:?}",
                 env.data().module.name,
                 e
             );
@@ -48,7 +48,10 @@ pub fn fetch_data_and_source(
     // Get the length of the log and convert it to a byte representation
     let log_length = (log_data.len() as u32).to_le_bytes();
 
-    let mut rule_data = Vec::new();
+    // Calculate the total size needed
+    let total_capacity = 4 + log_data.len() + source.len(); // log_length (4 bytes) + log_data + source
+    let mut rule_data = Vec::with_capacity(total_capacity);
+
     rule_data.extend_from_slice(&log_length);
     rule_data.extend_from_slice(log_data);
     rule_data.extend_from_slice(&source);
@@ -69,7 +72,7 @@ pub fn fetch_data(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_siz
         Ok(memory_view) => memory_view,
         Err(e) => {
             error!(
-                "{}: Memory error in fetch_from_module: {:?}",
+                "{}: Memory error in fetch_data: {:?}",
                 env.data().module.name,
                 e
             );
@@ -95,7 +98,7 @@ pub fn fetch_source(env: FunctionEnvMut<Env>, data_buffer: WasmPtr<u8>, buffer_s
         Ok(memory_view) => memory_view,
         Err(e) => {
             error!(
-                "{}: Memory error in fetch_from_module: {:?}",
+                "{}: Memory error in fetch_source: {:?}",
                 env.data().module.name,
                 e
             );
