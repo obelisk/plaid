@@ -10,8 +10,12 @@ use tokio::time::sleep_until;
 /// The `UriEntry` struct contains information about a URI, including the duration to wait before
 /// retrying a connection (`backoff_duration`) and the time when the next connection attempt
 /// should be made.
-#[derive(Debug, Eq, PartialEq)]
-struct UriEntry {
+///
+/// This entry must be passed back to `mark_failed()` or `reset_failure()` to ensure
+/// the correct URI entry is updated. This design prevents silent bugs where the heap
+/// state might change between selection and update.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct UriEntry {
     name: String,
     /// The URI to connect to.
     uri: Uri,
@@ -19,6 +23,18 @@ struct UriEntry {
     backoff_duration: Duration,
     /// The time when the next connection attempt should be made.
     next_attempt: Instant,
+}
+
+impl UriEntry {
+    /// Returns the name associated with this URI.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns a reference to the URI.
+    pub fn uri(&self) -> &Uri {
+        &self.uri
+    }
 }
 
 /// Manages a list of URI entries and handles the selection and retry logic for connection attempts.
@@ -88,54 +104,71 @@ impl UriSelector {
     ///
     /// # Returns
     ///
-    /// Returns an `Option<(String, Uri)>` where:
-    /// - `String` is the name associated with the selected URI.
-    /// - `Uri` is the next URI to use.
+    /// Returns an `Option<UriEntry>` containing the selected URI entry.
+    /// The entry must be passed back to `mark_failed()` or `reset_failure()` to update its state.
     ///
     /// If the URIs collection is empty, it returns `None`.
     ///
     /// # Behavior
     ///
-    /// - If a URI is ready for its next attempt, i.e., its `next_attempt` time has passed or is equal to the current time,
-    ///   this function immediately returns that URI.
-    /// - If no URIs are ready, the function calculates the duration until the earliest `next_attempt` time,
-    ///   sleeps for that duration, and then returns the URI once it is ready.
-    pub async fn next_uri(&self) -> Option<(String, Uri)> {
-        // Select the URI with the shortest backoff duration that is ready for the next attempt
-        let uri = self.uris.peek()?;
+    /// - Peeks at the URI with the earliest next_attempt time
+    /// - If the next attempt hasn't passed, sleeps until it's ready
+    /// - Only pops the entry from the heap when it's ready to be used
+    /// - Returns the entry for connection attempt
+    pub async fn next_uri(&mut self) -> Option<UriEntry> {
+        // Peek at the URI with the shortest backoff duration
+        let entry = self.uris.peek()?;
         let now = Instant::now();
 
         // If the next attempt hasn't passed, sleep until the socket is ready
-        if uri.next_attempt > now {
-            sleep_until((uri.next_attempt).into()).await;
+        if entry.next_attempt > now {
+            sleep_until((entry.next_attempt).into()).await;
         }
 
-        Some((uri.name.clone(), uri.uri.clone()))
+        // Now pop it from the heap since it's ready
+        self.uris.pop()
     }
 
-    /// Marks the currently selected URI as failed, updating its backoff duration and next attempt time.
-    pub fn mark_failed(&mut self) {
-        if let Some(mut uri) = self.uris.pop() {
-            uri.backoff_duration = (uri.backoff_duration * 2).min(self.max_retry_after);
-            uri.next_attempt = Instant::now() + uri.backoff_duration;
+    /// Marks the given URI entry as failed, updating its backoff duration and reinserting it into the heap.
+    ///
+    /// # Arguments
+    ///
+    /// * `entry` - The `UriEntry` returned from `next_uri()` that failed to connect.
+    ///
+    /// # Behavior
+    ///
+    /// - Doubles the backoff duration (up to `max_retry_after`)
+    /// - Sets the next attempt time to `now + backoff duration`
+    /// - Reinserts the entry back into the heap
+    pub fn mark_failed(&mut self, mut entry: UriEntry) {
+        entry.backoff_duration = (entry.backoff_duration * 2).min(self.max_retry_after);
+        entry.next_attempt = Instant::now() + entry.backoff_duration;
 
-            // Push back onto heap
-            self.uris.push(uri);
-        }
+        // Push back onto heap
+        self.uris.push(entry);
     }
 
-    /// Resets the backoff duration and next attempt time for the currently selected URI.
+    /// Resets the backoff duration and next attempt time for the given URI entry.
+    ///
+    /// # Arguments
+    ///
+    /// * `entry` - The `UriEntry` returned from `next_uri()` that successfully connected.
+    ///
+    /// # Returns
+    ///
+    /// Returns the entry back so it can be used by the caller. The caller must eventually
+    /// pass it back via `mark_failed()` to reinsert it into the heap.
+    ///
+    /// # Behavior
     ///
     /// This function resets the backoff duration to the initial value
-    /// and sets the next attempt time to now.
-    /// It can be used after a successful connection to a URI to indicate that it is healthy again.
-    pub fn reset_failure(&mut self) {
-        if let Some(mut uri) = self.uris.pop() {
-            uri.backoff_duration = self.initial_retry_after;
-            uri.next_attempt = Instant::now();
+    /// and sets the next attempt time to now, indicating the URI is healthy again.
+    /// The entry is NOT reinserted into the heap - it's returned to the caller who
+    /// will use it and eventually call `mark_failed()` to reinsert it.
+    pub fn reset_failure(&self, mut entry: UriEntry) -> UriEntry {
+        entry.backoff_duration = self.initial_retry_after;
+        entry.next_attempt = Instant::now();
 
-            // Push back onto heap
-            self.uris.push(uri);
-        }
+        entry
     }
 }
