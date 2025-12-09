@@ -42,9 +42,10 @@ impl Github {
 
         // Validate secret length against GitHub's 48KiB limit
         if secret.len() > GITHUB_SECRET_MAX_BYTES {
-            return Err(ApiError::GitHubError(GitHubError::InvalidInput(
-                format!("Secret exceeds GitHub's 48KiB limit: {} bytes", secret.len()),
-            )));
+            return Err(ApiError::GitHubError(GitHubError::InvalidInput(format!(
+                "Secret exceeds GitHub's 48KiB limit: {} bytes",
+                secret.len()
+            ))));
         }
 
         match env_name {
@@ -98,10 +99,10 @@ impl Github {
         seal::encrypt(
             secret.as_bytes(),
             base64::decode(pub_key)
-                .unwrap()
+                .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?
                 .as_slice()
                 .try_into()
-                .unwrap(),
+                .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?,
             &mut ciphertext,
         )
         .map_err(|_| {

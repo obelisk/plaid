@@ -99,6 +99,7 @@ impl NpmConfig {
         }
 
         // Check the automation_token looks OK: it should be "npm_" followed by 36 alphanum characters
+        // Safe unwrap: hardcoded regex
         let automation_token_regex = Regex::new(r"^npm_[a-zA-Z0-9]{36}$").unwrap();
         if !automation_token_regex.is_match(&automation_token) {
             return Err(NpmError::WrongConfig(
