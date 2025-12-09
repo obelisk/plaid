@@ -45,8 +45,8 @@ pub fn safely_get_string(
 ) -> Result<String, FunctionErrors> {
     match data_buffer.read_utf8_string(&memory_view, buffer_size as u32) {
         Ok(s) => Ok(s),
-        Err(_) => {
-            error!("Failed to read a UTF-8 string from the guest's memory");
+        Err(e) => {
+            error!("Failed to read a UTF-8 string from the guest's memory: {e}");
             Err(FunctionErrors::ParametersNotUtf8)
         }
     }
