@@ -276,6 +276,7 @@ impl WebSocketClient {
             configuration.uris.clone(),
             configuration.min_retry_duration,
             configuration.max_retry_duration,
+            configuration.log_type.clone(),
         );
 
         Self {

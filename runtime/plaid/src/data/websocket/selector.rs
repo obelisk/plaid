@@ -1,4 +1,5 @@
 use http::Uri;
+use log::debug;
 use std::{
     collections::{BinaryHeap, HashMap},
     time::{Duration, Instant},
@@ -51,6 +52,8 @@ pub struct UriSelector {
     initial_retry_after: Duration,
     /// The maximum duration to wait before retrying a connection.
     max_retry_after: Duration,
+    /// The type of logs the websockets in this selector produce
+    log_type: String,
 }
 
 impl Ord for UriEntry {
@@ -82,6 +85,7 @@ impl UriSelector {
         uris: HashMap<String, Uri>,
         initial_retry_after: Duration,
         max_retry_after: Duration,
+        log_type: String,
     ) -> Self {
         let now = Instant::now();
         UriSelector {
@@ -97,6 +101,7 @@ impl UriSelector {
             ),
             initial_retry_after,
             max_retry_after,
+            log_type,
         }
     }
 
@@ -122,6 +127,8 @@ impl UriSelector {
 
         // If the next attempt hasn't passed, sleep until the socket is ready
         if entry.next_attempt > now {
+            let seconds_until_retry = (entry.next_attempt - now).as_secs();
+            debug!("Next URI for log type [{}] is not ready yet. Retrying in {seconds_until_retry} seconds.", self.log_type);
             sleep_until((entry.next_attempt).into()).await;
         }
 
