@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::loader::PlaidModule;
+use futures_util::stream::TryStreamExt;
 use plaid_stl::network::{MakeRequestRequest, MnrResponseEncoding};
 use reqwest::{header::HeaderMap, Certificate, Client};
 use serde::{
@@ -68,6 +69,8 @@ pub struct Request {
     /// Whether to follow redirects
     #[serde(default)] // default to false
     pub enable_redirects: bool,
+    /// The max size for the response body. If none is provided, default to no limit.
+    pub max_response_size: Option<usize>,
 }
 
 /// Deserialize a non‐zero timeout (1–255 seconds) into a `Duration`, erroring on 0.
@@ -238,24 +241,38 @@ impl General {
                 }
 
                 if request_specification.return_body {
+                    // Read the response body as a stream of bytes, checking we do not go beyond
+                    // the max response size (if one is configured).
+                    let mut body_stream = r.bytes_stream();
+                    let mut body = Vec::new();
+                    let mut total = 0;
+                    while let Some(chunk) = body_stream
+                        .try_next()
+                        .await
+                        .map_err(|e| ApiError::NetworkError(e))?
+                    {
+                        total += chunk.len();
+                        if let Some(max_body_size) = request_specification.max_response_size {
+                            if total > max_body_size {
+                                return Err(ApiError::NetworkResponseTooLarge);
+                            }
+                        }
+                        body.extend_from_slice(&chunk);
+                    }
+
                     match request.response_encoding {
                         MnrResponseEncoding::Utf8 => {
-                            let data = r.text().await.unwrap_or_default();
+                            let data = String::from_utf8(body).unwrap_or_default();
                             ret.data = Some(ResponseData::Utf8(data));
                         }
                         MnrResponseEncoding::Binary => {
-                            let data = r.bytes().await.unwrap_or_default();
-                            ret.data = Some(ResponseData::Binary(data.to_vec()));
+                            ret.data = Some(ResponseData::Binary(body));
                         }
                     };
                 }
 
-                if let Ok(r) = serde_json::to_string(&ret) {
-                    Ok(r)
-                } else {
-                    // TODO: This is not really a BadRequest.
-                    Err(ApiError::BadRequest)
-                }
+                // TODO: This is not really a BadRequest.
+                serde_json::to_string(&ret).map_err(|_| ApiError::BadRequest)
             }
             Err(e) => Err(ApiError::NetworkError(e)),
         }
