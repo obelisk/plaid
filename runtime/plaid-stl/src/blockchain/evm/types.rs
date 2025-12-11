@@ -249,7 +249,7 @@ pub struct EthCallRequest {
 #[derive(Serialize, Deserialize)]
 pub struct EstimateGasRequest {
     /// The account the transaction is sent from
-    pub from: String,
+    pub from: Option<String>,
     /// The address the transaction is directed to
     /// If `None`, it indicates a contract creation transaction
     pub to: Option<String>,
@@ -265,19 +265,15 @@ pub struct EstimateGasRequest {
 
 impl EstimateGasRequest {
     /// Create a new builder for EstimateGasRequest
-    pub fn builder(
-        chain_id: impl Into<ChainId>,
-        from: impl Display,
-        block_tag: BlockTag,
-    ) -> EstimateGasRequestBuilder {
-        EstimateGasRequestBuilder::new(chain_id, from.to_string(), block_tag)
+    pub fn builder(chain_id: impl Into<ChainId>, block_tag: BlockTag) -> EstimateGasRequestBuilder {
+        EstimateGasRequestBuilder::new(chain_id, block_tag)
     }
 }
 
 /// Builder for `EstimateGasRequest`
 pub struct EstimateGasRequestBuilder {
     chain_id: ChainId,
-    from: String,
+    from: Option<String>,
     to: Option<String>,
     value: Option<String>,
     data: Option<String>,
@@ -285,15 +281,21 @@ pub struct EstimateGasRequestBuilder {
 }
 
 impl EstimateGasRequestBuilder {
-    fn new(chain_id: impl Into<ChainId>, from: impl Display, block_tag: BlockTag) -> Self {
+    fn new(chain_id: impl Into<ChainId>, block_tag: BlockTag) -> Self {
         Self {
             chain_id: chain_id.into(),
-            from: from.to_string(),
+            from: None,
             to: None,
             value: None,
             data: None,
             block_tag,
         }
+    }
+
+    /// Set the source address
+    pub fn from(mut self, from: impl Into<String>) -> Self {
+        self.from = Some(from.into());
+        self
     }
 
     /// Set the destination address

@@ -248,7 +248,9 @@ impl EvmClient {
         let node_selector = self.get_node_selector(request.chain_id)?;
 
         let mut object = serde_json::Map::new();
-        object.insert("from".to_string(), Value::String(request.from.to_string()));
+        if let Some(from) = request.from {
+            object.insert("from".to_string(), Value::String(from.to_string()));
+        }
 
         if let Some(to) = request.to {
             object.insert("to".to_string(), Value::String(to.to_string()));
