@@ -28,7 +28,8 @@ test_mode_exemptions = [
     "test_vec_entrypoint.wasm",
     "test_jwt.wasm",
     "test_redis_cache_eviction.wasm",
-    "test_dynamodb.wasm"
+    "test_dynamodb.wasm",
+    "test_mnr_return_certs.wasm"
 ]
 
 [loading.persistent_response_size]
@@ -85,6 +86,7 @@ test_mode_exemptions = [
 "test_vec_entrypoint.wasm" = "test_vec_entrypoint"
 "test_redis_cache_eviction.wasm" = "test_redis_cache_eviction"
 "test_dynamodb.wasm" = "test_dynamodb"
+"test_mnr_return_certs.wasm" = "test_mnr_return_certs"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.

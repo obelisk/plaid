@@ -444,6 +444,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_mnr_return_certs"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "test_persistent_response"
 version = "0.1.0"
 dependencies = [
