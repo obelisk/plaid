@@ -159,6 +159,7 @@ impl Internal {
                     break;
                 }
 
+                // safe unwrap because if the log_heap was empty, the call to `peek()` above would have returned None
                 let log = log_heap.pop().unwrap();
                 let log_id = log.0.message.id.clone();
                 match self.sender.send(log.0.message) {
