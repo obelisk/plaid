@@ -5,9 +5,9 @@ use plaid_stl::{entrypoint_with_source, messages::LogSource, network::make_named
 entrypoint_with_source!();
 
 fn main(log: String, _source: LogSource) -> Result<(), i32> {
-    plaid::print_debug_string(&format!("testing test_mnr_return_certs: [{log}]"));
+    plaid::print_debug_string(&format!("testing test_mnr_return_cert: [{log}]"));
 
-    let output = make_named_request("test_mnr_return_certs", "", HashMap::new()).unwrap();
+    let output = make_named_request("test_mnr_return_cert", "", HashMap::new()).unwrap();
 
     if let Some(cert) = output.cert {
         plaid::print_debug_string(&format!("Received cert: {cert}"));
