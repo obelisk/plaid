@@ -4,10 +4,8 @@ mod random;
 
 use crossbeam_channel::Sender;
 use reqwest::{redirect, Client};
-
 use ring::rand::SystemRandom;
 use serde::Deserialize;
-
 use std::{collections::HashMap, time::Duration};
 
 use crate::{data::DelayedMessage, executor::Message};
@@ -39,10 +37,57 @@ pub struct General {
 
 /// Holds the default HTTP client plus any named clients with per-request customizations.
 pub struct Clients {
-    /// The default `Client` used for requests without custom timeouts or certificates.
+    /// The default `Client` used for requests without customizations.
     default: Client,
-    /// Named `Client` instances configured with custom timeouts or root certificates.
+    /// Named `Client` instances where special configurations have been applied.
     specialized: HashMap<String, Client>,
+}
+
+/// An MNR needs a specialized client if it specifies
+/// * a custom timeout
+/// * a custom root CA
+/// * a permissive redirect policy
+fn create_specialized_client(
+    name: String,
+    req: &network::Request,
+    default_timeout_duration: Duration,
+) -> Option<(String, Client)> {
+    // If no specializations are needed, return None immediately
+    if req.timeout.is_none()
+        && req.root_certificate.is_none()
+        && !req.enable_redirects
+        && !req.return_cert
+    {
+        return None;
+    }
+
+    // If specializations are needed, start with the default timeout
+    let mut builder =
+        reqwest::Client::builder().timeout(req.timeout.unwrap_or(default_timeout_duration));
+
+    // If the request has a custom root CA, then we need to add that into
+    // the root certificate store
+    if let Some(ref ca) = req.root_certificate {
+        builder = builder.add_root_certificate(ca.clone());
+    }
+
+    if req.return_cert {
+        // Enable certificate retrieval
+        builder = builder.tls_info(true);
+    }
+
+    // All requests to follow redirects if needed. This is generally
+    // not advised.
+    builder = builder.redirect({
+        if req.enable_redirects {
+            redirect::Policy::default()
+        } else {
+            redirect::Policy::none()
+        }
+    });
+
+    let client = builder.build().unwrap();
+    Some((name.clone(), client))
 }
 
 impl Clients {
@@ -59,32 +104,7 @@ impl Clients {
             .web_requests
             .iter()
             .filter_map(|(name, req)| {
-                // An MNR needs a specialized client if it specifies
-                // * a custom timeout
-                // * a custom root CA
-                // * that it allows redirects
-                if req.timeout.is_some() || req.root_certificate.is_some() || req.enable_redirects {
-                    let mut builder = reqwest::Client::builder()
-                        .timeout(req.timeout.unwrap_or(default_timeout_duration));
-
-                    if let Some(ca) = req.root_certificate.clone() {
-                        builder = builder.add_root_certificate(ca);
-                    }
-
-                    // See if redirects should be enabled
-                    builder = builder.redirect({
-                        if req.enable_redirects {
-                            redirect::Policy::default()
-                        } else {
-                            redirect::Policy::none()
-                        }
-                    });
-
-                    let client = builder.build().unwrap();
-                    Some((name.clone(), client))
-                } else {
-                    None
-                }
+                create_specialized_client(name.clone(), req, default_timeout_duration)
             })
             .collect::<HashMap<String, Client>>();
 

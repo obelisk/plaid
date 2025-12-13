@@ -7,7 +7,9 @@ verb = "get"
 uri = "https://www.google.com/"
 return_body = true
 return_code = true
-allowed_rules = ["testing_test.wasm"]
+return_cert = true
+available_in_test_mode = true
+allowed_rules = ["just_run_please.wasm"]
 [apis."general"."network"."web_requests"."google_test"."headers"]
 
 [apis."general"."network"."web_requests"."testmode_allow"]
@@ -15,7 +17,8 @@ verb = "get"
 uri = "https://captive.apple.com/"
 return_body = true
 return_code = true
-allowed_rules = ["test_testmode.wasm"]
+return_cert = true
+allowed_rules = ["just_run_please.wasm"]
 available_in_test_mode = true
 [apis."general"."network"."web_requests"."testmode_allow"."headers"]
 
@@ -24,7 +27,8 @@ verb = "get"
 uri = "https://captive.apple.com/"
 return_body = true
 return_code = true
-allowed_rules = ["test_testmode.wasm"]
+return_cert = true
+allowed_rules = ["just_run_please.wasm"]
 available_in_test_mode = false
 [apis."general"."network"."web_requests"."testmode_deny"."headers"]
 
@@ -58,9 +62,7 @@ available_in_test_mode = false
 
 [apis."slack"]
 [apis."slack"."webhooks"]
-test_webhook = "{plaid-secret{test-webhook-secret}}"
 [apis."slack"."bot_tokens"]
-"plaid-testing" = "{plaid-secret{test-slack-bot-token}}"
 
 [apis."web"]
 [apis."web".keys]

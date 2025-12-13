@@ -113,6 +113,10 @@ headers = []
 log_type = "test_dynamodb"
 headers = []
 
+[webhooks."internal".webhooks."test_mnr_return_cert"]
+log_type = "test_mnr_return_cert"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples
