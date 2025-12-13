@@ -9,17 +9,13 @@ fn main(log: String, _source: LogSource) -> Result<(), i32> {
 
     let output = make_named_request("test_mnr_return_certs", "", HashMap::new()).unwrap();
 
-    if let Some(certs) = output.certs {
-        plaid::print_debug_string(&format!("cert chain len = {}", certs.len()));
-        for (i, c) in certs.iter().enumerate() {
-            plaid::print_debug_string(&format!("\nCert {i}"));
-            plaid::print_debug_string(&format!("\n{c}\n"));
-        }
+    if let Some(cert) = output.cert {
+        plaid::print_debug_string(&format!("Received cert: {cert}"));
 
         // If we are here, then everything worked fine (no unwraps or early returns), so we send an OK
         make_named_request("test-response", "OK", HashMap::new()).unwrap();
     } else {
-        plaid::print_debug_string(&format!("output.certs was empty. something is wrong",));
+        plaid::print_debug_string(&format!("output.cert was empty. something is wrong",));
     }
 
     Ok(())
