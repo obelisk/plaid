@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define what webhook within Plaid we're going to call
-URL="test_mnr_return_certs"
+URL="test_mnr_return_cert"
 FILE="received_data.$URL.txt"
 
 # Start the webhook
