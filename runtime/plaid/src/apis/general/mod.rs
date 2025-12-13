@@ -1,4 +1,3 @@
-mod certs;
 mod logback;
 mod network;
 mod random;
@@ -7,12 +6,8 @@ use crossbeam_channel::Sender;
 use reqwest::{redirect, Client};
 use ring::rand::SystemRandom;
 use serde::Deserialize;
-use tokio::sync::Mutex;
+use std::{collections::HashMap, time::Duration};
 
-use std::collections::VecDeque;
-use std::{collections::HashMap, sync::Arc, time::Duration};
-
-use crate::apis::ApiError;
 use crate::{data::DelayedMessage, executor::Message};
 
 use super::default_timeout_seconds;
@@ -42,12 +37,57 @@ pub struct General {
 
 /// Holds the default HTTP client plus any named clients with per-request customizations.
 pub struct Clients {
-    /// The default `Client` used for requests without custom timeouts or certificates.
+    /// The default `Client` used for requests without customizations.
     default: Client,
-    /// Named `Client` instances configured with custom timeouts or root certificates.
+    /// Named `Client` instances where special configurations have been applied.
     specialized: HashMap<String, Client>,
-    /// Captured certificate chain from the server in DER format
-    captured_certs: Arc<Mutex<Option<VecDeque<Vec<u8>>>>>,
+}
+
+/// An MNR needs a specialized client if it specifies
+/// * a custom timeout
+/// * a custom root CA
+/// * a permissive redirect policy
+fn create_specialized_client(
+    name: String,
+    req: &network::Request,
+    default_timeout_duration: Duration,
+) -> Option<(String, Client)> {
+    // If no specializations are needed, return None immediately
+    if req.timeout.is_none()
+        && req.root_certificate.is_none()
+        && !req.enable_redirects
+        && !req.return_cert
+    {
+        return None;
+    }
+
+    // If specializations are needed, start with the default timeout
+    let mut builder =
+        reqwest::Client::builder().timeout(req.timeout.unwrap_or(default_timeout_duration));
+
+    // If the request has a custom root CA, then we need to add that into
+    // the root certificate store
+    if let Some(ref ca) = req.root_certificate {
+        builder = builder.add_root_certificate(ca.clone());
+    }
+
+    if req.return_cert {
+        // Enable certificate retrieval
+        builder = builder.tls_info(true);
+    }
+
+    // All requests to follow redirects if needed. This is generally
+    // not advised.
+    builder = builder.redirect({
+        if req.enable_redirects {
+            redirect::Policy::default()
+        } else {
+            redirect::Policy::none()
+        }
+    });
+
+    let client = builder.build().unwrap();
+    Some((name.clone(), client))
 }
 
 impl Clients {
@@ -59,84 +99,18 @@ impl Clients {
             .build()
             .unwrap();
 
-        let captured_certs = Arc::new(Mutex::new(Option::None));
         let specialized = config
             .network
             .web_requests
             .iter()
             .filter_map(|(name, req)| {
-                // An MNR needs a specialized client if it specifies
-                // * a custom timeout
-                // * a custom root CA
-                // * that it allows redirects
-                // * capturing the server certificate chain
-                if req.timeout.is_some()
-                    || req.root_certificate.is_some()
-                    || req.enable_redirects
-                    || req.return_certs
-                {
-                    let mut builder = reqwest::Client::builder()
-                        .timeout(req.timeout.unwrap_or(default_timeout_duration));
-
-                    if let Some(ref ca) = req.root_certificate {
-                        builder = builder.add_root_certificate(ca.inner.clone());
-                    }
-
-                    // See if redirects should be enabled
-                    builder = builder.redirect({
-                        if req.enable_redirects {
-                            redirect::Policy::default()
-                        } else {
-                            redirect::Policy::none()
-                        }
-                    });
-
-                    // return cert chain
-                    builder = if req.return_certs {
-                        // build custom tls config with capturing verifier
-                        let config = certs::capturing_verifier_tls_config(
-                            &req.root_certificate,
-                            captured_certs.clone(),
-                        )
-                        .unwrap();
-
-                        // set custom tls config on client
-                        builder.use_rustls_tls().use_preconfigured_tls(config)
-                    } else {
-                        builder
-                    };
-
-                    let client = builder.build().unwrap();
-                    Some((name.clone(), client))
-                } else {
-                    None
-                }
+                create_specialized_client(name.clone(), req, default_timeout_duration)
             })
             .collect::<HashMap<String, Client>>();
 
         Self {
             default,
             specialized,
-            captured_certs,
-        }
-    }
-
-    pub fn get_captured_certs(&self) -> Result<Option<Vec<String>>, ApiError> {
-        let certs = self.captured_certs.try_lock().map_err(|err| {
-            error!("get_captured_certs try_lock failed {err}");
-            ApiError::ImpossibleError
-        })?;
-
-        if let Some(chain_bytes) = &*certs {
-            // Convert each DER to PEM
-            let chain_pem: Vec<String> = chain_bytes
-                .iter()
-                .map(|bytes| certs::der_to_pem(bytes))
-                .collect();
-
-            Ok(Some(chain_pem))
-        } else {
-            Ok(None)
         }
     }
 }

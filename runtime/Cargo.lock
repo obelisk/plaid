@@ -3445,7 +3445,6 @@ dependencies = [
  "warp",
  "wasmer",
  "wasmer-middlewares",
- "webpki-roots 1.0.4",
 ]
 
 [[package]]

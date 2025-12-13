@@ -87,7 +87,6 @@ urlencoding = "2.1.3"
 warp = { version = "0.3", features = ["tls"] }
 wasmer = { version = "6", default-features = false }
 wasmer-middlewares = "6"
-webpki-roots = "1.0.4"
 
 
 [[example]]
