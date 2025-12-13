@@ -1,6 +1,6 @@
 [package]
-name = "test_mnr_return_certs"
-description = "Test rule that verifies the Make Named Request functionality works as expected."
+name = "test_mnr_return_cert"
+description = "Test rule that verifies the Make Named Request return_cert functionality works as expected."
 version = "0.1.0"
 edition = "2021"
 

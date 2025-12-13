@@ -444,7 +444,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "test_mnr_return_certs"
+name = "test_mnr_return_cert"
 version = "0.1.0"
 dependencies = [
  "plaid_stl",
