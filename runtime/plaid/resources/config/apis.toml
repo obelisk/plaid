@@ -20,7 +20,8 @@ allowed_rules = [
     "test_vec_entrypoint.wasm",
     "test_jwt.wasm",
     "test_redis_cache_eviction.wasm",
-    "test_dynamodb.wasm"
+    "test_dynamodb.wasm",
+    "test_mnr_return_cert.wasm"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
@@ -98,6 +99,18 @@ return_code = true
 allowed_rules = ["test_testmode.wasm"]
 available_in_test_mode = false
 [apis."general"."network"."web_requests"."testmode_deny"."headers"]
+
+[apis."general"."network"."web_requests"."test_mnr_return_cert"]
+verb = "post"
+uri = "https://localhost:8998/test_mnr_return_cert"
+return_body = true
+return_code = true
+return_cert = true
+allowed_rules = ["test_mnr_return_cert.wasm"]
+root_certificate = """
+{plaid-secret{integration-test-root-ca}}
+"""
+[apis."general"."network"."web_requests"."test_mnr_return_cert"."headers"]
 
 # [apis."general"."network"."web_requests"."list_deploy_keys"]
 # verb = "get"

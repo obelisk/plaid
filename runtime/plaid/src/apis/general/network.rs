@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::loader::PlaidModule;
 use plaid_stl::network::{MakeRequestRequest, MnrResponseEncoding};
-use reqwest::{header::HeaderMap, Certificate, Client};
+use reqwest::{header::HeaderMap, Client};
 use serde::{
     de::{self},
     Deserialize, Serialize,
@@ -27,6 +27,9 @@ struct DynamicWebRequestResponse {
     code: Option<u16>,
     /// Response data, which can be either text or binary
     data: Option<ResponseData>,
+    /// Peer certificate from the server
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cert: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -48,10 +51,13 @@ pub struct Request {
     return_body: bool,
     /// Flag to return the code from the request
     return_code: bool,
+    /// Flag to return the peer certificate from the server
+    #[serde(default)] // default to false
+    pub return_cert: bool,
     /// Optional root TLS certificate to use for this request.  
     /// When set, the request will be sent via a special HTTP client configured with this certificate.
     #[serde(default, deserialize_with = "certificate_deserializer")]
-    pub root_certificate: Option<Certificate>,
+    pub root_certificate: Option<reqwest::Certificate>,
     /// Optional per‐request timeout.  
     /// When set, the request will be sent via a special HTTP client configured with this timeout;  
     /// if unset, the default timeout from the API config is used.
@@ -86,21 +92,16 @@ where
 }
 
 /// Deserialize a PEM‐encoded string into a `Certificate`, erroring on parse failure.
-fn certificate_deserializer<'de, D>(deserializer: D) -> Result<Option<Certificate>, D::Error>
+fn certificate_deserializer<'de, D>(
+    deserializer: D,
+) -> Result<Option<reqwest::Certificate>, D::Error>
 where
     D: de::Deserializer<'de>,
 {
-    let pem = Option::<String>::deserialize(deserializer)?;
-    match pem {
-        None => Ok(None),
-        Some(pem) => {
-            let cert = Certificate::from_pem(pem.as_bytes()).map_err(|e| {
-                serde::de::Error::custom(format!("Invalid certificate provided. Error: {e}"))
-            })?;
-
-            Ok(Some(cert))
-        }
-    }
+    Option::<&[u8]>::deserialize(deserializer)?
+        .map(reqwest::Certificate::from_pem)
+        .transpose()
+        .map_err(|e| serde::de::Error::custom(format!("Invalid certificate provided. Error: {e}")))
 }
 
 impl General {
@@ -144,18 +145,13 @@ impl General {
         }
     }
 
-    /// Make a named web request on behalf of a given `module`. The request's details are encoded in `params`.
-    pub async fn make_named_request(
+    /// This function checks if an MNR is allowed to be executed by the calling module.
+    /// It returns Ok(()) if it can, otherwise it will return a sensible ApiError.
+    fn make_named_request_check_permissions(
         &self,
-        params: &str,
+        request_name: &str,
         module: Arc<PlaidModule>,
-    ) -> Result<String, ApiError> {
-        // Parse the information needed to make the request
-        let request: MakeRequestRequest =
-            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
-
-        let request_name = &request.request_name;
-
+    ) -> Result<&Request, ApiError> {
         // TODO: Log these failures better in the runtime
         let request_specification = match self.config.network.web_requests.get(request_name) {
             Some(x) => x,
@@ -177,9 +173,30 @@ impl General {
         // If the call is coming from a module in test mode, and the request is not allowed to be
         // called in test mode, return TestMode error
         if module.test_mode && !request_specification.available_in_test_mode {
-            error!("{module} tried to use web-request which is not available in test mode: {request_name}");
+            error!(
+            "{module} tried to use web-request which is not available in test mode: {request_name}"
+        );
             return Err(ApiError::TestMode);
         }
+
+        Ok(request_specification)
+    }
+
+    /// Make a named web request on behalf of a given `module`. The request's details are encoded in `params`.
+    pub async fn make_named_request(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        // Parse the information needed to make the request
+        let request: MakeRequestRequest =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let request_name = &request.request_name;
+
+        // Check that this module is allowed to use this MNR
+        let request_specification =
+            self.make_named_request_check_permissions(request_name, module)?;
 
         let headers_to_include_in_request = match request.headers {
             Some(mut dynamic_headers) => {
@@ -212,8 +229,7 @@ impl General {
             "patch" => client.patch(&uri),
             "post" => client.post(&uri),
             "put" => client.put(&uri),
-            // Not sure we want to support head
-            //"head" => self.client.head(&request_specification.uri),
+            "head" => client.head(&request_specification.uri),
             _ => return Err(ApiError::BadRequest),
         }
         .headers(headers);
@@ -231,10 +247,17 @@ impl General {
                 let mut ret = DynamicWebRequestResponse {
                     code: None,
                     data: None,
+                    cert: None,
                 };
 
                 if request_specification.return_code {
                     ret.code = Some(r.status().as_u16());
+                }
+
+                if request_specification.return_cert {
+                    if let Some(certs) = r.extensions().get::<reqwest::tls::TlsInfo>() {
+                        ret.cert = certs.peer_certificate().map(base64::encode);
+                    }
                 }
 
                 if request_specification.return_body {
