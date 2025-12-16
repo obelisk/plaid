@@ -128,6 +128,7 @@ pub enum ApiError {
     BlockchainError(blockchain::BlockchainError),
     TestMode,
     JiraError(jira::JiraError),
+    NetworkResponseTooLarge,
 }
 
 impl From<evm::EvmCallError> for ApiError {
