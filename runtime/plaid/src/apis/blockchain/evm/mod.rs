@@ -12,7 +12,7 @@ use crate::{
     loader::PlaidModule,
     parse_duration,
 };
-use http::StatusCode;
+use http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
 use plaid_stl::blockchain::evm::types::{
     ChainId, EstimateGasRequest, EthCallRequest, GetAddressMetadataRequest, GetBlockRequest,
     GetGasPriceRequest, GetLogsRequest, GetTransactionRequest, SendRawTransactionRequest,
@@ -121,7 +121,14 @@ pub struct EvmClient {
 
 impl EvmClient {
     pub fn new(config: EvmConfig) -> Self {
+        let mut default_headers = HeaderMap::new();
+
+        let content_type_value =
+            HeaderValue::from_str("application/json").expect("Invalid header value");
+        default_headers.insert(CONTENT_TYPE, content_type_value);
+
         let client = reqwest::Client::builder()
+            .default_headers(default_headers)
             .timeout(config.timeout_millis)
             .build()
             .expect("Failed to build EVM reqwest client");
