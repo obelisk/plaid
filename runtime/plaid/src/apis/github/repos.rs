@@ -2,8 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use http::{HeaderMap, HeaderValue};
 use plaid_stl::github::{
-    CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus, CreateFileRequest,
-    FetchFileCustomMediaType, FetchFileRequest,
+    CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus, CommentOnPullRequestRequest,
+    CreateFileRequest, FetchFileCustomMediaType, FetchFileRequest,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -512,17 +512,13 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: CommentOnPullRequestRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let username =
-            self.validate_username(request.get("usename").ok_or(ApiError::BadRequest)?)?;
-        let repository_name = self.validate_repository_name(
-            request.get("repository_name").ok_or(ApiError::BadRequest)?,
-        )?;
-        let pull_request =
-            self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
-        let comment = request.get("comment").ok_or(ApiError::BadRequest)?;
+        let username = self.validate_username(&request.owner)?;
+        let repository_name = self.validate_repository_name(&request.repository)?;
+        let pull_request = self.validate_pint(&request.number)?;
+        let comment = &request.comment;
 
         info!("Commenting on Pull Request [{pull_request}] in repo [{repository_name}] on behalf of {module}");
         let address = format!("/repos/{username}/{repository_name}/issues/{pull_request}/comments");
