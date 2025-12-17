@@ -445,3 +445,16 @@ pub struct CreateFileRequest {
     /// The branch name. Default: the repository’s default branch.
     pub branch: Option<String>,
 }
+
+/// Request to comment on a pull request or issue
+#[derive(Serialize, Deserialize)]
+pub struct CommentOnPullRequestRequest {
+    /// Name of the owner of the repository
+    pub owner: String,
+    /// Name of the repository where the PR or issue is
+    pub repository: String,
+    /// Number of the pull request or issue
+    pub number: String,
+    /// Comment to leave
+    pub comment: String,
+}
