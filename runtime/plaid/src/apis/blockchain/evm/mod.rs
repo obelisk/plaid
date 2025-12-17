@@ -123,8 +123,7 @@ impl EvmClient {
     pub fn new(config: EvmConfig) -> Self {
         let mut default_headers = HeaderMap::new();
 
-        let content_type_value =
-            HeaderValue::from_str("application/json").expect("Invalid header value");
+        let content_type_value = HeaderValue::from_static("application/json");
         default_headers.insert(CONTENT_TYPE, content_type_value);
 
         let client = reqwest::Client::builder()
