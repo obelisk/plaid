@@ -48,11 +48,9 @@ pub enum GoogleDocsError {
 
 // Google API Endpoints
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const DRIVE_API_URL: &str = "https://www.googleapis.com/drive/v3/files";
 // we use the 'upload' subdomain for multipart uploads
 const DRIVE_UPLOAD_URL: &str =
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
-const DOCS_API_URL_BASE: &str = "https://docs.googleapis.com/v1/documents";
 
 impl GoogleDocs {
     pub fn new(config: GoogleDocsConfig) -> Self {
@@ -130,20 +128,7 @@ impl GoogleDocs {
         markdown_content: &str,
     ) -> Result<String, GoogleDocsError> {
         let access_token = self.refresh_access_token().await?;
-        // Convert Markdown to HTML
-        // We enable tables and footnotes for better compatibility
-        let mut options = Options::empty();
-        options.insert(Options::ENABLE_TABLES);
-        options.insert(Options::ENABLE_FOOTNOTES);
-
-        let parser = Parser::new_ext(markdown_content, options);
-        let mut html_output = String::new();
-        html::push_html(&mut html_output, parser);
-
-        println!(
-            "Converted Markdown to HTML payload ({} bytes)",
-            html_output.len()
-        );
+        let html_output = markdown_to_html(markdown_content);
 
         // Prepare Multipart Body
         // Part A: JSON Metadata (defines target folder and file name)
@@ -248,6 +233,44 @@ impl GoogleDocs {
     }
 }
 
+fn markdown_to_html(md: &str) -> String {
+    // Convert Markdown to HTML
+    // We enable tables and footnotes for better compatibility
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_FOOTNOTES);
+
+    let parser = Parser::new_ext(md, options);
+    let mut output = String::new();
+    html::push_html(&mut output, parser);
+
+    output
+}
+
+fn render_template(template: &str, data: serde_json::Value) -> Result<String, GoogleDocsError> {
+    // Initialize Tera and render
+    let mut tera = Tera::default();
+    tera.add_raw_template("template", template)
+        .map_err(|e| GoogleDocsError::Template(e.to_string()))
+        .unwrap();
+
+    let mut context = Context::new();
+
+    // Loop through the JSON object and insert each key-value pair into the Tera context
+    if let Some(map) = data.as_object() {
+        for (key, value) in map {
+            context.insert(key, value);
+        }
+    }
+
+    let rendered = tera
+        .render("template", &context)
+        .map_err(|e| GoogleDocsError::Template(e.to_string()))
+        .unwrap();
+
+    Ok(rendered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,13 +371,6 @@ This document was created by **{{ author }}** on {{ date }}.
 {{ conclusion_text }}
 "#;
 
-        // Initialize Tera and render
-        let mut tera = Tera::default();
-        tera.add_raw_template("markdown_doc", template_input)
-            .map_err(|e| GoogleDocsError::Template(e.to_string()))
-            .unwrap();
-
-        let mut context = Context::new();
         // Create a JSON object to store all parameters
         let data = json!({
             "project_name": "Omega Red",
@@ -367,18 +383,7 @@ This document was created by **{{ author }}** on {{ date }}.
             "conclusion_text": "Automated template rendering successful. Math operations in table verified."
         });
 
-        // Loop through the JSON object and insert each key-value pair into the Tera context
-        if let Some(map) = data.as_object() {
-            for (key, value) in map {
-                context.insert(key, value);
-            }
-        }
-
-        let rendered_markdown = tera
-            .render("markdown_doc", &context)
-            .map_err(|e| GoogleDocsError::Template(e.to_string()))
-            .unwrap();
-
+        let rendered_markdown = render_template(template_input, data).unwrap();
         // Create document
         let doc_id = docs
             .create_doc_from_markdown(&folder_id, "markdown test", &rendered_markdown)
@@ -406,8 +411,6 @@ This document was created by **{{ author }}** on {{ date }}.
         let docs = GoogleDocs::new(config);
 
         // CSV Template
-        let mut tera = Tera::default();
-        let mut context = Context::new();
         let csv_template = r#"Item,Cost,Category
 Server,{{ cost_server }},Hardware
 License,{{ cost_license }},Software
@@ -423,21 +426,7 @@ Total,{{ cost_server + cost_license }},"#;
             "cost_license": 500,
         });
 
-        // Loop through the JSON object and insert each key-value pair into the Tera context
-        if let Some(map) = data.as_object() {
-            for (key, value) in map {
-                context.insert(key, value);
-            }
-        }
-
-        tera.add_raw_template("csv_tpl", csv_template)
-            .map_err(|e| GoogleDocsError::Template(e.to_string()))
-            .unwrap();
-
-        let rendered_csv = tera
-            .render("csv_tpl", &context)
-            .map_err(|e| GoogleDocsError::Template(e.to_string()))
-            .unwrap();
+        let rendered_csv = render_template(csv_template, data).unwrap();
 
         let sheet_id = docs
             .create_sheet_from_csv(&folder_id, "Rust Financials Sheet", &rendered_csv)
