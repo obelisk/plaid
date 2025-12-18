@@ -1,9 +1,28 @@
+use std::collections::{HashMap, HashSet};
+
 use pulldown_cmark::{html, Options, Parser};
 use reqwest::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tera::{Context, Tera};
 use thiserror::Error;
+
+#[derive(Deserialize)]
+pub struct GoogleDocsConfig {
+    client_id: String,
+    client_secret: String,
+    refresh_token: String,
+    folder_id: String,
+    wr: HashSet<String>,
+}
+
+pub struct GoogleDocs {
+    client: Client,
+    client_id: String,
+    client_secret: String,
+    folder_id: String,
+    refresh_token: String,
+}
 
 #[derive(Error, Debug)]
 pub enum GoogleDocsError {
@@ -26,6 +45,28 @@ const DRIVE_API_URL: &str = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_UPLOAD_URL: &str =
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 const DOCS_API_URL_BASE: &str = "https://docs.googleapis.com/v1/documents";
+
+impl GoogleDocs {
+    pub fn new(config: GoogleDocsConfig) -> Self {
+        let GoogleDocsConfig {
+            client_id,
+            client_secret,
+            refresh_token,
+            folder_id,
+            wr,
+        } = config;
+
+        let client = Client::new();
+
+        Self {
+            client,
+            client_id,
+            client_secret,
+            refresh_token,
+            folder_id,
+        }
+    }
+}
 
 /// Swaps a long-lived Refresh Token for a short-lived Access Token
 async fn refresh_access_token(

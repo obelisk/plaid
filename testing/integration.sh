@@ -157,9 +157,9 @@ if [ "$1" == "llvm" ]; then
 fi
 
 if [[ "$CACHE_BACKEND" == redis* ]]; then
-  FEATURES="sled,$1,redis,aws"
+  FEATURES="sled,$1,redis,aws,gcp"
 else
-  FEATURES="sled,$1,aws"
+  FEATURES="sled,$1,aws,gcp"
 fi
 
 cargo build --release --no-default-features --features $FEATURES

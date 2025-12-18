@@ -1,6 +1,7 @@
 #[cfg(feature = "aws")]
 pub mod aws;
 pub mod cryptography;
+#[cfg(feature = "gcp")]
 pub mod gcp;
 pub mod general;
 pub mod github;
