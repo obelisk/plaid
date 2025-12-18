@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use pulldown_cmark::{html, Options, Parser};
 use reqwest::{multipart, Client};
@@ -6,22 +7,29 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tera::{Context, Tera};
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 #[derive(Deserialize)]
 pub struct GoogleDocsConfig {
     client_id: String,
     client_secret: String,
     refresh_token: String,
-    folder_id: String,
-    wr: HashSet<String>,
+    // Mapping for readers: folder_id -> list of rules
+    r: HashMap<String, HashSet<String>>,
+    // Mapping for writers: folder_id -> list of rules
+    wr: HashMap<String, HashSet<String>>,
 }
 
 pub struct GoogleDocs {
     client: Client,
     client_id: String,
     client_secret: String,
-    folder_id: String,
     refresh_token: String,
+    access_token: Mutex<Option<(String, Instant)>>,
+    // Mapping for readers: folder_id -> list of rules
+    r: HashMap<String, HashSet<String>>,
+    // Mapping for writers: folder_id -> list of rules
+    wr: HashMap<String, HashSet<String>>,
 }
 
 #[derive(Error, Debug)]
@@ -52,7 +60,7 @@ impl GoogleDocs {
             client_id,
             client_secret,
             refresh_token,
-            folder_id,
+            r,
             wr,
         } = config;
 
@@ -63,163 +71,181 @@ impl GoogleDocs {
             client_id,
             client_secret,
             refresh_token,
-            folder_id,
+            r,
+            wr,
+            access_token: Mutex::new(None),
         }
     }
-}
 
-/// Swaps a long-lived Refresh Token for a short-lived Access Token
-async fn refresh_access_token(
-    client: &Client,
-    client_id: &str,
-    client_secret: &str,
-    refresh_token: &str,
-) -> Result<String, GoogleDocsError> {
-    let params = [
-        ("client_id", client_id),
-        ("client_secret", client_secret),
-        ("refresh_token", refresh_token),
-        ("grant_type", "refresh_token"),
-    ];
+    /// Returns a valid Access Token, reusing the cached one if valid, or refreshing it
+    pub async fn refresh_access_token(&self) -> Result<String, GoogleDocsError> {
+        let mut lock = self.access_token.lock().await;
 
-    let response = client.post(TOKEN_URL).form(&params).send().await?; // Automatically converted to GoogleDocsError::Reqwest
+        if let Some((token, expiry)) = &*lock {
+            if Instant::now() < *expiry {
+                return Ok(token.clone());
+            }
+        }
 
-    if !response.status().is_success() {
-        let error_text = response.text().await?;
-        return Err(GoogleDocsError::OAuth {
-            description: format!("Token refresh failed: {}", error_text),
+        let params = [
+            ("client_id", self.client_id.as_str()),
+            ("client_secret", self.client_secret.as_str()),
+            ("refresh_token", self.refresh_token.as_str()),
+            ("grant_type", "refresh_token"),
+        ];
+
+        let response = self.client.post(TOKEN_URL).form(&params).send().await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(GoogleDocsError::OAuth {
+                description: format!("Token refresh failed: {}", error_text),
+            });
+        }
+
+        let json: Value = response.json().await?;
+
+        let access_token = json
+            .get("access_token")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or(GoogleDocsError::MissingField("access_token"))?;
+
+        let expires_in = json
+            .get("expires_in")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(3600);
+
+        let expiry = Instant::now() + Duration::from_secs(expires_in.saturating_sub(60));
+        *lock = Some((access_token.clone(), expiry));
+
+        Ok(access_token)
+    }
+
+    /// Converts Markdown to HTML and uploads it as a Google Doc
+    pub async fn create_doc_from_markdown(
+        &self,
+        folder_id: &str,
+        doc_title: &str,
+        markdown_content: &str,
+    ) -> Result<String, GoogleDocsError> {
+        let access_token = self.refresh_access_token().await?;
+        // Convert Markdown to HTML
+        // We enable tables and footnotes for better compatibility
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_TABLES);
+        options.insert(Options::ENABLE_FOOTNOTES);
+
+        let parser = Parser::new_ext(markdown_content, options);
+        let mut html_output = String::new();
+        html::push_html(&mut html_output, parser);
+
+        println!(
+            "Converted Markdown to HTML payload ({} bytes)",
+            html_output.len()
+        );
+
+        // Prepare Multipart Body
+        // Part A: JSON Metadata (defines target folder and file name)
+        // We set mimeType to Google Docs to trigger the conversion
+        let metadata = json!({
+            "name": doc_title,
+            "mimeType": "application/vnd.google-apps.document",
+            "parents": [folder_id]
         });
+
+        // Part B: The Content (HTML)
+        // We upload it as text/html, and Drive converts it because of the metadata mimeType above
+        let metadata_part = multipart::Part::text(metadata.to_string())
+            .mime_str("application/json; charset=UTF-8")?;
+
+        let content_part = multipart::Part::text(html_output).mime_str("text/html")?;
+
+        let form = multipart::Form::new()
+            .part("metadata", metadata_part)
+            .part("media", content_part);
+
+        // Send Request
+        let response = self
+            .client
+            .post(DRIVE_UPLOAD_URL)
+            .bearer_auth(access_token)
+            .multipart(form)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(GoogleDocsError::GoogleApi(format!(
+                "Drive Upload failed: {}",
+                error_text
+            )));
+        }
+
+        let json: Value = response.json().await?;
+
+        let file_id = json
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or(GoogleDocsError::MissingField("id"))?;
+
+        Ok(file_id.to_string())
     }
 
-    let json: Value = response.json().await?;
+    /// Uploads CSV content and instructs Drive to convert it to a Google Sheet
+    pub async fn create_sheet_from_csv(
+        &self,
+        folder_id: &str,
+        sheet_title: &str,
+        csv_content: &str,
+    ) -> Result<String, GoogleDocsError> {
+        println!("Preparing CSV payload ({} bytes)", csv_content.len());
+        let access_token = self.refresh_access_token().await?;
 
-    json.get("access_token")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or(GoogleDocsError::MissingField("access_token"))
-}
+        // Prepare Multipart Body
+        // mimeType here tells Google what to convert the file TO
+        let metadata = json!({
+            "name": sheet_title,
+            "mimeType": "application/vnd.google-apps.spreadsheet",
+            "parents": [folder_id]
+        });
 
-/// Converts Markdown to HTML and uploads it as a Google Doc
-async fn create_doc_from_markdown(
-    client: &Client,
-    access_token: &str,
-    folder_id: &str,
-    doc_title: &str,
-    markdown_content: &str,
-) -> Result<String, GoogleDocsError> {
-    // Convert Markdown to HTML
-    // We enable tables and footnotes for better compatibility
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_FOOTNOTES);
+        let metadata_part = multipart::Part::text(metadata.to_string())
+            .mime_str("application/json; charset=UTF-8")?;
 
-    let parser = Parser::new_ext(markdown_content, options);
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
+        // We send the content as text/csv so Google knows what it is converting FROM
+        let content_part = multipart::Part::text(csv_content.to_string()).mime_str("text/csv")?;
 
-    println!(
-        "Converted Markdown to HTML payload ({} bytes)",
-        html_output.len()
-    );
+        let form = multipart::Form::new()
+            .part("metadata", metadata_part)
+            .part("media", content_part);
 
-    // Prepare Multipart Body
-    // Part A: JSON Metadata (defines target folder and file name)
-    // We set mimeType to Google Docs to trigger the conversion
-    let metadata = json!({
-        "name": doc_title,
-        "mimeType": "application/vnd.google-apps.document",
-        "parents": [folder_id]
-    });
+        // Send Request
+        let response = self
+            .client
+            .post(DRIVE_UPLOAD_URL)
+            .bearer_auth(access_token)
+            .multipart(form)
+            .send()
+            .await?;
 
-    // Part B: The Content (HTML)
-    // We upload it as text/html, and Drive converts it because of the metadata mimeType above
-    let metadata_part =
-        multipart::Part::text(metadata.to_string()).mime_str("application/json; charset=UTF-8")?;
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(GoogleDocsError::GoogleApi(format!(
+                "Drive Sheet Upload failed: {}",
+                error_text
+            )));
+        }
 
-    let content_part = multipart::Part::text(html_output).mime_str("text/html")?;
+        let json: Value = response.json().await?;
 
-    let form = multipart::Form::new()
-        .part("metadata", metadata_part)
-        .part("media", content_part);
+        let file_id = json
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or(GoogleDocsError::MissingField("id"))?;
 
-    // Send Request
-    let response = client
-        .post(DRIVE_UPLOAD_URL)
-        .bearer_auth(access_token)
-        .multipart(form)
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        let error_text = response.text().await?;
-        return Err(GoogleDocsError::GoogleApi(format!(
-            "Drive Upload failed: {}",
-            error_text
-        )));
+        Ok(file_id.to_string())
     }
-
-    let json: Value = response.json().await?;
-
-    let file_id = json
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or(GoogleDocsError::MissingField("id"))?;
-
-    Ok(file_id.to_string())
-}
-
-/// Uploads CSV content and instructs Drive to convert it to a Google Sheet
-async fn create_sheet_from_csv(
-    client: &Client,
-    access_token: &str,
-    folder_id: &str,
-    sheet_title: &str,
-    csv_content: &str,
-) -> Result<String, GoogleDocsError> {
-    println!("Preparing CSV payload ({} bytes)", csv_content.len());
-
-    // Prepare Multipart Body
-    // mimeType here tells Google what to convert the file TO
-    let metadata = json!({
-        "name": sheet_title,
-        "mimeType": "application/vnd.google-apps.spreadsheet",
-        "parents": [folder_id]
-    });
-
-    let metadata_part =
-        multipart::Part::text(metadata.to_string()).mime_str("application/json; charset=UTF-8")?;
-
-    // We send the content as text/csv so Google knows what it is converting FROM
-    let content_part = multipart::Part::text(csv_content.to_string()).mime_str("text/csv")?;
-
-    let form = multipart::Form::new()
-        .part("metadata", metadata_part)
-        .part("media", content_part);
-
-    // Send Request
-    let response = client
-        .post(DRIVE_UPLOAD_URL)
-        .bearer_auth(access_token)
-        .multipart(form)
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        let error_text = response.text().await?;
-        return Err(GoogleDocsError::GoogleApi(format!(
-            "Drive Sheet Upload failed: {}",
-            error_text
-        )));
-    }
-
-    let json: Value = response.json().await?;
-
-    let file_id = json
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or(GoogleDocsError::MissingField("id"))?;
-
-    Ok(file_id.to_string())
 }
 
 #[cfg(test)]
@@ -291,11 +317,14 @@ mod tests {
         let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
         let folder_id = std::env::var("FOLDER_ID").unwrap();
 
-        let client = reqwest::Client::new();
-        let access_token =
-            refresh_access_token(&client, &client_id, &client_secret, &refresh_token)
-                .await
-                .unwrap();
+        let config = GoogleDocsConfig {
+            client_id,
+            client_secret,
+            refresh_token,
+            r: HashMap::new(),
+            wr: HashMap::new(),
+        };
+        let docs = GoogleDocs::new(config);
 
         // Define Markdown Template with Tera placeholders
         let template_input = r#"
@@ -351,15 +380,10 @@ This document was created by **{{ author }}** on {{ date }}.
             .unwrap();
 
         // Create document
-        let doc_id = create_doc_from_markdown(
-            &client,
-            &access_token,
-            &folder_id,
-            "markdown test",
-            &rendered_markdown,
-        )
-        .await
-        .unwrap();
+        let doc_id = docs
+            .create_doc_from_markdown(&folder_id, "markdown test", &rendered_markdown)
+            .await
+            .unwrap();
         println!("Success! Document ID: {}", doc_id);
         println!("View at: https://docs.google.com/document/d/{}", doc_id);
     }
@@ -372,11 +396,14 @@ This document was created by **{{ author }}** on {{ date }}.
         let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
         let folder_id = std::env::var("FOLDER_ID").unwrap();
 
-        let client = reqwest::Client::new();
-        let access_token =
-            refresh_access_token(&client, &client_id, &client_secret, &refresh_token)
-                .await
-                .unwrap();
+        let config = GoogleDocsConfig {
+            client_id,
+            client_secret,
+            refresh_token,
+            r: HashMap::new(),
+            wr: HashMap::new(),
+        };
+        let docs = GoogleDocs::new(config);
 
         // CSV Template
         let mut tera = Tera::default();
@@ -412,15 +439,10 @@ Total,{{ cost_server + cost_license }},"#;
             .map_err(|e| GoogleDocsError::Template(e.to_string()))
             .unwrap();
 
-        let sheet_id = create_sheet_from_csv(
-            &client,
-            &access_token,
-            &folder_id,
-            "Rust Financials Sheet",
-            &rendered_csv,
-        )
-        .await
-        .unwrap();
+        let sheet_id = docs
+            .create_sheet_from_csv(&folder_id, "Rust Financials Sheet", &rendered_csv)
+            .await
+            .unwrap();
 
         println!(
             "Sheet created: https://docs.google.com/spreadsheets/d/{}",
