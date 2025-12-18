@@ -199,7 +199,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "plaid_stl"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "base64 0.13.1",
  "chrono",
@@ -374,6 +374,16 @@ dependencies = [
 name = "test_db"
 version = "0.1.0"
 dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "test_dynamodb"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
  "plaid_stl",
  "serde",
  "serde_json",

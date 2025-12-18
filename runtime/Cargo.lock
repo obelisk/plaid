@@ -3593,7 +3593,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "plaid"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "aes",
  "alkali",
@@ -3630,6 +3630,7 @@ dependencies = [
  "reqwest",
  "reqwest_cookie_store",
  "ring 0.17.14",
+ "rustls 0.23.29",
  "serde",
  "serde_json",
  "serde_with",
@@ -3654,7 +3655,7 @@ dependencies = [
 
 [[package]]
 name = "plaid_stl"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "base64 0.13.1",
  "chrono",

@@ -109,6 +109,10 @@ headers = []
 log_type = "test_redis_cache_eviction"
 headers = []
 
+[webhooks."internal".webhooks."test_dynamodb"]
+log_type = "test_dynamodb"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples

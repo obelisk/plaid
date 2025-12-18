@@ -19,7 +19,8 @@ allowed_rules = [
     "test_aes_enc_dec.wasm",
     "test_vec_entrypoint.wasm",
     "test_jwt.wasm",
-    "test_redis_cache_eviction.wasm"
+    "test_redis_cache_eviction.wasm",
+    "test_dynamodb.wasm"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
@@ -198,6 +199,16 @@ secret_key = ""
 # [apis."aws"."s3".bucket_configuration."my-bucket"]
 # r = ["some_rule.wasm"]
 # rw = ["another_rule.wasm"]
+
+# DynamoDB (using IAM)
+[apis."aws"]
+[apis."aws"."dynamodb"]
+local_endpoint = true
+[apis."aws"."dynamodb".authentication]
+[apis."aws"."dynamodb".rw]
+local_test = ["test_dynamodb.wasm"]
+
+[apis."aws"."dynamodb".r]
 
 #[apis."github"]
 #[apis."github".authentication]
