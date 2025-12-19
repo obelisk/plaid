@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use pulldown_cmark::{html, Options, Parser};
 use reqwest::{multipart, Client};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tera::{Context, Tera};
 use thiserror::Error;
@@ -76,7 +76,7 @@ impl GoogleDocs {
     }
 
     /// Returns a valid Access Token, reusing the cached one if valid, or refreshing it
-    pub async fn refresh_access_token(&self) -> Result<String, GoogleDocsError> {
+    async fn refresh_access_token(&self) -> Result<String, GoogleDocsError> {
         let mut lock = self.access_token.lock().await;
 
         if let Some((token, expiry)) = &*lock {
@@ -120,37 +120,31 @@ impl GoogleDocs {
         Ok(access_token)
     }
 
-    /// Converts Markdown to HTML and uploads it as a Google Doc
-    pub async fn create_doc_from_markdown(
+    async fn upload_file(
         &self,
         folder_id: &str,
-        doc_title: &str,
-        markdown_content: &str,
+        title: &str,
+        content: String,
+        source_mime: &str,
+        target_mime: &str,
     ) -> Result<String, GoogleDocsError> {
         let access_token = self.refresh_access_token().await?;
-        let html_output = markdown_to_html(markdown_content);
 
-        // Prepare Multipart Body
-        // Part A: JSON Metadata (defines target folder and file name)
-        // We set mimeType to Google Docs to trigger the conversion
         let metadata = json!({
-            "name": doc_title,
-            "mimeType": "application/vnd.google-apps.document",
+            "name": title,
+            "mimeType": target_mime,
             "parents": [folder_id]
         });
 
-        // Part B: The Content (HTML)
-        // We upload it as text/html, and Drive converts it because of the metadata mimeType above
         let metadata_part = multipart::Part::text(metadata.to_string())
             .mime_str("application/json; charset=UTF-8")?;
 
-        let content_part = multipart::Part::text(html_output).mime_str("text/html")?;
+        let content_part = multipart::Part::text(content).mime_str(source_mime)?;
 
         let form = multipart::Form::new()
             .part("metadata", metadata_part)
             .part("media", content_part);
 
-        // Send Request
         let response = self
             .client
             .post(DRIVE_UPLOAD_URL)
@@ -169,12 +163,28 @@ impl GoogleDocs {
 
         let json: Value = response.json().await?;
 
-        let file_id = json
-            .get("id")
+        json.get("id")
             .and_then(|v| v.as_str())
-            .ok_or(GoogleDocsError::MissingField("id"))?;
+            .map(|s| s.to_string())
+            .ok_or(GoogleDocsError::MissingField("id"))
+    }
 
-        Ok(file_id.to_string())
+    /// Converts Markdown to HTML and uploads it as a Google Doc
+    pub async fn create_doc_from_markdown(
+        &self,
+        folder_id: &str,
+        doc_title: &str,
+        markdown_content: &str,
+    ) -> Result<String, GoogleDocsError> {
+        let html_output = markdown_to_html(markdown_content);
+        self.upload_file(
+            folder_id,
+            doc_title,
+            html_output,
+            "text/html",
+            "application/vnd.google-apps.document",
+        )
+        .await
     }
 
     /// Uploads CSV content and instructs Drive to convert it to a Google Sheet
@@ -184,52 +194,14 @@ impl GoogleDocs {
         sheet_title: &str,
         csv_content: &str,
     ) -> Result<String, GoogleDocsError> {
-        println!("Preparing CSV payload ({} bytes)", csv_content.len());
-        let access_token = self.refresh_access_token().await?;
-
-        // Prepare Multipart Body
-        // mimeType here tells Google what to convert the file TO
-        let metadata = json!({
-            "name": sheet_title,
-            "mimeType": "application/vnd.google-apps.spreadsheet",
-            "parents": [folder_id]
-        });
-
-        let metadata_part = multipart::Part::text(metadata.to_string())
-            .mime_str("application/json; charset=UTF-8")?;
-
-        // We send the content as text/csv so Google knows what it is converting FROM
-        let content_part = multipart::Part::text(csv_content.to_string()).mime_str("text/csv")?;
-
-        let form = multipart::Form::new()
-            .part("metadata", metadata_part)
-            .part("media", content_part);
-
-        // Send Request
-        let response = self
-            .client
-            .post(DRIVE_UPLOAD_URL)
-            .bearer_auth(access_token)
-            .multipart(form)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(GoogleDocsError::GoogleApi(format!(
-                "Drive Sheet Upload failed: {}",
-                error_text
-            )));
-        }
-
-        let json: Value = response.json().await?;
-
-        let file_id = json
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or(GoogleDocsError::MissingField("id"))?;
-
-        Ok(file_id.to_string())
+        self.upload_file(
+            folder_id,
+            sheet_title,
+            csv_content.to_string(),
+            "text/csv",
+            "application/vnd.google-apps.spreadsheet",
+        )
+        .await
     }
 }
 
@@ -251,8 +223,7 @@ fn render_template(template: &str, data: serde_json::Value) -> Result<String, Go
     // Initialize Tera and render
     let mut tera = Tera::default();
     tera.add_raw_template("template", template)
-        .map_err(|e| GoogleDocsError::Template(e.to_string()))
-        .unwrap();
+        .map_err(|e| GoogleDocsError::Template(e.to_string()))?;
 
     let mut context = Context::new();
 
@@ -265,8 +236,7 @@ fn render_template(template: &str, data: serde_json::Value) -> Result<String, Go
 
     let rendered = tera
         .render("template", &context)
-        .map_err(|e| GoogleDocsError::Template(e.to_string()))
-        .unwrap();
+        .map_err(|e| GoogleDocsError::Template(e.to_string()))?;
 
     Ok(rendered)
 }
@@ -277,7 +247,6 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use serde_json::Value;
     use std::io::BufRead;
-    use urlencoding::encode as url_encode;
 
     #[tokio::test]
     async fn get_refresh_token() {
@@ -291,13 +260,19 @@ mod tests {
             "https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive.file";
 
         // Generate auth URL
-        // TODO: use request form style
-        let auth_url = format!(
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&scope={}&response_type=code&access_type=offline&prompt=consent",
-            url_encode(&client_id),
-            url_encode(&redirect_uri),
-            url_encode(scope)
-        );
+        let auth_url = reqwest::Url::parse_with_params(
+            "https://accounts.google.com/o/oauth2/v2/auth",
+            &[
+                ("client_id", client_id.as_str()),
+                ("redirect_uri", redirect_uri.as_str()),
+                ("scope", scope),
+                ("response_type", "code"),
+                ("access_type", "offline"),
+                ("prompt", "consent"),
+            ],
+        )
+        .unwrap()
+        .to_string();
 
         println!("Open this URL in your browser and authorize:\n{}", auth_url);
         println!("After authorization, copy the 'code' from the redirect URL (e.g., http://localhost:8080/?code=XXXX).");
