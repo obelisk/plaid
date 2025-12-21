@@ -174,9 +174,11 @@ impl GoogleDocs {
         &self,
         folder_id: &str,
         doc_title: &str,
-        markdown_content: &str,
+        template: &str,
+        variables: Value,
     ) -> Result<String, GoogleDocsError> {
-        let html_output = markdown_to_html(markdown_content);
+        let rendered_template = render_template(template, variables).unwrap();
+        let html_output = markdown_to_html(&rendered_template);
         self.upload_file(
             folder_id,
             doc_title,
@@ -192,12 +194,14 @@ impl GoogleDocs {
         &self,
         folder_id: &str,
         sheet_title: &str,
-        csv_content: &str,
+        template: &str,
+        variables: Value,
     ) -> Result<String, GoogleDocsError> {
+        let rendered_template = render_template(template, variables).unwrap();
         self.upload_file(
             folder_id,
             sheet_title,
-            csv_content.to_string(),
+            rendered_template,
             "text/csv",
             "application/vnd.google-apps.spreadsheet",
         )
@@ -358,10 +362,10 @@ This document was created by **{{ author }}** on {{ date }}.
             "conclusion_text": "Automated template rendering successful. Math operations in table verified."
         });
 
-        let rendered_markdown = render_template(template_input, data).unwrap();
+        // let rendered_markdown = render_template(template_input, data).unwrap();
         // Create document
         let doc_id = docs
-            .create_doc_from_markdown(&folder_id, "markdown test", &rendered_markdown)
+            .create_doc_from_markdown(&folder_id, "markdown test", &template_input, data)
             .await
             .unwrap();
         println!("Success! Document ID: {}", doc_id);
@@ -369,7 +373,7 @@ This document was created by **{{ author }}** on {{ date }}.
     }
 
     #[tokio::test]
-    async fn create_spreadsheet_csv() {
+    async fn create_csv_sheet() {
         // From client-secret.json and the refresh token you obtained
         let client_id = std::env::var("CLIENT_ID").unwrap();
         let client_secret = std::env::var("CLIENT_SECRET").unwrap();
@@ -401,10 +405,8 @@ Total,{{ cost_server + cost_license }},"#;
             "cost_license": 500,
         });
 
-        let rendered_csv = render_template(csv_template, data).unwrap();
-
         let sheet_id = docs
-            .create_sheet_from_csv(&folder_id, "Rust Financials Sheet", &rendered_csv)
+            .create_sheet_from_csv(&folder_id, "Rust Financials Sheet", &csv_template, data)
             .await
             .unwrap();
 
