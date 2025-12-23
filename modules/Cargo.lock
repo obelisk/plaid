@@ -546,6 +546,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_tls_cert_with_sni"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "test_vec_entrypoint"
 version = "0.1.0"
 dependencies = [

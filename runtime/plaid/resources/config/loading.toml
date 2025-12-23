@@ -87,6 +87,7 @@ test_mode_exemptions = [
 "test_redis_cache_eviction.wasm" = "test_redis_cache_eviction"
 "test_dynamodb.wasm" = "test_dynamodb"
 "test_mnr_return_cert.wasm" = "test_mnr_return_cert"
+"test_tls_cert_with_sni.wasm" = "test_tls_cert_with_sni"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
