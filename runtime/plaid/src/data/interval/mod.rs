@@ -1,6 +1,6 @@
 use chrono::Utc;
 use cron::Schedule;
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Sender, TrySendError};
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use serde::Deserialize;
 use std::str::FromStr;
@@ -168,8 +168,19 @@ impl Interval {
             // Send job to executor
             // safe unwrap because if the job_heap was empty, the call to `peek()` above would have returned None
             let job = self.job_heap.pop().unwrap();
-            // TODO double check this unwrap
-            self.sender.send(job.0.message.create_duplicate()).unwrap();
+            let _ = self
+                .sender
+                .try_send(job.0.message.create_duplicate())
+                .inspect_err(|e| match e {
+                    TrySendError::Disconnected(_) => {
+                        error!("Interval job sender channel has been disconnected. Unable to send interval job message.");
+                    }
+                    TrySendError::Full(_) => {
+                        error!(
+                            "Interval job sender channel is full. Unable to send interval job message."
+                        );
+                    }
+                });
 
             // Try to get next execution time. If there are no more scheduled executions for this job, we'll exit early.
             let next_execution = job.0.schedule.upcoming(Utc).take(1).collect::<Vec<_>>();

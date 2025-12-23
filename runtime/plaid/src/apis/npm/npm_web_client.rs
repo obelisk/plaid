@@ -142,8 +142,10 @@ impl Npm {
         let cookies: Vec<String> = self
             .cookie_jar
             .as_ref()
-            // safe unwrap: data is hardcoded
-            .cookies(&Url::parse(NPMJS_COM_URL).unwrap())
+            .cookies(
+                &Url::parse(NPMJS_COM_URL)
+                    .map_err(|_| NpmError::WrongConfig("Failed to parse npm URL".to_string()))?,
+            )
             .ok_or(NpmError::FailedToGetCsrfTokenFromCookies)?
             .to_str()
             .map_err(|_| NpmError::FailedToGetCsrfTokenFromCookies)?
@@ -178,16 +180,23 @@ impl Npm {
         // become stale. In fact, it is quite hard to understand if the request "worked" or not, since
         // they all return 200 and, in many cases, parsing the returned HTML would be necessary.
         {
-            // TODO Double check this unwrap
-            let mut timestamp_last_request = self.timestamp_last_request.lock().unwrap();
+            let mut timestamp_last_request = self.timestamp_last_request.lock().map_err(|_| {
+                warn!("Could not acquire lock on timestamp_last_request mutex");
+                NpmError::LoginFlowError
+            })?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("Time went backwards")
                 .as_secs() as u32;
             if let Some(last_req) = *timestamp_last_request {
                 if now - last_req >= 120 {
-                    // TODO double check this unwrap
-                    self.cookie_jar.lock().unwrap().clear();
+                    self.cookie_jar
+                        .lock()
+                        .map_err(|_| {
+                            warn!("Could not acquire lock on cookie_jar mutex");
+                            NpmError::LoginFlowError
+                        })?
+                        .clear();
                     *timestamp_last_request = Some(now);
                 }
             } else {
