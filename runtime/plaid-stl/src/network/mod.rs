@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -164,4 +164,44 @@ pub fn make_named_request_with_headers(
         RETURN_BUFFER_SIZE,
         MnrResponseEncoding::Utf8,
     );
+}
+
+/// Retrive a TLS certificate for a given domain, using a specified SNI (Server Name Indication).
+pub fn retrieve_tls_certificate_with_sni(
+    domain: impl Display,
+    sni: impl Display,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(general, retrieve_tls_certificate_with_sni);
+    }
+
+    let mut params: HashMap<&'static str, String> = HashMap::new();
+    params.insert("domain", domain.to_string());
+    params.insert("sni", sni.to_string());
+
+    let params = serde_json::to_string(&params).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        general_retrieve_tls_certificate_with_sni(
+            params.as_ptr(),
+            params.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match String::from_utf8(return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
 }

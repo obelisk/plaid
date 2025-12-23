@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use crate::loader::PlaidModule;
+use crate::{apis::general::cert_sni::get_peer_certificate_with_sni, loader::PlaidModule};
 use futures_util::stream::TryStreamExt;
 use plaid_stl::network::{MakeRequestRequest, MnrResponseEncoding};
 use reqwest::{header::HeaderMap, Client};
@@ -299,6 +299,37 @@ impl General {
             }
             Err(e) => Err(ApiError::NetworkError(e)),
         }
+    }
+
+    /// Retrieve a TLS certificate for a given domain, using a specified SNI (Server Name Indication).
+    pub async fn retrieve_tls_certificate_with_sni(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: HashMap<String, String> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let domain = request
+            .get("domain")
+            .ok_or(ApiError::MissingParameter("domain".to_string()))?;
+        let sni = request
+            .get("sni")
+            .ok_or(ApiError::MissingParameter("sni".to_string()))?;
+
+        // Validating the request parameters here is not trivial and also does not seem strictly necessary,
+        // since Plaid will only make a TLS connection to the given domain.
+
+        info!("Retrieving TLS certificate for domain [{domain}] using SNI [{sni}] on behalf of module [{module}]");
+
+        let cert = get_peer_certificate_with_sni(&domain, &sni)
+            .await
+            .map_err(|e| {
+                error!("Error while retrieving TLS certificate: {e}");
+                ApiError::TlsError(e)
+            })?;
+
+        Ok(cert)
     }
 
     fn get_client(&self, mnr: &str) -> &Client {
