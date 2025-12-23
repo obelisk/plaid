@@ -322,7 +322,10 @@ fn markdown_to_html(md: &str) -> String {
 }
 
 /// untility function for rendering static template
-fn render_template(template: &str, data: serde_json::Value) -> Result<String, GoogleDocsError> {
+fn render_template(
+    template: &str,
+    variables: serde_json::Value,
+) -> Result<String, GoogleDocsError> {
     // Initialize Tera and render
     let mut tera = Tera::default();
     tera.add_raw_template("template", template)
@@ -331,7 +334,7 @@ fn render_template(template: &str, data: serde_json::Value) -> Result<String, Go
     let mut context = Context::new();
 
     // Loop through the JSON object and insert each key-value pair into the Tera context
-    if let Some(map) = data.as_object() {
+    if let Some(map) = variables.as_object() {
         for (key, value) in map {
             context.insert(key, value);
         }
