@@ -108,6 +108,8 @@ pub enum ApiError {
     KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
     #[cfg(feature = "aws")]
     S3Error(aws::s3::S3Errors),
+    #[cfg(feature = "gcp")]
+    GoogleDocsError(gcp::google_docs::GoogleDocsError),
     #[cfg(feature = "aws")]
     KmsError(aws::kms::KmsErrors),
     NetworkError(reqwest::Error),

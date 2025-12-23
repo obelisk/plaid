@@ -1,13 +1,23 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pulldown_cmark::{html, Options, Parser};
 use reqwest::{multipart, Client};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tera::{Context, Tera};
 use thiserror::Error;
 use tokio::sync::Mutex;
+
+use crate::apis::ApiError;
+use crate::loader::PlaidModule;
+
+#[derive(PartialEq, PartialOrd)]
+enum AccessScope {
+    Read,
+    Write,
+}
 
 #[derive(Deserialize)]
 pub struct GoogleDocsConfig {
@@ -17,7 +27,7 @@ pub struct GoogleDocsConfig {
     // Mapping for readers: folder_id -> list of rules
     r: HashMap<String, HashSet<String>>,
     // Mapping for writers: folder_id -> list of rules
-    wr: HashMap<String, HashSet<String>>,
+    rw: HashMap<String, HashSet<String>>,
 }
 
 pub struct GoogleDocs {
@@ -26,10 +36,36 @@ pub struct GoogleDocs {
     client_secret: String,
     refresh_token: String,
     access_token: Mutex<Option<(String, Instant)>>,
+    // Mapping for writers: folder_id -> list of rules
+    rw: HashMap<String, HashSet<String>>,
     // Mapping for readers: folder_id -> list of rules
     r: HashMap<String, HashSet<String>>,
-    // Mapping for writers: folder_id -> list of rules
-    wr: HashMap<String, HashSet<String>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CreateDocFromMarkdownInput {
+    folder_id: String,
+    title: String,
+    template: String,
+    variables: Value,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CreateDocFromMarkdownOutput {
+    document_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CreateSheetFromCsvInput {
+    folder_id: String,
+    title: String,
+    template: String,
+    variables: Value,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CreateSheetFromCsvOutput {
+    document_id: String,
 }
 
 #[derive(Error, Debug)]
@@ -59,7 +95,7 @@ impl GoogleDocs {
             client_secret,
             refresh_token,
             r,
-            wr,
+            rw: wr,
         } = config;
 
         let client = Client::new();
@@ -70,8 +106,55 @@ impl GoogleDocs {
             client_secret,
             refresh_token,
             r,
-            wr,
+            rw: wr,
             access_token: Mutex::new(None),
+        }
+    }
+
+    fn check_module_permissions(
+        &self,
+        access_scope: AccessScope,
+        module: Arc<PlaidModule>,
+        folder_id: &str,
+    ) -> Result<(), ApiError> {
+        match access_scope {
+            AccessScope::Read => {
+                // check if read access is configured for this folder
+                if let Some(folder_readers) = self.r.get(folder_id) {
+                    // check if this module has read access to this folder
+                    if folder_readers.contains(&module.to_string()) {
+                        return Ok(());
+                    }
+                }
+
+                // check if write access is configured for this folder
+                // writers can also read
+                if let Some(folder_writers) = self.rw.get(folder_id) {
+                    // check if this module has write access to this folder
+                    if folder_writers.contains(&module.to_string()) {
+                        return Ok(());
+                    }
+                }
+
+                warn!(
+                    "[{module}] failed [read] permission check for google drive folder [{folder_id}]"
+                );
+                Err(ApiError::BadRequest)
+            }
+            AccessScope::Write => {
+                // check if write access is configured for this folder
+                if let Some(write_access) = self.rw.get(folder_id) {
+                    // check if this module has write access to this folder
+                    if write_access.contains(&module.to_string()) {
+                        return Ok(());
+                    };
+                }
+
+                warn!(
+                    "[{module}] failed [write] permission check for google drive folder [{folder_id}]"
+                );
+                Err(ApiError::BadRequest)
+            }
         }
     }
 
@@ -169,49 +252,79 @@ impl GoogleDocs {
             .ok_or(GoogleDocsError::MissingField("id"))
     }
 
+    // Public API
+
     /// Converts Markdown to HTML and uploads it as a Google Doc
     pub async fn create_doc_from_markdown(
         &self,
-        folder_id: &str,
-        doc_title: &str,
-        template: &str,
-        variables: Value,
-    ) -> Result<String, GoogleDocsError> {
-        let rendered_template = render_template(template, variables).unwrap();
-        let html_output = markdown_to_html(&rendered_template);
-        self.upload_file(
+        input: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let CreateDocFromMarkdownInput {
             folder_id,
-            doc_title,
-            html_output,
-            "text/html",
-            "application/vnd.google-apps.document",
-        )
-        .await
+            title,
+            template,
+            variables,
+        } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
+
+        // check this module has access to this folder
+        self.check_module_permissions(AccessScope::Write, module, &folder_id)?;
+
+        let rendered_template =
+            render_template(&template, variables).map_err(|err| ApiError::GoogleDocsError(err))?;
+        let html_output = markdown_to_html(&rendered_template);
+        let document_id = self
+            .upload_file(
+                &folder_id,
+                &title,
+                html_output,
+                "text/html",
+                "application/vnd.google-apps.document",
+            )
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err))?;
+
+        let output = CreateDocFromMarkdownOutput { document_id };
+        serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 
     /// Uploads CSV content and instructs Drive to convert it to a Google Sheet
     pub async fn create_sheet_from_csv(
         &self,
-        folder_id: &str,
-        sheet_title: &str,
-        template: &str,
-        variables: Value,
-    ) -> Result<String, GoogleDocsError> {
-        let rendered_template = render_template(template, variables).unwrap();
-        self.upload_file(
+        input: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let CreateSheetFromCsvInput {
             folder_id,
-            sheet_title,
-            rendered_template,
-            "text/csv",
-            "application/vnd.google-apps.spreadsheet",
-        )
-        .await
+            title,
+            template,
+            variables,
+        } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
+        let rendered_template =
+            render_template(&template, variables).map_err(|err| ApiError::GoogleDocsError(err))?;
+
+        // check this module has access to this folder
+        self.check_module_permissions(AccessScope::Write, module, &folder_id)?;
+
+        let document_id = self
+            .upload_file(
+                &folder_id,
+                &title,
+                rendered_template,
+                "text/csv",
+                "application/vnd.google-apps.spreadsheet",
+            )
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err))?;
+
+        let output = CreateDocFromMarkdownOutput { document_id };
+        serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 }
 
 fn markdown_to_html(md: &str) -> String {
     // Convert Markdown to HTML
-    // We enable tables and footnotes for better compatibility
+    // We enable folders and footnotes for better compatibility
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_FOOTNOTES);
@@ -250,9 +363,106 @@ mod tests {
     use super::*;
     use http::header::CONTENT_TYPE;
     use serde_json::Value;
+    use serde_json::{from_str, from_value};
     use std::io::BufRead;
+    use wasmer::{
+        sys::{Cranelift, EngineBuilder},
+        Module, Store,
+    };
+
+    use crate::loader::LimitValue;
+
+    use super::*;
+
+    // helper function to generate a blank module that does nothing
+    fn test_module(name: &str, test_mode: bool) -> Arc<PlaidModule> {
+        let store = Store::default();
+        // stub wasm module, just enough to pass validation
+        // https://docs.rs/wabt/latest/wabt/fn.wat2wasm.html
+        let wasm = &[
+            0, 97, 115, 109, // \0ASM - magic
+            1, 0, 0, 0, //  0x01 - version
+        ];
+        let compiler_config = Cranelift::default();
+        let engine = EngineBuilder::new(compiler_config);
+        let m = Module::new(&store, wasm).unwrap();
+
+        Arc::new(PlaidModule {
+            name: name.to_string(),
+            logtype: "test".to_string(),
+            module: m,
+            engine: engine.into(),
+            computation_limit: 0,
+            page_limit: 0,
+            storage_current: Default::default(),
+            storage_limit: LimitValue::Unlimited,
+            accessory_data: Default::default(),
+            secrets: Default::default(),
+            persistent_response: Default::default(),
+            test_mode,
+        })
+    }
 
     #[tokio::test]
+    async fn permission_checks() {
+        let folder_name = String::from("local_test");
+        // permissions
+        let r = json!({folder_name.clone(): ["module_a"]});
+        let r = from_value::<HashMap<String, HashSet<String>>>(r).unwrap();
+
+        let rw = json!({folder_name.clone(): ["module_b"]});
+        let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
+
+        let config = GoogleDocsConfig {
+            client_id: String::default(),
+            client_secret: String::default(),
+            refresh_token: String::default(),
+            r,
+            rw,
+        };
+        let client = GoogleDocs::new(config);
+
+        // modules
+        let module_a = test_module("module_a", true); // reader
+        let module_b = test_module("module_b", true); // writer
+        let module_c = test_module("module_c", true); // no access
+
+        // modules can read folder
+        client
+            .check_module_permissions(AccessScope::Read, module_a.clone(), &folder_name)
+            .unwrap();
+        client
+            .check_module_permissions(AccessScope::Read, module_b.clone(), &folder_name)
+            .unwrap();
+        client
+            .check_module_permissions(AccessScope::Read, module_c.clone(), &folder_name)
+            .expect_err("expect to fail with BadRequest");
+
+        // readers can't write
+        client
+            .check_module_permissions(AccessScope::Write, module_a.clone(), &folder_name)
+            .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Write, module_b.clone(), &folder_name)
+            .unwrap();
+        client
+            .check_module_permissions(AccessScope::Write, module_c.clone(), &folder_name)
+            .expect_err("expect to fail with BadRequest");
+
+        // unknown folder
+        client
+            .check_module_permissions(AccessScope::Read, module_a.clone(), "unknown_folder")
+            .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Read, module_b.clone(), "unknown_folder")
+            .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Read, module_c.clone(), "unknown_folder")
+            .expect_err("expect to fail with BadRequest");
+    }
+
+    #[tokio::test]
+    // cli util OAuth to obtain refresh token for a google account
     async fn get_refresh_token() {
         let client_id = std::env::var("CLIENT_ID").unwrap();
         let client_secret = std::env::var("CLIENT_SECRET").unwrap();
@@ -313,18 +523,23 @@ mod tests {
 
     #[tokio::test]
     async fn create_markdown_doc() {
+        let m = test_module("test_module", true);
         // From client-secret.json and the refresh token you obtained
         let client_id = std::env::var("CLIENT_ID").unwrap();
         let client_secret = std::env::var("CLIENT_SECRET").unwrap();
         let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
         let folder_id = std::env::var("FOLDER_ID").unwrap();
 
+        // permissions: allow test module to write to folder_id
+        let rw = json!({folder_id.clone(): ["test_module"]});
+        let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
+
         let config = GoogleDocsConfig {
             client_id,
             client_secret,
             refresh_token,
+            rw,
             r: HashMap::new(),
-            wr: HashMap::new(),
         };
         let docs = GoogleDocs::new(config);
 
@@ -359,38 +574,52 @@ This document was created by **{{ author }}** on {{ date }}.
             "department": "Engineering",
             "cost_server": 1500,
             "cost_license": 500,
-            "conclusion_text": "Automated template rendering successful. Math operations in table verified."
+            "conclusion_text": "Automated template rendering successful. Math operations in folder verified."
         });
 
-        // let rendered_markdown = render_template(template_input, data).unwrap();
-        // Create document
-        let doc_id = docs
-            .create_doc_from_markdown(&folder_id, "markdown test", &template_input, data)
-            .await
-            .unwrap();
-        println!("Success! Document ID: {}", doc_id);
-        println!("View at: https://docs.google.com/document/d/{}", doc_id);
+        // input
+        let input = CreateDocFromMarkdownInput {
+            folder_id,
+            title: "markdown test".to_string(),
+            template: template_input.to_string(),
+            variables: data,
+        };
+        let input = serde_json::to_string(&input).unwrap();
+
+        let output = docs.create_doc_from_markdown(&input, m).await.unwrap();
+        let output = serde_json::from_str::<Value>(&output).unwrap();
+        let document_id = output["document_id"].as_str().unwrap();
+
+        println!(
+            "View at: https://docs.google.com/document/d/{}",
+            document_id
+        );
     }
 
     #[tokio::test]
     async fn create_csv_sheet() {
+        let m = test_module("test_module", true);
         // From client-secret.json and the refresh token you obtained
         let client_id = std::env::var("CLIENT_ID").unwrap();
         let client_secret = std::env::var("CLIENT_SECRET").unwrap();
         let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
         let folder_id = std::env::var("FOLDER_ID").unwrap();
 
+        // permissions: allow test module to write to folder_id
+        let rw = json!({folder_id.clone(): ["test_module"]});
+        let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
+
         let config = GoogleDocsConfig {
             client_id,
             client_secret,
             refresh_token,
+            rw,
             r: HashMap::new(),
-            wr: HashMap::new(),
         };
         let docs = GoogleDocs::new(config);
 
         // CSV Template
-        let csv_template = r#"Item,Cost,Category
+        let template = r#"Item,Cost,Category
 Server,{{ cost_server }},Hardware
 License,{{ cost_license }},Software
 Total,{{ cost_server + cost_license }},"#;
@@ -405,14 +634,21 @@ Total,{{ cost_server + cost_license }},"#;
             "cost_license": 500,
         });
 
-        let sheet_id = docs
-            .create_sheet_from_csv(&folder_id, "Rust Financials Sheet", &csv_template, data)
-            .await
-            .unwrap();
+        let input = CreateSheetFromCsvInput {
+            folder_id,
+            title: "csv test".to_string(),
+            template: template.to_string(),
+            variables: data,
+        };
+        let input = serde_json::to_string(&input).unwrap();
+
+        let output = docs.create_sheet_from_csv(&input, m).await.unwrap();
+        let output = serde_json::from_str::<Value>(&output).unwrap();
+        let document_id = output["document_id"].as_str().unwrap();
 
         println!(
             "Sheet created: https://docs.google.com/spreadsheets/d/{}",
-            sheet_id
+            document_id
         );
     }
 }
