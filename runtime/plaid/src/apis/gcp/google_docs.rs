@@ -2,70 +2,51 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use plaid_stl::gcp::google_docs::{
+    CreateDocFromMarkdownInput, CreateDocFromMarkdownOutput, CreateSheetFromCsvInput,
+};
 use pulldown_cmark::{html, Options, Parser};
 use reqwest::{multipart, Client};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tera::{Context, Tera};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
-use crate::apis::ApiError;
+use crate::apis::{AccessScope, ApiError};
 use crate::loader::PlaidModule;
 
-#[derive(PartialEq, PartialOrd)]
-enum AccessScope {
-    Read,
-    Write,
-}
-
+/// Defines configuration for the Google Docs API
 #[derive(Deserialize)]
 pub struct GoogleDocsConfig {
+    /// Google OAuth Client ID
     client_id: String,
+    /// Google OAuth Client Secret
     client_secret: String,
+    /// Gogle OAuth refresh token, used to obtain valid OAuth Access Token
     refresh_token: String,
-    // Mapping for readers: folder_id -> list of rules
-    r: HashMap<String, HashSet<String>>,
-    // Mapping for writers: folder_id -> list of rules
+    /// Configured writers - maps a folder ID to a list of rules that are allowed to READ or WRITE files
     rw: HashMap<String, HashSet<String>>,
+    /// Configured readers - maps a folder ID to a list of rules that are allowed to READ files
+    r: HashMap<String, HashSet<String>>,
 }
 
+/// Represents the Google Docs API client
 pub struct GoogleDocs {
+    /// Inner HTTP client used to make requests to Google APIs
     client: Client,
+    /// Google OAuth Client ID
     client_id: String,
+    /// Google OAuth Client Secret
     client_secret: String,
+    /// Gogle OAuth refresh token, used to obtain valid OAuth Access Token
     refresh_token: String,
+    /// Cached Google OAuth Access Token
     access_token: Mutex<Option<(String, Instant)>>,
-    // Mapping for writers: folder_id -> list of rules
+    /// Configured writers - maps a folder ID to a list of rules that are allowed to READ or WRITE files
     rw: HashMap<String, HashSet<String>>,
-    // Mapping for readers: folder_id -> list of rules
+    /// Configured readers - maps a folder ID to a list of rules that are allowed to READ files
     r: HashMap<String, HashSet<String>>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct CreateDocFromMarkdownInput {
-    folder_id: String,
-    title: String,
-    template: String,
-    variables: Value,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct CreateDocFromMarkdownOutput {
-    document_id: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct CreateSheetFromCsvInput {
-    folder_id: String,
-    title: String,
-    template: String,
-    variables: Value,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct CreateSheetFromCsvOutput {
-    document_id: String,
 }
 
 #[derive(Error, Debug)]
@@ -111,6 +92,8 @@ impl GoogleDocs {
         }
     }
 
+    /// Checks if a module can perform a given action on a specific google drive folder
+    /// Modules are registered as as read (R) or write (RW) under self.
     fn check_module_permissions(
         &self,
         access_scope: AccessScope,
@@ -203,6 +186,7 @@ impl GoogleDocs {
         Ok(access_token)
     }
 
+    /// Uploads a file to a Google Drive folder using multi-part uploads
     async fn upload_file(
         &self,
         folder_id: &str,
@@ -254,7 +238,7 @@ impl GoogleDocs {
 
     // Public API
 
-    /// Converts Markdown to HTML and uploads it as a Google Doc
+    /// Create Google Doc from markdown template
     pub async fn create_doc_from_markdown(
         &self,
         input: &str,
@@ -288,7 +272,7 @@ impl GoogleDocs {
         serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 
-    /// Uploads CSV content and instructs Drive to convert it to a Google Sheet
+    /// Create Google Sheet from csv template
     pub async fn create_sheet_from_csv(
         &self,
         input: &str,
@@ -322,6 +306,7 @@ impl GoogleDocs {
     }
 }
 
+/// utility function for converting markdown into HTML
 fn markdown_to_html(md: &str) -> String {
     // Convert Markdown to HTML
     // We enable folders and footnotes for better compatibility
@@ -336,6 +321,7 @@ fn markdown_to_html(md: &str) -> String {
     output
 }
 
+/// untility function for rendering static template
 fn render_template(template: &str, data: serde_json::Value) -> Result<String, GoogleDocsError> {
     // Initialize Tera and render
     let mut tera = Tera::default();

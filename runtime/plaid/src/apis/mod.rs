@@ -285,3 +285,10 @@ impl Api {
 fn default_timeout_seconds() -> u64 {
     5
 }
+
+#[derive(PartialEq, PartialOrd, Debug)]
+/// Represents an access scope for a rule
+enum AccessScope {
+    Read,
+    Write,
+}

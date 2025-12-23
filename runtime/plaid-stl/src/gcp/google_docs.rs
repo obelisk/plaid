@@ -5,29 +5,45 @@ use crate::PlaidFunctionError;
 
 const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
 
+/// Input for create_doc_from_markdown operation
 #[derive(Serialize, Deserialize)]
 pub struct CreateDocFromMarkdownInput {
+    /// The Google Drive folder (parent folder) where to place the document
     pub folder_id: String,
+    /// Title of the document
     pub title: String,
+    /// Markdown template for the document content including any variables '{{ my_var }}'
     pub template: String,
+    /// JSON Object (key : value pairs) containing variables to inject into your template
     pub variables: Value,
 }
 
+/// Output for create_doc_from_markdown operation
 #[derive(Serialize, Deserialize)]
 pub struct CreateDocFromMarkdownOutput {
+    /// The document ID of the newly created document
+    /// View at https://docs.google.com/document/d/<DOCUMENT_ID>
     pub document_id: String,
 }
 
+/// Input for create_sheet_from_csv operation
 #[derive(Serialize, Deserialize)]
 pub struct CreateSheetFromCsvInput {
+    /// The Google Drive folder (parent folder) where to place the spreadsheet
     pub folder_id: String,
+    /// Title of the spreadsheet
     pub title: String,
+    /// CSV template for the sheet content including any variables '{{ my_var }}'
     pub template: String,
+    /// JSON Object (key : value pairs) containing variables to inject into your template
     pub variables: Value,
 }
 
+/// Output for create_sheet_from_csv operation
 #[derive(Serialize, Deserialize)]
 pub struct CreateSheetFromCsvOutput {
+    /// The document ID of the newly created spreadsheet
+    /// View at https://docs.google.com/spreadsheets/d/<DOCUMENT_ID>
     pub document_id: String,
 }
 
@@ -64,7 +80,7 @@ pub fn create_doc_from_markdown(
         .map_err(|_| PlaidFunctionError::InternalApiError)
 }
 
-/// Create google sheet from csv template
+/// Create google spreadsheet from csv template
 pub fn create_sheet_from_csv(
     input: CreateDocFromMarkdownInput,
 ) -> Result<CreateDocFromMarkdownOutput, PlaidFunctionError> {
