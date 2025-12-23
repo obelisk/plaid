@@ -522,8 +522,8 @@ fn process_message_with_module(
                     get_remaining_points(&mut store, &instance)
                 {
                     let computation_remaining_percentage =
-                        (remaining as f32 / computation_limit as f32) * 100.;
-                    let computation_used = 100. - computation_remaining_percentage;
+                        (remaining as f32 / computation_limit as f32) * 100.0;
+                    let computation_used = 100.0 - computation_remaining_percentage;
                     els.log_ts(
                         format!("{}_computation_percentage_used", module.name),
                         computation_used as i64,

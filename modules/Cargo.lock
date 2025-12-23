@@ -149,6 +149,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "just_run_please"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.174"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -199,7 +208,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "plaid_stl"
-version = "0.32.0"
+version = "0.34.0"
 dependencies = [
  "base64 0.13.1",
  "chrono",
@@ -437,6 +446,15 @@ dependencies = [
 
 [[package]]
 name = "test_mnr"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "test_mnr_return_cert"
 version = "0.1.0"
 dependencies = [
  "plaid_stl",

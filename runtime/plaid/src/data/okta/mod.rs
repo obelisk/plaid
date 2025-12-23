@@ -1,5 +1,4 @@
-use super::parse_duration;
-use crate::{data::DataGeneratorLog, executor::Message};
+use crate::{data::DataGeneratorLog, executor::Message, parse_duration};
 use crossbeam_channel::Sender;
 use lru::LruCache;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};

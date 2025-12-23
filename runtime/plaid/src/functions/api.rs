@@ -403,7 +403,11 @@ impl_new_function_with_error_buffer!(github, make_graphql_query, ALLOW_IN_TEST_M
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, fetch_commit, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, list_files, ALLOW_IN_TEST_MODE);
-impl_new_function_with_error_buffer!(github, fetch_file, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(
+    github,
+    fetch_file_with_custom_media_type,
+    ALLOW_IN_TEST_MODE
+);
 impl_new_function_with_error_buffer!(github, get_branch_protection_rules, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_branch_protection_ruleset, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_repository_collaborators, ALLOW_IN_TEST_MODE);
@@ -436,6 +440,13 @@ impl_new_function_with_error_buffer!(github, get_repos_for_fpat, ALLOW_IN_TEST_M
 // AES functions
 impl_new_function_with_error_buffer!(cryptography, aes_128_cbc_encrypt, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(cryptography, aes_128_cbc_decrypt, ALLOW_IN_TEST_MODE);
+
+// Jira functions
+impl_new_function_with_error_buffer!(jira, create_issue, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(jira, get_issue, ALLOW_IN_TEST_MODE);
+impl_new_function!(jira, update_issue, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(jira, get_user, ALLOW_IN_TEST_MODE);
+impl_new_function!(jira, post_comment, DISALLOW_IN_TEST_MODE);
 
 // AWS functions
 
@@ -540,6 +551,38 @@ impl_new_function_with_error_buffer!(yubikey, verify_otp, ALLOW_IN_TEST_MODE);
 
 // Web Functions
 impl_new_function_with_error_buffer!(web, issue_jwt, DISALLOW_IN_TEST_MODE);
+
+// Blockchain functions
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    get_transaction_by_hash,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    get_transaction_receipt,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    send_raw_transaction,
+    DISALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    get_transaction_count,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_balance, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, estimate_gas, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, eth_call, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, gas_price, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_logs, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_block, ALLOW_IN_TEST_MODE);
 
 pub fn to_api_function(
     name: &str,
@@ -704,7 +747,9 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, github_fetch_commit)
         }
         "github_list_files" => Function::new_typed_with_env(&mut store, &env, github_list_files),
-        "github_fetch_file" => Function::new_typed_with_env(&mut store, &env, github_fetch_file),
+        "github_fetch_file_with_custom_media_type" => {
+            Function::new_typed_with_env(&mut store, &env, github_fetch_file_with_custom_media_type)
+        }
         "github_list_fpat_requests_for_org" => {
             Function::new_typed_with_env(&mut store, &env, github_list_fpat_requests_for_org)
         }
@@ -822,6 +867,13 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, general_make_named_request)
         }
 
+        // Jira Calls
+        "jira_create_issue" => Function::new_typed_with_env(&mut store, &env, jira_create_issue),
+        "jira_get_issue" => Function::new_typed_with_env(&mut store, &env, jira_get_issue),
+        "jira_update_issue" => Function::new_typed_with_env(&mut store, &env, jira_update_issue),
+        "jira_get_user" => Function::new_typed_with_env(&mut store, &env, jira_get_user),
+        "jira_post_comment" => Function::new_typed_with_env(&mut store, &env, jira_post_comment),
+
         // KMS calls
         #[cfg(feature = "aws")]
         "aws_kms_generate_mac" => {
@@ -915,6 +967,38 @@ pub fn to_api_function(
 
         // Web Calls
         "web_issue_jwt" => Function::new_typed_with_env(&mut store, &env, web_issue_jwt),
+
+        // Blockchain calls
+        "blockchain_evm_get_transaction_by_hash" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_transaction_by_hash)
+        }
+        "blockchain_evm_get_transaction_receipt" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_transaction_receipt)
+        }
+        "blockchain_evm_send_raw_transaction" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_send_raw_transaction)
+        }
+        "blockchain_evm_get_transaction_count" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_transaction_count)
+        }
+        "blockchain_evm_get_balance" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_balance)
+        }
+        "blockchain_evm_estimate_gas" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_estimate_gas)
+        }
+        "blockchain_evm_eth_call" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_eth_call)
+        }
+        "blockchain_evm_gas_price" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_gas_price)
+        }
+        "blockchain_evm_get_logs" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_logs)
+        }
+        "blockchain_evm_get_block" => {
+            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_block)
+        }
 
         // No match
         _ => return None,

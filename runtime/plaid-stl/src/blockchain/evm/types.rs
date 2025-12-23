@@ -1,0 +1,394 @@
+use std::{
+    fmt::{self, Display},
+    str::FromStr,
+};
+
+use serde::{de, Deserialize, Serialize};
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct ChainId(u64);
+
+impl FromStr for ChainId {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let id: u64 = s.parse()?;
+        Ok(ChainId(id))
+    }
+}
+
+macro_rules! impl_from_uint {
+    ($($t:ty),*) => {
+        $(
+            impl From<$t> for ChainId {
+                fn from(id: $t) -> Self {
+                    ChainId(id as u64)
+                }
+            }
+        )*
+    };
+}
+
+impl_from_uint!(u8, u16, u32, u64);
+
+impl ChainId {
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Display for ChainId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct GetTransactionRequest {
+    /// The chain ID to query
+    pub chain_id: ChainId,
+    /// The transaction hash to look up
+    pub hash: String,
+}
+
+/// Represents the error details in a failed JSON-RPC call.
+#[derive(Deserialize, Debug, Clone)]
+pub struct JsonRpcError {
+    /// Error code indicating the type of failure.
+    pub code: i32,
+    /// Human-readable error message.
+    pub message: String,
+    /// Additional data related to the error.
+    pub data: Option<String>,
+}
+
+/// Basic structure of a JSON-RPC response.
+#[derive(Deserialize, Debug, Clone)]
+pub struct BasicRpcResponse {
+    /// Optional error details, if the call failed.
+    pub error: Option<JsonRpcError>,
+    /// Optional result, if the call was successful.
+    pub result: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct DetailedRpcResponse {
+    /// Optional error details, if the call failed.
+    pub error: Option<JsonRpcError>,
+    /// Optional result, if the call was successful.
+    pub result: Option<serde_json::Value>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub enum BlockTag {
+    /// The lowest numbered block the client has available
+    Earliest,
+    /// The most recent crypto-economically secure block, cannot be re-orged outside of manual intervention driven by community coordination
+    Finalized,
+    /// The most recent block in the canonical chain observed by the client,
+    /// this block may be re-orged out of the canonical chain even under healthy/normal conditions
+    Latest,
+    /// A sample next block built by the client on top of `latest` and containing the set of transactions usually taken from local mempool
+    Pending,
+    /// The most recent block that is safe from re-orgs under honest majority and certain synchronicity assumptions
+    Safe,
+    /// A specific block number
+    Number(u64),
+}
+
+impl Display for BlockTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlockTag::Earliest => write!(f, "earliest"),
+            BlockTag::Finalized => write!(f, "finalized"),
+            BlockTag::Latest => write!(f, "latest"),
+            BlockTag::Pending => write!(f, "pending"),
+            BlockTag::Safe => write!(f, "safe"),
+            BlockTag::Number(n) => write!(f, "0x{n:x}"),
+        }
+    }
+}
+
+/// Representation of an Ethereum transaction returned by `eth_getTransactionByHash`
+#[derive(Deserialize, Debug, Clone)]
+pub struct Transaction {
+    /// Hash of the block where this transaction was in. null when its pending.
+    #[serde(rename = "blockHash")]
+    pub block_hash: Option<String>,
+    /// Block number where this transaction was in. null when its pending.
+    #[serde(rename = "blockNumber")]
+    pub block_number: Option<String>,
+    /// Address of the sender
+    pub from: String,
+    /// Gas provided by the sender
+    pub gas: String,
+    /// Gas price provided by the sender in Wei
+    #[serde(rename = "gasPrice")]
+    pub gas_price: String,
+    /// The maximum total fee per gas the sender is willing to pay (includes the network / base fee and miner / priority fee) in wei
+    /// Only present for EIP-1559 transactions
+    #[serde(rename = "maxFeePerGas")]
+    pub max_fee_per_gas: Option<String>,
+    /// Maximum fee per gas the sender is willing to pay to miners in wei
+    /// Only present for EIP-1559 transactions
+    #[serde(rename = "maxPriorityFeePerGas")]
+    pub max_priority_fee_per_gas: Option<String>,
+    /// The data sent along with the transaction.
+    pub input: String,
+    /// Address of the receiver. null when its a contract creation transaction
+    pub to: Option<String>,
+    /// Integer of the transaction index position in the block. null when its pending.
+    #[serde(rename = "transactionIndex")]
+    pub transaction_index: Option<String>,
+    /// Value transferred in Wei
+    pub value: String,
+    /// The type of transaction
+    pub r#type: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct TransactionReceipt {
+    /// Status of the transaction
+    #[serde(deserialize_with = "deserialize_transaction_status")]
+    pub status: TransactionStatus,
+    /// Array of log objects, which this transaction generated
+    pub logs: Vec<Log>,
+    /// Bloom filter for light clients to quickly retrieve related logs
+    #[serde(rename = "logsBloom")]
+    pub logs_bloom: String,
+    /// Block number this transaction was included in
+    #[serde(rename = "blockNumber")]
+    pub block_number: String,
+    /// Address of the sender
+    pub from: String,
+    /// Address of the receiver.
+    /// `None` when its a contract creation transaction
+    pub to: Option<String>,
+    /// The contract address created, if the transaction was a contract creation, otherwise `None`
+    #[serde(rename = "contractAddress")]
+    pub contract_address: Option<String>,
+}
+
+/// Represents the statuses a tx on chain can have
+#[derive(Deserialize, Debug, Clone)]
+pub enum TransactionStatus {
+    Success,
+    Failure,
+}
+
+fn deserialize_transaction_status<'de, D>(deserializer: D) -> Result<TransactionStatus, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let status = String::deserialize(deserializer)?;
+
+    match status.as_str() {
+        "0x0" => Ok(TransactionStatus::Failure),
+        "0x1" => Ok(TransactionStatus::Success),
+        _ => Err(serde::de::Error::custom(format!(
+            "{status} is not a valid status. Expected one of 0x0 or 0x1"
+        ))),
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Log {
+    /// Index of this log in the transaction's log array
+    #[serde(rename = "logIndex")]
+    pub log_index: String,
+    /// Index of the transaction this log was emitted in
+    #[serde(rename = "transactionIndex")]
+    pub transaction_index: String,
+    /// Block number this log was included in
+    #[serde(rename = "blockNumber")]
+    pub block_number: String,
+    /// The transaction hash this log was created from
+    #[serde(rename = "transactionHash")]
+    pub transaction_hash: String,
+    /// Address from which this log originated
+    pub address: String,
+    /// Array of topics provided by the contract
+    pub topics: Vec<String>,
+    /// Data provided by the contract
+    pub data: String,
+}
+
+/// Request structure for broadcasting a transaction.
+#[derive(Deserialize, Serialize)]
+pub struct SendRawTransactionRequest {
+    /// The chain ID to send the transaction to
+    pub chain_id: ChainId,
+    /// The signed transaction data
+    pub signed_tx: String,
+}
+
+/// Request structure for getting basic metadata about an address.
+#[derive(Deserialize, Serialize)]
+pub struct GetAddressMetadataRequest {
+    /// The chain ID to query
+    pub chain_id: ChainId,
+    /// The address to look up
+    pub address: String,
+    /// The block tag to query against
+    pub block_tag: BlockTag,
+}
+
+/// Request structure for making a call to a contract without creating a transaction.
+#[derive(Serialize, Deserialize)]
+pub struct EthCallRequest {
+    /// The chain ID to query
+    pub chain_id: ChainId,
+    /// The address to which the call is directed
+    pub to: String,
+    /// The data payload for the call
+    pub data: String,
+    /// The block tag to query against
+    pub block_tag: BlockTag,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EstimateGasRequest {
+    /// The account the transaction is sent from
+    pub from: Option<String>,
+    /// The address the transaction is directed to
+    /// If `None`, it indicates a contract creation transaction
+    pub to: Option<String>,
+    /// The value sent along with the transaction
+    pub value: Option<String>,
+    /// The data payload for the transaction
+    pub data: Option<String>,
+    /// The block tag to query against
+    pub block_tag: BlockTag,
+    /// The chain ID to query
+    pub chain_id: ChainId,
+}
+
+impl EstimateGasRequest {
+    /// Create a new builder for EstimateGasRequest
+    pub fn builder(chain_id: impl Into<ChainId>, block_tag: BlockTag) -> EstimateGasRequestBuilder {
+        EstimateGasRequestBuilder::new(chain_id, block_tag)
+    }
+}
+
+/// Builder for `EstimateGasRequest`
+pub struct EstimateGasRequestBuilder {
+    chain_id: ChainId,
+    from: Option<String>,
+    to: Option<String>,
+    value: Option<String>,
+    data: Option<String>,
+    block_tag: BlockTag,
+}
+
+impl EstimateGasRequestBuilder {
+    fn new(chain_id: impl Into<ChainId>, block_tag: BlockTag) -> Self {
+        Self {
+            chain_id: chain_id.into(),
+            from: None,
+            to: None,
+            value: None,
+            data: None,
+            block_tag,
+        }
+    }
+
+    /// Set the source address
+    pub fn from(mut self, from: impl Into<String>) -> Self {
+        self.from = Some(from.into());
+        self
+    }
+
+    /// Set the destination address
+    pub fn to(mut self, to: impl Into<String>) -> Self {
+        self.to = Some(to.into());
+        self
+    }
+
+    /// Set the value to send (in wei)
+    pub fn value(mut self, value: impl Into<String>) -> Self {
+        self.value = Some(value.into());
+        self
+    }
+
+    /// Set the transaction data payload
+    pub fn data(mut self, data: impl Into<String>) -> Self {
+        self.data = Some(data.into());
+        self
+    }
+
+    /// Set the block tag to query against
+    pub fn block_tag(mut self, block_tag: BlockTag) -> Self {
+        self.block_tag = block_tag;
+        self
+    }
+
+    /// Build the EstimateGasRequest
+    pub fn build(self) -> EstimateGasRequest {
+        EstimateGasRequest {
+            chain_id: self.chain_id,
+            from: self.from,
+            to: self.to,
+            value: self.value,
+            data: self.data,
+            block_tag: self.block_tag,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetGasPriceRequest {
+    /// The chain ID to query
+    pub chain_id: ChainId,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetLogsRequest {
+    /// The chain ID to query
+    pub chain_id: ChainId,
+    /// The starting block tag
+    pub from_block: BlockTag,
+    /// The ending block tag
+    pub to_block: BlockTag,
+    /// The addresses to filter logs by
+    pub address: Option<Vec<String>>,
+    /// The topics to filter logs by
+    pub topics: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetBlockRequest {
+    /// The chain ID to query
+    pub chain_id: ChainId,
+    /// The block tag to query
+    pub block_tag: BlockTag,
+    /// If true, returns full transaction objects; if false, returns only transaction hashes.
+    pub hydrated_transactions: bool,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Block {
+    /// The base fee per gas for this block (EIP-1559). None for pre-EIP-1559 blocks.
+    #[serde(rename = "baseFeePerGas")]
+    pub base_fee_per_gas: Option<String>,
+    /// Hash of the block
+    pub hash: String,
+    /// Bloom filter for light clients to quickly retrieve related logs
+    #[serde(rename = "logsBloom")]
+    pub logs_bloom: String,
+    /// Block number
+    pub number: String,
+    /// Timestamp of the block
+    pub timestamp: String,
+    /// Transactions included in the block
+    pub transactions: BlockTransactions,
+}
+
+/// Representation of an Ethereum block with full transaction objects.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum BlockTransactions {
+    /// Only transaction hashes
+    Hashes(Vec<String>),
+    /// Full transaction objects
+    Full(Vec<Transaction>),
+}

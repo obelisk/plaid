@@ -22,6 +22,7 @@ allowed_rules = [
     "test_redis_cache_eviction.wasm",
     "test_dynamodb.wasm",
     "test_google_docs.wasm",
+    "test_mnr_return_cert.wasm"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
@@ -100,6 +101,18 @@ allowed_rules = ["test_testmode.wasm"]
 available_in_test_mode = false
 [apis."general"."network"."web_requests"."testmode_deny"."headers"]
 
+[apis."general"."network"."web_requests"."test_mnr_return_cert"]
+verb = "post"
+uri = "https://localhost:8998/test_mnr_return_cert"
+return_body = true
+return_code = true
+return_cert = true
+allowed_rules = ["test_mnr_return_cert.wasm"]
+root_certificate = """
+{plaid-secret{integration-test-root-ca}}
+"""
+[apis."general"."network"."web_requests"."test_mnr_return_cert"."headers"]
+
 # [apis."general"."network"."web_requests"."list_deploy_keys"]
 # verb = "get"
 # uri = "https://api.github.com/repos/{owner}/{repo}/keys"
@@ -170,6 +183,24 @@ allowed_rules = ["testing_test.wasm"]
 [apis."yubikey"]
 client_id = 99999
 secret_key = ""
+
+# BLOCKCHAIN EVM EXAMPLE CONFIGURATION
+# [apis."blockchain"]
+# [apis."blockchain"."evm"]
+# max_retries = 5
+# timeout_millis = 10000
+
+# [apis."blockchain"."evm".chains.1] # Ethereum 
+# selection_strategy = "RoundRobin"
+
+# [[apis."blockchain"."evm".chains.1.nodes]]
+# uri = "https://some-node"
+# name = "Node 1"
+
+# [[apis."blockchain"."evm".chains.1.nodes]]
+# uri = "https://some-other-node"
+# name = "Node 2"
+
 
 # KMS USING IAM
 

@@ -1,7 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
+use http::{HeaderMap, HeaderValue};
 use plaid_stl::github::{
-    CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus, CreateFileRequest,
+    CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus, CommentOnPullRequestRequest,
+    CreateFileRequest, FetchFileCustomMediaType, FetchFileRequest,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -176,20 +178,17 @@ impl Github {
 
     /// Returns the contents of a file at a specific URI.
     /// See https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28#get-repository-content for more detail
-    pub async fn fetch_file(
+    pub async fn fetch_file_with_custom_media_type(
         &self,
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: FetchFileRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let organization =
-            self.validate_org(request.get("organization").ok_or(ApiError::BadRequest)?)?;
-        let repository_name = self.validate_repository_name(
-            request.get("repository_name").ok_or(ApiError::BadRequest)?,
-        )?;
-        let file_path = request.get("file_path").ok_or(ApiError::BadRequest)?;
+        let organization = self.validate_org(&request.organization)?;
+        let repository_name = self.validate_repository_name(&request.repository_name)?;
+        let file_path = &request.file_path;
 
         // If this call return Ok(_), it means the provided file path contains ".." which we do
         // not want to allow
@@ -200,7 +199,7 @@ impl Github {
             return Err(ApiError::BadRequest);
         }
 
-        let reference = request.get("reference").ok_or(ApiError::BadRequest)?;
+        let reference = request.reference;
 
         // Reference can be commit hash OR a branch name.
         // To validate that the provided ref is valid, we must check that it is either a
@@ -211,11 +210,27 @@ impl Github {
             return Err(ApiError::BadRequest);
         }
 
-        info!("Fetching contents of file in repository [{organization}/{repository_name}] at {file_path} and reference {reference}");
+        let custom_media_type = request.media_type;
+
+        info!("Fetching contents of file in repository [{organization}/{repository_name}] at {file_path} and reference {reference} with encoding [{custom_media_type}]");
         let address =
             format!("/repos/{organization}/{repository_name}/contents/{file_path}?ref={reference}");
 
-        match self.make_generic_get_request(address, module).await {
+        // Set the Accept header according to the media type we have
+        let header_value = match custom_media_type {
+            FetchFileCustomMediaType::Default => "application/vnd.github+json".to_string(),
+            cmt => format!("application/vnd.github.{cmt}+json"),
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Accept",
+            HeaderValue::from_str(&header_value).map_err(|_| ApiError::ImpossibleError)?,
+        );
+
+        match self
+            .make_get_request_with_headers(address, Some(headers), module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -497,17 +512,13 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: CommentOnPullRequestRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let username =
-            self.validate_username(request.get("usename").ok_or(ApiError::BadRequest)?)?;
-        let repository_name = self.validate_repository_name(
-            request.get("repository_name").ok_or(ApiError::BadRequest)?,
-        )?;
-        let pull_request =
-            self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
-        let comment = request.get("comment").ok_or(ApiError::BadRequest)?;
+        let username = self.validate_username(&request.owner)?;
+        let repository_name = self.validate_repository_name(&request.repository)?;
+        let pull_request = self.validate_pint(&request.number)?;
+        let comment = &request.comment;
 
         info!("Commenting on Pull Request [{pull_request}] in repo [{repository_name}] on behalf of {module}");
         let address = format!("/repos/{username}/{repository_name}/issues/{pull_request}/comments");

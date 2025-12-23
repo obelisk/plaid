@@ -12,6 +12,8 @@ use std::{
 };
 use tokio::runtime::Runtime;
 
+const CHANNEL_CAPACITY: usize = 4096;
+
 /// A severity scale to measure how critical a log is when sent
 /// to a logging service.
 #[derive(Serialize)]
@@ -276,7 +278,7 @@ impl Logger {
     }
 
     pub fn start(config: LoggingConfiguration) -> (Self, JoinHandle<Result<(), LoggingError>>) {
-        let (sender, rx) = bounded(4096);
+        let (sender, rx) = bounded(CHANNEL_CAPACITY);
         let show_log_on_error = config.show_log_on_error;
         let _handle = thread::spawn(move || Self::logging_thread_loop(config, rx));
 

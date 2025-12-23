@@ -75,7 +75,6 @@ pub fn get(key: &str) -> Result<String, PlaidFunctionError> {
     };
 
     if copied_size == buffer_size {
-        data_buffer.truncate(copied_size as usize);
         Ok(String::from_utf8(data_buffer).unwrap())
     } else {
         Err(PlaidFunctionError::ReturnBufferTooSmall)

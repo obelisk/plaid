@@ -1,0 +1,207 @@
+[apis."general"]
+[apis."general".network.web_requests]
+
+
+[apis."general"."network"."web_requests"."google_test"]
+verb = "get"
+uri = "https://www.google.com/"
+return_body = true
+return_code = true
+return_cert = true
+available_in_test_mode = true
+allowed_rules = ["just_run_please.wasm"]
+[apis."general"."network"."web_requests"."google_test"."headers"]
+
+[apis."general"."network"."web_requests"."testmode_allow"]
+verb = "get"
+uri = "https://captive.apple.com/"
+return_body = true
+return_code = true
+return_cert = true
+allowed_rules = ["just_run_please.wasm"]
+available_in_test_mode = true
+[apis."general"."network"."web_requests"."testmode_allow"."headers"]
+
+[apis."general"."network"."web_requests"."testmode_deny"]
+verb = "get"
+uri = "https://captive.apple.com/"
+return_body = true
+return_code = true
+return_cert = true
+allowed_rules = ["just_run_please.wasm"]
+available_in_test_mode = false
+[apis."general"."network"."web_requests"."testmode_deny"."headers"]
+
+# [apis."general"."network"."web_requests"."list_deploy_keys"]
+# verb = "get"
+# uri = "https://api.github.com/repos/{owner}/{repo}/keys"
+# return_body = true
+# return_code = true
+# allowed_rules = ["testing_test.wasm"]
+# [apis."general"."network"."web_requests"."list_deploy_keys"."headers"]
+# Authorization = "Bearer github_pat_11AAS..."
+# "X-GitHub-Api-Version" = "2022-11-28"
+# "Accept" = "application/vnd.github+json"
+# "User-Agent" = "Plaid/0.10"
+
+# [apis."general"."network"."web_requests"."create_deploy_key"]
+# verb = "post"
+# uri = "https://api.github.com/repos/{owner}/{repo}/keys"
+# return_body = false
+# return_code = true
+# allowed_rules = ["testing_test.wasm"]
+# [apis."general"."network"."web_requests"."create_deploy_key"."headers"]
+# Authorization = "Bearer github_pat_11AAS..."
+# "X-GitHub-Api-Version" = "2022-11-28"
+# "Accept" = "application/vnd.github+json"
+# "User-Agent" = "Plaid/0.10"
+
+# [apis."github"]
+# token = ""
+# [apis."github".graphql_queries]
+
+[apis."slack"]
+[apis."slack"."webhooks"]
+[apis."slack"."bot_tokens"]
+
+[apis."web"]
+[apis."web".keys]
+[apis."web".keys."46c642b0da02030407c6463c013a8dbd"]
+# To generate the ECDSA256 key PEM, run the following commands:
+# openssl ecparam -genkey -name prime256v1 -out ec-params.key
+# openssl pkcs8 -topk8 -nocrypt -in ec-params.key -out private-key.pem
+# openssl ec -in ec-params.key -pubout
+
+# This is the example private key from JWT.io. Do not use it in production.
+private_key = """
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
+OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
+1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G
+-----END PRIVATE KEY-----
+"""
+
+allowed_rules = ["test_jwt.wasm"]
+allowlisted_extra_fields = ["ext"]
+allowlisted_extra_headers = ["smt", "cty"]
+
+[apis."web".keys."230216b400a90b29f70db61aca97bbca"]
+# This is a test key. Do not use it in production.
+private_key = """
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgO7Efw+K7iAHg6+E2
+ClqcPgx7lsGbpkrbVDO7kzT8MfChRANCAARjZdpuBQmWKxr+CFwiWQcXo8qeZvBr
+sa5i5Zy6yHszl8nBOEWDUOx2RC6UKaCPT+dgr8O4OZ/d0PKGMo0a4a69
+-----END PRIVATE KEY-----
+"""
+
+allowed_rules = ["testing_test.wasm"]
+
+[apis."yubikey"]
+client_id = 99999
+secret_key = ""
+
+# BLOCKCHAIN EVM EXAMPLE CONFIGURATION
+# [apis."blockchain"]
+# [apis."blockchain"."evm"]
+# max_retries = 5
+# timeout_millis = 10000
+
+# [apis."blockchain"."evm".chains.1] # Ethereum 
+# selection_strategy = "RoundRobin"
+
+# [[apis."blockchain"."evm".chains.1.nodes]]
+# uri = "https://some-node"
+# name = "Node 1"
+
+# [[apis."blockchain"."evm".chains.1.nodes]]
+# uri = "https://some-other-node"
+# name = "Node 2"
+
+
+# KMS USING IAM
+
+# [apis."aws"]
+# [apis."aws"."kms".authentication]
+# [apis."aws"."kms".key_configuration]
+# "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
+
+# KMS USING API KEY
+
+# [apis."aws"]
+# [apis."aws"."kms"]
+# [apis."aws"."kms".authentication]
+# access_key_id = "asdf"
+# secret_access_key = "asdf"
+# region = "asdf"
+# [apis."aws"."kms".key_configuration]
+# "some_key_id" = ["testing_test.wasm", "another_rule.wasm"]
+
+
+# S3 (using IAM)
+# top‐level bucket_configuration map
+# [apis."aws"]
+# [apis."aws"."s3"]
+# [apis."aws"."s3".authentication]
+# [apis."aws"."s3".bucket_configuration]
+# for bucket named "my-bucket"
+# [apis."aws"."s3".bucket_configuration."my-bucket"]
+# r = ["some_rule.wasm"]
+# rw = ["another_rule.wasm"]
+
+# DynamoDB (using IAM)
+# [apis."aws"]
+# [apis."aws"."dynamodb"]
+# local_endpoint = true
+# [apis."aws"."dynamodb".authentication]
+# [apis."aws"."dynamodb".rw]
+# local_test = ["test_dynamodb.wasm"]
+
+# [apis."aws"."dynamodb".r]
+
+#[apis."github"]
+#[apis."github".authentication]
+#logbacks_allowed = "Unlimited"
+#app_id = 0
+#installation_id = 0
+#private_key = """{plaid-secret{plaid-github-app-private-key}}"""
+
+# [apis."github"."graphql_queries"]
+# saml_identities = """
+# query($organization: String!, $cursor: String) {
+#   organization(login: $organization) {
+#     samlIdentityProvider {
+#       externalIdentities(first: 100, after: $cursor) {
+#         pageInfo {
+#           hasNextPage
+#           endCursor
+#         }
+#         nodes {
+#           user {
+#             login
+#           }
+#           samlIdentity {
+#             nameId
+#           }
+#         }
+#       }
+#     }
+#   }
+# }
+# """
+
+[apis.cryptography.aes]
+[[apis.cryptography.aes.key_specs]]
+id = "my_aes_key"
+key = "34958749579573957968934692346934" # This is just an example key. !!! DO NOT USE IN PRODUCTION !!!
+rules_and_actions = { "test_aes_enc_dec.wasm"  = ["Encrypt", "Decrypt"] }
+
+[[apis.cryptography.aes.key_specs]]
+id = "aes_key_only_enc"
+key = "34958749579573957968934692346935" # This is just an example key. !!! DO NOT USE IN PRODUCTION !!!
+rules_and_actions = { "test_aes_enc_dec.wasm"  = ["Encrypt"] }
+
+[[apis.cryptography.aes.key_specs]]
+id = "another_aes_key"
+key = "34958749579573957968934692346936" # This is just an example key. !!! DO NOT USE IN PRODUCTION !!!
+rules_and_actions = { "some_rule.wasm"  = ["Encrypt", "Decrypt"] }

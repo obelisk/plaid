@@ -1,8 +1,11 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{github::PullRequestRequestReviewers, PlaidFunctionError};
+use crate::{
+    github::{CommentOnPullRequestRequest, PullRequestRequestReviewers},
+    PlaidFunctionError,
+};
 
 pub fn list_files(
     organization: &str,
@@ -65,13 +68,14 @@ pub fn comment_on_pull_request(
         new_host_function!(github, comment_on_pull_request);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("username", username.to_string());
-    params.insert("repostory_name", repository_name.to_string());
-    params.insert("pull_request", pull_request.to_string());
-    params.insert("comment", comment.to_string());
+    let request = CommentOnPullRequestRequest {
+        owner: username.to_string(),
+        repository: repository_name.to_string(),
+        number: pull_request.to_string(),
+        comment: comment.to_string(),
+    };
 
-    let request = serde_json::to_string(&params).unwrap();
+    let request = serde_json::to_string(&request).unwrap();
 
     let res = unsafe {
         github_comment_on_pull_request(request.as_bytes().as_ptr(), request.as_bytes().len())

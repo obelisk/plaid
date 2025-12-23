@@ -13,7 +13,7 @@ mod secrets;
 mod teams;
 mod validators;
 
-use http::header::USER_AGENT;
+use http::{header::USER_AGENT, HeaderMap};
 use jsonwebtoken::EncodingKey;
 use octocrab::Octocrab;
 
@@ -104,9 +104,33 @@ impl Github {
         uri: String,
         module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
-        info!("Making a get request to {uri} on behalf of {module}");
+        self.make_get_request_with_headers(uri, None, module).await
+    }
 
-        let request = self.client._get(uri).await;
+    /// Make a GET request with custom headers to the GitHub API using the GitHub app library.
+    /// Note - This function does not do any validation on the provided headers. That's because
+    /// it's not exposed to the rules but only callable from within the runtime itself. Therefore
+    /// we assume that all necessary validation has already been performed by the calling function.
+    async fn make_get_request_with_headers(
+        &self,
+        uri: String,
+        headers: Option<HeaderMap>,
+        module: Arc<PlaidModule>,
+    ) -> Result<(u16, Result<String, ApiError>), ApiError> {
+        // We log the header names we are passing but not the values, in case they are sensitive.
+        info!(
+            "Making a get request to {uri} on behalf of {module}. Provided headers: {:?}",
+            match headers {
+                Some(ref headers) => headers
+                    .keys()
+                    .map(|v| v.as_str())
+                    .collect::<Vec<&str>>()
+                    .join(", "),
+                None => "None".to_string(),
+            }
+        );
+
+        let request = self.client._get_with_headers(uri, headers).await;
 
         match request {
             Ok(r) => {

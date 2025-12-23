@@ -16,7 +16,7 @@ pub fn get_response(
         Ok(memory_view) => memory_view,
         Err(e) => {
             error!(
-                "{}: Memory error in fetch_from_module: {:?}",
+                "{}: Memory error in get_response: {:?}",
                 env.data().module.name,
                 e
             );
@@ -62,7 +62,7 @@ pub fn set_response(
         Ok(memory_view) => memory_view,
         Err(e) => {
             error!(
-                "{}: Memory error in fetch_from_module: {:?}",
+                "{}: Memory error in set_response: {:?}",
                 env.data().module.name,
                 e
             );

@@ -1,6 +1,6 @@
-use super::parse_duration;
 use crate::apis::github::{build_github_client, Authentication};
 use crate::executor::Message;
+use crate::parse_duration;
 use crossbeam_channel::Sender;
 use lru::LruCache;
 use octocrab::{self, Octocrab};

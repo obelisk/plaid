@@ -5,6 +5,7 @@
 /compiled_modules
 /runtime/performance-monitoring/*
 /module_signatures
+runtime/plaid_ready
 
 # Private items
 /runtime/plaid/private-resources
@@ -16,3 +17,6 @@
 /modules/target
 /target
 /plaid-stl/target
+
+# Scratch items
+/modules/jrp/

@@ -1,10 +1,12 @@
 #[cfg(feature = "aws")]
 pub mod aws;
+pub mod blockchain;
 pub mod cryptography;
 #[cfg(feature = "gcp")]
 pub mod gcp;
 pub mod general;
 pub mod github;
+pub mod jira;
 pub mod npm;
 pub mod okta;
 pub mod pagerduty;
@@ -16,8 +18,10 @@ pub mod yubikey;
 
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
+use crate::apis::blockchain::{evm, Blockchain, BlockchainConfig};
 #[cfg(feature = "gcp")]
 use crate::apis::gcp::{Gcp, GcpConfig};
+use crate::apis::jira::{Jira, JiraConfig};
 #[cfg(feature = "aws")]
 use aws::s3::S3Errors;
 #[cfg(feature = "aws")]
@@ -62,6 +66,7 @@ pub struct Api {
     pub gcp: Option<Gcp>,
     pub general: Option<General>,
     pub github: Option<Github>,
+    pub jira: Option<Jira>,
     pub npm: Option<Npm>,
     pub okta: Option<Okta>,
     pub pagerduty: Option<PagerDuty>,
@@ -70,6 +75,7 @@ pub struct Api {
     pub splunk: Option<Splunk>,
     pub yubikey: Option<Yubikey>,
     pub web: Option<Web>,
+    pub blockchain: Option<Blockchain>,
 }
 
 /// Configurations for all the APIs Plaid can use
@@ -82,6 +88,7 @@ pub struct ApiConfigs {
     pub cryptography: Option<CryptographyConfig>,
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
+    pub jira: Option<JiraConfig>,
     pub npm: Option<NpmConfig>,
     pub okta: Option<OktaConfig>,
     pub pagerduty: Option<PagerDutyConfig>,
@@ -90,6 +97,7 @@ pub struct ApiConfigs {
     pub splunk: Option<SplunkConfig>,
     pub yubikey: Option<YubikeyConfig>,
     pub web: Option<WebConfig>,
+    pub blockchain: Option<BlockchainConfig>,
 }
 
 #[derive(Debug)]
@@ -127,7 +135,16 @@ pub enum ApiError {
     SplunkError(splunk::SplunkError),
     YubikeyError(yubikey::YubikeyError),
     WebError(web::WebError),
+    BlockchainError(blockchain::BlockchainError),
     TestMode,
+    JiraError(jira::JiraError),
+    NetworkResponseTooLarge,
+}
+
+impl From<evm::EvmCallError> for ApiError {
+    fn from(e: evm::EvmCallError) -> Self {
+        ApiError::BlockchainError(blockchain::BlockchainError::EvmError(e))
+    }
 }
 
 #[cfg(feature = "aws")]
@@ -167,6 +184,11 @@ impl Api {
             _ => None,
         };
 
+        let blockchain = match config.blockchain {
+            Some(blockchain) => Some(Blockchain::new(blockchain)),
+            _ => None,
+        };
+
         let general = match config.general {
             Some(gc) => Some(General::new(gc, log_sender, delayed_log_sender)),
             _ => None,
@@ -174,6 +196,17 @@ impl Api {
 
         let github = match config.github {
             Some(gh) => Some(Github::new(gh)),
+            _ => None,
+        };
+
+        let jira = match config.jira {
+            Some(j) => match Jira::new(j) {
+                Ok(jira) => Some(jira),
+                Err(e) => {
+                    error!("Something went wrong while initializing the Jira API: proceeding without. This should be investigated! The error was {e}");
+                    None
+                }
+            },
             _ => None,
         };
 
@@ -229,9 +262,11 @@ impl Api {
             aws,
             #[cfg(feature = "gcp")]
             gcp,
+            blockchain,
             cryptography,
             general,
             github,
+            jira,
             npm,
             okta,
             pagerduty,

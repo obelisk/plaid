@@ -1,0 +1,55 @@
+# Configure the loading and linking system. This configures how much
+# computation is allocated for module invocations and manual remapping
+# of module names to log types which is useful is a synthetic logtype
+# contains underscores.
+[loading]
+module_dir = "../compiled_modules/"
+compiler_backend = "cranelift"
+readiness_check_file = "./plaid_ready"
+
+test_mode = true
+test_mode_exemptions = []
+
+[loading.persistent_response_size]
+
+[loading.universal_accessory_data]
+"key_1" = "value_1"
+"key_2" = "value_2"
+"key_4" = "value_4_ignored"
+
+[loading.accessory_data_log_type_overrides.test_geteverything]
+"key_1" = "value_1_intermediate"
+"key_4" = "value_4"
+
+[loading.accessory_data_file_overrides."test_get_everything.wasm"]
+"key_1" = "value_1_new"
+"key_3" = "value_3"
+
+[loading.secrets]
+[loading.secrets."testing"]
+
+[loading.secrets."test_geteverything"]
+"my_secret" = "verySecureSecret"
+
+[loading.log_type_overrides]
+"just_run_please.wasm" = "justrunplease"
+
+# Configure the computation amount. See the loader module for more
+# information on how computation cost is calculated.
+[loading.computation_amount]
+default = 55_000_000
+[loading.computation_amount.log_type]
+
+[loading.computation_amount.module_overrides]
+
+[loading.memory_page_count]
+default = 300
+[loading.memory_page_count.log_type]
+[loading.memory_page_count.module_overrides]
+
+
+[loading.storage_size]
+default = "Unlimited"
+[loading.storage_size.log_type]
+[loading.storage_size.module_overrides]
+"test_db.wasm" = { Limited = 50 }
