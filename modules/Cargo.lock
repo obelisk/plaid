@@ -408,6 +408,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_google_docs"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "test_jwt"
 version = "0.1.0"
 dependencies = [

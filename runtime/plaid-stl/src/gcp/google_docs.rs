@@ -7,28 +7,28 @@ const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
 
 #[derive(Serialize, Deserialize)]
 pub struct CreateDocFromMarkdownInput {
-    folder_id: String,
-    title: String,
-    template: String,
-    variables: Value,
+    pub folder_id: String,
+    pub title: String,
+    pub template: String,
+    pub variables: Value,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct CreateDocFromMarkdownOutput {
-    document_id: String,
+    pub document_id: String,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct CreateSheetFromCsvInput {
-    folder_id: String,
-    title: String,
-    template: String,
-    variables: Value,
+    pub folder_id: String,
+    pub title: String,
+    pub template: String,
+    pub variables: Value,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct CreateSheetFromCsvOutput {
-    document_id: String,
+    pub document_id: String,
 }
 
 /// Create google doc from markdown template
