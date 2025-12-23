@@ -16,6 +16,8 @@ pub mod yubikey;
 
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
+#[cfg(feature = "gcp")]
+use crate::apis::gcp::{Gcp, GcpConfig};
 #[cfg(feature = "aws")]
 use aws::s3::S3Errors;
 #[cfg(feature = "aws")]
@@ -56,6 +58,8 @@ pub struct Api {
     pub cryptography: Option<Cryptography>,
     #[cfg(feature = "aws")]
     pub aws: Option<Aws>,
+    #[cfg(feature = "gcp")]
+    pub gcp: Option<Gcp>,
     pub general: Option<General>,
     pub github: Option<Github>,
     pub npm: Option<Npm>,
@@ -73,6 +77,8 @@ pub struct Api {
 pub struct ApiConfigs {
     #[cfg(feature = "aws")]
     pub aws: Option<AwsConfig>,
+    #[cfg(feature = "gcp")]
+    pub gcp: Option<GcpConfig>,
     pub cryptography: Option<CryptographyConfig>,
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
@@ -155,6 +161,12 @@ impl Api {
             _ => None,
         };
 
+        #[cfg(feature = "gcp")]
+        let gcp = match config.gcp {
+            Some(gcp) => Some(Gcp::new(gcp).await),
+            _ => None,
+        };
+
         let general = match config.general {
             Some(gc) => Some(General::new(gc, log_sender, delayed_log_sender)),
             _ => None,
@@ -215,6 +227,8 @@ impl Api {
             runtime: Runtime::new().unwrap(),
             #[cfg(feature = "aws")]
             aws,
+            #[cfg(feature = "gcp")]
+            gcp,
             cryptography,
             general,
             github,

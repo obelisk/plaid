@@ -476,6 +476,22 @@ impl_new_sub_module_function!(aws, s3, put_object, DISALLOW_IN_TEST_MODE);
 #[cfg(feature = "aws")]
 impl_new_sub_module_function_with_error_buffer!(aws, s3, put_object_tags, DISALLOW_IN_TEST_MODE);
 
+// GCP
+#[cfg(feature = "gcp")]
+impl_new_sub_module_function_with_error_buffer!(
+    gcp,
+    google_docs,
+    create_doc_from_markdown,
+    ALLOW_IN_TEST_MODE
+);
+#[cfg(feature = "gcp")]
+impl_new_sub_module_function_with_error_buffer!(
+    gcp,
+    google_docs,
+    create_sheet_from_csv,
+    ALLOW_IN_TEST_MODE
+);
+
 // Npm Functions
 impl_new_function_with_error_buffer!(npm, publish_empty_stub, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(npm, set_team_permission_on_package, DISALLOW_IN_TEST_MODE);
@@ -838,6 +854,16 @@ pub fn to_api_function(
 
         #[cfg(feature = "aws")]
         "aws_dynamodb_query" => Function::new_typed_with_env(&mut store, &env, aws_dynamodb_query),
+
+        #[cfg(feature = "gcp")]
+        "gcp_google_docs_create_doc_from_markdown" => {
+            Function::new_typed_with_env(&mut store, &env, gcp_google_docs_create_doc_from_markdown)
+        }
+
+        #[cfg(feature = "gcp")]
+        "gcp_google_docs_create_sheet_from_csv" => {
+            Function::new_typed_with_env(&mut store, &env, gcp_google_docs_create_sheet_from_csv)
+        }
 
         // PagerDuty Calls
         "pagerduty_trigger_incident" => {

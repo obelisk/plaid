@@ -362,8 +362,8 @@ fn render_template(template: &str, data: serde_json::Value) -> Result<String, Go
 mod tests {
     use super::*;
     use http::header::CONTENT_TYPE;
+    use serde_json::from_value;
     use serde_json::Value;
-    use serde_json::{from_str, from_value};
     use std::io::BufRead;
     use wasmer::{
         sys::{Cranelift, EngineBuilder},
@@ -371,8 +371,6 @@ mod tests {
     };
 
     use crate::loader::LimitValue;
-
-    use super::*;
 
     // helper function to generate a blank module that does nothing
     fn test_module(name: &str, test_mode: bool) -> Arc<PlaidModule> {
@@ -462,7 +460,7 @@ mod tests {
     }
 
     #[tokio::test]
-    // cli util OAuth to obtain refresh token for a google account
+    // cli util OAuth flow to obtain refresh token for a google account
     async fn get_refresh_token() {
         let client_id = std::env::var("CLIENT_ID").unwrap();
         let client_secret = std::env::var("CLIENT_SECRET").unwrap();
