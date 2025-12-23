@@ -30,6 +30,7 @@ test_mode_exemptions = [
     "test_redis_cache_eviction.wasm",
     "test_dynamodb.wasm",
     "test_mnr_return_cert.wasm",
+    "test_google_docs.wasm",
 ]
 
 [loading.persistent_response_size]
@@ -87,6 +88,7 @@ test_mode_exemptions = [
 "test_redis_cache_eviction.wasm" = "test_redis_cache_eviction"
 "test_dynamodb.wasm" = "test_dynamodb"
 "test_mnr_return_cert.wasm" = "test_mnr_return_cert"
+"test_google_docs.wasm" = "test_google_docs"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.
