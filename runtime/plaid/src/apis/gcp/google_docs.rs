@@ -23,7 +23,7 @@ pub struct GoogleDocsConfig {
     client_id: String,
     /// Google OAuth Client Secret
     client_secret: String,
-    /// Gogle OAuth refresh token, used to obtain valid OAuth Access Token
+    /// Google OAuth refresh token, used to obtain valid OAuth Access Token
     refresh_token: String,
     /// Configured writers - maps a folder ID to a list of rules that are allowed to READ or WRITE files
     rw: HashMap<String, HashSet<String>>,
@@ -39,7 +39,7 @@ pub struct GoogleDocs {
     client_id: String,
     /// Google OAuth Client Secret
     client_secret: String,
-    /// Gogle OAuth refresh token, used to obtain valid OAuth Access Token
+    /// Google OAuth refresh token, used to obtain valid OAuth Access Token
     refresh_token: String,
     /// Cached Google OAuth Access Token
     access_token: Mutex<Option<(String, Instant)>>,
