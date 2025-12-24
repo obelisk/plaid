@@ -21,8 +21,9 @@ allowed_rules = [
     "test_jwt.wasm",
     "test_redis_cache_eviction.wasm",
     "test_dynamodb.wasm",
-    "test_google_docs.wasm",
-    "test_mnr_return_cert.wasm"
+    "test_mnr_return_cert.wasm",
+    "test_tls_cert_with_sni.wasm",
+    "test_google_docs.wasm"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}

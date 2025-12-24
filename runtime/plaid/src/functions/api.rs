@@ -378,6 +378,11 @@ macro_rules! impl_new_sub_module_function {
 // General Functions
 impl_new_function!(general, simple_json_post_request, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(general, make_named_request, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(
+    general,
+    retrieve_tls_certificate_with_sni,
+    ALLOW_IN_TEST_MODE
+);
 
 // GitHub Functions
 impl_new_function!(github, add_user_to_repo, DISALLOW_IN_TEST_MODE);
@@ -866,6 +871,12 @@ pub fn to_api_function(
         "general_make_named_request" => {
             Function::new_typed_with_env(&mut store, &env, general_make_named_request)
         }
+
+        "general_retrieve_tls_certificate_with_sni" => Function::new_typed_with_env(
+            &mut store,
+            &env,
+            general_retrieve_tls_certificate_with_sni,
+        ),
 
         // Jira Calls
         "jira_create_issue" => Function::new_typed_with_env(&mut store, &env, jira_create_issue),

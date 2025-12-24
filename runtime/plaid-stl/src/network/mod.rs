@@ -36,6 +36,15 @@ pub struct WebRequestResponse<T> {
     pub cert: Option<String>,
 }
 
+/// Request structure for retrieving a TLS certificate with SNI
+#[derive(Serialize, Deserialize)]
+pub struct TlsCertWithSniRequest {
+    /// Domain of the TCP endpoint
+    pub domain: String,
+    /// SNI hostname
+    pub sni: String,
+}
+
 const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
 
 pub fn simple_json_post_request(
@@ -164,4 +173,39 @@ pub fn make_named_request_with_headers(
         RETURN_BUFFER_SIZE,
         MnrResponseEncoding::Utf8,
     );
+}
+
+/// Retrive a TLS certificate for a given domain, using a specified SNI (Server Name Indication).
+pub fn retrieve_tls_certificate_with_sni(
+    request: &TlsCertWithSniRequest,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(general, retrieve_tls_certificate_with_sni);
+    }
+
+    let params = serde_json::to_string(&request).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        general_retrieve_tls_certificate_with_sni(
+            params.as_ptr(),
+            params.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match String::from_utf8(return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
 }

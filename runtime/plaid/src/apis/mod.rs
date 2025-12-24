@@ -139,6 +139,7 @@ pub enum ApiError {
     TestMode,
     JiraError(jira::JiraError),
     NetworkResponseTooLarge,
+    TlsError(String),
 }
 
 impl From<evm::EvmCallError> for ApiError {
