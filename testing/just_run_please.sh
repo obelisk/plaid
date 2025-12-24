@@ -18,7 +18,7 @@ if uname | grep -q Darwin; then
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
 
-# Built the just_run_please module
+# Build the just_run_please module
 cd modules
 cargo build -p just_run_please --target wasm32-unknown-unknown --release
 cd ..
