@@ -23,7 +23,6 @@ allowed_rules = [
     "test_dynamodb.wasm",
     "test_mnr_return_cert.wasm",
     "test_tls_cert_with_sni.wasm",
-    "test_google_docs.wasm"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
@@ -242,18 +241,6 @@ local_endpoint = true
 local_test = ["test_dynamodb.wasm"]
 
 [apis."aws"."dynamodb".r]
-
-# Google Docs
-[apis."gcp"]
-[apis."gcp"."google_docs"]
-client_id = "fake"
-client_secret = "fake"
-refresh_token = "fake"
-
-[apis."gcp"."google_docs".rw]
-folder_1234 = ["test_google_docs.wasm"]
-
-[apis."gcp"."google_docs".r]
 
 #[apis."github"]
 #[apis."github".authentication]

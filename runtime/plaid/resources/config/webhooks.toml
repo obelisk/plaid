@@ -117,10 +117,6 @@ headers = []
 log_type = "test_mnr_return_cert"
 headers = []
 
-[webhooks."internal".webhooks."test_google_docs"]
-log_type = "test_google_docs"
-headers = []
-
 [webhooks."internal".webhooks."test_tls_cert_with_sni"]
 log_type = "test_tls_cert_with_sni"
 headers = []
