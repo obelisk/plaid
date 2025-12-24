@@ -186,7 +186,7 @@ impl GoogleDocs {
         Ok(access_token)
     }
 
-    /// Uploads a file to a Google Drive folder using multi-part uploads
+    /// Uploads a file to a Google Drive folder using multipart uploads
     async fn upload_file(
         &self,
         folder_id: &str,
@@ -236,7 +236,7 @@ impl GoogleDocs {
             .ok_or(GoogleDocsError::MissingField("id"))
     }
 
-    // Public API
+    // API for rules
 
     /// Create Google Doc from markdown template
     pub async fn create_doc_from_markdown(

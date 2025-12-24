@@ -117,6 +117,10 @@ headers = []
 log_type = "test_mnr_return_cert"
 headers = []
 
+[webhooks."internal".webhooks."test_google_docs"]
+log_type = "test_google_docs"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples
