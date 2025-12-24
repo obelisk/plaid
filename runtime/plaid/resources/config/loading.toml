@@ -30,7 +30,7 @@ test_mode_exemptions = [
     "test_redis_cache_eviction.wasm",
     "test_dynamodb.wasm",
     "test_mnr_return_cert.wasm",
-    "test_tls_cert_with_sni.wasm",
+    "test_tls_cert_with_sni.wasm"
 ]
 
 [loading.persistent_response_size]
