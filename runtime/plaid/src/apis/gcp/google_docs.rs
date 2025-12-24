@@ -39,9 +39,9 @@ pub struct GoogleDocs {
     client_id: String,
     /// Google OAuth Client Secret
     client_secret: String,
-    /// Google OAuth refresh token, used to obtain valid OAuth Access Token
+    /// Google OAuth refresh token for plaid's google account
     refresh_token: String,
-    /// Cached Google OAuth Access Token
+    /// Cached Google OAuth Access Token (Token, Expiry)
     access_token: Mutex<Option<(String, Instant)>>,
     /// Configured writers - maps a folder ID to a list of rules that are allowed to READ or WRITE files
     rw: HashMap<String, HashSet<String>>,
@@ -63,9 +63,9 @@ pub enum GoogleDocsError {
     Template(String),
 }
 
-// Google API Endpoints
+// Google OAuth Token URL
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-// we use the 'upload' subdomain for multipart uploads
+// Google Drive Multipart Upload URL
 const DRIVE_UPLOAD_URL: &str =
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 
@@ -76,7 +76,7 @@ impl GoogleDocs {
             client_secret,
             refresh_token,
             r,
-            rw: wr,
+            rw,
         } = config;
 
         let client = Client::new();
@@ -87,7 +87,7 @@ impl GoogleDocs {
             client_secret,
             refresh_token,
             r,
-            rw: wr,
+            rw,
             access_token: Mutex::new(None),
         }
     }
@@ -321,7 +321,7 @@ fn markdown_to_html(md: &str) -> String {
     output
 }
 
-/// untility function for rendering static template
+/// utility function for rendering static template
 fn render_template(
     template: &str,
     variables: serde_json::Value,
@@ -530,8 +530,7 @@ mod tests {
         };
         let docs = GoogleDocs::new(config);
 
-        // Define Markdown Template with Tera placeholders
-        let template_input = r#"
+        let template = r#"
 # Project: {{ project_name }}
 
 This document was created by **{{ author }}** on {{ date }}.
@@ -564,11 +563,10 @@ This document was created by **{{ author }}** on {{ date }}.
             "conclusion_text": "Automated template rendering successful. Math operations in folder verified."
         });
 
-        // input
         let input = CreateDocFromMarkdownInput {
             folder_id,
             title: "markdown test".to_string(),
-            template: template_input.to_string(),
+            template: template.to_string(),
             variables: data,
         };
         let input = serde_json::to_string(&input).unwrap();
