@@ -94,7 +94,6 @@ wasmer-middlewares = "6"
 x509-parser = "0.18.0"
 thiserror = "2.0.17"
 pulldown-cmark = "0.13.0"
-tera = "1.20.1"
 
 
 [[example]]

@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::PlaidFunctionError;
 
@@ -12,10 +11,9 @@ pub struct CreateDocFromMarkdownInput {
     pub folder_id: String,
     /// Title of the document
     pub title: String,
-    /// Markdown template for the document content including any variables '{{ my_var }}'
-    pub template: String,
-    /// JSON Object (key : value pairs) containing variables to inject into your template
-    pub variables: Value,
+    /// Markdown content of the document.
+    /// CommonMark markdown specification - https://commonmark.org/
+    pub content: String,
 }
 
 /// Output for create_doc_from_markdown operation
@@ -33,10 +31,8 @@ pub struct CreateSheetFromCsvInput {
     pub folder_id: String,
     /// Title of the spreadsheet
     pub title: String,
-    /// CSV template for the sheet content including any variables '{{ my_var }}'
-    pub template: String,
-    /// JSON Object (key : value pairs) containing variables to inject into your template
-    pub variables: Value,
+    /// CSV content of the spreadsheet
+    pub content: String,
 }
 
 /// Output for create_sheet_from_csv operation

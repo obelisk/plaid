@@ -16,12 +16,16 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
 use crate::apis::blockchain::{evm, Blockchain, BlockchainConfig};
 #[cfg(feature = "gcp")]
 use crate::apis::gcp::{Gcp, GcpConfig};
 use crate::apis::jira::{Jira, JiraConfig};
+use crate::loader::PlaidModule;
 #[cfg(feature = "aws")]
 use aws::s3::S3Errors;
 #[cfg(feature = "aws")]
@@ -292,4 +296,54 @@ fn default_timeout_seconds() -> u64 {
 enum AccessScope {
     Read,
     Write,
+}
+
+/// Checks if a module can perform a given action on a specific resource
+/// Modules are registered as as read (R) or write (RW)
+fn check_module_permissions(
+    rw: &HashMap<String, HashSet<String>>,
+    r: &HashMap<String, HashSet<String>>,
+    access_scope: AccessScope,
+    module: Arc<PlaidModule>,
+    resource_id: &str,
+) -> Result<(), ApiError> {
+    match access_scope {
+        AccessScope::Read => {
+            // check if read access is configured for this folder
+            if let Some(folder_readers) = r.get(resource_id) {
+                // check if this module has read access to this folder
+                if folder_readers.contains(&module.to_string()) {
+                    return Ok(());
+                }
+            }
+
+            // check if write access is configured for this folder
+            // writers can also read
+            if let Some(folder_writers) = rw.get(resource_id) {
+                // check if this module has write access to this folder
+                if folder_writers.contains(&module.to_string()) {
+                    return Ok(());
+                }
+            }
+
+            warn!(
+                "[{module}] failed [read] permission check for google drive folder [{resource_id}]"
+            );
+            Err(ApiError::BadRequest)
+        }
+        AccessScope::Write => {
+            // check if write access is configured for this folder
+            if let Some(write_access) = rw.get(resource_id) {
+                // check if this module has write access to this folder
+                if write_access.contains(&module.to_string()) {
+                    return Ok(());
+                };
+            }
+
+            warn!(
+                "[{module}] failed [write] permission check for google drive folder [{resource_id}]"
+            );
+            Err(ApiError::BadRequest)
+        }
+    }
 }

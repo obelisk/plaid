@@ -9,11 +9,10 @@ use pulldown_cmark::{html, Options, Parser};
 use reqwest::{multipart, Client};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tera::{Context, Tera};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
-use crate::apis::{AccessScope, ApiError};
+use crate::apis::{check_module_permissions, AccessScope, ApiError};
 use crate::loader::PlaidModule;
 
 /// Defines configuration for the Google Docs API
@@ -35,19 +34,17 @@ pub struct GoogleDocsConfig {
 pub struct GoogleDocs {
     /// Inner HTTP client used to make requests to Google APIs
     client: Client,
-    /// Google OAuth Client ID
-    client_id: String,
-    /// Google OAuth Client Secret
-    client_secret: String,
-    /// Google OAuth refresh token for plaid's google account
-    refresh_token: String,
+    /// Inner Config
+    config: GoogleDocsConfig,
     /// Cached Google OAuth Access Token (Token, Expiry)
     access_token: Mutex<Option<(String, Instant)>>,
-    /// Configured writers - maps a folder ID to a list of rules that are allowed to READ or WRITE files
-    rw: HashMap<String, HashSet<String>>,
-    /// Configured readers - maps a folder ID to a list of rules that are allowed to READ files
-    r: HashMap<String, HashSet<String>>,
 }
+
+// Google OAuth Token URL
+const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+// Google Drive Multipart Upload URL
+const DRIVE_UPLOAD_URL: &str =
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 
 #[derive(Error, Debug)]
 pub enum GoogleDocsError {
@@ -59,85 +56,16 @@ pub enum GoogleDocsError {
     OAuth { description: String },
     #[error("Google API error: {0}")]
     GoogleApi(String),
-    #[error("Template error: {0}")]
-    Template(String),
 }
-
-// Google OAuth Token URL
-const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-// Google Drive Multipart Upload URL
-const DRIVE_UPLOAD_URL: &str =
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 
 impl GoogleDocs {
     pub fn new(config: GoogleDocsConfig) -> Self {
-        let GoogleDocsConfig {
-            client_id,
-            client_secret,
-            refresh_token,
-            r,
-            rw,
-        } = config;
-
         let client = Client::new();
 
         Self {
             client,
-            client_id,
-            client_secret,
-            refresh_token,
-            r,
-            rw,
+            config,
             access_token: Mutex::new(None),
-        }
-    }
-
-    /// Checks if a module can perform a given action on a specific google drive folder
-    /// Modules are registered as as read (R) or write (RW) under self.
-    fn check_module_permissions(
-        &self,
-        access_scope: AccessScope,
-        module: Arc<PlaidModule>,
-        folder_id: &str,
-    ) -> Result<(), ApiError> {
-        match access_scope {
-            AccessScope::Read => {
-                // check if read access is configured for this folder
-                if let Some(folder_readers) = self.r.get(folder_id) {
-                    // check if this module has read access to this folder
-                    if folder_readers.contains(&module.to_string()) {
-                        return Ok(());
-                    }
-                }
-
-                // check if write access is configured for this folder
-                // writers can also read
-                if let Some(folder_writers) = self.rw.get(folder_id) {
-                    // check if this module has write access to this folder
-                    if folder_writers.contains(&module.to_string()) {
-                        return Ok(());
-                    }
-                }
-
-                warn!(
-                    "[{module}] failed [read] permission check for google drive folder [{folder_id}]"
-                );
-                Err(ApiError::BadRequest)
-            }
-            AccessScope::Write => {
-                // check if write access is configured for this folder
-                if let Some(write_access) = self.rw.get(folder_id) {
-                    // check if this module has write access to this folder
-                    if write_access.contains(&module.to_string()) {
-                        return Ok(());
-                    };
-                }
-
-                warn!(
-                    "[{module}] failed [write] permission check for google drive folder [{folder_id}]"
-                );
-                Err(ApiError::BadRequest)
-            }
         }
     }
 
@@ -152,9 +80,9 @@ impl GoogleDocs {
         }
 
         let params = [
-            ("client_id", self.client_id.as_str()),
-            ("client_secret", self.client_secret.as_str()),
-            ("refresh_token", self.refresh_token.as_str()),
+            ("client_id", self.config.client_id.as_str()),
+            ("client_secret", self.config.client_secret.as_str()),
+            ("refresh_token", self.config.refresh_token.as_str()),
             ("grant_type", "refresh_token"),
         ];
 
@@ -186,7 +114,7 @@ impl GoogleDocs {
         Ok(access_token)
     }
 
-    /// Uploads a file to a Google Drive folder using multipart uploads
+    /// Uploads a file to a Google Drive folder
     async fn upload_file(
         &self,
         folder_id: &str,
@@ -236,9 +164,7 @@ impl GoogleDocs {
             .ok_or(GoogleDocsError::MissingField("id"))
     }
 
-    // API for rules
-
-    /// Create Google Doc from markdown template
+    /// Create Google Doc from markdown content
     pub async fn create_doc_from_markdown(
         &self,
         input: &str,
@@ -247,16 +173,19 @@ impl GoogleDocs {
         let CreateDocFromMarkdownInput {
             folder_id,
             title,
-            template,
-            variables,
+            content: content,
         } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
         // check this module has access to this folder
-        self.check_module_permissions(AccessScope::Write, module, &folder_id)?;
+        check_module_permissions(
+            &self.config.rw,
+            &self.config.r,
+            AccessScope::Write,
+            module,
+            &folder_id,
+        )?;
 
-        let rendered_template =
-            render_template(&template, variables).map_err(|err| ApiError::GoogleDocsError(err))?;
-        let html_output = markdown_to_html(&rendered_template);
+        let html_output = markdown_to_html(&content);
         let document_id = self
             .upload_file(
                 &folder_id,
@@ -272,7 +201,7 @@ impl GoogleDocs {
         serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 
-    /// Create Google Sheet from csv template
+    /// Create Google Sheet from csv content
     pub async fn create_sheet_from_csv(
         &self,
         input: &str,
@@ -281,20 +210,23 @@ impl GoogleDocs {
         let CreateSheetFromCsvInput {
             folder_id,
             title,
-            template,
-            variables,
+            content,
         } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
-        let rendered_template =
-            render_template(&template, variables).map_err(|err| ApiError::GoogleDocsError(err))?;
 
         // check this module has access to this folder
-        self.check_module_permissions(AccessScope::Write, module, &folder_id)?;
+        check_module_permissions(
+            &self.config.rw,
+            &self.config.r,
+            AccessScope::Write,
+            module,
+            &folder_id,
+        )?;
 
         let document_id = self
             .upload_file(
                 &folder_id,
                 &title,
-                rendered_template,
+                content,
                 "text/csv",
                 "application/vnd.google-apps.spreadsheet",
             )
@@ -319,32 +251,6 @@ fn markdown_to_html(md: &str) -> String {
     html::push_html(&mut output, parser);
 
     output
-}
-
-/// utility function for rendering static template
-fn render_template(
-    template: &str,
-    variables: serde_json::Value,
-) -> Result<String, GoogleDocsError> {
-    // Initialize Tera and render
-    let mut tera = Tera::default();
-    tera.add_raw_template("template", template)
-        .map_err(|e| GoogleDocsError::Template(e.to_string()))?;
-
-    let mut context = Context::new();
-
-    // Loop through the JSON object and insert each key-value pair into the Tera context
-    if let Some(map) = variables.as_object() {
-        for (key, value) in map {
-            context.insert(key, value);
-        }
-    }
-
-    let rendered = tera
-        .render("template", &context)
-        .map_err(|e| GoogleDocsError::Template(e.to_string()))?;
-
-    Ok(rendered)
 }
 
 #[cfg(test)]
@@ -415,37 +321,89 @@ mod tests {
         let module_c = test_module("module_c", true); // no access
 
         // modules can read folder
-        client
-            .check_module_permissions(AccessScope::Read, module_a.clone(), &folder_name)
-            .unwrap();
-        client
-            .check_module_permissions(AccessScope::Read, module_b.clone(), &folder_name)
-            .unwrap();
-        client
-            .check_module_permissions(AccessScope::Read, module_c.clone(), &folder_name)
-            .expect_err("expect to fail with BadRequest");
+
+        check_module_permissions(
+            &client.config.rw,
+            &client.config.r,
+            AccessScope::Read,
+            module_a.clone(),
+            &folder_name,
+        )
+        .unwrap();
+
+        check_module_permissions(
+            &client.config.rw,
+            &client.config.r,
+            AccessScope::Read,
+            module_b.clone(),
+            &folder_name,
+        )
+        .unwrap();
+
+        check_module_permissions(
+            &client.config.rw,
+            &client.config.r,
+            AccessScope::Read,
+            module_c.clone(),
+            &folder_name,
+        )
+        .expect_err("expect to fail with BadRequest");
 
         // readers can't write
-        client
-            .check_module_permissions(AccessScope::Write, module_a.clone(), &folder_name)
-            .expect_err("expect to fail with BadRequest");
-        client
-            .check_module_permissions(AccessScope::Write, module_b.clone(), &folder_name)
-            .unwrap();
-        client
-            .check_module_permissions(AccessScope::Write, module_c.clone(), &folder_name)
-            .expect_err("expect to fail with BadRequest");
+        check_module_permissions(
+            &client.config.rw,
+            &client.config.r,
+            AccessScope::Write,
+            module_a.clone(),
+            &folder_name,
+        )
+        .expect_err("expect to fail with BadRequest");
+
+        check_module_permissions(
+            &client.config.rw,
+            &client.config.r,
+            AccessScope::Write,
+            module_b.clone(),
+            &folder_name,
+        )
+        .unwrap();
+
+        check_module_permissions(
+            &client.config.rw,
+            &client.config.r,
+            AccessScope::Write,
+            module_c.clone(),
+            &folder_name,
+        )
+        .expect_err("expect to fail with BadRequest");
 
         // unknown folder
-        client
-            .check_module_permissions(AccessScope::Read, module_a.clone(), "unknown_folder")
-            .expect_err("expect to fail with BadRequest");
-        client
-            .check_module_permissions(AccessScope::Read, module_b.clone(), "unknown_folder")
-            .expect_err("expect to fail with BadRequest");
-        client
-            .check_module_permissions(AccessScope::Read, module_c.clone(), "unknown_folder")
-            .expect_err("expect to fail with BadRequest");
+        check_module_permissions(
+            &client.config.rw,
+            &client.config.r,
+            AccessScope::Read,
+            module_a.clone(),
+            "unknown_folder",
+        )
+        .expect_err("expect to fail with BadRequest");
+
+        check_module_permissions(
+            &client.config.rw,
+            &client.config.r,
+            AccessScope::Read,
+            module_b.clone(),
+            "unknown_folder",
+        )
+        .expect_err("expect to fail with BadRequest");
+
+        check_module_permissions(
+            &client.config.rw,
+            &client.config.r,
+            AccessScope::Read,
+            module_c.clone(),
+            "unknown_folder",
+        )
+        .expect_err("expect to fail with BadRequest");
     }
 
     #[tokio::test]
@@ -530,44 +488,17 @@ mod tests {
         };
         let docs = GoogleDocs::new(config);
 
-        let template = r#"
-# Project: {{ project_name }}
+        let content = r#"
+# Document 
 
-This document was created by **{{ author }}** on {{ date }}.
+Markdown test
 
-## Status Report
-* **Priority**: {{ priority }}
-* **Department**: {{ department }}
-
-## Financials
-
-| Item | Cost |
-|------|------|
-| Server | ${{ cost_server }} |
-| License | ${{ cost_license }} |
-| **Total** | **${{ cost_server + cost_license }}** |
-
-## Conclusion
-{{ conclusion_text }}
 "#;
-
-        // Create a JSON object to store all parameters
-        let data = json!({
-            "project_name": "Omega Red",
-            "author": "Rust Bot",
-            "date": "2023-10-27",
-            "priority": "Critical",
-            "department": "Engineering",
-            "cost_server": 1500,
-            "cost_license": 500,
-            "conclusion_text": "Automated template rendering successful. Math operations in folder verified."
-        });
 
         let input = CreateDocFromMarkdownInput {
             folder_id,
             title: "markdown test".to_string(),
-            template: template.to_string(),
-            variables: data,
+            content: content.to_string(),
         };
         let input = serde_json::to_string(&input).unwrap();
 
@@ -603,27 +534,14 @@ This document was created by **{{ author }}** on {{ date }}.
         };
         let docs = GoogleDocs::new(config);
 
-        // CSV Template
-        let template = r#"Item,Cost,Category
-Server,{{ cost_server }},Hardware
-License,{{ cost_license }},Software
-Total,{{ cost_server + cost_license }},"#;
-
-        let data = json!({
-            "project_name": "Omega Red",
-            "author": "Rust Bot",
-            "date": "2023-10-27",
-            "priority": "Critical",
-            "department": "Engineering",
-            "cost_server": 1500,
-            "cost_license": 500,
-        });
+        // CSV content
+        let content = r#"Item,Cost,Category
+Server,5,Hardware"#;
 
         let input = CreateSheetFromCsvInput {
             folder_id,
             title: "csv test".to_string(),
-            template: template.to_string(),
-            variables: data,
+            content: content.to_string(),
         };
         let input = serde_json::to_string(&input).unwrap();
 
