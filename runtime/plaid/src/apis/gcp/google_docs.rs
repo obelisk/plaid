@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
-use crate::apis::{check_module_permissions, AccessScope, ApiError};
+use crate::apis::{AccessScope, ApiError};
 use crate::loader::PlaidModule;
 
 /// Defines configuration for the Google Docs API
@@ -66,6 +66,55 @@ impl GoogleDocs {
             client,
             config,
             access_token: Mutex::new(None),
+        }
+    }
+
+    /// Checks if a module can perform a given action on a specific resource
+    /// Modules are registered as as read (R) or write (RW) under self
+    fn check_module_permissions(
+        &self,
+        access_scope: AccessScope,
+        module: Arc<PlaidModule>,
+        resource_id: &str,
+    ) -> Result<(), ApiError> {
+        match access_scope {
+            AccessScope::Read => {
+                // check if read access is configured for this folder
+                if let Some(folder_readers) = self.config.r.get(resource_id) {
+                    // check if this module has read access to this folder
+                    if folder_readers.contains(&module.to_string()) {
+                        return Ok(());
+                    }
+                }
+
+                // check if write access is configured for this folder
+                // writers can also read
+                if let Some(folder_writers) = self.config.rw.get(resource_id) {
+                    // check if this module has write access to this folder
+                    if folder_writers.contains(&module.to_string()) {
+                        return Ok(());
+                    }
+                }
+
+                warn!(
+                "[{module}] failed [read] permission check for google drive folder [{resource_id}]"
+            );
+                Err(ApiError::BadRequest)
+            }
+            AccessScope::Write => {
+                // check if write access is configured for this folder
+                if let Some(write_access) = self.config.rw.get(resource_id) {
+                    // check if this module has write access to this folder
+                    if write_access.contains(&module.to_string()) {
+                        return Ok(());
+                    };
+                }
+
+                warn!(
+                "[{module}] failed [write] permission check for google drive folder [{resource_id}]"
+            );
+                Err(ApiError::BadRequest)
+            }
         }
     }
 
@@ -173,17 +222,11 @@ impl GoogleDocs {
         let CreateDocFromMarkdownInput {
             folder_id,
             title,
-            content: content,
+            content,
         } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
         // check this module has access to this folder
-        check_module_permissions(
-            &self.config.rw,
-            &self.config.r,
-            AccessScope::Write,
-            module,
-            &folder_id,
-        )?;
+        self.check_module_permissions(AccessScope::Write, module, &folder_id)?;
 
         let html_output = markdown_to_html(&content);
         let document_id = self
@@ -214,13 +257,7 @@ impl GoogleDocs {
         } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
         // check this module has access to this folder
-        check_module_permissions(
-            &self.config.rw,
-            &self.config.r,
-            AccessScope::Write,
-            module,
-            &folder_id,
-        )?;
+        self.check_module_permissions(AccessScope::Write, module, &folder_id)?;
 
         let document_id = self
             .upload_file(
