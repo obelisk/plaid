@@ -359,88 +359,43 @@ mod tests {
 
         // modules can read folder
 
-        check_module_permissions(
-            &client.config.rw,
-            &client.config.r,
-            AccessScope::Read,
-            module_a.clone(),
-            &folder_name,
-        )
-        .unwrap();
+        client
+            .check_module_permissions(AccessScope::Read, module_a.clone(), &folder_name)
+            .unwrap();
 
-        check_module_permissions(
-            &client.config.rw,
-            &client.config.r,
-            AccessScope::Read,
-            module_b.clone(),
-            &folder_name,
-        )
-        .unwrap();
+        client
+            .check_module_permissions(AccessScope::Read, module_b.clone(), &folder_name)
+            .unwrap();
 
-        check_module_permissions(
-            &client.config.rw,
-            &client.config.r,
-            AccessScope::Read,
-            module_c.clone(),
-            &folder_name,
-        )
-        .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Read, module_c.clone(), &folder_name)
+            .expect_err("expect to fail with BadRequest");
 
         // readers can't write
-        check_module_permissions(
-            &client.config.rw,
-            &client.config.r,
-            AccessScope::Write,
-            module_a.clone(),
-            &folder_name,
-        )
-        .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Write, module_a.clone(), &folder_name)
+            .expect_err("expect to fail with BadRequest");
 
-        check_module_permissions(
-            &client.config.rw,
-            &client.config.r,
-            AccessScope::Write,
-            module_b.clone(),
-            &folder_name,
-        )
-        .unwrap();
+        client
+            .check_module_permissions(AccessScope::Write, module_b.clone(), &folder_name)
+            .unwrap();
 
-        check_module_permissions(
-            &client.config.rw,
-            &client.config.r,
-            AccessScope::Write,
-            module_c.clone(),
-            &folder_name,
-        )
-        .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Write, module_c.clone(), &folder_name)
+            .expect_err("expect to fail with BadRequest");
 
         // unknown folder
-        check_module_permissions(
-            &client.config.rw,
-            &client.config.r,
-            AccessScope::Read,
-            module_a.clone(),
-            "unknown_folder",
-        )
-        .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Read, module_a.clone(), "unknown_folder")
+            .expect_err("expect to fail with BadRequest");
 
-        check_module_permissions(
-            &client.config.rw,
-            &client.config.r,
-            AccessScope::Read,
-            module_b.clone(),
-            "unknown_folder",
-        )
-        .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Read, module_b.clone(), "unknown_folder")
+            .expect_err("expect to fail with BadRequest");
 
-        check_module_permissions(
-            &client.config.rw,
-            &client.config.r,
-            AccessScope::Read,
-            module_c.clone(),
-            "unknown_folder",
-        )
-        .expect_err("expect to fail with BadRequest");
+        client
+            .check_module_permissions(AccessScope::Read, module_c.clone(), "unknown_folder")
+            .expect_err("expect to fail with BadRequest");
     }
 
     #[tokio::test]
