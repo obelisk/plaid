@@ -491,3 +491,63 @@ pub fn create_channel(
     // successfully parsed the response.
     serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
 }
+
+/// Data to be sent to the runtime for inviting users to a channel
+#[derive(Serialize, Deserialize)]
+pub struct InviteToChannel {
+    /// Bot to use for inviting users
+    pub bot: String,
+    /// ID of the channel to invite users to
+    pub channel: String,
+    /// IDs of the users to invite
+    pub users: Vec<String>,
+}
+
+impl InviteToChannel {
+    /// Serialize the body for the Slack API request
+    pub fn body(&self) -> Result<String, String> {
+        #[derive(Serialize)]
+        struct InviteToChannelBody<'a> {
+            channel: &'a str,
+            users: String,
+        }
+
+        let users = self.users.join(",");
+
+        let body = InviteToChannelBody {
+            channel: &self.channel,
+            users,
+        };
+
+        serde_json::to_string(&body).map_err(|e| format!("Failed to serialize body: {}", e))
+    }
+}
+
+/// Invite users to a Slack channel
+/// - `bot`: bot to use for inviting users
+/// - `channel`: ID of the channel to invite users to
+/// - `users`: IDs of the users to invite
+pub fn invite_to_channel(
+    bot: &str,
+    channel: &str,
+    users: Vec<&str>,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(slack, invite_to_channel);
+    }
+
+    let params = serde_json::to_string(&InviteToChannel {
+        bot: bot.to_string(),
+        channel: channel.to_string(),
+        users: users.iter().map(|s| s.to_string()).collect(),
+    })
+    .unwrap();
+
+    let res = unsafe { slack_invite_to_channel(params.as_ptr(), params.len()) };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
