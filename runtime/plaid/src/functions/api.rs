@@ -531,7 +531,7 @@ impl_new_function!(slack, post_to_named_webhook, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, get_presence, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, get_dnd, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, user_info, ALLOW_IN_TEST_MODE);
-impl_new_function_with_error_buffer!(slack, create_channel, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, create_channel, DISALLOW_IN_TEST_MODE);
 
 // Splunk Functions
 impl_new_function!(splunk, post_hec, ALLOW_IN_TEST_MODE);
