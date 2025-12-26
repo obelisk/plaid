@@ -402,3 +402,92 @@ pub fn user_info(bot: &str, id: &str) -> Result<UserInfoResponse, PlaidFunctionE
     // successfully parsed the response.
     serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
 }
+
+/// Data to be sent to the runtime for creating a channel
+#[derive(Serialize, Deserialize)]
+pub struct CreateChannel {
+    /// Bot to use for creating the channel
+    pub bot: String,
+    /// Name of the channel to create. Note: Slack can still modify this
+    pub name: String,
+    /// Whether the channel should be private
+    pub is_private: bool,
+}
+
+impl CreateChannel {
+    /// Serialize the body for the Slack API request
+    pub fn body(&self) -> Result<String, String> {
+        #[derive(Serialize)]
+        struct CreateChannelBody<'a> {
+            name: &'a str,
+            is_private: bool,
+        }
+
+        let body = CreateChannelBody {
+            name: &self.name,
+            is_private: self.is_private,
+        };
+
+        serde_json::to_string(&body).map_err(|e| format!("Failed to serialize body: {}", e))
+    }
+}
+
+/// A Slack channel
+#[derive(Serialize, Deserialize)]
+pub struct SlackChannel {
+    pub id: String,
+    pub name: String,
+}
+
+/// Response from Slack when creating a channel
+#[derive(Serialize, Deserialize)]
+pub struct CreateChannelResponse {
+    pub ok: bool,
+    pub channel: SlackChannel,
+}
+
+/// Create a Slack channel
+/// - `bot`: bot to use for creating the channel
+/// - `name`: name of the channel to create
+/// - `is_private`: whether the channel should be private
+pub fn create_channel(
+    bot: &str,
+    name: &str,
+    is_private: bool,
+) -> Result<CreateChannelResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, create_channel);
+    }
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&CreateChannel {
+        bot: bot.to_string(),
+        name: name.to_string(),
+        is_private,
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_create_channel(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    // This should only happen if the Slack API returns a different structure
+    // than expected. Which would be odd because to get here the runtime
+    // successfully parsed the response.
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
+}

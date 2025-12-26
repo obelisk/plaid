@@ -531,6 +531,7 @@ impl_new_function!(slack, post_to_named_webhook, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, get_presence, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, get_dnd, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, user_info, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, create_channel, DISALLOW_IN_TEST_MODE);
 
 // Splunk Functions
 impl_new_function!(splunk, post_hec, ALLOW_IN_TEST_MODE);
@@ -847,6 +848,9 @@ pub fn to_api_function(
         "slack_get_presence" => Function::new_typed_with_env(&mut store, &env, slack_get_presence),
         "slack_get_dnd" => Function::new_typed_with_env(&mut store, &env, slack_get_dnd),
         "slack_user_info" => Function::new_typed_with_env(&mut store, &env, slack_user_info),
+        "slack_create_channel" => {
+            Function::new_typed_with_env(&mut store, &env, slack_create_channel)
+        }
 
         // General Calls
         "general_simple_json_post_request" => {
