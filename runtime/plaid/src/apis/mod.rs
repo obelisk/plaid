@@ -2,6 +2,8 @@
 pub mod aws;
 pub mod blockchain;
 pub mod cryptography;
+#[cfg(feature = "gcp")]
+pub mod gcp;
 pub mod general;
 pub mod github;
 pub mod jira;
@@ -17,6 +19,8 @@ pub mod yubikey;
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
 use crate::apis::blockchain::{evm, Blockchain, BlockchainConfig};
+#[cfg(feature = "gcp")]
+use crate::apis::gcp::{Gcp, GcpConfig};
 use crate::apis::jira::{Jira, JiraConfig};
 #[cfg(feature = "aws")]
 use aws::s3::S3Errors;
@@ -58,6 +62,8 @@ pub struct Api {
     pub cryptography: Option<Cryptography>,
     #[cfg(feature = "aws")]
     pub aws: Option<Aws>,
+    #[cfg(feature = "gcp")]
+    pub gcp: Option<Gcp>,
     pub general: Option<General>,
     pub github: Option<Github>,
     pub jira: Option<Jira>,
@@ -77,6 +83,8 @@ pub struct Api {
 pub struct ApiConfigs {
     #[cfg(feature = "aws")]
     pub aws: Option<AwsConfig>,
+    #[cfg(feature = "gcp")]
+    pub gcp: Option<GcpConfig>,
     pub cryptography: Option<CryptographyConfig>,
     pub general: Option<GeneralConfig>,
     pub github: Option<GithubConfig>,
@@ -114,6 +122,8 @@ pub enum ApiError {
     KmsGetPublicKeyError(SdkError<GetPublicKeyError>),
     #[cfg(feature = "aws")]
     S3Error(aws::s3::S3Errors),
+    #[cfg(feature = "gcp")]
+    GoogleDocsError(gcp::google_docs::GoogleDocsError),
     #[cfg(feature = "aws")]
     KmsError(aws::kms::KmsErrors),
     NetworkError(reqwest::Error),
@@ -166,6 +176,12 @@ impl Api {
         #[cfg(feature = "aws")]
         let aws = match config.aws {
             Some(aws) => Some(Aws::new(aws).await),
+            _ => None,
+        };
+
+        #[cfg(feature = "gcp")]
+        let gcp = match config.gcp {
+            Some(gcp) => Some(Gcp::new(gcp).await),
             _ => None,
         };
 
@@ -245,6 +261,8 @@ impl Api {
             runtime: Runtime::new().unwrap(),
             #[cfg(feature = "aws")]
             aws,
+            #[cfg(feature = "gcp")]
+            gcp,
             blockchain,
             cryptography,
             general,
@@ -267,4 +285,11 @@ impl Api {
 /// in the event that no value is provided.
 fn default_timeout_seconds() -> u64 {
     5
+}
+
+#[derive(PartialEq, PartialOrd, Debug)]
+/// Represents an access scope for a rule
+enum AccessScope {
+    Read,
+    Write,
 }
