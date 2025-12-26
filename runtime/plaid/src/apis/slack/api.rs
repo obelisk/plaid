@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use plaid_stl::slack::{
-    GetDndInfo, GetDndInfoResponse, GetIdFromEmail, GetPresence, GetPresenceResponse, PostMessage,
-    UserInfo, UserInfoResponse, ViewOpen,
+    CreateChannel, CreateChannelResponse, GetDndInfo, GetDndInfoResponse, GetIdFromEmail,
+    GetPresence, GetPresenceResponse, PostMessage, UserInfo, UserInfoResponse, ViewOpen,
 };
 use reqwest::{Client, RequestBuilder};
 
@@ -20,6 +20,7 @@ enum Apis {
     GetPresence(plaid_stl::slack::GetPresence),
     GetDndInfo(plaid_stl::slack::GetDndInfo),
     UserInfo(plaid_stl::slack::UserInfo),
+    CreateChannel(plaid_stl::slack::CreateChannel),
 }
 
 const SLACK_API_URL: &str = "https://slack.com/api/";
@@ -63,6 +64,13 @@ impl Apis {
                 api = "users.info",
                 user = p.id,
             )),
+            Self::CreateChannel(p) => client
+                .post(format!(
+                    "{SLACK_API_URL}{api}",
+                    api = "conversations.create"
+                ))
+                .body(p.body().unwrap_or_default()) // TODO this is not great: maybe this method should be fallible
+                .header("Content-Type", "application/json; charset=utf-8"),
         }
     }
 }
@@ -76,6 +84,7 @@ impl std::fmt::Display for Apis {
             Self::GetPresence(_) => write!(f, "GetPresence"),
             Self::GetDndInfo(_) => write!(f, "GetDndInfo"),
             Self::UserInfo(_) => write!(f, "UserInfo"),
+            Self::CreateChannel(_) => write!(f, "CreateChannel"),
         }
     }
 }
@@ -259,6 +268,32 @@ impl Slack {
                         ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
                     })?;
                 if !up_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(response)
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Create a new Slack channel
+    pub async fn create_channel(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
+        let p: CreateChannel = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::CreateChannel(p), module)
+            .await
+        {
+            Ok((200, response)) => {
+                let cc_response: CreateChannelResponse =
+                    serde_json::from_str(&response).map_err(|e| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
+                    })?;
+                if !cc_response.ok {
                     return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
                         response,
                     )));
