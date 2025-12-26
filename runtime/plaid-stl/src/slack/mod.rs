@@ -409,11 +409,9 @@ pub struct CreateChannel {
     /// Bot to use for creating the channel
     pub bot: String,
     /// Name of the channel to create. Note: Slack can still modify this
-    pub channel_name: String,
+    pub name: String,
     /// Whether the channel should be private
     pub is_private: bool,
-    /// Optional list of user IDs to name as channel managers
-    pub channel_managers: Option<Vec<String>>,
 }
 
 impl CreateChannel {
@@ -421,39 +419,41 @@ impl CreateChannel {
     pub fn body(&self) -> Result<String, String> {
         #[derive(Serialize)]
         struct CreateChannelBody<'a> {
-            channel_name: &'a str,
+            name: &'a str,
             is_private: bool,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            channel_managers: Option<&'a [String]>,
         }
 
         let body = CreateChannelBody {
-            channel_name: &self.channel_name,
+            name: &self.name,
             is_private: self.is_private,
-            channel_managers: self.channel_managers.as_deref(),
         };
 
         serde_json::to_string(&body).map_err(|e| format!("Failed to serialize body: {}", e))
     }
 }
 
+/// A Slack channel
+#[derive(Serialize, Deserialize)]
+pub struct SlackChannel {
+    pub id: String,
+    pub name: String,
+}
+
 /// Response from Slack when creating a channel
 #[derive(Serialize, Deserialize)]
 pub struct CreateChannelResponse {
     pub ok: bool,
-    pub channel_id: String,
+    pub channel: SlackChannel,
 }
 
 /// Create a Slack channel
 /// - `bot`: bot to use for creating the channel
-/// - `channel_name`: name of the channel to create
+/// - `name`: name of the channel to create
 /// - `is_private`: whether the channel should be private
-/// - `channel_managers`: optional list of user IDs to name as channel managers
 pub fn create_channel(
     bot: &str,
-    channel_name: &str,
+    name: &str,
     is_private: bool,
-    channel_managers: Option<Vec<String>>,
 ) -> Result<CreateChannelResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(slack, create_channel);
@@ -463,9 +463,8 @@ pub fn create_channel(
 
     let params = serde_json::to_string(&CreateChannel {
         bot: bot.to_string(),
-        channel_name: channel_name.to_string(),
+        name: name.to_string(),
         is_private,
-        channel_managers,
     })
     .unwrap();
 
