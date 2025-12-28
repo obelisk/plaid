@@ -278,7 +278,7 @@ impl GoogleDocs {
 /// utility function for converting markdown into HTML
 fn markdown_to_html(md: &str) -> String {
     // Convert Markdown to HTML
-    // We enable folders and footnotes for better compatibility
+    // We enable tables and footnotes for better compatibility
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_FOOTNOTES);

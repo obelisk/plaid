@@ -498,14 +498,14 @@ impl_new_sub_module_function_with_error_buffer!(
     gcp,
     google_docs,
     create_doc_from_markdown,
-    ALLOW_IN_TEST_MODE
+    DISALLOW_IN_TEST_MODE
 );
 #[cfg(feature = "gcp")]
 impl_new_sub_module_function_with_error_buffer!(
     gcp,
     google_docs,
     create_sheet_from_csv,
-    ALLOW_IN_TEST_MODE
+    DISALLOW_IN_TEST_MODE
 );
 
 // Npm Functions
