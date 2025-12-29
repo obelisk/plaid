@@ -2,7 +2,7 @@ mod otp;
 
 use reqwest::Client;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use std::time::Duration;
 
@@ -13,9 +13,22 @@ use ring::{
 
 use super::default_timeout_seconds;
 
+/// Validate that the client_id is not zero
+fn validate_client_id<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(serde::de::Error::custom("Yubico client_id must not be 0"));
+    }
+    Ok(value)
+}
+
 #[derive(Deserialize)]
 pub struct YubikeyConfig {
     /// Client ID for the Yubico API service
+    #[serde(deserialize_with = "validate_client_id")]
     client_id: u64,
     /// Secret key for the Yubico API service
     secret_key: String,
