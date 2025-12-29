@@ -46,26 +46,18 @@ impl Apis {
                 .post(format!("{SLACK_API_URL}{api}", api = "views.open"))
                 .body(p.body.clone())
                 .header("Content-Type", "application/json; charset=utf-8"),
-            Self::LookupByEmail(p) => client.get(format!(
-                "{SLACK_API_URL}{api}?email={email}",
-                api = "users.lookupByEmail",
-                email = p.email,
-            )),
-            Self::GetPresence(p) => client.get(format!(
-                "{SLACK_API_URL}{api}?user={user}",
-                api = "users.getPresence",
-                user = p.id,
-            )),
-            Self::GetDndInfo(p) => client.get(format!(
-                "{SLACK_API_URL}{api}?user={user}",
-                api = "dnd.info",
-                user = p.id
-            )),
-            Self::UserInfo(p) => client.get(format!(
-                "{SLACK_API_URL}{api}?user={user}",
-                api = "users.info",
-                user = p.id,
-            )),
+            Self::LookupByEmail(p) => client
+                .get(format!("{SLACK_API_URL}{api}", api = "users.lookupByEmail"))
+                .query(&[("email", &p.email)]),
+            Self::GetPresence(p) => client
+                .get(format!("{SLACK_API_URL}{api}", api = "users.getPresence"))
+                .query(&[("user", &p.id)]),
+            Self::GetDndInfo(p) => client
+                .get(format!("{SLACK_API_URL}{api}", api = "dnd.info"))
+                .query(&[("user", &p.id)]),
+            Self::UserInfo(p) => client
+                .get(format!("{SLACK_API_URL}{api}", api = "users.info"))
+                .query(&[("user", &p.id)]),
             Self::CreateChannel(p) => client
                 .post(format!(
                     "{SLACK_API_URL}{api}",
