@@ -2,9 +2,9 @@ name: Feature Checks
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches:  "**"
+    branches: "**"
 
 permissions:
   contents: read
@@ -16,7 +16,15 @@ jobs:
   build-feature-combination:
     strategy:
       matrix:
-        features: ["sled,cranelift", "aws,cranelift", "aws,sled,cranelift", "aws,cranelift,redis"]
+        features:
+          [
+            "sled,cranelift",
+            "aws,cranelift",
+            "aws,sled,cranelift",
+            "aws,cranelift,redis",
+            "aws,gcp,sled,cranelift",
+            "aws,gcp,cranelift,redis",
+          ]
     runs-on: ubuntu-latest
     steps:
       - name: Setup Rust

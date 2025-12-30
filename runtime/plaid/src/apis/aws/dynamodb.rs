@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::apis::{
     aws::dynamodb_utils::{attributes_into_json, json_into_attributes, return_value_from_string},
-    ApiError,
+    AccessScope, ApiError,
 };
 use crate::{get_aws_sdk_config, loader::PlaidModule, AwsAuthentication};
 
@@ -38,7 +38,7 @@ pub struct DynamoDbConfig {
 /// Represents the DynamoDB API client.
 /// NOTE: if Plaid is configured with the DynamoDB database backend, sharing tables here will lead to undefined behaviour
 pub struct DynamoDb {
-    /// The underlying client used to interact with the KMS API.
+    /// The underlying client used to interact with the Dynamodb API.
     client: Client,
     /// Configured writers - maps a table name to a list of rules that are allowed to READ or WRITE data
     rw: HashMap<String, HashSet<String>>,
@@ -46,13 +46,6 @@ pub struct DynamoDb {
     r: HashMap<String, HashSet<String>>,
     /// Reserved tables - list of 'reserved' table names which rules cannot access
     reserved_tables: Option<HashSet<String>>,
-}
-
-#[derive(PartialEq, PartialOrd, Debug)]
-/// Represents an access scope that a rule has to modify a DynamoDB table
-enum AccessScope {
-    Read,
-    Write,
 }
 
 impl DynamoDb {
