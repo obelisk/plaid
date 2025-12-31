@@ -139,6 +139,7 @@ root_certificate = """
 # "User-Agent" = "Plaid/0.10"
 
 [apis."github"]
+[apis."github".authentication]
 token = ""
 [apis."github".graphql_queries]
 
