@@ -15,7 +15,7 @@ mod validators;
 
 use http::{header::USER_AGENT, HeaderMap};
 use jsonwebtoken::EncodingKey;
-use octocrab::Octocrab;
+use octocrab::{NoAuth, Octocrab};
 
 use serde::{Deserialize, Serialize};
 
@@ -227,8 +227,13 @@ impl Github {
 pub fn build_github_client(authentication: &Authentication) -> Octocrab {
     let client_builder = match authentication {
         Authentication::Token { token } => {
-            info!("Configuring GitHub client with GitHub PAT");
-            Octocrab::builder().personal_token(token.clone())
+            if token.is_empty() {
+                info!("Configuring GitHub client without authentication");
+                Octocrab::builder().with_auth(NoAuth {})
+            } else {
+                info!("Configuring GitHub client with GitHub PAT");
+                Octocrab::builder().personal_token(token.clone())
+            }
         }
         Authentication::App {
             app_id,
