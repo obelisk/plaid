@@ -138,9 +138,9 @@ root_certificate = """
 # "Accept" = "application/vnd.github+json"
 # "User-Agent" = "Plaid/0.10"
 
-# [apis."github"]
-# token = ""
-# [apis."github".graphql_queries]
+[apis."github"]
+token = ""
+[apis."github".graphql_queries]
 
 [apis."slack"]
 [apis."slack"."webhooks"]
