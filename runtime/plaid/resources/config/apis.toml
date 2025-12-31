@@ -140,7 +140,7 @@ root_certificate = """
 
 [apis."github"]
 [apis."github".authentication]
-token = ""
+# Nothing here means no authentication
 [apis."github".graphql_queries]
 
 [apis."slack"]
