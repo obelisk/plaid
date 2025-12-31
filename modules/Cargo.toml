@@ -30,7 +30,8 @@ members = [
     "tests/test_vec_entrypoint",
     "tests/test_jwt",
     "tests/test_redis_cache_eviction",
-    "tests/test_tls_cert_with_sni"
+    "tests/test_tls_cert_with_sni",
+    "tests/test_gh_username_id"
 ]
 
 [profile.release]

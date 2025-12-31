@@ -360,6 +360,16 @@ impl Display for FetchFileCustomMediaType {
    MISCELLANEA
 *******************************************************************************************/
 
+/// A GitHub user.
+/// Note - We only deserialize the fields we care about.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GitHubUser {
+    /// The user's login name. This can change over time.
+    pub login: String,
+    /// The user's unique ID. This does not change.
+    pub id: u64,
+}
+
 pub enum ReviewPatAction {
     Approve,
     Deny,
