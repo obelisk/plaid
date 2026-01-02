@@ -10,7 +10,7 @@ pub fn get_user_id_from_username(username: impl Display) -> Result<String, Plaid
         new_host_function_with_error_buffer!(github, get_user_id_from_username);
     }
 
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    const RETURN_BUFFER_SIZE: usize = 64 * 1024; // 64 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let username = username.to_string();
@@ -44,7 +44,7 @@ pub fn get_username_from_user_id(user_id: impl Display) -> Result<String, PlaidF
         new_host_function_with_error_buffer!(github, get_username_from_user_id);
     }
 
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    const RETURN_BUFFER_SIZE: usize = 64 * 1024; // 64 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let user_id = user_id.to_string();
