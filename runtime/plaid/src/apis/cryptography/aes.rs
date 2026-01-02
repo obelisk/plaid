@@ -50,25 +50,27 @@ impl Aes {
 }
 
 impl Cryptography {
-    /// Return whether a module can perform a certain action on a given AES key
-    fn can_module_perform_aes_action(
+    /// Return the key if a module can perform a certain action on a given AES key, otherwise None
+    fn get_aes_key_for_action(
         &self,
         module: impl Display,
         key_id: impl Display,
         action: AesAction,
-    ) -> bool {
-        if self.aes.is_none() {
-            return false;
-        }
-
-        self.aes
-            .as_ref()
-            .unwrap() // OK: we checked it's not None
-            .key_specs
-            .get(&key_id.to_string())
-            .and_then(|key_spec| key_spec.rules_and_actions.get(&module.to_string()))
-            .and_then(|allowed_actions| Some(allowed_actions.contains(&action)))
-            == Some(true)
+    ) -> Option<String> {
+        self.aes.as_ref().and_then(|aes| {
+            aes.key_specs.get(&key_id.to_string()).and_then(|key_spec| {
+                key_spec
+                    .rules_and_actions
+                    .get(&module.to_string())
+                    .and_then(|allowed_actions| {
+                        if allowed_actions.contains(&action) {
+                            Some(key_spec.key.clone())
+                        } else {
+                            None
+                        }
+                    })
+            })
+        })
     }
 
     /// Perform an AES encryption using a key defined in Plaid's config.
@@ -82,33 +84,27 @@ impl Cryptography {
                 "API not configured".to_string(),
             ));
         }
-        // We have an AES API, so we can continue
 
         let payload: AesEncryptPayload = serde_json::from_str(&params)
             .map_err(|_| ApiError::CryptographyError("Failed to parse payload".to_string()))?;
 
-        if !self.can_module_perform_aes_action(&module.name, &payload.key_id, AesAction::Encrypt) {
-            return Err(ApiError::CryptographyError(
-                "Missing key or operation not permitted".to_string(),
-            ));
-        }
+        let key =
+            match self.get_aes_key_for_action(&module.name, &payload.key_id, AesAction::Encrypt) {
+                Some(key) => key,
+                None => {
+                    return Err(ApiError::CryptographyError(
+                        "Missing key or operation not permitted".to_string(),
+                    ))
+                }
+            };
+
+        let key = hex::decode(key)
+            .map_err(|_| ApiError::CryptographyError("Failed to decode key".to_string()))?;
 
         info!(
             "Performing an AES encryption with local key [{}] on behalf of module [{module}]",
             payload.key_id
         );
-
-        let key = self
-            .aes
-            .as_ref()
-            .unwrap() // OK: we checked above
-            .key_specs
-            .get(&payload.key_id.to_string())
-            .unwrap() // OK because we checked above
-            .key
-            .clone();
-        let key = hex::decode(key)
-            .map_err(|_| ApiError::CryptographyError("Failed to decode key".to_string()))?;
 
         cryptography::aes_128_cbc::encrypt(&key, &payload.plaintext.to_string())
             .map_err(|_| ApiError::CryptographyError("Failed to encrypt plaintext".to_string()))
@@ -125,33 +121,27 @@ impl Cryptography {
                 "API not configured".to_string(),
             ));
         }
-        // We have an AES API, so we can continue
 
         let payload: AesDecryptPayload = serde_json::from_str(&params)
             .map_err(|_| ApiError::CryptographyError("Failed to parse payload".to_string()))?;
 
-        if !self.can_module_perform_aes_action(&module.name, &payload.key_id, AesAction::Decrypt) {
-            return Err(ApiError::CryptographyError(
-                "Missing key or operation not permitted".to_string(),
-            ));
-        }
+        let key =
+            match self.get_aes_key_for_action(&module.name, &payload.key_id, AesAction::Decrypt) {
+                Some(key) => key,
+                None => {
+                    return Err(ApiError::CryptographyError(
+                        "Missing key or operation not permitted".to_string(),
+                    ))
+                }
+            };
+
+        let key = hex::decode(key)
+            .map_err(|_| ApiError::CryptographyError("Failed to decode key".to_string()))?;
 
         info!(
             "Performing an AES decryption with local key [{}] on behalf of module [{module}]",
             payload.key_id
         );
-
-        let key = self
-            .aes
-            .as_ref()
-            .unwrap() // OK: we checked above
-            .key_specs
-            .get(&payload.key_id.to_string())
-            .unwrap() // OK because we checked above
-            .key
-            .clone();
-        let key = hex::decode(key)
-            .map_err(|_| ApiError::CryptographyError("Failed to decode key".to_string()))?;
 
         cryptography::aes_128_cbc::decrypt(&key, &payload.ciphertext.to_string())
             .map_err(|_| ApiError::CryptographyError("Failed to decrypt ciphertext".to_string()))
