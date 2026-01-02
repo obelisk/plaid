@@ -79,15 +79,17 @@ impl Cryptography {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        if self.aes.is_some() {
-            let payload: AesEncryptPayload = serde_json::from_str(&params)
-                .map_err(|_| ApiError::CryptographyError("Failed to parse payload".to_string()))?;
+        if self.aes.is_none() {
+            return Err(ApiError::CryptographyError(
+                "API not configured".to_string(),
+            ));
+        }
 
-            let key = match self.get_aes_key_for_action(
-                &module.name,
-                &payload.key_id,
-                AesAction::Encrypt,
-            ) {
+        let payload: AesEncryptPayload = serde_json::from_str(&params)
+            .map_err(|_| ApiError::CryptographyError("Failed to parse payload".to_string()))?;
+
+        let key =
+            match self.get_aes_key_for_action(&module.name, &payload.key_id, AesAction::Encrypt) {
                 Some(key) => key,
                 None => {
                     return Err(ApiError::CryptographyError(
@@ -96,21 +98,16 @@ impl Cryptography {
                 }
             };
 
-            let key = hex::decode(key)
-                .map_err(|_| ApiError::CryptographyError("Failed to decode key".to_string()))?;
+        let key = hex::decode(key)
+            .map_err(|_| ApiError::CryptographyError("Failed to decode key".to_string()))?;
 
-            info!(
-                "Performing an AES encryption with local key [{}] on behalf of module [{module}]",
-                payload.key_id
-            );
+        info!(
+            "Performing an AES encryption with local key [{}] on behalf of module [{module}]",
+            payload.key_id
+        );
 
-            cryptography::aes_128_cbc::encrypt(&key, &payload.plaintext.to_string())
-                .map_err(|_| ApiError::CryptographyError("Failed to encrypt plaintext".to_string()))
-        } else {
-            Err(ApiError::CryptographyError(
-                "API not configured".to_string(),
-            ))
-        }
+        cryptography::aes_128_cbc::encrypt(&key, &payload.plaintext.to_string())
+            .map_err(|_| ApiError::CryptographyError("Failed to encrypt plaintext".to_string()))
     }
 
     /// Perform an AES decryption using a key defined in Plaid's config.
@@ -119,15 +116,17 @@ impl Cryptography {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        if self.aes.is_some() {
-            let payload: AesDecryptPayload = serde_json::from_str(&params)
-                .map_err(|_| ApiError::CryptographyError("Failed to parse payload".to_string()))?;
+        if self.aes.is_none() {
+            return Err(ApiError::CryptographyError(
+                "API not configured".to_string(),
+            ));
+        }
 
-            let key = match self.get_aes_key_for_action(
-                &module.name,
-                &payload.key_id,
-                AesAction::Decrypt,
-            ) {
+        let payload: AesDecryptPayload = serde_json::from_str(&params)
+            .map_err(|_| ApiError::CryptographyError("Failed to parse payload".to_string()))?;
+
+        let key =
+            match self.get_aes_key_for_action(&module.name, &payload.key_id, AesAction::Decrypt) {
                 Some(key) => key,
                 None => {
                     return Err(ApiError::CryptographyError(
@@ -136,21 +135,15 @@ impl Cryptography {
                 }
             };
 
-            let key = hex::decode(key)
-                .map_err(|_| ApiError::CryptographyError("Failed to decode key".to_string()))?;
+        let key = hex::decode(key)
+            .map_err(|_| ApiError::CryptographyError("Failed to decode key".to_string()))?;
 
-            info!(
-                "Performing an AES decryption with local key [{}] on behalf of module [{module}]",
-                payload.key_id
-            );
+        info!(
+            "Performing an AES decryption with local key [{}] on behalf of module [{module}]",
+            payload.key_id
+        );
 
-            cryptography::aes_128_cbc::decrypt(&key, &payload.ciphertext.to_string()).map_err(
-                |_| ApiError::CryptographyError("Failed to decrypt ciphertext".to_string()),
-            )
-        } else {
-            Err(ApiError::CryptographyError(
-                "API not configured".to_string(),
-            ))
-        }
+        cryptography::aes_128_cbc::decrypt(&key, &payload.ciphertext.to_string())
+            .map_err(|_| ApiError::CryptographyError("Failed to decrypt ciphertext".to_string()))
     }
 }
