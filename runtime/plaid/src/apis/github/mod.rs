@@ -15,7 +15,7 @@ mod validators;
 
 use http::{header::USER_AGENT, HeaderMap};
 use jsonwebtoken::EncodingKey;
-use octocrab::Octocrab;
+use octocrab::{NoAuth, Octocrab};
 
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +28,9 @@ use super::ApiError;
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub enum Authentication {
+    /// Do not use any authentication when making requests to the GitHub API. This will
+    /// limit you to only public APIs that do not require authentication.
+    NoAuth {},
     /// If you provide a token then we will initialize the client using that
     /// method of authentication. This is generally simpler to set up but less
     /// secure and doesn't have access to all the same APIs (for example approving
@@ -226,6 +229,10 @@ impl Github {
 /// Builds an instance of a Github API client
 pub fn build_github_client(authentication: &Authentication) -> Octocrab {
     let client_builder = match authentication {
+        Authentication::NoAuth {} => {
+            info!("Configuring GitHub client without authentication");
+            Octocrab::builder().with_auth(NoAuth {})
+        }
         Authentication::Token { token } => {
             info!("Configuring GitHub client with GitHub PAT");
             Octocrab::builder().personal_token(token.clone())

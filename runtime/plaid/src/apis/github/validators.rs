@@ -97,3 +97,10 @@ create_regex_validator_func!(extension);
 create_regex_validator_func!(path);
 create_regex_validator_func!(event_type);
 create_regex_validator_func!(contains_parent_directory_component);
+
+impl Github {
+    pub fn validate_user_id<'a>(&self, user_id: &'a str) -> Result<&'a str, ApiError> {
+        // User IDs are positive integers
+        self.validate_pint(user_id)
+    }
+}

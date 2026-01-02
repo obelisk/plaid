@@ -1,3 +1,5 @@
+use plaid_stl::github::GitHubUser;
+
 use super::Github;
 use crate::{
     apis::{github::GitHubError, ApiError},
@@ -29,6 +31,64 @@ impl Github {
                     Ok(true)
                 } else if status == 404 {
                     Ok(false)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get a user's ID from their username
+    /// See https://docs.github.com/en/rest/users/users?apiVersion=2022-11-28#get-a-user
+    pub async fn get_user_id_from_username(
+        &self,
+        username: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let username = self.validate_username(username)?;
+
+        info!("Getting user ID for username [{username}] on behalf of [{module}]");
+        let address = format!("/users/{username}");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    let user_info: GitHubUser = serde_json::from_str(&body)
+                        .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
+                    Ok(user_info.id.to_string())
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get a user's username from their user ID
+    /// See https://docs.github.com/en/rest/users/users?apiVersion=2022-11-28#get-a-user-using-their-id
+    pub async fn get_username_from_user_id(
+        &self,
+        user_id: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let user_id = self.validate_user_id(user_id)?;
+
+        info!("Getting username for user ID [{user_id}] on behalf of [{module}]");
+        let address = format!("/user/{user_id}");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    let user_info: GitHubUser = serde_json::from_str(&body)
+                        .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
+                    Ok(user_info.login)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
