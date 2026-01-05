@@ -121,6 +121,10 @@ headers = []
 log_type = "test_tls_cert_with_sni"
 headers = []
 
+[webhooks."internal".webhooks."test_gh_username_id"]
+log_type = "test_gh_username_id"
+headers = []
+
 
 # End webhooks for tests
 

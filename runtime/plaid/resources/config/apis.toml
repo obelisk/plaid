@@ -22,7 +22,8 @@ allowed_rules = [
     "test_redis_cache_eviction.wasm",
     "test_dynamodb.wasm",
     "test_mnr_return_cert.wasm",
-    "test_tls_cert_with_sni.wasm"
+    "test_tls_cert_with_sni.wasm",
+    "test_gh_username_id.wasm"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
@@ -137,9 +138,10 @@ root_certificate = """
 # "Accept" = "application/vnd.github+json"
 # "User-Agent" = "Plaid/0.10"
 
-# [apis."github"]
-# token = ""
-# [apis."github".graphql_queries]
+[apis."github"]
+[apis."github".authentication]
+# Nothing here means no authentication
+[apis."github".graphql_queries]
 
 [apis."slack"]
 [apis."slack"."webhooks"]
