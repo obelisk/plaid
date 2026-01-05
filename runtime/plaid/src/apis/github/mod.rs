@@ -28,9 +28,6 @@ use super::ApiError;
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub enum Authentication {
-    /// Do not use any authentication when making requests to the GitHub API. This will
-    /// limit you to only public APIs that do not require authentication.
-    NoAuth {},
     /// If you provide a token then we will initialize the client using that
     /// method of authentication. This is generally simpler to set up but less
     /// secure and doesn't have access to all the same APIs (for example approving
@@ -44,6 +41,10 @@ pub enum Authentication {
         installation_id: u64,
         private_key: String,
     },
+    /// Do not use any authentication when making requests to the GitHub API. This will
+    /// limit you to only public APIs that do not require authentication.
+    /// NOTE - THIS MUST BE LAST IN THE ENUM BECAUSE IT ACTS AS A CATCH-ALL.
+    NoAuth {},
 }
 
 #[derive(Deserialize)]
