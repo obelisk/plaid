@@ -110,7 +110,7 @@ impl DataInternal {
         Ok(Self {
             github,
             okta,
-            internal: Some(internal),
+            internal: Some(internal?),
             interval,
             #[cfg(feature = "aws")]
             sqs,
