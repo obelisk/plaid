@@ -242,25 +242,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => Arc::new(Storage::new_in_memory()),
     };
 
-    // This sender provides an internal route to sending logs. This is what
-    // powers the logback functions.
-    let delayed_log_sender = Data::start(
-        config.data,
-        log_sender.clone(),
-        internal_storage.clone(),
-        els.clone(),
-        &roles,
-    )
-    .await?
-    .ok_or(Errors::FailedToStartDataSystem)?;
-
-    info!("Configuring APIs for Modules");
-    // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender).await;
-
-    // Create an Arc so all the handlers have access to our API object
-    let api = Arc::new(api);
-
     // Graceful shutdown handling
     let cancellation_token = CancellationToken::new();
     let ct = cancellation_token.clone();
@@ -319,6 +300,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         info!("Starting {} {thread_or_threads} dedicated to log type [{log_type}]. Log queue size = {}", tp.num_threads, tp.sender.capacity().unwrap_or_default());
     }
+
+    // This sender provides an internal route to sending logs. This is what
+    // powers the logback functions.
+    let delayed_log_sender = Data::start(
+        config.data,
+        log_sender.clone(),
+        internal_storage.clone(),
+        els.clone(),
+        &roles,
+    )
+    .await?
+    .ok_or(Errors::FailedToStartDataSystem)?;
+
+    info!("Configuring APIs for Modules");
+    // Create the API that powers all the wrapped calls that modules can make
+    let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender).await;
+
+    // Create an Arc so all the handlers have access to our API object
+    let api = Arc::new(api);
 
     // Create the executor that will handle all the logs that come in and immediate
     // requests for handling some configured get requests.
