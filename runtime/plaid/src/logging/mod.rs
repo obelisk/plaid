@@ -257,7 +257,9 @@ impl Logger {
             };
 
             if let Some(logger) = &stdout_logger {
-                logger.send_log(&log).unwrap();
+                if let Err(_) = logger.send_log(&log) {
+                    error!("Could not send logs to stdout");
+                }
             }
 
             if let Some(logger) = &splunk_logger {

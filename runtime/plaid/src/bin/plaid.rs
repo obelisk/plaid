@@ -490,6 +490,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     Ok(Some(response))=> {
                                         if update {
                                             info!("Updating cache for get request to: {webhook}");
+                                            // I'm making the assumption here that getting the system time will never fail
                                             let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                                             let mut cache = get_cache.write().await;
                                             cache.insert(webhook.clone(), (current_time, response.body.clone()));

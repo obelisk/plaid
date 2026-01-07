@@ -129,7 +129,9 @@ fn to_attribute_value(value: Value) -> Result<AttributeValue, ApiError> {
                     // String Set (SS)
                     let strings: Vec<String> = arr
                         .into_iter()
-                        .map(|v| v.as_str().unwrap().to_string())
+                        // We use filter_map to discard Values that are not string. This is out of an abundance
+                        // of caution since we have already checked that's the case, but we don't want to unwrap.
+                        .filter_map(|v| Some(v.as_str()?.to_string()))
                         .collect();
                     Ok(AttributeValue::Ss(strings))
                 }

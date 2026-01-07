@@ -173,108 +173,105 @@ impl DataGenerator for Okta {
         let mut next = Some(address);
 
         loop {
-            // At this point we know `next` is Some. Either because this is the first request, or
-            // because we are here after checking it's not None (which would have stopped the loop).
-            let response = self
-                .client
-                .get(next.unwrap())
-                .header("Accept", "application/json")
-                .header("Authorization", format!("SSWS {}", self.config.token))
-                .send()
-                .await
-                .map_err(|e| {
-                    error!("Could not get logs from Okta: {e}");
-                })?;
+            if let Some(address) = next {
+                let response = self
+                    .client
+                    .get(address)
+                    .header("Accept", "application/json")
+                    .header("Authorization", format!("SSWS {}", self.config.token))
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        error!("Could not get logs from Okta: {e}");
+                    })?;
 
-            // Check the response status code
-            // If it's outside of the 2XX range, we log the error and exit the loop, allowing the
-            // data generator to handle a restart
-            if !response.status().is_success() {
-                let status = response.status();
-                let error_body = response.text().await.ok();
-                error!(
-                    "Call to Okta API failed with code: {status}. Error: {}",
-                    error_body.unwrap_or_default()
-                );
-                return Err(());
-            }
+                // Check the response status code
+                // If it's outside of the 2XX range, we log the error and exit the loop, allowing the
+                // data generator to handle a restart
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let error_body = response.text().await.ok();
+                    error!(
+                        "Call to Okta API failed with code: {status}. Error: {}",
+                        error_body.unwrap_or_default()
+                    );
+                    return Err(());
+                }
 
-            // See if there is another page of logs after this by looking at the `link` header
-            // https://developer.okta.com/docs/api/#link-header
-            next = response
-                .headers()
-                .get("link")
-                .and_then(|v| super::get_next_from_link_header(v));
+                // See if there is another page of logs after this by looking at the `link` header
+                // https://developer.okta.com/docs/api/#link-header
+                next = response
+                    .headers()
+                    .get("link")
+                    .and_then(|v| super::get_next_from_link_header(v));
 
-            // Get the body from the response from Okta
-            let body = response
-                .text()
-                .await
-                .map_err(|e| error!("Could not get logs from Okta: {e}"))?;
+                // Get the body from the response from Okta
+                let body = response
+                    .text()
+                    .await
+                    .map_err(|e| error!("Could not get logs from Okta: {e}"))?;
 
-            // Attempt to deserialize the response from Okta
-            let logs: Vec<Value> = serde_json::from_str(body.as_str())
-                .map_err(|e| error!("Could not parse data from Okta: {e}"))?;
+                // Attempt to deserialize the response from Okta
+                let logs: Vec<Value> = serde_json::from_str(body.as_str())
+                    .map_err(|e| error!("Could not parse data from Okta: {e}"))?;
 
-            if logs.is_empty() {
-                return Ok(output_logs);
-            }
+                if logs.is_empty() {
+                    return Ok(output_logs);
+                }
 
-            // Loop over the logs we got from Okta, parse them and add them to the growing vector
-            for log in &logs {
-                let published = match log
-                    .as_object()
-                    .and_then(|obj| obj.get(OKTA_LOG_PUBLISHED_FIELD_KEY))
-                    .and_then(|val| val.as_str())
-                {
-                    Some(published) => published,
-                    None => {
-                        error!("Missing or invalid 'published' field in Okta log",);
-                        continue;
-                    }
-                };
+                // Loop over the logs we got from Okta, parse them and add them to the growing vector
+                for log in &logs {
+                    let published = match log
+                        .as_object()
+                        .and_then(|obj| obj.get(OKTA_LOG_PUBLISHED_FIELD_KEY))
+                        .and_then(|val| val.as_str())
+                    {
+                        Some(published) => published,
+                        None => {
+                            error!("Missing or invalid 'published' field in Okta log",);
+                            continue;
+                        }
+                    };
 
-                let log_timestamp = match OffsetDateTime::parse(published, &Rfc3339) {
-                    Ok(dt) => dt,
-                    Err(_) => {
-                        error!("Got an invalid date from Okta: {}", published);
-                        continue;
-                    }
-                };
+                    let log_timestamp = match OffsetDateTime::parse(published, &Rfc3339) {
+                        Ok(dt) => dt,
+                        Err(_) => {
+                            error!("Got an invalid date from Okta: {}", published);
+                            continue;
+                        }
+                    };
 
-                let uuid = match log
-                    .as_object()
-                    .and_then(|obj| obj.get(OKTA_LOG_UUID_FIELD_KEY))
-                    .and_then(|val| val.as_str())
-                {
-                    Some(uuid) => uuid,
-                    None => {
-                        error!("Missing or invalid 'uuid' field in Okta log",);
-                        continue;
-                    }
-                };
+                    let uuid = match log
+                        .as_object()
+                        .and_then(|obj| obj.get(OKTA_LOG_UUID_FIELD_KEY))
+                        .and_then(|val| val.as_str())
+                    {
+                        Some(uuid) => uuid,
+                        None => {
+                            error!("Missing or invalid 'uuid' field in Okta log",);
+                            continue;
+                        }
+                    };
 
-                // Attempt to parse the log received from Okta to bytes.
-                let log_bytes = match serde_json::to_vec(&log) {
-                    Ok(bytes) => bytes,
-                    Err(e) => {
-                        error!("Failed to serialize Okta logs to bytes. Error: {e}");
-                        continue;
-                    }
-                };
+                    // Attempt to parse the log received from Okta to bytes.
+                    let log_bytes = match serde_json::to_vec(&log) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("Failed to serialize Okta logs to bytes. Error: {e}");
+                            continue;
+                        }
+                    };
 
-                output_logs.push(DataGeneratorLog {
-                    id: uuid.to_string(),
-                    timestamp: log_timestamp,
-                    payload: log_bytes,
-                });
-            }
-
-            // Exit the loop if there is no next page
-            if next.is_none() {
+                    output_logs.push(DataGeneratorLog {
+                        id: uuid.to_string(),
+                        timestamp: log_timestamp,
+                        payload: log_bytes,
+                    });
+                }
+            } else {
+                // next is None: exit the loop if there is no next page
                 break;
             }
-            // Otherwise we are ready for the next request
         }
 
         Ok(output_logs)
