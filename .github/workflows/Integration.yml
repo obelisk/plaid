@@ -29,6 +29,17 @@ jobs:
           - 8000:8000
 
     steps:
+    - name: Wait for DynamoDB to be ready
+      run: |
+        for i in {1..30}; do
+          if aws dynamodb list-tables --endpoint-url http://localhost:8000 --region us-east-1 > /dev/null 2>&1; then
+            echo "DynamoDB is ready"
+            break
+          fi
+          echo "Waiting for DynamoDB..."
+          sleep 1
+        done
+
     - name: Create DynamoDB Table
       run: |
         aws dynamodb create-table \
@@ -81,6 +92,17 @@ jobs:
           - 8000:8000
 
     steps:
+    - name: Wait for DynamoDB to be ready
+      run: |
+        for i in {1..30}; do
+          if aws dynamodb list-tables --endpoint-url http://localhost:8000 --region us-east-1 > /dev/null 2>&1; then
+            echo "DynamoDB is ready"
+            break
+          fi
+          echo "Waiting for DynamoDB..."
+          sleep 1
+        done
+
     - name: Create DynamoDB Table
       run: |
         aws dynamodb create-table \
@@ -134,6 +156,17 @@ jobs:
           - 8000:8000
 
     steps:
+    - name: Wait for DynamoDB to be ready
+      run: |
+        for i in {1..30}; do
+          if aws dynamodb list-tables --endpoint-url http://localhost:8000 --region us-east-1 > /dev/null 2>&1; then
+            echo "DynamoDB is ready"
+            break
+          fi
+          echo "Waiting for DynamoDB..."
+          sleep 1
+        done
+
     - name: Create DynamoDB Table
       run: |
         aws dynamodb create-table \
@@ -206,6 +239,17 @@ jobs:
           - 8000:8000
 
     steps:
+    - name: Wait for DynamoDB to be ready
+      run: |
+        for i in {1..30}; do
+          if aws dynamodb list-tables --endpoint-url http://localhost:8000 --region us-east-1 > /dev/null 2>&1; then
+            echo "DynamoDB is ready"
+            break
+          fi
+          echo "Waiting for DynamoDB..."
+          sleep 1
+        done
+
     - name: Create DynamoDB Table
       run: |
         aws dynamodb create-table \
