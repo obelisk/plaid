@@ -27,11 +27,6 @@ jobs:
       matrix:
         compiler: [cranelift, llvm]
         redis-mode: [none, basic, auth]
-        exclude:
-          - compiler: llvm
-            redis-mode: basic
-          - compiler: llvm
-            redis-mode: auth
     
     name: ${{ matrix.compiler }}${{ matrix.redis-mode != 'none' && format(' + redis-{0}', matrix.redis-mode) || '' }}
     
