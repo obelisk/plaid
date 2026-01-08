@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use plaid_stl::slack::{
-    CreateChannel, CreateChannelResponse, GetDndInfo, GetDndInfoResponse, GetIdFromEmail,
-    GetPresence, GetPresenceResponse, InviteToChannel, PostMessage, UserInfo, UserInfoResponse,
-    ViewOpen,
+    CompleteFileUpload, CreateChannel, CreateChannelResponse, GetDndInfo, GetDndInfoResponse,
+    GetIdFromEmail, GetPresence, GetPresenceResponse, GetUploadUrl, InviteToChannel, PostMessage,
+    UserInfo, UserInfoResponse, ViewOpen,
 };
 use reqwest::{Client, RequestBuilder};
 
@@ -23,6 +23,8 @@ enum Apis {
     UserInfo(plaid_stl::slack::UserInfo),
     CreateChannel(plaid_stl::slack::CreateChannel),
     InviteToChannel(plaid_stl::slack::InviteToChannel),
+    GetFileUploadUrl(plaid_stl::slack::GetUploadUrl),
+    CompleteFileUpload(plaid_stl::slack::CompleteFileUpload),
 }
 
 const SLACK_API_URL: &str = "https://slack.com/api/";
@@ -70,7 +72,20 @@ impl Apis {
                     "{SLACK_API_URL}{api}",
                     api = "conversations.invite"
                 ))
-                .body(p.body().unwrap_or_default()) // TODO this is not great: maybe this method should be fallible
+                .body(p.body().unwrap_or_default()), // TODO this is not great: maybe this method should be fallible
+            Self::GetFileUploadUrl(p) => client
+                .post(format!(
+                    "{SLACK_API_URL}{api}",
+                    api = "files.getUploadURLExternal"
+                ))
+                .json(p)
+                .header("Content-Type", "application/json; charset=utf-8"),
+            Self::CompleteFileUpload(p) => client
+                .post(format!(
+                    "{SLACK_API_URL}{api}",
+                    api = "files.completeUploadExternal"
+                ))
+                .json(p)
                 .header("Content-Type", "application/json; charset=utf-8"),
         }
     }
@@ -87,6 +102,8 @@ impl std::fmt::Display for Apis {
             Self::UserInfo(_) => write!(f, "UserInfo"),
             Self::CreateChannel(_) => write!(f, "CreateChannel"),
             Self::InviteToChannel(_) => write!(f, "InviteToChannel"),
+            Self::GetFileUploadUrl(_) => write!(f, "GetFileUploadUrlExternal"),
+            Self::CompleteFileUpload(_) => write!(f, "CompleteFileUploadExternal"),
         }
     }
 }
@@ -328,6 +345,45 @@ impl Slack {
                 }
                 Ok(0)
             }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub async fn get_upload_url_external(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String> {
+        let p: GetUploadUrl = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        match self
+            .call_slack(p.bot.clone(), Apis::GetFileUploadUrl(p), module)
+            .await
+        {
+            Ok((200, response)) => Ok(response),
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub async fn complete_file_upload(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32> {
+        let p: CompleteFileUpload =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        match self
+            .call_slack(p.bot.clone(), Apis::CompleteFileUpload(p), module)
+            .await
+        {
+            Ok((200, _)) => Ok(0),
             Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                 status,
             ))),

@@ -551,3 +551,125 @@ pub fn invite_to_channel(
 
     Ok(())
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct GetUploadUrl {
+    /// Bot token to use for this upload
+    #[serde(skip_serializing)]
+    pub bot: String,
+    /// Size in bytes of the file being uploaded.
+    pub length: usize,
+    /// Name of the file being uploaded.
+    pub filename: String,
+}
+
+/// Response from Slack for a get upload URL request
+#[derive(Deserialize, Debug, Serialize)]
+pub struct GetUploadUrlResponse {
+    /// URL to upload the file to
+    pub upload_url: String,
+    /// ID assigned to the file uploaded to `upload_url`
+    pub file_id: String,
+}
+
+/// Gets a URL for an edge external file upload
+/// See https://docs.slack.dev/reference/methods/files.getUploadURLExternal for full details
+pub fn get_upload_url_external(
+    bot: &str,
+    filename: &str,
+    length: usize,
+) -> Result<GetUploadUrlResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, get_upload_url_external);
+    }
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&GetUploadUrl {
+        bot: bot.to_string(),
+        length,
+        filename: filename.to_string(),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_get_upload_url_external(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    // This should only happen if the Slack API returns a different structure
+    // than expected. Which would be odd because to get here the runtime
+    // successfully parsed the response.
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct UploadedFile {
+    /// ID of the uploaded file
+    pub id: String,
+    /// Title of the file
+    pub title: Option<String>,
+}
+
+fn serialize_channels<S>(channels: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&channels.join(","))
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CompleteFileUpload {
+    /// The bot from which to complete the upload
+    #[serde(skip_serializing)]
+    pub bot: String,
+    /// Array of file ids and their corresponding (optional) titles.
+    pub files: Vec<UploadedFile>,
+    /// Channel IDs or user IDs where the file will be shared
+    #[serde(serialize_with = "serialize_channels")]
+    pub channels: Vec<String>,
+    /// The message text introducing the file in specified channels.
+    pub initial_comment: Option<String>,
+}
+
+/// Finishes an upload started with `files.getUploadURLExternal`
+/// See https://docs.slack.dev/reference/methods/files.completeUploadExternal for full details
+pub fn complete_file_upload(
+    bot: &str,
+    files: Vec<UploadedFile>,
+    channels: Vec<String>,
+    initial_comment: Option<String>,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(slack, complete_file_upload);
+    }
+
+    let params = serde_json::to_string(&CompleteFileUpload {
+        bot: bot.to_string(),
+        files,
+        channels,
+        initial_comment,
+    })
+    .unwrap();
+
+    let res = unsafe { slack_complete_file_upload(params.as_ptr(), params.len()) };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
