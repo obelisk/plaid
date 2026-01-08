@@ -574,7 +574,7 @@ pub struct GetUploadUrlResponse {
 
 /// Gets a URL for an edge external file upload
 /// See https://docs.slack.dev/reference/methods/files.getUploadURLExternal for full details
-pub fn get_upload_url_external(
+pub fn get_file_upload_url(
     bot: &str,
     filename: &str,
     length: usize,
@@ -614,6 +614,34 @@ pub fn get_upload_url_external(
     // than expected. Which would be odd because to get here the runtime
     // successfully parsed the response.
     serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct UploadFile {
+    pub url: String,
+    pub file_bytes: Vec<u8>,
+}
+
+/// Uploads a file to the given upload URL. Callers should have obtained an upload URL from `get_file_upload_url`
+/// prior to calling.
+pub fn upload_file(upload_url: &str, file_bytes: Vec<u8>) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(slack, upload_file);
+    }
+
+    let params = serde_json::to_string(&UploadFile {
+        url: upload_url.to_string(),
+        file_bytes,
+    })
+    .unwrap();
+
+    let res = unsafe { slack_upload_file(params.as_ptr(), params.len()) };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize)]

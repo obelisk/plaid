@@ -3,7 +3,7 @@ use std::sync::Arc;
 use plaid_stl::slack::{
     CompleteFileUpload, CreateChannel, CreateChannelResponse, GetDndInfo, GetDndInfoResponse,
     GetIdFromEmail, GetPresence, GetPresenceResponse, GetUploadUrl, InviteToChannel, PostMessage,
-    UserInfo, UserInfoResponse, ViewOpen,
+    UploadFile, UserInfo, UserInfoResponse, ViewOpen,
 };
 use reqwest::{Client, RequestBuilder};
 
@@ -388,6 +388,30 @@ impl Slack {
                 status,
             ))),
             Err(e) => Err(e),
+        }
+    }
+
+    pub async fn upload_file(&self, params: &str, module: Arc<PlaidModule>) -> Result<u32> {
+        info!("Uploading file to Slack on behalf of: [{module}]");
+
+        let p: UploadFile = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let resp = self
+            .client
+            .post(p.url)
+            .body(p.file_bytes)
+            .header("Content-Type", "application/octet-stream")
+            .send()
+            .await
+            .map_err(|e| ApiError::NetworkError(e))?;
+
+        let status = resp.status();
+        if status.is_success() {
+            Ok(0)
+        } else {
+            Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status.as_u16(),
+            )))
         }
     }
 }
