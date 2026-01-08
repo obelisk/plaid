@@ -352,7 +352,7 @@ impl Slack {
         }
     }
 
-    pub async fn get_upload_url_external(
+    pub async fn get_file_upload_url(
         &self,
         params: &str,
         module: Arc<PlaidModule>,

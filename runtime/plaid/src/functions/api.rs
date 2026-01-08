@@ -551,7 +551,7 @@ impl_new_function_with_error_buffer!(slack, get_dnd, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, user_info, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, create_channel, DISALLOW_IN_TEST_MODE);
 impl_new_function!(slack, invite_to_channel, DISALLOW_IN_TEST_MODE);
-impl_new_function_with_error_buffer!(slack, get_upload_url_external, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, get_file_upload_url, DISALLOW_IN_TEST_MODE);
 impl_new_function!(slack, complete_file_upload, DISALLOW_IN_TEST_MODE);
 
 // Splunk Functions
@@ -881,8 +881,8 @@ pub fn to_api_function(
         "slack_invite_to_channel" => {
             Function::new_typed_with_env(&mut store, &env, slack_invite_to_channel)
         }
-        "slack_get_upload_url_external" => {
-            Function::new_typed_with_env(&mut store, &env, slack_get_upload_url_external)
+        "slack_get_file_upload_url" => {
+            Function::new_typed_with_env(&mut store, &env, slack_get_file_upload_url)
         }
         "slack_complete_file_upload" => {
             Function::new_typed_with_env(&mut store, &env, slack_complete_file_upload)

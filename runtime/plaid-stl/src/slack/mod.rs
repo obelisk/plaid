@@ -580,7 +580,7 @@ pub fn get_file_upload_url(
     length: usize,
 ) -> Result<GetUploadUrlResponse, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(slack, get_upload_url_external);
+        new_host_function_with_error_buffer!(slack, get_file_upload_url);
     }
     const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -593,7 +593,7 @@ pub fn get_file_upload_url(
     .unwrap();
 
     let res = unsafe {
-        slack_get_upload_url_external(
+        slack_get_file_upload_url(
             params.as_bytes().as_ptr(),
             params.as_bytes().len(),
             return_buffer.as_mut_ptr(),
