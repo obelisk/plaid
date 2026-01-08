@@ -378,6 +378,11 @@ impl Slack {
 
         let p: UploadFile = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
+        // Validate that provided URL looks like a file upload URL
+        if !p.url.starts_with("https://files.slack.com/upload") {
+            return Err(ApiError::BadRequest);
+        }
+
         let resp = self
             .client
             .post(p.url)
