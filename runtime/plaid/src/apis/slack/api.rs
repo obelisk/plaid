@@ -352,6 +352,7 @@ impl Slack {
         }
     }
 
+    /// Gets a URL for an edge external file upload
     pub async fn get_file_upload_url(
         &self,
         params: &str,
@@ -371,26 +372,7 @@ impl Slack {
         }
     }
 
-    pub async fn complete_file_upload(
-        &self,
-        params: &str,
-        module: Arc<PlaidModule>,
-    ) -> Result<u32> {
-        let p: CompleteFileUpload =
-            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
-
-        match self
-            .call_slack(p.bot.clone(), Apis::CompleteFileUpload(p), module)
-            .await
-        {
-            Ok((200, _)) => Ok(0),
-            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
-                status,
-            ))),
-            Err(e) => Err(e),
-        }
-    }
-
+    /// Uploads a file to the URL returned from `files.getUploadURLExternal`
     pub async fn upload_file(&self, params: &str, module: Arc<PlaidModule>) -> Result<u32> {
         info!("Uploading file to Slack on behalf of: [{module}]");
 
@@ -412,6 +394,27 @@ impl Slack {
             Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                 status.as_u16(),
             )))
+        }
+    }
+
+    /// Finishes an upload started with `files.getUploadURLExternal`
+    pub async fn complete_file_upload(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32> {
+        let p: CompleteFileUpload =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        match self
+            .call_slack(p.bot.clone(), Apis::CompleteFileUpload(p), module)
+            .await
+        {
+            Ok((200, _)) => Ok(0),
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
         }
     }
 }
