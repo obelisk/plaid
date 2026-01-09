@@ -226,8 +226,12 @@ impl DataGenerator for Github {
                     error!(
                         "{}",
                         format!(
-                            "Call to get GitHub logs failed with code: {}",
-                            response.status()
+                            "Call to get GitHub logs failed with code: {}. The body was [{}]",
+                            response.status(),
+                            self.client
+                                .body_to_string(response)
+                                .await
+                                .unwrap_or("N/A".to_string())
                         )
                     );
                     return Err(());
