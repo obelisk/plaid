@@ -63,6 +63,7 @@ pub enum YubikeyError {
     OperationNotAllowed,
     MissingParameter,
     NotEnoughAnswers,
+    MissingNonce,
     NonceMismatch,
     SignatureMismatch,
     Other(String),
