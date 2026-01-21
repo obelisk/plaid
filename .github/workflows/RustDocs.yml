@@ -1,4 +1,4 @@
-name: Rust Docs
+name: Rust Docs (Runtime)
 
 on:
   push:
@@ -31,9 +31,11 @@ jobs:
           echo "/tmp/protobuf/bin" >> "$GITHUB_PATH"
 
       - name: Generate Documentation
+        working-directory: ./runtime
         run: cargo doc --no-deps 
 
       - name: Fix Redirect
+        working-directory: ./runtime
         shell: bash
         run: |
           # Auto-detect crate name to create the correct redirect
@@ -43,6 +45,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
+          working-directory: ./runtime
           path: 'target/doc'
 
       - name: Deploy to GitHub Pages
