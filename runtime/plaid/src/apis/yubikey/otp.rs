@@ -91,6 +91,15 @@ impl Yubikey {
             return Err(ApiError::YubikeyError(YubikeyError::BadSignature));
         };
 
+        // Validate the returned nonce is the same as the one we sent
+        let returned_nonce = response_items
+            .get("nonce")
+            .ok_or(ApiError::YubikeyError(YubikeyError::MissingNonce))?;
+        if &nonce != returned_nonce {
+            error!("The nonce returned from Yubico does not match the one we sent!");
+            return Err(ApiError::YubikeyError(YubikeyError::NonceMismatch));
+        }
+
         // Finally look at the status
         let status = response_items
             .get("status")
