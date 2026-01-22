@@ -1,9 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use http::{HeaderMap, HeaderValue};
+use octocrab::models::events::Repository;
 use plaid_stl::github::{
     CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus, CommentOnPullRequestRequest,
-    CreateFileRequest, FetchFileCustomMediaType, FetchFileRequest,
+    CreateFileRequest, FetchFileCustomMediaType, FetchFileRequest, GithubRepository,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -695,6 +696,70 @@ impl Github {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get a repo ID from its name
+    /// See https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#get-a-repository
+    pub async fn get_repo_id_from_repo_name(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
+        let repo =
+            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+
+        info!("Getting repo ID for repo [{owner}/{repo}] on behalf of [{module}]");
+        let address = format!("/repos/{owner}/{repo}");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    let repo_info: Repository = serde_json::from_str(&body)
+                        .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
+                    Ok(repo_info.id.to_string())
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get a repo's name from their repo ID
+    /// This is not explicitly documented in the API specs but it works, even for private repos.
+    /// Related to https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#get-a-repository
+    pub async fn get_repo_name_from_repo_id(
+        &self,
+        repo_id: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let repo_id = self.validate_repo_id(repo_id)?;
+
+        info!("Getting repo name for repo ID [{repo_id}] on behalf of [{module}]");
+        let address = format!("/repositories/{repo_id}");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    let repo_info: GithubRepository = serde_json::from_str(&body)
+                        .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
+                    Ok(repo_info.full_name)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,

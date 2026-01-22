@@ -103,4 +103,9 @@ impl Github {
         // User IDs are positive integers
         self.validate_pint(user_id)
     }
+
+    pub fn validate_repo_id<'a>(&self, repo_id: &'a str) -> Result<&'a str, ApiError> {
+        // Repo IDs are positive integers
+        self.validate_pint(repo_id)
+    }
 }

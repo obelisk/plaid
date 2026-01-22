@@ -135,6 +135,7 @@ pub struct FileSearchResultItem {
 
 #[derive(Debug, Deserialize)]
 pub struct GithubRepository {
+    pub id: u64,
     pub name: String,
     pub full_name: String,
     pub private: bool,
