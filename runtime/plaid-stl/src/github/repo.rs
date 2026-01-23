@@ -492,7 +492,8 @@ pub fn create_file(
 
 /// Get a repo ID from its name
 /// ## Arguments
-/// * `repo_name` - The GitHub repo name.
+/// * `owner` - The owner of the repo.
+/// * `repo` - The name of the repo without the owner.
 pub fn get_repo_id_from_repo_name(
     owner: impl Display,
     repo: impl Display,
