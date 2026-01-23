@@ -23,7 +23,7 @@ allowed_rules = [
     "test_dynamodb.wasm",
     "test_mnr_return_cert.wasm",
     "test_tls_cert_with_sni.wasm",
-    "test_gh_username_id.wasm"
+    "test_gh_id_conversion.wasm"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
