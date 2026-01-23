@@ -501,7 +501,7 @@ pub fn get_repo_id_from_repo_name(
         new_host_function_with_error_buffer!(github, get_repo_id_from_repo_name);
     }
 
-    const RETURN_BUFFER_SIZE: usize = 8; // 8 bytes for i64
+    const RETURN_BUFFER_SIZE: usize = 32;
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let mut params: HashMap<&'static str, &str> = HashMap::new();
