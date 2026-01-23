@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define what webhook within Plaid we're going to call
-URL="test_gh_username_id"
+URL="test_gh_id_conversion"
 FILE="received_data.$URL.txt"
 
 # Start the webhook

@@ -208,7 +208,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "plaid_stl"
-version = "0.35.6"
+version = "0.35.7"
 dependencies = [
  "base64 0.13.1",
  "chrono",
@@ -417,7 +417,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "test_gh_username_id"
+name = "test_gh_id_conversion"
 version = "0.1.0"
 dependencies = [
  "plaid_stl",

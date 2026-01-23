@@ -3549,7 +3549,7 @@ dependencies = [
 
 [[package]]
 name = "plaid_stl"
-version = "0.35.6"
+version = "0.35.7"
 dependencies = [
  "base64 0.13.1",
  "chrono",

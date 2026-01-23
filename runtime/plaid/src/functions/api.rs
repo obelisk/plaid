@@ -438,6 +438,8 @@ impl_new_function_with_error_buffer!(github, create_file, DISALLOW_IN_TEST_MODE)
 impl_new_function!(github, add_labels, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_user_id_from_username, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_username_from_user_id, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_repo_id_from_repo_name, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_repo_name_from_repo_id, ALLOW_IN_TEST_MODE);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
@@ -856,6 +858,12 @@ pub fn to_api_function(
         }
         "github_get_username_from_user_id" => {
             Function::new_typed_with_env(&mut store, &env, github_get_username_from_user_id)
+        }
+        "github_get_repo_id_from_repo_name" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repo_id_from_repo_name)
+        }
+        "github_get_repo_name_from_repo_id" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repo_name_from_repo_id)
         }
 
         // Slack Calls

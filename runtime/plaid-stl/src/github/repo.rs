@@ -489,3 +489,82 @@ pub fn create_file(
 
     Ok(response_body)
 }
+
+/// Get a repo ID from its name
+/// ## Arguments
+/// * `owner` - The owner of the repo.
+/// * `repo` - The name of the repo without the owner.
+pub fn get_repo_id_from_repo_name(
+    owner: impl Display,
+    repo: impl Display,
+) -> Result<i64, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_repo_id_from_repo_name);
+    }
+
+    const RETURN_BUFFER_SIZE: usize = 32;
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let mut params: HashMap<&'static str, &str> = HashMap::new();
+    let owner = owner.to_string();
+    let repo = repo.to_string();
+    params.insert("owner", &owner);
+    params.insert("repo", &repo);
+    let params = serde_json::to_string(&params).unwrap();
+
+    let res = unsafe {
+        github_get_repo_id_from_repo_name(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response = String::from_utf8(return_buffer).unwrap();
+    let response: i64 = response.parse().unwrap();
+    Ok(response)
+}
+
+/// Get a repo_name from a repo ID
+/// ## Arguments
+/// * `repo_id` - The GitHub repo ID.
+pub fn get_repo_name_from_repo_id(repo_id: impl Display) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_repo_name_from_repo_id);
+    }
+
+    const RETURN_BUFFER_SIZE: usize = 64 * 1024; // 64 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let repo_id = repo_id.to_string();
+
+    let res = unsafe {
+        github_get_repo_name_from_repo_id(
+            repo_id.as_bytes().as_ptr(),
+            repo_id.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
