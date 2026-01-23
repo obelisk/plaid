@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::PlaidFunctionError;
 
@@ -338,6 +339,63 @@ pub fn get_public_key(key_id: &str) -> Result<GetPublicKeyResponse, PlaidFunctio
 
     let res = unsafe {
         aws_kms_get_public_key(
+            request.as_ptr(),
+            request.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    return_buffer.truncate(res as usize);
+
+    match serde_json::from_slice(&return_buffer) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetKeyPolicyRequest {
+    pub key_id: String,
+    pub policy_name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeyPolicy {
+    pub policy: Value,
+    pub policy_name: String,
+}
+
+/// Gets a key policy attached to the specified KMS key.
+///
+/// # Parameters
+/// - `key_id`:  To specify a KMS key, use its key ID, key ARN, alias name, or alias ARN.
+/// When using an alias name, prefix it with "alias/".
+///     To specify a KMS key in a different Amazon Web Services account, you must use the key ARN or alias ARN.
+///     For example:
+///     - Key ID: 1234abcd-12ab-34cd-56ef-1234567890ab
+///     - Key ARN: arn:aws:kms:us-east-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
+///     - Alias name: alias/ExampleAlias
+///     - Alias ARN: arn:aws:kms:us-east-2:111122223333:alias/ExampleAlias
+/// - `policy_name`: Specifies the name of the key policy. If no policy name is specified, the default value is `default`
+pub fn get_key_policy(
+    key_id: impl Display,
+    policy_name: Option<impl Display>,
+) -> Result<KeyPolicy, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(aws_kms, get_key_policy);
+    }
+
+    let request = GetKeyPolicyRequest {
+        key_id: key_id.to_string(),
+        policy_name: policy_name.map(|n| n.to_string()),
+    };
+    let request = serde_json::to_string(&request).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        aws_kms_get_key_policy(
             request.as_ptr(),
             request.len(),
             return_buffer.as_mut_ptr(),

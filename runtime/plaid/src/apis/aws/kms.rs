@@ -1,3 +1,4 @@
+use aws_sdk_kms::operation::get_key_policy::GetKeyPolicyError;
 use aws_sdk_kms::operation::get_public_key::GetPublicKeyError;
 use aws_sdk_kms::{
     error::SdkError, operation::generate_mac::GenerateMacError, operation::sign::SignError,
@@ -11,7 +12,9 @@ use aws_sdk_kms::{
     types::{MacAlgorithmSpec, MessageType, SigningAlgorithmSpec},
     Client,
 };
-use plaid_stl::aws::kms::{GenerateMacRequest, MacAlgorithm, VerifyMacRequest};
+use plaid_stl::aws::kms::{
+    GenerateMacRequest, GetKeyPolicyRequest, KeyPolicy, MacAlgorithm, VerifyMacRequest,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
@@ -22,6 +25,8 @@ pub enum KmsErrors {
     GenerateMacError(SdkError<GenerateMacError>),
     VerifyMacError(SdkError<VerifyMacError>),
     NoMacReturned,
+    GetKeyPolicyError(SdkError<GetKeyPolicyError>),
+    UnexpectedKeyPolicyResponse { missing_field: String },
 }
 
 /// A request to sign a given message with a KMS key.
@@ -344,6 +349,58 @@ impl Kms {
         let output = PublicKey::from_aws_response(output);
 
         serde_json::to_string(&output).map_err(|_| ApiError::BadRequest)
+    }
+
+    /// Gets a key policy attached to the specified KMS key.
+    pub async fn get_key_policy(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request = serde_json::from_str::<GetKeyPolicyRequest>(params)
+            .map_err(|_| ApiError::BadRequest)?;
+
+        let key_id = request.key_id;
+
+        // Fetch rules that are allowed to use this key
+        let allowed_rules = self.fetch_key_configuration(module.clone(), &key_id)?;
+
+        // Verify that caller is allowed to use this key
+        if !allowed_rules.contains(&module.to_string()) {
+            error!("{module} tried to use KMS key which it's not allowed to: {key_id}",);
+            return Err(ApiError::BadRequest);
+        }
+
+        let mut request_builder = self.client.get_key_policy().key_id(key_id);
+        if let Some(policy_name) = request.policy_name {
+            request_builder = request_builder.policy_name(policy_name);
+        }
+
+        let policy = request_builder
+            .send()
+            .await
+            .map_err(KmsErrors::GetKeyPolicyError)?;
+
+        let (policy, policy_name) = match (policy.policy, policy.policy_name) {
+            (Some(p), Some(n)) => (p, n),
+            (_, None) => {
+                return Err(KmsErrors::UnexpectedKeyPolicyResponse {
+                    missing_field: "policy_name".to_string(),
+                })?
+            }
+            (None, _) => {
+                return Err(KmsErrors::UnexpectedKeyPolicyResponse {
+                    missing_field: "policy".to_string(),
+                })?
+            }
+        };
+
+        let policy = KeyPolicy {
+            policy: serde_json::from_str(&policy).map_err(|_| ApiError::BadRequest)?,
+            policy_name,
+        };
+
+        serde_json::to_string(&policy).map_err(|_| ApiError::BadRequest)
     }
 
     fn fetch_key_configuration<T: Display>(
