@@ -13,7 +13,7 @@ use aws_sdk_kms::{
     Client,
 };
 use plaid_stl::aws::kms::{
-    GenerateMacRequest, GetKeyPolicyRequest, KeyPolicy, MacAlgorithm, VerifyMacRequest,
+    GenerateMacRequest, GetKeyPolicyRequest, MacAlgorithm, VerifyMacRequest,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
@@ -26,7 +26,7 @@ pub enum KmsErrors {
     VerifyMacError(SdkError<VerifyMacError>),
     NoMacReturned,
     GetKeyPolicyError(SdkError<GetKeyPolicyError>),
-    UnexpectedKeyPolicyResponse { missing_field: String },
+    MissingPolicy,
 }
 
 /// A request to sign a given message with a KMS key.
@@ -371,32 +371,19 @@ impl Kms {
             return Err(ApiError::BadRequest);
         }
 
-        let mut request_builder = self.client.get_key_policy().key_id(key_id);
-        if let Some(policy_name) = request.policy_name {
-            request_builder = request_builder.policy_name(policy_name);
-        }
-
-        let policy = request_builder
+        let policy_response = self
+            .client
+            .get_key_policy()
+            .key_id(key_id)
             .send()
             .await
             .map_err(KmsErrors::GetKeyPolicyError)?;
 
-        let (policy, policy_name) = match (policy.policy, policy.policy_name) {
-            (Some(p), Some(n)) => (p, n),
-            (_, None) => Err(KmsErrors::UnexpectedKeyPolicyResponse {
-                missing_field: "policy_name".to_string(),
-            })?,
-            (None, _) => Err(KmsErrors::UnexpectedKeyPolicyResponse {
-                missing_field: "policy".to_string(),
-            })?,
+        let Some(policy) = policy_response.policy else {
+            Err(KmsErrors::MissingPolicy)?
         };
 
-        let policy = KeyPolicy {
-            policy: serde_json::from_str(&policy).map_err(|_| ApiError::BadRequest)?,
-            policy_name,
-        };
-
-        serde_json::to_string(&policy).map_err(|_| ApiError::BadRequest)
+        Ok(policy)
     }
 
     fn fetch_key_configuration<T: Display>(

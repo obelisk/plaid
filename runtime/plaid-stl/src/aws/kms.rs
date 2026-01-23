@@ -357,15 +357,6 @@ pub fn get_public_key(key_id: &str) -> Result<GetPublicKeyResponse, PlaidFunctio
 #[derive(Serialize, Deserialize)]
 pub struct GetKeyPolicyRequest {
     pub key_id: String,
-    pub policy_name: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct KeyPolicy {
-    /// A key policy document in JSON format.
-    pub policy: Value,
-    /// The name of the key policy.
-    pub policy_name: String,
 }
 
 /// Gets a key policy attached to the specified KMS key.
@@ -379,18 +370,16 @@ pub struct KeyPolicy {
 ///     - Key ARN: arn:aws:kms:us-east-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
 ///     - Alias name: alias/ExampleAlias
 ///     - Alias ARN: arn:aws:kms:us-east-2:111122223333:alias/ExampleAlias
-/// - `policy_name`: Specifies the name of the key policy. If no policy name is specified, the default value is `default`
-pub fn get_key_policy(
-    key_id: impl Display,
-    policy_name: Option<impl Display>,
-) -> Result<KeyPolicy, PlaidFunctionError> {
+///
+/// # Returns
+/// A JSON value representing the key policy.
+pub fn get_key_policy(key_id: impl Display) -> Result<Value, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(aws_kms, get_key_policy);
     }
 
     let request = GetKeyPolicyRequest {
         key_id: key_id.to_string(),
-        policy_name: policy_name.map(|n| n.to_string()),
     };
     let request = serde_json::to_string(&request).unwrap();
 
