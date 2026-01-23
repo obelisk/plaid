@@ -31,7 +31,7 @@ test_mode_exemptions = [
     "test_dynamodb.wasm",
     "test_mnr_return_cert.wasm",
     "test_tls_cert_with_sni.wasm",
-    "test_gh_conversion_id.wasm"
+    "test_gh_id_conversion.wasm"
 ]
 
 [loading.persistent_response_size]
