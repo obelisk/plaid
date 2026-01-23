@@ -362,7 +362,9 @@ pub struct GetKeyPolicyRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KeyPolicy {
+    /// A key policy document in JSON format.
     pub policy: Value,
+    /// The name of the key policy.
     pub policy_name: String,
 }
 
