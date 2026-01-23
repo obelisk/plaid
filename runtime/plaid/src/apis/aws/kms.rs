@@ -383,16 +383,12 @@ impl Kms {
 
         let (policy, policy_name) = match (policy.policy, policy.policy_name) {
             (Some(p), Some(n)) => (p, n),
-            (_, None) => {
-                return Err(KmsErrors::UnexpectedKeyPolicyResponse {
-                    missing_field: "policy_name".to_string(),
-                })?
-            }
-            (None, _) => {
-                return Err(KmsErrors::UnexpectedKeyPolicyResponse {
-                    missing_field: "policy".to_string(),
-                })?
-            }
+            (_, None) => Err(KmsErrors::UnexpectedKeyPolicyResponse {
+                missing_field: "policy_name".to_string(),
+            })?,
+            (None, _) => Err(KmsErrors::UnexpectedKeyPolicyResponse {
+                missing_field: "policy".to_string(),
+            })?,
         };
 
         let policy = KeyPolicy {
