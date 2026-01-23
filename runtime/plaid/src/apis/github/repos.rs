@@ -1,7 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
 use http::{HeaderMap, HeaderValue};
-use octocrab::models::events::Repository;
 use plaid_stl::github::{
     CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus, CommentOnPullRequestRequest,
     CreateFileRequest, FetchFileCustomMediaType, FetchFileRequest, GithubRepository,
@@ -727,7 +726,7 @@ impl Github {
         match self.make_generic_get_request(address, module).await {
             Ok((status, Ok(body))) => {
                 if status == 200 {
-                    let repo_info: Repository = serde_json::from_str(&body)
+                    let repo_info: GithubRepository = serde_json::from_str(&body)
                         .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
                     Ok(repo_info.id.to_string())
                 } else {

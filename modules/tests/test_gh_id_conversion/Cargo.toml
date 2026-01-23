@@ -1,6 +1,6 @@
 [package]
-name = "test_gh_username_id"
-description = "Test rule that verifies the APIs to map GH usernames to user IDs and vice versa work correctly."
+name = "test_gh_id_conversion"
+description = "Test rule that verifies the APIs to map GH IDs to user IDs, repo IDs, etc, and vice versa work correctly."
 version = "0.1.0"
 edition = "2021"
 
