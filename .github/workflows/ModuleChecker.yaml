@@ -19,10 +19,10 @@ jobs:
           cd runtime
           rustup toolchain install 1.86.0
           rustup default 1.86.0
-          cargo build --bin module_checker --no-default-features --features cranelift
+          cargo build --release --bin module_checker --no-default-features --features cranelift
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: module_checker
-          path: runtime/target/debug/module_checker
+          path: runtime/target/release/module_checker
