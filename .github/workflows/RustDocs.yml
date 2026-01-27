@@ -29,15 +29,22 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Generate Documentation
-        run: cargo doc --no-deps
+        # Builds both plaid and plaid-stl into the same target directory
+        run: cargo doc --workspace --no-deps
         working-directory: ./runtime
 
       - name: Fix Redirect
         shell: bash
         run: |
           DOC_DIR="./runtime/target/doc"
-          CRATE_NAME=$(cargo metadata --no-deps --format-version 1 --manifest-path ./runtime/Cargo.toml | jq -r '.packages[0].name' | tr '-' '_')
-          echo "<meta http-equiv=\"refresh\" content=\"0; url=${CRATE_NAME}/index.html\">" > "${DOC_DIR}/index.html"
+          # Set plaid-stl as the primary entry point
+          PRIMARY_CRATE="plaid-stl"
+          
+          # Standardize naming (hyphens to underscores) for the URL
+          REDIRECT_TARGET=$(echo $PRIMARY_CRATE | tr '-' '_')
+          
+          echo "<meta http-equiv=\"refresh\" content=\"0; url=${REDIRECT_TARGET}/index.html\">" > "${DOC_DIR}/index.html"
+          echo "Redirect set to: ${REDIRECT_TARGET}"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -45,10 +52,6 @@ jobs:
           path: './runtime/target/doc'
 
       - name: Deploy to GitHub Pages
-        # Only run this step on main push; this skips the environment check for PRs
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: deployment
         uses: actions/deploy-pages@v4
-        with:
-          # Explicitly target the environment only during the actual deployment
-          preview: false
