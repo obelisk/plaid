@@ -3,6 +3,8 @@ name: Rust Docs (Runtime)
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"] # This allows you to test the build on PR push
 
 permissions:
   contents: read
@@ -19,35 +21,35 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    # Added a conditional so it only attempts the final deployment on main
+    # But runs the build/upload steps on the PR
     steps:
-      - name: Setup Rust
-        run: |
-          rustup toolchain install 1.86.0
-          rustup default 1.86.0
-          rustup target add wasm32-unknown-unknown
-
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.86.0
+          targets: wasm32-unknown-unknown
+
       - name: Generate Documentation
+        run: cargo doc --no-deps
         working-directory: ./runtime
-        run: cargo doc --no-deps 
 
       - name: Fix Redirect
-        working-directory: ./runtime
         shell: bash
         run: |
-          # Auto-detect crate name to create the correct redirect
-          CRATE_NAME=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name' | tr '-' '_')
-          echo "<meta http-equiv=\"refresh\" content=\"0; url=${CRATE_NAME}/index.html\">" > target/doc/index.html
+          DOC_DIR="./runtime/target/doc"
+          CRATE_NAME=$(cargo metadata --no-deps --format-version 1 --manifest-path ./runtime/Cargo.toml | jq -r '.packages[0].name' | tr '-' '_')
+          echo "<meta http-equiv=\"refresh\" content=\"0; url=${CRATE_NAME}/index.html\">" > "${DOC_DIR}/index.html"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          working-directory: ./runtime
-          path: 'target/doc'
+          path: './runtime/target/doc'
 
       - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: deployment
         uses: actions/deploy-pages@v4
-
