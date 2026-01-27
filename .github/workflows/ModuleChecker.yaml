@@ -1,0 +1,26 @@
+name: Module Checker
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  release_module_checker:
+    name: Release module checker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build module checker
+        run: |
+          cd runtime
+          cargo build --bin module_checker
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: module_checker
+          path: runtime/target/debug/module_checker
