@@ -17,7 +17,7 @@ jobs:
       - name: Build module checker
         run: |
           cd runtime
-          cargo build --bin module_checker
+          cargo build --bin module_checker --no-default-features --features cranelift
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -142,3 +142,4 @@ path = "src/bin/blocksmith.rs"
 [[bin]]
 name = "module_checker"
 path = "src/bin/module_checker.rs"
+required-features = ["cranelift"]
