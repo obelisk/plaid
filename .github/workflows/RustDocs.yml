@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main"]
   pull_request:
-    branches: ["main"] # This allows you to test the build on PR push
+    branches: ["main"]
 
 permissions:
   contents: read
@@ -17,12 +17,7 @@ concurrency:
 
 jobs:
   deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
-    # Added a conditional so it only attempts the final deployment on main
-    # But runs the build/upload steps on the PR
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,6 +45,10 @@ jobs:
           path: './runtime/target/doc'
 
       - name: Deploy to GitHub Pages
+        # Only run this step on main push; this skips the environment check for PRs
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          # Explicitly target the environment only during the actual deployment
+          preview: false
