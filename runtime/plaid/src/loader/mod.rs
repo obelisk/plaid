@@ -12,9 +12,10 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs::{self};
 use std::sync::{Arc, RwLock};
+pub use utils::cost_function;
 use utils::{
-    cost_function, get_module_computation_limit, get_module_page_count,
-    get_module_persistent_storage_limit, read_and_configure_secrets, read_and_parse_modules,
+    get_module_computation_limit, get_module_page_count, get_module_persistent_storage_limit,
+    read_and_configure_secrets, read_and_parse_modules,
 };
 use wasmer::sys::{NativeEngineExt, Target};
 
