@@ -2,6 +2,9 @@ name: Module Checker
 
 on:
   workflow_call:
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -17,9 +20,12 @@ jobs:
       - name: Build module checker
         run: |
           cd runtime
+          rustup toolchain install 1.86.0
+          rustup default 1.86.0
           cargo build --bin module_checker --no-default-features --features cranelift
 
       - name: Upload artifact
+        if: github.event_name == 'workflow_call'
         uses: actions/upload-artifact@v4
         with:
           name: module_checker
