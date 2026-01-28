@@ -1,0 +1,57 @@
+name: Rust Docs (Runtime)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.86.0
+          targets: wasm32-unknown-unknown
+
+      - name: Generate Documentation
+        # Builds both plaid and plaid-stl into the same target directory
+        run: cargo doc --workspace --no-deps
+        working-directory: ./runtime
+
+      - name: Fix Redirect
+        shell: bash
+        run: |
+          DOC_DIR="./runtime/target/doc"
+          # Set plaid-stl as the primary entry point
+          PRIMARY_CRATE="plaid-stl"
+          
+          # Standardize naming (hyphens to underscores) for the URL
+          REDIRECT_TARGET=$(echo $PRIMARY_CRATE | tr '-' '_')
+          
+          echo "<meta http-equiv=\"refresh\" content=\"0; url=${REDIRECT_TARGET}/index.html\">" > "${DOC_DIR}/index.html"
+          echo "Redirect set to: ${REDIRECT_TARGET}"
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './runtime/target/doc'
+
+      - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: deployment
+        uses: actions/deploy-pages@v4
