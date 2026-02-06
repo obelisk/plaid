@@ -7,7 +7,7 @@ use crate::functions::{
     create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
 };
 use crate::loader::PlaidModule;
-use crate::logging::{Logger, LoggingError};
+use crate::logging::{Logger, LoggingError, Severity};
 use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
 
@@ -567,6 +567,15 @@ fn process_message_with_module(
 
         // Stop processing this log and move on to the next one
         return Ok(());
+    }
+
+    // Check to see if there is data in the error context even if the module didn't report an error
+    // Modules can do this to return warnings it wants to surface without affecting error metrics
+    if let Some(return_message) = &env.as_ref(&store).execution_error_context {
+        let _ = els.log_internal_message(
+            Severity::Info,
+            format!("Module [{}] returned: {}", module.name, return_message),
+        );
     }
 
     // Update the persistent response

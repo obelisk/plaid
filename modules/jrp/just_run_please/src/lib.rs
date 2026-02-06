@@ -14,5 +14,9 @@ fn main(data: String, _: LogSource) -> Result<(), i32> {
     let cert = result.cert.unwrap();
 
     plaid::print_debug_string(&format!("Received cert: {cert}"));
+
+    plaid::set_error_context(
+        "Setting some error context which gets logged as Severity::Info in the runtime",
+    );
     Ok(())
 }

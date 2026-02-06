@@ -19,7 +19,6 @@ const CHANNEL_CAPACITY: usize = 4096;
 #[derive(Serialize)]
 pub enum Severity {
     /// An informative log
-    #[allow(dead_code)]
     Info,
     /// A non critical error
     Warning,
