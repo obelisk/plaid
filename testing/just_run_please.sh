@@ -11,6 +11,12 @@ CACHE_BACKEND="inmemory"
 CONFIG_WORKING_PATH="plaid/resources/jrp_config"
 SECRETS_WORKING_PATH="/tmp/empty"
 
+# If secrets files doesn't exist, create an empty one
+if [ ! -f "$SECRETS_WORKING_PATH" ]; then
+  echo "Creating empty secrets file at $SECRETS_WORKING_PATH"
+  touch "$SECRETS_WORKING_PATH"
+fi
+
 # On macOS, we need to install a brew provided version of LLVM
 # so that we can compile WASM binaries.
 if uname | grep -q Darwin; then
