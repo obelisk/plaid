@@ -46,6 +46,8 @@ const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const DRIVE_UPLOAD_URL: &str =
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 
+const DRIVE_API_URL: &str = "https://www.googleapis.com/drive/v3/files";
+
 #[derive(Error, Debug)]
 pub enum GoogleDocsError {
     #[error("HTTP error: {0}")]
@@ -56,6 +58,8 @@ pub enum GoogleDocsError {
     OAuth { description: String },
     #[error("Google API error: {0}")]
     GoogleApi(String),
+    #[error("Bad Request")]
+    BadRequest,
 }
 
 impl GoogleDocs {
@@ -161,6 +165,116 @@ impl GoogleDocs {
         *lock = Some((access_token.clone(), expiry));
 
         Ok(access_token)
+    }
+
+    /// Creates a new folder in Google Drive
+    async fn create_folder(
+        &self,
+        module: Arc<PlaidModule>,
+        client: &Client,
+        access_token: &str,
+        parent_id: &str,
+        folder_name: &str,
+    ) -> Result<String, ApiError> {
+        self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
+
+        let body = json!({
+            "name": folder_name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [parent_id]
+        });
+
+        let response = client
+            .post(DRIVE_API_URL)
+            .bearer_auth(access_token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+
+        if !response.status().is_success() {
+            let error_text = response
+                .text()
+                .await
+                .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+            return Err(ApiError::GoogleDocsError(GoogleDocsError::GoogleApi(
+                format!("Create Folder failed: {}", error_text),
+            )));
+        }
+
+        let json: Value = response
+            .json()
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+
+        let folder_id = json
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or(GoogleDocsError::MissingField("id"))
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+
+        Ok(folder_id.to_string())
+    }
+
+    /// Copies an existing file/doc to a new location with a new name
+    pub async fn copy_file(
+        &self,
+        module: Arc<PlaidModule>,
+        file_id: &str,
+        parent_id: &str,
+        new_name: &str,
+    ) -> Result<String, ApiError> {
+        // check this module has access to [read] file_id and [write] folder
+        // self.check_module_permissions(AccessScope::Read, module.clone(), &file_id)?;
+        self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
+
+        let access_token = self
+            .refresh_access_token()
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err))?;
+
+        let url = format!("{}/{}/copy?supportsAllDrives=true", DRIVE_API_URL, file_id);
+
+        let body = json!({
+            "name": new_name,
+            "parents": [parent_id]
+        });
+
+        let response = self
+            .client
+            .post(&url)
+            .bearer_auth(access_token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+
+        if !response.status().is_success() {
+            let error_text = response
+                .text()
+                .await
+                .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+
+            return Err(ApiError::GoogleDocsError(GoogleDocsError::GoogleApi(
+                format!("Copy File failed: {}", error_text),
+            )));
+        }
+
+        let json: Value = response
+            .json()
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+
+        let new_file_id = json
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or(GoogleDocsError::MissingField("id"))
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+
+        let output = json!({"document_id": new_file_id});
+        let output = serde_json::to_string(&output).unwrap();
+
+        Ok(output)
     }
 
     /// Uploads a file to a Google Drive folder
@@ -408,7 +522,7 @@ mod tests {
 
         // Scopes (use space-separated for multiple)
         let scope =
-            "https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive.file";
+            "https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive";
 
         // Generate auth URL
         let auth_url = reqwest::Url::parse_with_params(
@@ -458,6 +572,49 @@ mod tests {
         println!("Refresh token: {}", response["refresh_token"]);
     }
 
+    #[tokio::test]
+    async fn test_copy_file() {
+        let m = test_module("test_module", true);
+        // From client-secret.json and the refresh token you obtained
+        let client_id = std::env::var("CLIENT_ID").unwrap();
+        let client_secret = std::env::var("CLIENT_SECRET").unwrap();
+        let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
+        let parent_id = std::env::var("PARENT_ID").unwrap();
+        let file_id = std::env::var("FILE_ID").unwrap();
+
+        // permissions: allow test module to write to folder_id
+        let rw = json!({parent_id.clone(): ["test_module"]});
+        let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
+
+        let config = GoogleDocsConfig {
+            client_id,
+            client_secret,
+            refresh_token,
+            rw,
+            r: HashMap::new(),
+        };
+        let docs = GoogleDocs::new(config);
+
+        //
+        // let input = CreateDocFromMarkdownInput {
+        //     folder_id,
+        //     title: "markdown test".to_string(),
+        //     content: content.to_string(),
+        // };
+        // let input = serde_json::to_string(&input).unwrap();
+
+        let output = docs
+            .copy_file(m, &file_id, &parent_id, "copied_file")
+            .await
+            .unwrap();
+        let output = serde_json::from_str::<Value>(&output).unwrap();
+        let document_id = output["document_id"].as_str().unwrap();
+
+        println!(
+            "View at: https://docs.google.com/document/d/{}",
+            document_id
+        );
+    }
     #[tokio::test]
     async fn create_markdown_doc() {
         let m = test_module("test_module", true);
