@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use plaid_stl::gcp::google_docs::{
-    CreateDocFromMarkdownInput, CreateDocFromMarkdownOutput, CreateSheetFromCsvInput,
+    CopyFileInput, CreateDocFromMarkdownInput, CreateDocFromMarkdownOutput, CreateFolderInput,
+    CreateFolderOutput, CreateSheetFromCsvInput, UploadFileInput, UploadFileOutput,
 };
 use pulldown_cmark::{html, Options, Parser};
 use reqwest::{multipart, Client};
@@ -168,12 +169,14 @@ impl GoogleDocs {
     }
 
     /// Creates a new folder in Google Drive
-    async fn create_folder(
+    pub async fn create_folder(
         &self,
+        input: &str,
         module: Arc<PlaidModule>,
-        parent_id: &str,
-        folder_name: &str,
     ) -> Result<String, ApiError> {
+        let CreateFolderInput { parent_id, name } =
+            serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
+
         self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
 
         let access_token = self
@@ -182,7 +185,7 @@ impl GoogleDocs {
             .map_err(|err| ApiError::GoogleDocsError(err))?;
 
         let body = json!({
-            "name": folder_name,
+            "name": name,
             "mimeType": "application/vnd.google-apps.folder",
             "parents": [parent_id]
         });
@@ -215,9 +218,10 @@ impl GoogleDocs {
             .get("id")
             .and_then(|v| v.as_str())
             .ok_or(GoogleDocsError::MissingField("id"))
-            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?
+            .to_string();
 
-        let output = json!({"folder_id": folder_id});
+        let output = CreateFolderOutput { folder_id };
         let output =
             serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
@@ -227,11 +231,15 @@ impl GoogleDocs {
     /// Copies an existing file/doc to a new location with a new name
     pub async fn copy_file(
         &self,
+        input: &str,
         module: Arc<PlaidModule>,
-        file_id: &str,
-        parent_id: &str,
-        new_name: &str,
     ) -> Result<String, ApiError> {
+        let CopyFileInput {
+            file_id,
+            parent_id,
+            name,
+        } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
+
         // check this module has access to [read] file_id and [write] parent_folder
         self.check_module_permissions(AccessScope::Read, module.clone(), &file_id)?;
         self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
@@ -244,7 +252,7 @@ impl GoogleDocs {
         let url = format!("{}/{}/copy?supportsAllDrives=true", DRIVE_API_URL, file_id);
 
         let body = json!({
-            "name": new_name,
+            "name": name,
             "parents": [parent_id]
         });
 
@@ -285,27 +293,40 @@ impl GoogleDocs {
         Ok(output)
     }
 
-    /// Uploads a file to a Google Drive folder
-    async fn upload_file(
+    /// Uploads a file to a Google Drive folder using multi-part upload
+    pub async fn upload_file(
         &self,
-        folder_id: &str,
-        title: &str,
-        content: String,
-        source_mime: &str,
-        target_mime: &str,
-    ) -> Result<String, GoogleDocsError> {
-        let access_token = self.refresh_access_token().await?;
+        input: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let UploadFileInput {
+            parent_id,
+            name,
+            content,
+            source_mime,
+            target_mime,
+        } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
+
+        self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
+
+        let access_token = self
+            .refresh_access_token()
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err))?;
 
         let metadata = json!({
-            "name": title,
+            "name": name,
             "mimeType": target_mime,
-            "parents": [folder_id]
+            "parents": [parent_id]
         });
 
         let metadata_part = multipart::Part::text(metadata.to_string())
-            .mime_str("application/json; charset=UTF-8")?;
+            .mime_str("application/json; charset=UTF-8")
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
 
-        let content_part = multipart::Part::text(content).mime_str(source_mime)?;
+        let content_part = multipart::Part::text(content)
+            .mime_str(&source_mime)
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
 
         let form = multipart::Form::new()
             .part("metadata", metadata_part)
@@ -317,22 +338,34 @@ impl GoogleDocs {
             .bearer_auth(access_token)
             .multipart(form)
             .send()
-            .await?;
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(GoogleDocsError::GoogleApi(format!(
-                "Drive Upload failed: {}",
-                error_text
+            let error_text = response
+                .text()
+                .await
+                .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+            return Err(ApiError::GoogleDocsError(GoogleDocsError::GoogleApi(
+                format!("Drive Upload failed: {}", error_text),
             )));
         }
 
-        let json: Value = response.json().await?;
+        let json: Value = response
+            .json()
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
 
-        json.get("id")
+        let document_id = json
+            .get("id")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .ok_or(GoogleDocsError::MissingField("id"))
+            .ok_or(ApiError::GoogleDocsError(GoogleDocsError::MissingField(
+                "id",
+            )))?;
+
+        let output = UploadFileOutput { document_id };
+        serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 
     /// Create Google Doc from markdown content
@@ -342,25 +375,26 @@ impl GoogleDocs {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let CreateDocFromMarkdownInput {
-            folder_id,
-            title,
+            parent_id,
+            name,
             content,
         } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
-        // check this module has access to this folder
-        self.check_module_permissions(AccessScope::Write, module, &folder_id)?;
+        // convert markdown to html
+        let content = markdown_to_html(&content);
 
-        let html_output = markdown_to_html(&content);
-        let document_id = self
-            .upload_file(
-                &folder_id,
-                &title,
-                html_output,
-                "text/html",
-                "application/vnd.google-apps.document",
-            )
-            .await
-            .map_err(|err| ApiError::GoogleDocsError(err))?;
+        // upload html, auto convert to google doc
+        let upload_input = UploadFileInput {
+            parent_id,
+            name,
+            content,
+            source_mime: String::from("text/html"),
+            target_mime: String::from("application/vnd.google-apps.document"),
+        };
+        let upload_input = serde_json::to_string(&upload_input)
+            .map_err(|err| ApiError::SerdeError(err.to_string()))?;
+
+        let document_id = self.upload_file(&upload_input, module).await?;
 
         let output = CreateDocFromMarkdownOutput { document_id };
         serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))
@@ -373,24 +407,22 @@ impl GoogleDocs {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let CreateSheetFromCsvInput {
-            folder_id,
-            title,
+            parent_id,
+            name,
             content,
         } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
-        // check this module has access to this folder
-        self.check_module_permissions(AccessScope::Write, module, &folder_id)?;
+        let upload_input = UploadFileInput {
+            parent_id,
+            name,
+            content,
+            source_mime: String::from("text/csv"),
+            target_mime: String::from("application/vnd.google-apps.spreadsheet"),
+        };
+        let upload_input = serde_json::to_string(&upload_input)
+            .map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
-        let document_id = self
-            .upload_file(
-                &folder_id,
-                &title,
-                content,
-                "text/csv",
-                "application/vnd.google-apps.spreadsheet",
-            )
-            .await
-            .map_err(|err| ApiError::GoogleDocsError(err))?;
+        let document_id = self.upload_file(&upload_input, module).await?;
 
         let output = CreateDocFromMarkdownOutput { document_id };
         serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))
@@ -416,6 +448,7 @@ fn markdown_to_html(md: &str) -> String {
 mod tests {
     use super::*;
     use http::header::CONTENT_TYPE;
+    use plaid_stl::gcp::google_docs::CopyFileOutput;
     use serde_json::from_value;
     use serde_json::Value;
     use std::io::BufRead;
@@ -587,7 +620,7 @@ mod tests {
         let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
         let parent_id = std::env::var("PARENT_ID").unwrap();
 
-        // permissions: allow test module to write to folder_id
+        // permissions: allow test_module to [write] to folder_id
         let rw = json!({parent_id.clone(): ["test_module"]});
         let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
 
@@ -599,22 +632,16 @@ mod tests {
             r: HashMap::new(),
         });
 
-        //
-        // let input = CreateDocFromMarkdownInput {
-        //     folder_id,
-        //     title: "markdown test".to_string(),
-        //     content: content.to_string(),
-        // };
-        // let input = serde_json::to_string(&input).unwrap();
+        let input = CreateFolderInput {
+            parent_id,
+            name: String::from("test_folder"),
+        };
+        let input = serde_json::to_string(&input).unwrap();
 
-        let output = docs
-            .create_folder(m, &parent_id, "test_folder")
-            .await
-            .unwrap();
-        let output = serde_json::from_str::<Value>(&output).unwrap();
-        let folder_id = output["folder_id"].as_str().unwrap();
+        let output = docs.create_folder(&input, m).await.unwrap();
+        let output = serde_json::from_str::<CreateFolderOutput>(&output).unwrap();
 
-        println!("Created {}", folder_id);
+        println!("Created {}", output.folder_id);
     }
 
     #[tokio::test]
@@ -626,7 +653,7 @@ mod tests {
         let parent_id = std::env::var("PARENT_ID").unwrap();
         let file_id = std::env::var("FILE_ID").unwrap();
 
-        // permissions: allow test module to write to folder_id
+        // permissions: allow test_module to [read] fie_id and [write] folder_id
         let rw = json!({parent_id.clone(): ["test_module"]});
         let r = json!({file_id.clone(): ["test_module"]});
         let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
@@ -640,24 +667,19 @@ mod tests {
             r,
         });
 
-        //
-        // let input = CreateDocFromMarkdownInput {
-        //     folder_id,
-        //     title: "markdown test".to_string(),
-        //     content: content.to_string(),
-        // };
-        // let input = serde_json::to_string(&input).unwrap();
+        let input = CopyFileInput {
+            parent_id,
+            file_id,
+            name: String::from("copied file"),
+        };
+        let input = serde_json::to_string(&input).unwrap();
 
-        let output = docs
-            .copy_file(m, &file_id, &parent_id, "copied_file")
-            .await
-            .unwrap();
-        let output = serde_json::from_str::<Value>(&output).unwrap();
-        let document_id = output["document_id"].as_str().unwrap();
+        let output = docs.copy_file(&input, m).await.unwrap();
+        let output = serde_json::from_str::<CopyFileOutput>(&output).unwrap();
 
         println!(
             "View at: https://docs.google.com/document/d/{}",
-            document_id
+            output.document_id
         );
     }
 
@@ -668,10 +690,10 @@ mod tests {
         let client_id = std::env::var("CLIENT_ID").unwrap();
         let client_secret = std::env::var("CLIENT_SECRET").unwrap();
         let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
-        let folder_id = std::env::var("FOLDER_ID").unwrap();
+        let parent_id = std::env::var("PARENT_ID").unwrap();
 
         // permissions: allow test module to write to folder_id
-        let rw = json!({folder_id.clone(): ["test_module"]});
+        let rw = json!({parent_id.clone(): ["test_module"]});
         let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
 
         let config = GoogleDocsConfig {
@@ -691,8 +713,8 @@ Markdown test
 "#;
 
         let input = CreateDocFromMarkdownInput {
-            folder_id,
-            title: "markdown test".to_string(),
+            parent_id,
+            name: "markdown test".to_string(),
             content: content.to_string(),
         };
         let input = serde_json::to_string(&input).unwrap();
@@ -714,10 +736,10 @@ Markdown test
         let client_id = std::env::var("CLIENT_ID").unwrap();
         let client_secret = std::env::var("CLIENT_SECRET").unwrap();
         let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
-        let folder_id = std::env::var("FOLDER_ID").unwrap();
+        let parent_id = std::env::var("PARENT_ID").unwrap();
 
         // permissions: allow test module to write to folder_id
-        let rw = json!({folder_id.clone(): ["test_module"]});
+        let rw = json!({parent_id.clone(): ["test_module"]});
         let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
 
         let config = GoogleDocsConfig {
@@ -734,8 +756,8 @@ Markdown test
 Server,5,Hardware"#;
 
         let input = CreateSheetFromCsvInput {
-            folder_id,
-            title: "csv test".to_string(),
+            parent_id,
+            name: "csv test".to_string(),
             content: content.to_string(),
         };
         let input = serde_json::to_string(&input).unwrap();

@@ -4,13 +4,69 @@ use crate::PlaidFunctionError;
 
 const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
 
+/// Input for create_folder operation
+#[derive(Serialize, Deserialize)]
+pub struct CreateFolderInput {
+    /// The Google Drive folder (parent folder) where to place the new folder
+    pub parent_id: String,
+    /// Name of the new folder
+    pub name: String,
+}
+
+/// Output for create_folder operation
+#[derive(Serialize, Deserialize)]
+pub struct CreateFolderOutput {
+    /// The ID of the newly created folder
+    pub folder_id: String,
+}
+
+/// Input for copy_file operation
+#[derive(Serialize, Deserialize)]
+pub struct CopyFileInput {
+    /// The Google Drive folder (parent folder) where to place the new file
+    pub parent_id: String,
+    /// The ID of the file to copy
+    pub file_id: String,
+    /// The name of the copied file
+    pub name: String,
+}
+
+/// Outoupt for copy_file operation
+#[derive(Serialize, Deserialize)]
+pub struct CopyFileOutput {
+    /// The document ID of the copied document
+    pub document_id: String,
+}
+
+/// Input for upload_file operation
+#[derive(Serialize, Deserialize)]
+pub struct UploadFileInput {
+    /// The Google Drive folder (parent folder) where to place the file
+    pub parent_id: String,
+    /// The name of the uploaded file
+    pub name: String,
+    /// The content of the uploaded file
+    pub content: String,
+    /// The source mime type of the file
+    pub source_mime: String,
+    /// The target mime type of the file (for conversion)
+    pub target_mime: String,
+}
+
+/// Output for upload_file operation
+#[derive(Serialize, Deserialize)]
+pub struct UploadFileOutput {
+    /// The document ID of the copied document
+    pub document_id: String,
+}
+
 /// Input for create_doc_from_markdown operation
 #[derive(Serialize, Deserialize)]
 pub struct CreateDocFromMarkdownInput {
     /// The Google Drive folder (parent folder) where to place the document
-    pub folder_id: String,
-    /// Title of the document
-    pub title: String,
+    pub parent_id: String,
+    /// Name of the document
+    pub name: String,
     /// Markdown content of the document.
     /// CommonMark markdown specification - https://commonmark.org/
     pub content: String,
@@ -28,9 +84,9 @@ pub struct CreateDocFromMarkdownOutput {
 #[derive(Serialize, Deserialize)]
 pub struct CreateSheetFromCsvInput {
     /// The Google Drive folder (parent folder) where to place the spreadsheet
-    pub folder_id: String,
-    /// Title of the spreadsheet
-    pub title: String,
+    pub parent_id: String,
+    /// Name of the spreadsheet
+    pub name: String,
     /// CSV content of the spreadsheet
     pub content: String,
 }
