@@ -99,6 +99,99 @@ pub struct CreateSheetFromCsvOutput {
     pub document_id: String,
 }
 
+/// Upload file to Google Drive folder
+pub fn upload_file(input: UploadFileInput) -> Result<UploadFileOutput, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(gcp_google_docs, upload_file);
+    }
+
+    let input = serde_json::to_string(&input).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        gcp_google_docs_upload_file(
+            input.as_ptr(),
+            input.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    serde_json::from_slice::<UploadFileOutput>(&return_buffer)
+        .map_err(|_| PlaidFunctionError::InternalApiError)
+}
+
+/// Copy file to Google Drive folder
+pub fn copy_file(input: CopyFileInput) -> Result<CopyFileOutput, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(gcp_google_docs, copy_file);
+    }
+
+    let input = serde_json::to_string(&input).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        gcp_google_docs_copy_file(
+            input.as_ptr(),
+            input.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    serde_json::from_slice::<CopyFileOutput>(&return_buffer)
+        .map_err(|_| PlaidFunctionError::InternalApiError)
+}
+
+/// Create new folder in Google Drive
+pub fn create_folder(input: CreateFolderInput) -> Result<CreateFolderOutput, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(gcp_google_docs, create_folder);
+    }
+
+    let input = serde_json::to_string(&input).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        gcp_google_docs_create_folder(
+            input.as_ptr(),
+            input.len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    serde_json::from_slice::<CreateFolderOutput>(&return_buffer)
+        .map_err(|_| PlaidFunctionError::InternalApiError)
+}
+
 /// Create google doc from markdown template
 pub fn create_doc_from_markdown(
     input: CreateDocFromMarkdownInput,
