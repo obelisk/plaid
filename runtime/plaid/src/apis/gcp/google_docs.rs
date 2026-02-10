@@ -171,12 +171,15 @@ impl GoogleDocs {
     async fn create_folder(
         &self,
         module: Arc<PlaidModule>,
-        client: &Client,
-        access_token: &str,
         parent_id: &str,
         folder_name: &str,
     ) -> Result<String, ApiError> {
         self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
+
+        let access_token = self
+            .refresh_access_token()
+            .await
+            .map_err(|err| ApiError::GoogleDocsError(err))?;
 
         let body = json!({
             "name": folder_name,
@@ -184,7 +187,8 @@ impl GoogleDocs {
             "parents": [parent_id]
         });
 
-        let response = client
+        let response = self
+            .client
             .post(DRIVE_API_URL)
             .bearer_auth(access_token)
             .json(&body)
@@ -213,7 +217,11 @@ impl GoogleDocs {
             .ok_or(GoogleDocsError::MissingField("id"))
             .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
 
-        Ok(folder_id.to_string())
+        let output = json!({"folder_id": folder_id});
+        let output =
+            serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))?;
+
+        Ok(output)
     }
 
     /// Copies an existing file/doc to a new location with a new name
@@ -224,8 +232,8 @@ impl GoogleDocs {
         parent_id: &str,
         new_name: &str,
     ) -> Result<String, ApiError> {
-        // check this module has access to [read] file_id and [write] folder
-        // self.check_module_permissions(AccessScope::Read, module.clone(), &file_id)?;
+        // check this module has access to [read] file_id and [write] parent_folder
+        self.check_module_permissions(AccessScope::Read, module.clone(), &file_id)?;
         self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
 
         let access_token = self
@@ -517,7 +525,6 @@ mod tests {
     async fn get_refresh_token() {
         let client_id = std::env::var("CLIENT_ID").unwrap();
         let client_secret = std::env::var("CLIENT_SECRET").unwrap();
-        // From your client-secret.json
         let redirect_uri = "http://localhost:8080".to_string(); // Must match what you set in console
 
         // Scopes (use space-separated for multiple)
@@ -573,9 +580,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_folder() {
+        let m = test_module("test_module", true);
+        let client_id = std::env::var("CLIENT_ID").unwrap();
+        let client_secret = std::env::var("CLIENT_SECRET").unwrap();
+        let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
+        let parent_id = std::env::var("PARENT_ID").unwrap();
+
+        // permissions: allow test module to write to folder_id
+        let rw = json!({parent_id.clone(): ["test_module"]});
+        let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
+
+        let docs = GoogleDocs::new(GoogleDocsConfig {
+            client_id,
+            client_secret,
+            refresh_token,
+            rw,
+            r: HashMap::new(),
+        });
+
+        //
+        // let input = CreateDocFromMarkdownInput {
+        //     folder_id,
+        //     title: "markdown test".to_string(),
+        //     content: content.to_string(),
+        // };
+        // let input = serde_json::to_string(&input).unwrap();
+
+        let output = docs
+            .create_folder(m, &parent_id, "test_folder")
+            .await
+            .unwrap();
+        let output = serde_json::from_str::<Value>(&output).unwrap();
+        let folder_id = output["folder_id"].as_str().unwrap();
+
+        println!("Created {}", folder_id);
+    }
+
+    #[tokio::test]
     async fn test_copy_file() {
         let m = test_module("test_module", true);
-        // From client-secret.json and the refresh token you obtained
         let client_id = std::env::var("CLIENT_ID").unwrap();
         let client_secret = std::env::var("CLIENT_SECRET").unwrap();
         let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
@@ -584,16 +628,17 @@ mod tests {
 
         // permissions: allow test module to write to folder_id
         let rw = json!({parent_id.clone(): ["test_module"]});
+        let r = json!({file_id.clone(): ["test_module"]});
         let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
+        let r = from_value::<HashMap<String, HashSet<String>>>(r).unwrap();
 
-        let config = GoogleDocsConfig {
+        let docs = GoogleDocs::new(GoogleDocsConfig {
             client_id,
             client_secret,
             refresh_token,
             rw,
-            r: HashMap::new(),
-        };
-        let docs = GoogleDocs::new(config);
+            r,
+        });
 
         //
         // let input = CreateDocFromMarkdownInput {
@@ -615,6 +660,7 @@ mod tests {
             document_id
         );
     }
+
     #[tokio::test]
     async fn create_markdown_doc() {
         let m = test_module("test_module", true);
