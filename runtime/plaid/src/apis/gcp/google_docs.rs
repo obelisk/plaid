@@ -620,7 +620,7 @@ mod tests {
         let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
         let parent_id = std::env::var("PARENT_ID").unwrap();
 
-        // permissions: allow test_module to [write] to folder_id
+        // permissions: allow test_module to [write] to parent_id
         let rw = json!({parent_id.clone(): ["test_module"]});
         let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
 
@@ -653,7 +653,7 @@ mod tests {
         let parent_id = std::env::var("PARENT_ID").unwrap();
         let file_id = std::env::var("FILE_ID").unwrap();
 
-        // permissions: allow test_module to [read] fie_id and [write] folder_id
+        // permissions: allow test_module to [read] file_id and [write] parent_id
         let rw = json!({parent_id.clone(): ["test_module"]});
         let r = json!({file_id.clone(): ["test_module"]});
         let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
@@ -738,7 +738,7 @@ Markdown test
         let refresh_token = std::env::var("REFRESH_TOKEN").unwrap();
         let parent_id = std::env::var("PARENT_ID").unwrap();
 
-        // permissions: allow test module to write to folder_id
+        // permissions: allow test module to [write] to parent_id
         let rw = json!({parent_id.clone(): ["test_module"]});
         let rw = from_value::<HashMap<String, HashSet<String>>>(rw).unwrap();
 
