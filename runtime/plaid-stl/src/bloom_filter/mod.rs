@@ -27,19 +27,19 @@ pub struct BloomFilterInternals {
     pub num_hashes: u32,
 }
 
-/// Build a bloom filter with the given parameters and items, returning the internals of the bloom filter as a JSON string.
+/// Build a bloom filter with the given parameters and items, returning the internals of the bloom filter.
 ///
 /// Args:
 /// - `params`: Parameters for building the bloom filter, including expected number of items and false positive rate.
 /// - `items`: The items to insert into the bloom filter.
 ///
 /// Returns:
-/// - On success, returns a JSON string representing the internals of the bloom filter, which can be used to reconstruct the filter for later use.
+/// - On success, returns the internals of the bloom filter, which can be used to reconstruct the filter for later use.
 /// - On failure, returns a `PlaidFunctionError` indicating what went wrong.
 pub fn build_with_items(
     params: &BloomFilterParams,
     items: &[impl Display],
-) -> Result<String, PlaidFunctionError> {
+) -> Result<BloomFilterInternals, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(bloom_filter, build_with_items);
     }
@@ -68,5 +68,5 @@ pub fn build_with_items(
     }
 
     return_buffer.truncate(res as usize);
-    Ok(String::from_utf8(return_buffer).unwrap())
+    Ok(serde_json::from_str(&String::from_utf8(return_buffer).unwrap()).unwrap())
 }
