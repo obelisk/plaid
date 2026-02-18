@@ -8,10 +8,31 @@ use plaid_stl::{
     web::{issue_jwt, JwtParams},
 };
 
+use jsonwebtoken::errors::Error as JwtError;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde_json::Value;
 
 entrypoint_with_source!();
+
+#[derive(Debug)]
+pub enum ValidateJwtError {
+    Jwt(JwtError),
+    InvalidAlgorithm,
+    InvalidToken,
+    InvalidSecret(String),
+}
+
+impl From<JwtError> for ValidateJwtError {
+    fn from(err: JwtError) -> Self {
+        ValidateJwtError::Jwt(err)
+    }
+}
+
+impl From<String> for ValidateJwtError {
+    fn from(err: String) -> Self {
+        ValidateJwtError::InvalidSecret(err)
+    }
+}
 
 const ES256_KEY_ID: &str = "46c642b0da02030407c6463c013a8dbd";
 const RS256_KEY_ID: &str = "b27b3d7279c0c6244e7e25e0f10ea4aa";
@@ -219,36 +240,21 @@ pub fn validate_jwt(
     jwt_params: &JwtParams,
     jwt: &str,
     enforced_claims: Option<&HashMap<String, Value>>,
-) -> Result<Value, jsonwebtoken::errors::Error> {
-    // Grab enforced claims for this key (if any)
-    let enforced_for_kid = enforced_claims_by_kid
-        .get(&jwt_params.kid)
-        .cloned()
-        .unwrap_or_default();
-
-    // Conflict rule: if JwtParams.aud is set and enforced aud exists but differs => error
-    if let (Some(param_aud), Some(enforced_aud)) =
-        (jwt_params.aud.as_deref(), enforced_for_kid.get("aud"))
-    {
-        if !aud_value_matches_param(enforced_aud, param_aud) {
-            return Err(invalid_token());
-        }
-    }
-
+) -> Result<Value, ValidateJwtError> {
     // ---- Normal header + signature validation setup ----
     let header = decode_header(jwt)?;
-    let alg = header.alg.ok_or_else(invalid_token)?;
+    let alg = header.alg;
 
     match alg {
         Algorithm::RS256 | Algorithm::ES256 => {}
         _ => {
-            return Err(jsonwebtoken::errors::Error::from(
-                jsonwebtoken::errors::ErrorKind::InvalidAlgorithm,
-            ))
+            return Err(ValidateJwtError::InvalidAlgorithm);
         }
     }
 
-    let public_key_pem = plaid::get_secrets("pub_" + &jwt_params.kid)?;
+    let key_name = format!("pub_{}", jwt_params.kid);
+    let public_key_pem = plaid::get_secrets(key_name.as_str())
+        .map_err(|e| ValidateJwtError::InvalidSecret(e.to_string()))?;
     let decoding_key = match alg {
         Algorithm::RS256 => DecodingKey::from_rsa_pem(public_key_pem.as_bytes())?,
         Algorithm::ES256 => DecodingKey::from_ec_pem(public_key_pem.as_bytes())?,
@@ -264,7 +270,7 @@ pub fn validate_jwt(
     let claims = token.claims;
 
     // Build expected claims from JwtParams
-    let mut expected = Map::<String, Value>::new();
+    let mut expected = HashMap::<String, Value>::new();
     expected.insert("sub".to_string(), Value::String(jwt_params.sub.clone()));
 
     // Validate the claims that defined explicitly in JwtParams
@@ -297,7 +303,7 @@ pub fn validate_jwt(
     for (k, expected_v) in &expected {
         match claims.get(k) {
             Some(actual_v) if actual_v == expected_v => {}
-            _ => return Err(invalid_token()),
+            _ => return Err(ValidateJwtError::InvalidToken),
         }
     }
 
