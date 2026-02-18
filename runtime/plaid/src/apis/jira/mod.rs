@@ -5,8 +5,8 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use http::{HeaderMap, HeaderValue};
 use plaid_stl::jira::{
-    CreateIssueRequest, CreateIssueResponse, GetIssueResponse, GetUserResponse, PostCommentRequest,
-    UpdateIssueRequest,
+    CreateIssueRequest, CreateIssueResponse, GetIssueResponse, GetUserResponse, JiraIssue,
+    PostCommentRequest, SearchIssueRequest, UpdateIssueRequest,
 };
 use reqwest::Client;
 use serde::Deserialize;
@@ -341,5 +341,101 @@ impl Jira {
                 return Err(ApiError::JiraError(JiraError::NetworkError(e)));
             }
         }
+    }
+
+    /// Search for Jira issues using JQL
+    pub async fn search_issues(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request =
+            serde_json::from_str::<SearchIssueRequest>(params).map_err(|_| ApiError::BadRequest)?;
+
+        // Future development: consider how to validate the request.
+        // Do we want to put guardrails on the JQL query, for example by forcing the rule to pass
+        // a struct with a prescribed set of fields to filter on instead of a free-form JQL query?
+
+        // Percent-encode the JQL query to be passed as a query parameter in the URL
+        let percent_encoded_jql = urlencoding::encode(&request.jql);
+
+        let url = format!(
+            "{}/search/jql?fields=id,key&jql={}",
+            self.base_url, percent_encoded_jql
+        );
+
+        info!(
+            "Searching for Jira issues on behalf of [{module}] with JQL query: [{percent_encoded_jql}]"
+        );
+
+        // Internal struct used to deserialize the response from the REST API
+        #[derive(Deserialize)]
+        struct JiraSearchResponse {
+            #[serde(rename = "isLast")]
+            is_last: bool,
+            issues: Vec<JiraIssue>,
+            #[serde(rename = "nextPageToken")]
+            next_page_token: Option<String>,
+        }
+
+        // Helper function to fetch a page and handle errors
+        let fetch_page = |url: String| async {
+            match self.client.get(url).send().await {
+                Ok(resp) => {
+                    if resp.status() != 200 {
+                        let status = resp.status();
+                        let text = resp.text().await.unwrap_or_else(|_| "N/A".to_string());
+                        warn!("Jira returned {status}: {text}");
+                        return Err(ApiError::JiraError(JiraError::UnexpectedStatusCode(
+                            status.as_u16(),
+                        )));
+                    }
+
+                    resp.json::<JiraSearchResponse>()
+                        .await
+                        .map_err(|_| ApiError::JiraError(JiraError::InvalidResponse))
+                }
+                Err(e) => Err(ApiError::JiraError(JiraError::NetworkError(e))),
+            }
+        };
+
+        let mut result = vec![];
+        // First page
+        let mut current_page = fetch_page(url).await?;
+
+        loop {
+            result.extend(current_page.issues);
+
+            if let Some(max_results) = request.max_results {
+                if result.len() as u32 >= max_results {
+                    result.truncate(max_results as usize);
+                    break;
+                }
+            }
+
+            if current_page.is_last {
+                break;
+            }
+
+            match current_page.next_page_token {
+                Some(next_page_token) => {
+                    let url = format!(
+                        "{}/search/jql?fields=id,key&jql={}&nextPageToken={next_page_token}",
+                        self.base_url, percent_encoded_jql
+                    );
+
+                    info!("Fetching the next page of Jira search results with token [{next_page_token}]");
+
+                    current_page = fetch_page(url).await?;
+                }
+                None => {
+                    warn!("Jira search response indicated there are more pages, but no next page token was provided. Stopping pagination.");
+                    break;
+                }
+            }
+        }
+
+        Ok(serde_json::to_string(&result)
+            .map_err(|_| ApiError::JiraError(JiraError::InvalidResponse))?)
     }
 }
