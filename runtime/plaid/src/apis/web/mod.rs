@@ -62,6 +62,10 @@ impl JwtKeyType {
     }
 }
 
+/// Claims that must not be set via `enforced_claims` because they are already
+/// handled by dedicated config knobs or internal logic (and have security semantics).
+const RESERVED_ENFORCED_CLAIMS: [&str; 3] = ["sub", "iat", "exp"];
+
 #[derive(Deserialize)]
 struct JwtConfigRaw {
     /// The private key in PEM format. Interpretation depends on `key_type`.
@@ -78,9 +82,6 @@ struct JwtConfigRaw {
     /// If this is true, then `iat` is set to the current time,
     /// regardless of what is passed in the request
     enforce_accurate_iat: Option<bool>,
-    /// If this is set, then all JWTs signed with this key will
-    /// have this `aud`.
-    enforced_aud: Option<String>,
     /// If this is set, then all JWTs signed with this key must
     /// have a validity <= this value.
     max_ttl: Option<u64>,
@@ -96,11 +97,16 @@ struct JwtConfigRaw {
     /// Note - Be careful when configuring these fields, as including a crucial,
     /// untrusted field in a claim can impact the security of downstream systems.
     allowlisted_extra_fields: Option<Vec<String>>,
+    /// Generic enforced claims to always include in the JWT for this key.
+    ///
+    /// These are config-controlled, so they are NOT subject to `allowlisted_extra_fields`.
+    /// NOTE: Reserved claims ("sub", "iat", "exp") are rejected here to avoid
+    /// conflicting with dedicated enforcement logic.
+    #[serde(default)]
+    enforced_claims: Option<HashMap<String, Value>>,
 }
 
 /// Public runtime configuration for a JWT signing key.
-///
-/// NOTE: We intentionally do NOT derive Debug because `EncodingKey` does not implement Debug.
 pub struct JwtConfig {
     /// The signing key type / JWT `alg`.
     pub key_type: JwtKeyType,
@@ -111,9 +117,6 @@ pub struct JwtConfig {
     /// If this is true, then `iat` is set to the current time,
     /// regardless of what is passed in the request
     pub enforce_accurate_iat: Option<bool>,
-    /// If this is set, then all JWTs signed with this key will
-    /// have this `aud`.
-    pub enforced_aud: Option<String>,
     /// If this is set, then all JWTs signed with this key must
     /// have a validity <= this value.
     pub max_ttl: Option<u64>,
@@ -129,19 +132,27 @@ pub struct JwtConfig {
     /// Note - Be careful when configuring these fields, as including a crucial,
     /// untrusted field in a claim can impact the security of downstream systems.
     allowlisted_extra_fields: Option<Vec<String>>,
+    /// See `JwtConfigRaw::enforced_claims`.
+    enforced_claims: Option<HashMap<String, Value>>,
 }
 
 impl std::fmt::Debug for JwtConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Avoid printing key material. Provide only high-level info.
         f.debug_struct("JwtConfig")
             .field("key_type", &self.key_type)
             .field("allowed_rules", &self.allowed_rules)
             .field("enforce_accurate_iat", &self.enforce_accurate_iat)
-            .field("enforced_aud", &self.enforced_aud)
             .field("max_ttl", &self.max_ttl)
             .field("allowlisted_extra_headers", &self.allowlisted_extra_headers)
             .field("allowlisted_extra_fields", &self.allowlisted_extra_fields)
+            .field(
+                "enforced_claims",
+                &self
+                    .enforced_claims
+                    .as_ref()
+                    .map(|m| m.keys().cloned().collect::<Vec<_>>()),
+            )
+            // safe (no key material)
             .finish()
     }
 }
@@ -152,6 +163,17 @@ impl<'de> Deserialize<'de> for JwtConfig {
         D: serde::Deserializer<'de>,
     {
         let raw = JwtConfigRaw::deserialize(deserializer)?;
+
+        // Validate enforced_claims don't conflict with reserved claims.
+        if let Some(map) = &raw.enforced_claims {
+            for k in map.keys() {
+                if RESERVED_ENFORCED_CLAIMS.contains(&k.as_str()) {
+                    return Err(serde::de::Error::custom(format!(
+                        "enforced_claims may not include reserved claim [{k}]"
+                    )));
+                }
+            }
+        }
 
         let encoding_key = raw
             .key_type
@@ -164,10 +186,10 @@ impl<'de> Deserialize<'de> for JwtConfig {
             private_key: encoding_key,
             allowed_rules: raw.allowed_rules,
             enforce_accurate_iat: raw.enforce_accurate_iat,
-            enforced_aud: raw.enforced_aud,
             max_ttl: raw.max_ttl,
             allowlisted_extra_headers: raw.allowlisted_extra_headers,
             allowlisted_extra_fields: raw.allowlisted_extra_fields,
+            enforced_claims: raw.enforced_claims,
         })
     }
 }
@@ -293,14 +315,6 @@ impl Web {
             };
         claims.insert("exp".to_string(), Value::Number(exp.into()));
 
-        // aud (optional)
-        // If the key has an enforced aud, then we use that.
-        // Otherwise, we use whatever value is passed in the request (if any).
-        if let Some(enforced_aud) = &key_specs.enforced_aud {
-            claims.insert("aud".to_string(), Value::String(enforced_aud.clone()));
-        } else if let Some(aud) = request.aud {
-                claims.insert("aud".to_string(), Value::String(aud));
-        };
 
         // Include extra fields, but only if they are allowlisted in the config
         if !request.extra_fields.is_empty() {
@@ -325,6 +339,21 @@ impl Web {
                         "The request contains extra fields but none is allowed".to_string(),
                     )));
                 }
+            }
+        }
+
+        // Apply config-enforced claims (generic, not subject to allowlist).
+        // STRICT MODE: if the requester set the same claim to a different value, error out.
+        if let Some(enforced) = &key_specs.enforced_claims {
+            for (k, v) in enforced.iter() {
+                if let Some(existing) = claims.get(k) {
+                    if existing != v {
+                        return Err(ApiError::WebError(WebError::UnsupportedField(format!(
+                            "Claim [{k}] is enforced by config and cannot be set to a different value"
+                        ))));
+                    }
+                }
+                claims.insert(k.clone(), v.clone());
             }
         }
 
