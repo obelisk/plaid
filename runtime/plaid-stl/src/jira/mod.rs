@@ -213,7 +213,7 @@ pub fn search_issues(
 
     let request = serde_json::to_string(&payload).unwrap();
 
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let res = unsafe {
