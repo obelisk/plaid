@@ -182,6 +182,38 @@ sa5i5Zy6yHszl8nBOEWDUOx2RC6UKaCPT+dgr8O4OZ/d0PKGMo0a4a69
 
 allowed_rules = ["testing_test.wasm"]
 
+
+[apis."web".keys."b27b3d7279c0c6244e7e25e0f10ea4aa"]
+# To generate an RSA key PEM, run the following command:
+# openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:1024 -out rsa_1024_private.pem
+# Key is 1024 bits - using RS256 signing alg
+key_type = "rs256"
+# This is a test key. Do not use it in production.
+private_key = """
+-----BEGIN PRIVATE KEY-----
+MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAKJvR8wOQAarZd8l
+n+ZsPCAvSSrxUITSzbHnVzdT/pVZTC7WiiDokgNNDDPNY8fAB73UHadIU+JD4Boq
+hAle4e5hg/9BXkDSe4dlbTF9YhnKHktv01IuG3yipURJsjClfZxma7CZo75qOglK
+hhaN+EiE0xTh2zr8sm6Hd7si3WUBAgMBAAECgYAdcJnMrBCCpPHzvbf7ZUaIdsmG
+FPKJAEPzqIAwMPMFUofyPUQPrtc37fD2OpWJEI7Wouk09nDto2uskmQX5rB/4Ao6
+ZmJVqF5OI+inSW8q2zdCpksjKrHpbk5lY3FxT/DnxjVUgCDn6W4ZSOcKniwZoNB6
+Onjs/qNsqyyvsZ8+gQJBANMbFzfJLjQ/yl4VeD3BtiXFAs3+Ou1TGNXhcee694qO
+/uMK0i0piBK4wGLclR0rSx4tMyNRvqwlzkMkz6c9oJkCQQDE+nZQQi5czQi3XbB/
+ETBAsA6JT28lxp6tLDp8Brl8IQLULSCwCRqpRlhQnZNurFIVF1rDKuG/92lsrxo+
+vWCpAkEAhpVtzuXWK/9DD4oWdyCo9BlOeW8LuENSwQASMw7SQ6Z4PtymM56Xnn/k
+PuKrucXhBOMCCBFUQsFzZwDv1YoHeQJAYn2dpPnCdtJqVk05T//HMcEWM6ANQkUy
+2AHyaEtweVmEMZUy7/JNa3Bp/j0cF81/6V3ZGxcY88SA6UAQjmhgqQJAHuhCsU7a
+xuVyZo5RChZaWfWvdA4xIrJpoXXwsIXWjmniweAzKNmPAIFVSAOiCM6qYffNyU/6
+GsymJTWu6S+nYQ==
+-----END PRIVATE KEY-----
+"""
+
+allowed_rules = ["test_jwt.wasm"]
+
+[apis."web".keys."b27b3d7279c0c6244e7e25e0f10ea4aa"."enforced_claims"]
+aud = "audience"
+iss = "issuer"
+
 [apis."yubikey"]
 client_id = 99999
 secret_key = ""
