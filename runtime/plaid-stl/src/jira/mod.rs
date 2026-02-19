@@ -204,12 +204,22 @@ pub fn post_comment(payload: PostCommentRequest) -> Result<(), PlaidFunctionErro
 }
 
 /// Search for Jira issues
+///
+/// Args:
+/// - `jql`: The JQL query to execute
+/// - `max_results`: The maximum number of results to return (optional)
 pub fn search_issues(
-    payload: SearchIssueRequest,
+    jql: impl Display,
+    max_results: Option<u32>,
 ) -> Result<SearchIssueResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(jira, search_issues);
     }
+
+    let payload = SearchIssueRequest {
+        jql: jql.to_string(),
+        max_results,
+    };
 
     let request = serde_json::to_string(&payload).unwrap();
 

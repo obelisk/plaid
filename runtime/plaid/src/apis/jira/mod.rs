@@ -359,7 +359,7 @@ impl Jira {
         // Percent-encode the JQL query to be passed as a query parameter in the URL
         let percent_encoded_jql = urlencoding::encode(&request.jql);
 
-        let url = format!(
+        let request_url = format!(
             "{}/search/jql?fields=id,key&jql={}",
             self.base_url, percent_encoded_jql
         );
@@ -401,7 +401,7 @@ impl Jira {
 
         let mut result = vec![];
         // First page
-        let mut current_page = fetch_page(url).await?;
+        let mut current_page = fetch_page(request_url.clone()).await?;
 
         loop {
             result.extend(current_page.issues);
@@ -419,10 +419,7 @@ impl Jira {
 
             match current_page.next_page_token {
                 Some(next_page_token) => {
-                    let url = format!(
-                        "{}/search/jql?fields=id,key&jql={}&nextPageToken={next_page_token}",
-                        self.base_url, percent_encoded_jql
-                    );
+                    let url = format!("{request_url}&nextPageToken={next_page_token}");
 
                     info!("Fetching the next page of Jira search results with token [{next_page_token}]");
 

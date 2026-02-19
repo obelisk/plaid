@@ -28,11 +28,11 @@ impl BloomFilter {
         let payload: BloomFilterPayload = serde_json::from_str(params).map_err(|e| {
             ApiError::BloomFilterError(format!("Failed to parse bloom filter params: {}", e))
         })?;
-        let mut seed = vec![0u8; 16];
+        let mut seed = [0u8; 16];
         SystemRandom::new().fill(&mut seed).map_err(|_| {
             ApiError::BloomFilterError("Failed to generate seed for bloom filter".to_string())
         })?;
-        let seed_u128 = u128::from_le_bytes(seed[..16].try_into().unwrap());
+        let seed_u128 = u128::from_le_bytes(seed);
 
         let mut filter = FastBloomFilter::with_false_pos(payload.params.false_positive_rate)
             .seed(&seed_u128)
