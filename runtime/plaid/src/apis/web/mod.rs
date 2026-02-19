@@ -18,6 +18,7 @@ pub enum WebError {
     UnsupportedField(String),
     UnsupportedKeyType(String),
     FailedToParsePrivateKey(String),
+    EnforcedClaimsConflict(String),
 }
 
 /// Which signing algorithm/key type a configured key uses.
@@ -94,7 +95,7 @@ struct JwtConfigRaw {
     /// NOTE: Reserved claims ("sub", "iat", "exp") are rejected here to avoid
     /// conflicting with dedicated enforcement logic.
     #[serde(default)]
-    enforced_claims: Option<HashMap<String, Value>>,
+    enforced_claims: HashMap<String, Value>,
 }
 
 /// Public runtime configuration for a JWT signing key.
@@ -124,7 +125,7 @@ pub struct JwtConfig {
     /// untrusted field in a claim can impact the security of downstream systems.
     allowlisted_extra_fields: Option<Vec<String>>,
     /// See `JwtConfigRaw::enforced_claims`.
-    enforced_claims: Option<HashMap<String, Value>>,
+    enforced_claims: HashMap<String, Value>,
 }
 
 impl std::fmt::Debug for JwtConfig {
@@ -140,8 +141,9 @@ impl std::fmt::Debug for JwtConfig {
                 "enforced_claims",
                 &self
                     .enforced_claims
-                    .as_ref()
-                    .map(|m| m.keys().cloned().collect::<Vec<_>>()),
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>(),
             )
             // safe (no key material)
             .finish()
@@ -156,8 +158,8 @@ impl<'de> Deserialize<'de> for JwtConfig {
         let raw = JwtConfigRaw::deserialize(deserializer)?;
 
         // Validate enforced_claims don't conflict with reserved claims.
-        if let Some(map) = &raw.enforced_claims {
-            for k in map.keys() {
+        if !raw.enforced_claims.is_empty() {
+            for k in raw.enforced_claims.keys() {
                 if RESERVED_ENFORCED_CLAIMS.contains(&k.as_str()) {
                     return Err(serde::de::Error::custom(format!(
                         "enforced_claims may not include reserved claim [{k}]"
@@ -334,12 +336,12 @@ impl Web {
         }
 
         // Apply config-enforced claims (generic, not subject to allowlist).
-        // STRICT MODE: if the requester set the same claim to a different value, error out.
-        if let Some(enforced) = &key_specs.enforced_claims {
-            for (k, v) in enforced.iter() {
+        // If the requester set the same claim to a different value, error out.
+        if !key_specs.enforced_claims.is_empty() {
+            for (k, v) in key_specs.enforced_claims.iter() {
                 if let Some(existing) = claims.get(k) {
                     if existing != v {
-                        return Err(ApiError::WebError(WebError::UnsupportedField(format!(
+                        return Err(ApiError::WebError(WebError::EnforcedClaimsConflict(format!(
                             "Claim [{k}] is enforced by config and cannot be set to a different value"
                         ))));
                     }
