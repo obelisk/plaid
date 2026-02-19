@@ -166,6 +166,7 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
 -----END PRIVATE KEY-----
 """
 
+key_type = "es256"
 allowed_rules = ["test_jwt.wasm"]
 allowlisted_extra_fields = ["ext"]
 allowlisted_extra_headers = ["smt", "cty"]
@@ -180,14 +181,12 @@ sa5i5Zy6yHszl8nBOEWDUOx2RC6UKaCPT+dgr8O4OZ/d0PKGMo0a4a69
 -----END PRIVATE KEY-----
 """
 
+key_type = "es256"
 allowed_rules = ["testing_test.wasm"]
-
 
 [apis."web".keys."b27b3d7279c0c6244e7e25e0f10ea4aa"]
 # To generate an RSA key PEM, run the following command:
 # openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:1024 -out rsa_1024_private.pem
-# Key is 1024 bits - using RS256 signing alg
-key_type = "rs256"
 # This is a test key. Do not use it in production.
 private_key = """
 -----BEGIN PRIVATE KEY-----
@@ -208,6 +207,7 @@ GsymJTWu6S+nYQ==
 -----END PRIVATE KEY-----
 """
 
+key_type = "rs256"
 allowed_rules = ["test_jwt.wasm"]
 
 [apis."web".keys."b27b3d7279c0c6244e7e25e0f10ea4aa"."enforced_claims"]

@@ -34,13 +34,6 @@ pub enum JwtKeyType {
     Rs256,
 }
 
-impl Default for JwtKeyType {
-    fn default() -> Self {
-        // Backwards compatible default: existing configs were ES256-only.
-        JwtKeyType::Es256
-    }
-}
-
 impl JwtKeyType {
     fn algorithm(self) -> Algorithm {
         match self {
@@ -73,8 +66,6 @@ struct JwtConfigRaw {
     /// The signing key type / JWT `alg`.
     ///
     /// Supported values: `es256`, `rs256`.
-    /// If omitted, defaults to `es256` for backwards compatibility.
-    #[serde(default)]
     key_type: JwtKeyType,
 
     /// Which rules are allowed to use the key
