@@ -1,6 +1,7 @@
 #[cfg(feature = "aws")]
 pub mod aws;
 pub mod blockchain;
+pub mod bloom_filter;
 pub mod cryptography;
 #[cfg(feature = "gcp")]
 pub mod gcp;
@@ -19,6 +20,7 @@ pub mod yubikey;
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
 use crate::apis::blockchain::{evm, Blockchain, BlockchainConfig};
+use crate::apis::bloom_filter::BloomFilter;
 #[cfg(feature = "gcp")]
 use crate::apis::gcp::{Gcp, GcpConfig};
 use crate::apis::jira::{Jira, JiraConfig};
@@ -39,6 +41,7 @@ use aws_sdk_kms::operation::get_public_key::GetPublicKeyError;
 use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 
 use crate::{data::DelayedMessage, executor::Message};
+use bloom_filter::BloomFilterConfig;
 use crossbeam_channel::Sender;
 use general::{General, GeneralConfig};
 use github::{Github, GithubConfig};
@@ -76,6 +79,7 @@ pub struct Api {
     pub yubikey: Option<Yubikey>,
     pub web: Option<Web>,
     pub blockchain: Option<Blockchain>,
+    pub bloom_filter: Option<BloomFilter>,
 }
 
 /// Configurations for all the APIs Plaid can use
@@ -83,6 +87,7 @@ pub struct Api {
 pub struct ApiConfigs {
     #[cfg(feature = "aws")]
     pub aws: Option<AwsConfig>,
+    pub bloom_filter: Option<BloomFilterConfig>,
     #[cfg(feature = "gcp")]
     pub gcp: Option<GcpConfig>,
     pub cryptography: Option<CryptographyConfig>,
@@ -140,6 +145,7 @@ pub enum ApiError {
     JiraError(jira::JiraError),
     NetworkResponseTooLarge,
     TlsError(String),
+    BloomFilterError(String),
 }
 
 impl From<evm::EvmCallError> for ApiError {
@@ -187,6 +193,11 @@ impl Api {
 
         let blockchain = match config.blockchain {
             Some(blockchain) => Some(Blockchain::new(blockchain)),
+            _ => None,
+        };
+
+        let bloom_filter = match config.bloom_filter {
+            Some(bloom_filter) => Some(BloomFilter::new(bloom_filter)),
             _ => None,
         };
 
@@ -265,6 +276,7 @@ impl Api {
             gcp,
             blockchain,
             cryptography,
+            bloom_filter,
             general,
             github,
             jira,

@@ -65,6 +65,26 @@ pub struct PostCommentRequest {
     pub comment: String,
 }
 
+/// Request sent to the runtime to search for Jira issues
+#[derive(Serialize, Deserialize)]
+pub struct SearchIssueRequest {
+    pub jql: String,
+    pub max_results: Option<u32>,
+}
+
+/// Represents a Jira issue with only the most basic fields (id and key)
+#[derive(Serialize, Deserialize)]
+pub struct JiraIssue {
+    pub id: String,
+    pub key: String,
+}
+
+/// Response received from the runtime when searching for Jira issues
+#[derive(Serialize, Deserialize)]
+pub struct SearchIssueResponse {
+    pub issues: Vec<JiraIssue>,
+}
+
 // ==============================================================================================================
 
 /// Create a Jira issue
@@ -181,4 +201,44 @@ pub fn post_comment(payload: PostCommentRequest) -> Result<(), PlaidFunctionErro
         0 => Ok(()),
         x => Err(x.into()),
     }
+}
+
+/// Search for Jira issues
+///
+/// Args:
+/// - `jql`: The JQL query to execute
+/// - `max_results`: The maximum number of results to return (optional)
+pub fn search_issues(
+    jql: impl Display,
+    max_results: Option<u32>,
+) -> Result<SearchIssueResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(jira, search_issues);
+    }
+
+    let payload = SearchIssueRequest {
+        jql: jql.to_string(),
+        max_results,
+    };
+
+    let request = serde_json::to_string(&payload).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        jira_search_issues(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    Ok(serde_json::from_str(&String::from_utf8(return_buffer).unwrap()).unwrap())
 }

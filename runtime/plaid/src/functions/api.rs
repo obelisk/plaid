@@ -456,6 +456,7 @@ impl_new_function_with_error_buffer!(jira, get_issue, ALLOW_IN_TEST_MODE);
 impl_new_function!(jira, update_issue, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(jira, get_user, ALLOW_IN_TEST_MODE);
 impl_new_function!(jira, post_comment, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(jira, search_issues, ALLOW_IN_TEST_MODE);
 
 // AWS functions
 
@@ -594,6 +595,9 @@ impl_new_sub_module_function_with_error_buffer!(blockchain, evm, eth_call, ALLOW
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, gas_price, ALLOW_IN_TEST_MODE);
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_logs, ALLOW_IN_TEST_MODE);
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_block, ALLOW_IN_TEST_MODE);
+
+// Bloom filter functions
+impl_new_function_with_error_buffer!(bloom_filter, build_with_items, ALLOW_IN_TEST_MODE);
 
 pub fn to_api_function(
     name: &str,
@@ -908,6 +912,7 @@ pub fn to_api_function(
         "jira_update_issue" => Function::new_typed_with_env(&mut store, &env, jira_update_issue),
         "jira_get_user" => Function::new_typed_with_env(&mut store, &env, jira_get_user),
         "jira_post_comment" => Function::new_typed_with_env(&mut store, &env, jira_post_comment),
+        "jira_search_issues" => Function::new_typed_with_env(&mut store, &env, jira_search_issues),
 
         // KMS calls
         #[cfg(feature = "aws")]
@@ -1033,6 +1038,11 @@ pub fn to_api_function(
         }
         "blockchain_evm_get_block" => {
             Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_block)
+        }
+
+        // Bloomfilter calls
+        "bloom_filter_build_with_items" => {
+            Function::new_typed_with_env(&mut store, &env, bloom_filter_build_with_items)
         }
 
         // No match
