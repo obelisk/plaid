@@ -1,0 +1,7 @@
+[storage.db]
+type = "InMemory"
+
+# For persistent storage across restarts, use Sled:
+# [storage.db]
+# type = "Sled"
+# sled_path = "/data/sled"

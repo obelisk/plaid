@@ -1,0 +1,13 @@
+# Use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Mounts compiled_modules/ into the container for testing external rules.
+#
+# Build your rules locally:
+#   cargo build --release --target wasm32-unknown-unknown
+#   cp target/wasm32-unknown-unknown/release/my_rule.wasm compiled_modules/
+#
+# Then start with both compose files:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  plaid:
+    volumes:
+      - ./compiled_modules:/modules:ro

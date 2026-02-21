@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "hello-world",
+]
+resolver = "2"
+
+[profile.release]
+lto = true
+strip = "symbols"
