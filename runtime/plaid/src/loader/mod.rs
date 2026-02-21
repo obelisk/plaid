@@ -38,8 +38,10 @@ pub struct LimitedAmount {
     /// The limit's default value
     pub default: u64,
     /// Override values based on log type
+    #[serde(default)]
     pub log_type: HashMap<String, u64>,
     /// Override values based on module names
+    #[serde(default)]
     pub module_overrides: HashMap<String, u64>,
 }
 
@@ -82,8 +84,10 @@ pub struct LimitableAmount {
     /// The limit's default value
     default: LimitValue,
     /// Override values based on log type
+    #[serde(default)]
     log_type: HashMap<String, LimitValue>,
     /// Override values based on module names
+    #[serde(default)]
     module_overrides: HashMap<String, LimitValue>,
 }
 
@@ -105,6 +109,7 @@ pub struct Configuration {
     /// Where to load modules from
     pub module_dir: String,
     /// What the log type of a module should be if it's not the first part of the filename
+    #[serde(default)]
     pub log_type_overrides: HashMap<String, String>,
     /// How much computation a module is allowed to do
     #[serde(deserialize_with = "deserialize_limited_amount")]
@@ -118,6 +123,7 @@ pub struct Configuration {
     /// Instead, the values here should be names of secrets whose values are present in
     /// the secrets file. This makes it possible for to check in your Plaid config without exposing secrets.
     /// The mapping is `{log_type -> {secret_name -> secret_value}}`.
+    #[serde(default)]
     pub secrets: HashMap<String, HashMap<String, String>>,
     /// Accessory data which is available to all rules (unless overridden by the dedicated override config).
     /// The mapping is `{key -> value}``
@@ -125,12 +131,15 @@ pub struct Configuration {
     /// Per-log-type accessory data that is added to universal accessory data for the given log type. In case
     /// of a name clash, this takes precedence.
     /// The mapping is `{log_type -> {key -> value}}`
+    #[serde(default)]
     pub accessory_data_log_type_overrides: HashMap<String, HashMap<String, String>>,
     /// Per-rule accessory data that is added to universal accessory data and per-log-type accessory data. In
     /// case of a name clash, this takes precedence over everything else.
     /// The mapping is `{rule_file_name -> {key -> value}}`
+    #[serde(default)]
     pub accessory_data_file_overrides: HashMap<String, HashMap<String, String>>,
     /// See persistent_response_size in PlaidModule for an explanation on how to use this
+    #[serde(default)]
     pub persistent_response_size: HashMap<String, usize>,
     /// Modules will be loaded in test_mode meaning they will not be able to make any API calls that
     /// cause side effects. This does not include:
@@ -498,6 +507,16 @@ pub async fn load(
             let type_: Vec<&str> = filename.split('_').collect();
             type_[0].to_string()
         };
+
+        // Warn when the inferred log type differs from what the full filename would suggest
+        let filename_without_ext = filename.trim_end_matches(".wasm");
+        if !config.log_type_overrides.contains_key(&filename) && filename_without_ext != type_ {
+            warn!(
+                "Module [{filename}] assigned log type [{type_}] (inferred from first segment before '_'). \
+                 If you expected log type [{filename_without_ext}], add to [loading.log_type_overrides]: \
+                 \"{filename}\" = \"{filename_without_ext}\""
+            );
+        }
 
         // Default is the global test mode. Then if the module is in the exemptions specification
         // we will disable test mode for that module.

@@ -7,8 +7,6 @@
 # for examples of GitHub, Slack, AWS, GCP, blockchain, and other integrations.
 
 [apis."general"]
-[apis."general".network]
-[apis."general".network.web_requests]
 
 # Example: allow a rule to make HTTP GET requests
 # [apis."general".network.web_requests."example_request"]

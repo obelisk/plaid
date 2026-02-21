@@ -34,6 +34,7 @@ plaid  | [hello-world] parsed JSON with 1 keys
 ```
 local-dev/
 ├── docker-compose.yml          # Orchestrates the local Plaid runtime
+├── docker-compose.dev.yml      # Compose override for external modules
 ├── Dockerfile                  # Multi-stage: build runtime + modules
 ├── config/                     # Plaid configuration (TOML)
 │   ├── apis.toml               # External API definitions
@@ -55,7 +56,8 @@ local-dev/
 │       └── src/lib.rs
 ├── scripts/
 │   ├── build-modules.sh        # Build modules locally (no Docker)
-│   └── test-webhook.sh         # Quick webhook test helper
+│   ├── test-webhook.sh         # Quick webhook test helper
+│   └── watch-modules.sh        # Watch .wasm files and auto-restart
 └── README.md
 ```
 
@@ -154,53 +156,25 @@ default target, you'll need the `--target` flag every time. You can add one:
 target = "wasm32-unknown-unknown"
 ```
 
-**2. Mount the compiled modules into the container:**
-
-Create a `docker-compose.override.yml` in `local-dev/` (this file is
-gitignored and won't affect other developers):
-
-```yaml
-# docker-compose.override.yml
-services:
-  plaid:
-    volumes:
-      - /path/to/plaid-rules/target/wasm32-unknown-unknown/release:/external-modules:ro
-```
-
-**3. Update `loading.toml` to load from both directories:**
-
-The Plaid runtime loads modules from a single `module_dir`. To load external
-modules, mount them into the same `/modules` directory. Update the override:
-
-```yaml
-# docker-compose.override.yml
-services:
-  plaid:
-    volumes:
-      # Mount individual .wasm files into /modules alongside built-in modules
-      - /path/to/plaid-rules/target/wasm32-unknown-unknown/release/my_rule.wasm:/modules/my_rule.wasm:ro
-```
-
-Or use a script to copy the `.wasm` files you want into `compiled_modules/`
-and mount that directory:
+**2. Copy `.wasm` files into `compiled_modules/`:**
 
 ```bash
-# Copy specific rules you want to test
 mkdir -p compiled_modules
 cp ~/dev/plaid-rules/target/wasm32-unknown-unknown/release/my_rule.wasm compiled_modules/
 cp ~/dev/plaid-rules/target/wasm32-unknown-unknown/release/another_rule.wasm compiled_modules/
 ```
 
-```yaml
-# docker-compose.override.yml
-services:
-  plaid:
-    volumes:
-      - ./compiled_modules:/modules:ro
-```
-
 Note: when you mount over `/modules`, the built-in hello-world module is
 hidden. If you want both, copy it in too or use the build script.
+
+**3. Start with the dev compose file:**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
+
+This uses `docker-compose.dev.yml` which mounts `compiled_modules/` into
+the container at `/modules`. No custom override file needed.
 
 **4. Add webhook routes and log type overrides as needed:**
 
@@ -208,10 +182,22 @@ Edit `config/webhooks.toml` and `config/loading.toml` for your external rules,
 then restart:
 
 ```bash
-docker compose restart
+docker compose -f docker-compose.yml -f docker-compose.dev.yml restart
 ```
 
 No `--build` needed — config and modules are volume-mounted.
+
+**5. (Optional) Auto-restart on module changes:**
+
+Use the watch script to automatically restart the container when `.wasm`
+files in `compiled_modules/` change:
+
+```bash
+./scripts/watch-modules.sh compiled_modules
+```
+
+This uses `inotifywait` if available, otherwise falls back to polling.
+Re-compile your rules and the container restarts automatically.
 
 ### Option B: Symlink rules into the workspace (rebuilds in Docker)
 
@@ -304,13 +290,10 @@ echo "Building local rules..."
 docker compose up "$@"
 ```
 
-Then use `docker-compose.override.yml` to mount `compiled_modules/`:
+Then use `docker-compose.dev.yml` to mount `compiled_modules/`:
 
-```yaml
-services:
-  plaid:
-    volumes:
-      - ./compiled_modules:/modules:ro
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 
 ### Quick reference: iteration loop
@@ -323,8 +306,11 @@ cargo build --release --target wasm32-unknown-unknown
 cp target/wasm32-unknown-unknown/release/my_rule.wasm ~/dev/plaid/local-dev/compiled_modules/
 
 # In the local-dev directory:
-docker compose restart                    # picks up new .wasm
-./scripts/test-webhook.sh my-endpoint     # test it
+docker compose -f docker-compose.yml -f docker-compose.dev.yml restart  # picks up new .wasm
+./scripts/test-webhook.sh my-endpoint                                    # test it
+
+# Or use the watch script to auto-restart on changes:
+./scripts/watch-modules.sh compiled_modules
 ```
 
 ## Adding Secrets
@@ -488,9 +474,10 @@ your crate name has underscores, add a `log_type_overrides` entry in
 touch secrets/secrets.toml
 ```
 
-**"missing field" parse errors** — The Plaid runtime requires certain config
-fields even when empty. If you see `missing field 'foo'`, add an empty TOML
-table for it (e.g., `[loading.foo]`).
+**"missing field" parse errors** — Most HashMap/Vec config fields default to
+empty, but some fields (like `computation_amount`, `memory_page_count`,
+`storage_size`) are still required. If you see `missing field 'foo'`, add the
+field to your config (e.g., `[loading.foo]`).
 
 **`wasm-bindgen` link errors** — A dependency is pulling in `wasm-bindgen`,
 which requires a JS host. Fix by disabling default features on the offending
