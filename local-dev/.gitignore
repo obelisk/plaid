@@ -1,0 +1,9 @@
+# Build artifacts
+rules/target/
+compiled_modules/
+
+# Secrets (real secrets, not the example template)
+secrets/secrets.toml
+
+# Local overrides (per-developer customizations)
+docker-compose.override.yml

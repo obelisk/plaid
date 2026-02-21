@@ -1,0 +1,23 @@
+[webhooks."local"]
+listen_address = "0.0.0.0:8080"
+
+# Default webhook — receives POST requests at /webhook/default
+# Triggers any rule with log_type "default"
+[webhooks."local".webhooks."default"]
+log_type = "default"
+headers = ["Content-Type", "Authorization", "X-Custom-Header"]
+logbacks_allowed = "Unlimited"
+
+# Hello world webhook — receives POST requests at /webhook/hello
+# Triggers the hello_world rule
+[webhooks."local".webhooks."hello"]
+log_type = "hello_world"
+headers = []
+logbacks_allowed = "Unlimited"
+
+# GET handler example — returns static text at GET /webhook/health
+[webhooks."local".webhooks."health"]
+log_type = "health"
+headers = []
+[webhooks."local".webhooks."health".get_mode]
+response_mode = "static:ok"
