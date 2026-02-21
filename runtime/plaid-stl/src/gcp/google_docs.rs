@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
 
-const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
+const RETURN_BUFFER_SIZE: usize = 1024 * 4; // 4 KiB
 
 /// Input for create_folder operation
 #[derive(Serialize, Deserialize)]
