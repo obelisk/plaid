@@ -7,7 +7,8 @@ const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 4; // 4 MiB
 /// Input for create_folder operation
 #[derive(Serialize, Deserialize)]
 pub struct CreateFolderInput {
-    /// The Google Drive folder (parent folder) where to place the new folder
+    /// The Google Drive folder (parent folder) where to place the new folder.
+    /// Use "root" for the top-level of the user's Drive.
     pub parent_id: String,
     /// Name of the new folder
     pub name: String,
@@ -31,7 +32,7 @@ pub struct CopyFileInput {
     pub name: String,
 }
 
-/// Outoupt for copy_file operation
+/// Output for copy_file operation
 #[derive(Serialize, Deserialize)]
 pub struct CopyFileOutput {
     /// The document ID of the copied document
@@ -56,7 +57,7 @@ pub struct UploadFileInput {
 /// Output for upload_file operation
 #[derive(Serialize, Deserialize)]
 pub struct UploadFileOutput {
-    /// The document ID of the copied document
+    /// The document ID of the uploaded file
     pub document_id: String,
 }
 

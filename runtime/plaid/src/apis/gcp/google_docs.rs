@@ -3,8 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use plaid_stl::gcp::google_docs::{
-    CopyFileInput, CreateDocFromMarkdownInput, CreateDocFromMarkdownOutput, CreateFolderInput,
-    CreateFolderOutput, CreateSheetFromCsvInput, UploadFileInput, UploadFileOutput,
+    CopyFileInput, CopyFileOutput, CreateDocFromMarkdownInput, CreateDocFromMarkdownOutput,
+    CreateFolderInput, CreateFolderOutput, CreateSheetFromCsvInput, UploadFileInput,
+    UploadFileOutput,
 };
 use pulldown_cmark::{html, Options, Parser};
 use reqwest::{multipart, Client};
@@ -177,6 +178,8 @@ impl GoogleDocs {
         let CreateFolderInput { parent_id, name } =
             serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
+        info!("[{module}] create_folder in parent [{parent_id}] name [{name}]");
+
         self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
 
         let access_token = self
@@ -240,6 +243,8 @@ impl GoogleDocs {
             name,
         } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
+        info!("[{module}] copy_file [{file_id}] to parent [{parent_id}] name [{name}]");
+
         // check this module has access to [read] file_id and [write] parent_folder
         self.check_module_permissions(AccessScope::Read, module.clone(), &file_id)?;
         self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
@@ -285,12 +290,13 @@ impl GoogleDocs {
             .get("id")
             .and_then(|v| v.as_str())
             .ok_or(GoogleDocsError::MissingField("id"))
-            .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+            .map_err(|err| ApiError::GoogleDocsError(err.into()))?
+            .to_string();
 
-        let output = json!({"document_id": new_file_id});
-        let output = serde_json::to_string(&output).unwrap();
-
-        Ok(output)
+        let output = CopyFileOutput {
+            document_id: new_file_id,
+        };
+        serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 
     /// Uploads a file to a Google Drive folder using multi-part upload
@@ -306,6 +312,8 @@ impl GoogleDocs {
             source_mime,
             target_mime,
         } = serde_json::from_str(input).map_err(|err| ApiError::SerdeError(err.to_string()))?;
+
+        info!("[{module}] upload_file to parent [{parent_id}] name [{name}] source_mime [{source_mime}] target_mime [{target_mime}]");
 
         self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
 
@@ -394,9 +402,13 @@ impl GoogleDocs {
         let upload_input = serde_json::to_string(&upload_input)
             .map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
-        let document_id = self.upload_file(&upload_input, module).await?;
+        let upload_result = self.upload_file(&upload_input, module).await?;
+        let upload_output: UploadFileOutput = serde_json::from_str(&upload_result)
+            .map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
-        let output = CreateDocFromMarkdownOutput { document_id };
+        let output = CreateDocFromMarkdownOutput {
+            document_id: upload_output.document_id,
+        };
         serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 
@@ -422,9 +434,13 @@ impl GoogleDocs {
         let upload_input = serde_json::to_string(&upload_input)
             .map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
-        let document_id = self.upload_file(&upload_input, module).await?;
+        let upload_result = self.upload_file(&upload_input, module).await?;
+        let upload_output: UploadFileOutput = serde_json::from_str(&upload_result)
+            .map_err(|err| ApiError::SerdeError(err.to_string()))?;
 
-        let output = CreateDocFromMarkdownOutput { document_id };
+        let output = CreateDocFromMarkdownOutput {
+            document_id: upload_output.document_id,
+        };
         serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))
     }
 }
