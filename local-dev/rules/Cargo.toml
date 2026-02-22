@@ -1,6 +1,15 @@
 [workspace]
 members = [
     "hello-world",
+    "echo-json",
+    "counter",
+    "cron-heartbeat",
+    "webhook-router",
+    "rate-limiter",
+    "request-logger",
+    "todo-api",
+    "http-proxy",
+    "error-handling",
 ]
 resolver = "2"
 

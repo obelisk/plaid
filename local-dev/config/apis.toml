@@ -8,15 +8,28 @@
 
 [apis."general"]
 
-# Example: allow a rule to make HTTP GET requests
-# [apis."general".network.web_requests."example_request"]
-# verb = "get"
-# uri = "https://httpbin.org/get"
-# return_body = true
-# return_code = true
-# return_cert = false
-# allowed_rules = ["hello_world.wasm"]
-# [apis."general".network.web_requests."example_request".headers]
+# ──────────────────────────────────────────────────────────────
+# http-proxy example: outbound HTTP requests to httpbin.org
+# ──────────────────────────────────────────────────────────────
+
+[apis."general".network.web_requests."httpbin_get"]
+verb = "get"
+uri = "https://httpbin.org/get"
+return_body = true
+return_code = true
+return_cert = false
+allowed_rules = ["http_proxy.wasm"]
+[apis."general".network.web_requests."httpbin_get".headers]
+
+[apis."general".network.web_requests."httpbin_post"]
+verb = "post"
+uri = "https://httpbin.org/post"
+return_body = true
+return_code = true
+return_cert = false
+allowed_rules = ["http_proxy.wasm"]
+[apis."general".network.web_requests."httpbin_post".headers]
+Content-Type = "application/json"
 
 # Example: Slack integration
 # [apis."slack"]

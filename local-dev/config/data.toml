@@ -1,7 +1,7 @@
 [data]
 
-# Example: cron job that fires every 30 seconds
-# [data.interval]
-# [data.interval.jobs."my_cron_job"]
-# schedule = "0,30 * * * * * *"
-# log_type = "my_cron_rule"
+# cron-heartbeat example: fires every 30 seconds
+[data.interval]
+[data.interval.jobs."heartbeat"]
+schedule = "0,30 * * * * * *"
+log_type = "cron_heartbeat"
