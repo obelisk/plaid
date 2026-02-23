@@ -199,38 +199,16 @@ impl Storage {
             }
         };
 
-        let shared_dbs = config
-            .shared_dbs
-            .map(async |shared_dbs| {
-                join_all(shared_dbs.into_iter().map(async |(db_name, db_config)| {
-                    if db_name.to_string().ends_with(".wasm") {
-                        return Err(StorageError::SharedDbError(
-                            "The name of a shared DB must not end with .wasm".to_string(),
-                        ));
-                    }
-                    let used_storage = match database.get_namespace_byte_size(&db_name).await {
-                        Ok(r) => r,
-                        Err(_) => {
-                            return Err(StorageError::SharedDbError(
-                                "Could not count used storage in shared DB".to_string(),
-                            ))
-                        }
-                    };
-                    let db = SharedDb {
-                        config: db_config,
-                        used_storage: Arc::new(RwLock::new(used_storage)),
-                    };
-                    Ok((db_name, db))
+        let shared_dbs = match config.shared_dbs {
+            None => None,
+            Some(shared_dbs) => {
+                let results = join_all(shared_dbs.into_iter().map(|(db_name, db_config)| {
+                    init_shared_db(db_name, db_config, database.as_ref())
                 }))
-                .await
-                .into_iter()
-                .collect::<Result<HashMap<_, _>, _>>()
-            })
-            .ok_or(StorageError::SharedDbError(
-                "Error while configuring shared storage".to_string(),
-            ))?
-            .await
-            .ok();
+                .await;
+                Some(results.into_iter().collect::<Result<HashMap<_, _>, _>>()?)
+            }
+        };
 
         Ok(Storage {
             database,
@@ -278,4 +256,28 @@ impl Storage {
     pub async fn get_namespace_byte_size(&self, namespace: &str) -> Result<u64, StorageError> {
         self.database.get_namespace_byte_size(namespace).await
     }
+}
+
+/// Validates a shared DB name, reads its current byte size from storage, and builds a [`SharedDb`].
+async fn init_shared_db(
+    db_name: String,
+    db_config: SharedDbConfig,
+    database: &(dyn StorageProvider + Send + Sync),
+) -> Result<(String, SharedDb), StorageError> {
+    if db_name.ends_with(".wasm") {
+        return Err(StorageError::SharedDbError(
+            "The name of a shared DB must not end with .wasm".to_string(),
+        ));
+    }
+    let used_storage = database
+        .get_namespace_byte_size(&db_name)
+        .await
+        .map_err(|e| {
+            StorageError::SharedDbError(format!("Could not count used storage in shared DB: {e}"))
+        })?;
+    let db = SharedDb {
+        config: db_config,
+        used_storage: Arc::new(RwLock::new(used_storage)),
+    };
+    Ok((db_name, db))
 }
