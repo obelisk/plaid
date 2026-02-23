@@ -502,6 +502,22 @@ impl_new_sub_module_function_with_error_buffer!(aws, s3, put_object_tags, DISALL
 impl_new_sub_module_function_with_error_buffer!(
     gcp,
     google_docs,
+    upload_file,
+    DISALLOW_IN_TEST_MODE
+);
+#[cfg(feature = "gcp")]
+impl_new_sub_module_function_with_error_buffer!(gcp, google_docs, copy_file, DISALLOW_IN_TEST_MODE);
+#[cfg(feature = "gcp")]
+impl_new_sub_module_function_with_error_buffer!(
+    gcp,
+    google_docs,
+    create_folder,
+    DISALLOW_IN_TEST_MODE
+);
+#[cfg(feature = "gcp")]
+impl_new_sub_module_function_with_error_buffer!(
+    gcp,
+    google_docs,
     create_doc_from_markdown,
     DISALLOW_IN_TEST_MODE
 );
@@ -946,6 +962,22 @@ pub fn to_api_function(
 
         #[cfg(feature = "aws")]
         "aws_dynamodb_query" => Function::new_typed_with_env(&mut store, &env, aws_dynamodb_query),
+
+        // GCP
+        #[cfg(feature = "gcp")]
+        "gcp_google_docs_upload_file" => {
+            Function::new_typed_with_env(&mut store, &env, gcp_google_docs_upload_file)
+        }
+
+        #[cfg(feature = "gcp")]
+        "gcp_google_docs_copy_file" => {
+            Function::new_typed_with_env(&mut store, &env, gcp_google_docs_copy_file)
+        }
+
+        #[cfg(feature = "gcp")]
+        "gcp_google_docs_create_folder" => {
+            Function::new_typed_with_env(&mut store, &env, gcp_google_docs_create_folder)
+        }
 
         #[cfg(feature = "gcp")]
         "gcp_google_docs_create_doc_from_markdown" => {
