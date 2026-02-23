@@ -6,7 +6,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use http::{HeaderMap, HeaderValue};
 use plaid_stl::jira::{
     CreateIssueRequest, CreateIssueResponse, GetIssueResponse, GetUserResponse, JiraIssue,
-    PostCommentRequest, SearchIssueRequest, UpdateIssueRequest,
+    PostCommentRequest, SearchIssueRequest, SearchIssueResponse, UpdateIssueRequest,
 };
 use reqwest::Client;
 use serde::Deserialize;
@@ -432,7 +432,9 @@ impl Jira {
             }
         }
 
-        Ok(serde_json::to_string(&result)
+        let output = SearchIssueResponse { issues: result };
+
+        Ok(serde_json::to_string(&output)
             .map_err(|_| ApiError::JiraError(JiraError::InvalidResponse))?)
     }
 }
