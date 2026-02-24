@@ -528,6 +528,8 @@ impl_new_sub_module_function_with_error_buffer!(
     create_sheet_from_csv,
     DISALLOW_IN_TEST_MODE
 );
+#[cfg(feature = "gcp")]
+impl_new_sub_module_function_with_error_buffer!(gcp, bigquery, query_table, DISALLOW_IN_TEST_MODE);
 
 // Npm Functions
 impl_new_function_with_error_buffer!(npm, publish_empty_stub, DISALLOW_IN_TEST_MODE);
@@ -987,6 +989,11 @@ pub fn to_api_function(
         #[cfg(feature = "gcp")]
         "gcp_google_docs_create_sheet_from_csv" => {
             Function::new_typed_with_env(&mut store, &env, gcp_google_docs_create_sheet_from_csv)
+        }
+
+        #[cfg(feature = "gcp")]
+        "gcp_bigquery_query_table" => {
+            Function::new_typed_with_env(&mut store, &env, gcp_bigquery_query_table)
         }
 
         // PagerDuty Calls
