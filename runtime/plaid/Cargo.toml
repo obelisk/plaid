@@ -15,7 +15,7 @@ aws = [
 ]
 cranelift = ["wasmer/cranelift"]
 llvm = ["wasmer/llvm"]
-gcp = []
+gcp = ["google-cloud-bigquery"]
 
 [dependencies]
 aes = "0.7"
@@ -30,7 +30,7 @@ aws-sdk-sqs = { version = "1.41.0", optional = true }
 base64 = "0.13"
 block-modes = "0.8"
 fastbloom = "0.14"
-chrono = "0.4.41"
+chrono = "=0.4.39"
 clap = { version = "4", default-features = false, features = [
     "std",
     "help",
@@ -95,7 +95,7 @@ wasmer-middlewares = "6"
 x509-parser = "0.18.0"
 thiserror = "2.0.17"
 pulldown-cmark = "0.13.0"
-
+google-cloud-bigquery = { version = "0.15.0", optional = true, default-features = true }
 
 [[example]]
 name = "github-tailer"
