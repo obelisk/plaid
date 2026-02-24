@@ -80,7 +80,7 @@ pub struct BigQueryConfig {
 
 /// The default timeout if none is provided.
 fn default_timeout_ms() -> i64 {
-    50000
+    5000
 }
 
 pub struct BigQuery {
