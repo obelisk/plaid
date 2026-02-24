@@ -39,7 +39,7 @@ pub struct ReadTableRequest {
 ///
 /// println!("{} rows returned", rows.len());
 /// ```
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct ReadTableResponse {
     pub rows: Vec<HashMap<String, Value>>,
 }
