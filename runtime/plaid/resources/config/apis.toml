@@ -293,3 +293,27 @@ rules_and_actions = { "some_rule.wasm"  = ["Encrypt", "Decrypt"] }
 
 [apis.bloom_filter]
 # nothing here
+
+# =============================================================================
+# BigQuery example configuration
+# =============================================================================
+# [apis.gcp.bigquery]
+# project_id = ""
+# client_email = ""
+# private_key_id = ""
+# private_key = """
+# <some-private-key>
+# """
+# timeout_ms = 30000   # optional, defaults to 50000
+
+# # Read access map: module → dataset → list of permitted tables
+# [apis.gcp.bigquery.r."<some-module>.wasm"]
+# "<some-dataset>" = ["table1", "table2"]
+
+# # Column type schemas: dataset → table → column → type
+# # Supported types: "string" | "integer" | "float" | "boolean"
+# # Columns not listed here default to "string".
+# [apis.gcp.bigquery.schemas."<some-dataset>"."table1"]
+# column1 = "string"
+# colum2 = "float"
+
