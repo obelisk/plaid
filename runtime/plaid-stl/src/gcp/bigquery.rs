@@ -175,7 +175,7 @@ pub fn query_table(
         filter,
     };
 
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    const RETURN_BUFFER_SIZE: usize = 10 * 1000 * 1000; // 10 MB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
     let params = serde_json::to_string(&params).unwrap();

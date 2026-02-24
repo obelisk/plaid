@@ -175,7 +175,11 @@ impl BigQuery {
         // are preserved as their native JSON types rather than being coerced to
         // strings. Columns absent from the schema fall back to String, which is
         // always safe to attempt.
-        let mut rows = Vec::new();
+        //
+        // Memory safety: the BigQuery API enforces a hard 10 MB
+        // per-response cap server-side, so a malicious module cannot trigger an
+        // OOM by issuing a query that matches an arbitrarily large result set.
+        let mut rows: Vec<HashMap<String, serde_json::Value>> = Vec::new();
         while let Some(row) = iter.next().await.map_err(BigQueryError::from)? {
             let mut map = HashMap::new();
             for (i, col_name) in params.columns.iter().enumerate() {
