@@ -19,6 +19,9 @@ jobs:
     - name: Build local-dev docker-compose
       run: docker compose -f local-dev/docker-compose.yml build
 
+    - name: Create empty secrets file
+      run: touch local-dev/secrets/secrets.toml
+
     - name: Start services
       run: docker compose -f local-dev/docker-compose.yml up -d
 
