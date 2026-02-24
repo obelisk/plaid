@@ -18,6 +18,78 @@ pub struct ReadTableRequest {
     /// `SELECT *` so that callers are always explicit about what data they
     /// need and the runtime can return named results.
     pub columns: Vec<String>,
+    /// Optional WHERE clause. When `None` the query returns all rows.
+    pub filter: Option<Filter>,
+}
+
+/// A node in a WHERE clause expression tree.
+///
+/// Conditions can be nested arbitrarily using `And` and `Or`. The runtime
+/// validates all column names and renders the tree into safe BigQuery SQL —
+/// modules never construct raw SQL strings.
+///
+/// # Example
+///
+/// ```ignore
+/// // WHERE (status = 'active' AND login_count > 5)
+/// let filter = Filter::And(vec![
+///     Filter::Condition {
+///         column: "status".into(),
+///         operator: Operator::Eq,
+///         value: FilterValue::String("active".into()),
+///     },
+///     Filter::Condition {
+///         column: "login_count".into(),
+///         operator: Operator::Gt,
+///         value: FilterValue::Integer(5),
+///     },
+/// ]);
+/// ```
+#[derive(Serialize, Deserialize)]
+pub enum Filter {
+    /// All child conditions must be true.
+    And(Vec<Filter>),
+    /// At least one child condition must be true.
+    Or(Vec<Filter>),
+    /// A single column comparison.
+    Condition {
+        column: String,
+        operator: Operator,
+        value: FilterValue,
+    },
+}
+
+/// Comparison operator for a [`Filter::Condition`].
+#[derive(Serialize, Deserialize)]
+pub enum Operator {
+    /// `=`
+    Eq,
+    /// `!=`
+    Ne,
+    /// `<`
+    Lt,
+    /// `<=`
+    Le,
+    /// `>`
+    Gt,
+    /// `>=`
+    Ge,
+    /// `LIKE` — use `%` and `_` wildcards in a [`FilterValue::String`].
+    Like,
+    /// `IS NULL` — no value is required; the runtime ignores the `value` field.
+    IsNull,
+    /// `IS NOT NULL` — no value is required; the runtime ignores the `value` field.
+    IsNotNull,
+}
+
+/// The right-hand-side value for a [`Filter::Condition`].
+#[derive(Serialize, Deserialize)]
+pub enum FilterValue {
+    String(String),
+    Integer(i64),
+    Float(f64),
+    Boolean(bool),
+    Null,
 }
 
 /// Response returned by the runtime for a BigQuery read.
@@ -81,10 +153,14 @@ impl<'a> IntoIterator for &'a ReadTableResponse {
 /// Returns a [`ReadTableResponse`] that can be iterated directly or indexed
 /// like a slice. Each row is a [`HashMap`] keyed by the column names supplied
 /// in `columns`. NULL database values are represented as [`Value::Null`].
+///
+/// Pass `filter` to add a WHERE clause. Use [`Filter`] to build the condition
+/// tree — the runtime validates all identifiers and renders the SQL safely.
 pub fn query_table(
     dataset: impl Display,
     table: impl Display,
     columns: &[impl Display],
+    filter: Option<Filter>,
 ) -> Result<ReadTableResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(gcp_bigquery, query_table);
@@ -94,6 +170,7 @@ pub fn query_table(
         dataset: dataset.to_string(),
         table: table.to_string(),
         columns: columns.iter().map(|c| c.to_string()).collect(),
+        filter,
     };
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
