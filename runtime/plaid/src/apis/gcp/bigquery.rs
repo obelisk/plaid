@@ -168,6 +168,13 @@ impl BigQuery {
             .get(&params.dataset)
             .and_then(|d| d.get(&params.table));
 
+        // Stream rows from BigQuery one at a time. For each row, walk the
+        // requested columns in order — BigQuery returns them positionally, so
+        // the column index `i` is the correct handle into the row. The schema
+        // lookup drives decode_column so that integers, floats, and booleans
+        // are preserved as their native JSON types rather than being coerced to
+        // strings. Columns absent from the schema fall back to String, which is
+        // always safe to attempt.
         let mut rows = Vec::new();
         while let Some(row) = iter.next().await.map_err(BigQueryError::from)? {
             let mut map = HashMap::new();
