@@ -95,7 +95,10 @@ wasmer-middlewares = "6"
 x509-parser = "0.18.0"
 thiserror = "2.0.17"
 pulldown-cmark = "0.13.0"
-google-cloud-bigquery = { version = "0.15.0", optional = true, default-features = true }
+google-cloud-bigquery = { version = "0.15.0", optional = true, default-features = false, features = [
+    "rustls-tls",
+    "auth",
+] }
 
 [[example]]
 name = "github-tailer"
