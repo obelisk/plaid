@@ -9,10 +9,12 @@ use serde_json::Value;
 
 use crate::PlaidFunctionError;
 
-/// Request sent to the runtime to read rows from a BigQuery table.
-#[derive(Deserialize, Serialize)]
-pub struct ReadTableRequest {
+/// Request sent to the runtime to query a BigQuery table.
+#[derive(Deserialize, Serialize, Clone)]
+pub struct QueryTableRequest {
+    /// Dataset where `table` lives
     pub dataset: String,
+    /// Name of the table to query
     pub table: String,
     /// Columns to select. Must be non-empty; the runtime does not support
     /// `SELECT *` so that callers are always explicit about what data they
@@ -45,7 +47,7 @@ pub struct ReadTableRequest {
 ///     },
 /// ]);
 /// ```
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum Filter {
     /// All child conditions must be true.
     And(Vec<Filter>),
@@ -60,7 +62,7 @@ pub enum Filter {
 }
 
 /// Comparison operator for a [`Filter::Condition`].
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum Operator {
     /// `=`
     Eq,
@@ -83,7 +85,7 @@ pub enum Operator {
 }
 
 /// The right-hand-side value for a [`Filter::Condition`].
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum FilterValue {
     String(String),
     Integer(i64),
@@ -92,17 +94,17 @@ pub enum FilterValue {
     Null,
 }
 
-/// Response returned by the runtime for a BigQuery read.
+/// Response returned by the runtime for a BigQuery query.
 ///
 /// Each row is a [`HashMap`] keyed by column name. NULL database values are
 /// represented as [`Value::Null`].
 ///
-/// `ReadTableResponse` implements [`Deref`] to `[HashMap<String, Value>]` and
+/// `QueryTableResponse` implements [`Deref`] to `[HashMap<String, Value>]` and
 /// both consuming and borrowing [`IntoIterator`], so it can be used directly as
 /// a collection without accessing the inner field:
 ///
 /// ```ignore
-/// let rows = read_from_table("my_dataset", "events", &["user_id", "count"])?;
+/// let rows = query_table("my_dataset", "events", &["user_id", "count"])?;
 ///
 /// for row in &rows {
 ///     let user = &row["user_id"];   // Value::String
@@ -111,25 +113,25 @@ pub enum FilterValue {
 ///
 /// println!("{} rows returned", rows.len());
 /// ```
-#[derive(Deserialize, Serialize, Debug)]
-pub struct ReadTableResponse {
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct QueryTableResponse {
     pub rows: Vec<HashMap<String, Value>>,
 }
 
-impl Deref for ReadTableResponse {
+impl Deref for QueryTableResponse {
     type Target = [HashMap<String, Value>];
     fn deref(&self) -> &Self::Target {
         &self.rows
     }
 }
 
-impl DerefMut for ReadTableResponse {
+impl DerefMut for QueryTableResponse {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.rows
     }
 }
 
-impl IntoIterator for ReadTableResponse {
+impl IntoIterator for QueryTableResponse {
     type Item = HashMap<String, Value>;
     type IntoIter = std::vec::IntoIter<Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
@@ -137,7 +139,7 @@ impl IntoIterator for ReadTableResponse {
     }
 }
 
-impl<'a> IntoIterator for &'a ReadTableResponse {
+impl<'a> IntoIterator for &'a QueryTableResponse {
     type Item = &'a HashMap<String, Value>;
     type IntoIter = std::slice::Iter<'a, HashMap<String, Value>>;
     fn into_iter(self) -> Self::IntoIter {
@@ -145,12 +147,12 @@ impl<'a> IntoIterator for &'a ReadTableResponse {
     }
 }
 
-/// Read rows from a BigQuery table.
+/// Query a BigQuery table.
 ///
 /// `columns` must be non-empty. Specify exactly which columns you need;
 /// the runtime will reject requests that do not name at least one column.
 ///
-/// Returns a [`ReadTableResponse`] that can be iterated directly or indexed
+/// Returns a [`QueryTableResponse`] that can be iterated directly or indexed
 /// like a slice. Each row is a [`HashMap`] keyed by the column names supplied
 /// in `columns`. NULL database values are represented as [`Value::Null`].
 ///
@@ -161,12 +163,12 @@ pub fn query_table(
     table: impl Display,
     columns: &[impl Display],
     filter: Option<Filter>,
-) -> Result<ReadTableResponse, PlaidFunctionError> {
+) -> Result<QueryTableResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(gcp_bigquery, query_table);
     }
 
-    let params = ReadTableRequest {
+    let params = QueryTableRequest {
         dataset: dataset.to_string(),
         table: table.to_string(),
         columns: columns.iter().map(|c| c.to_string()).collect(),

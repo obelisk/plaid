@@ -6,7 +6,7 @@ use google_cloud_bigquery::{
     query::row::Row,
 };
 use plaid_stl::gcp::bigquery::{
-    Filter, FilterValue, Operator, ReadTableRequest, ReadTableResponse,
+    Filter, FilterValue, Operator, QueryTableRequest, QueryTableResponse,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -150,7 +150,7 @@ impl BigQuery {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let params =
-            serde_json::from_str::<ReadTableRequest>(params).map_err(|_| ApiError::BadRequest)?;
+            serde_json::from_str::<QueryTableRequest>(params).map_err(|_| ApiError::BadRequest)?;
 
         let query_request = self.build_query_request(&module, &params)?;
 
@@ -189,7 +189,7 @@ impl BigQuery {
             rows.push(map);
         }
 
-        let response = ReadTableResponse { rows };
+        let response = QueryTableResponse { rows };
         serde_json::to_string(&response).map_err(|_| ApiError::ImpossibleError)
     }
 
@@ -235,7 +235,7 @@ impl BigQuery {
     fn build_query_request(
         &self,
         module: &Arc<PlaidModule>,
-        params: &ReadTableRequest,
+        params: &QueryTableRequest,
     ) -> Result<QueryRequest, ApiError> {
         self.check_module_permission(module, &params.dataset, &params.table)?;
         let query = build_query_string(
