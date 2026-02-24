@@ -5,7 +5,9 @@ use google_cloud_bigquery::{
     http::job::query::QueryRequest,
     query::row::Row,
 };
-use plaid_stl::gcp::bigquery::{ReadTableRequest, ReadTableResponse};
+use plaid_stl::gcp::bigquery::{
+    Filter, FilterValue, Operator, ReadTableRequest, ReadTableResponse,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -229,7 +231,12 @@ impl BigQuery {
         params: &ReadTableRequest,
     ) -> Result<QueryRequest, ApiError> {
         self.check_module_permission(module, &params.dataset, &params.table)?;
-        let query = build_query_string(&params.dataset, &params.table, &params.columns)?;
+        let query = build_query_string(
+            &params.dataset,
+            &params.table,
+            &params.columns,
+            params.filter.as_ref(),
+        )?;
         Ok(QueryRequest {
             timeout_ms: Some(self.config.timeout_ms),
             query,
@@ -238,15 +245,18 @@ impl BigQuery {
     }
 }
 
-/// Validates that every identifier (dataset, table, column names) contains
-/// only ASCII letters, digits, and underscores, then builds the SELECT query
-/// with each column wrapped in backticks.
+/// Validates every identifier and builds the full `SELECT … FROM … [WHERE …]`
+/// query string.
 ///
-/// Backtick-quoting alone is not sufficient — a column name containing a
-/// literal backtick would break out of the quoting. Rejecting any name that
-/// is not a clean identifier is the safest approach and the correct thing to
-/// do in a controlled API: callers supply column names, not arbitrary SQL.
-fn build_query_string(dataset: &str, table: &str, columns: &[String]) -> Result<String, ApiError> {
+/// Column names, dataset, and table are validated against a strict identifier
+/// allowlist. The optional `filter` is rendered via [`build_filter_sql`], which
+/// recursively validates all column names inside the condition tree.
+fn build_query_string(
+    dataset: &str,
+    table: &str,
+    columns: &[String],
+    filter: Option<&Filter>,
+) -> Result<String, ApiError> {
     if !is_valid_identifier(dataset) || !is_valid_identifier(table) {
         return Err(ApiError::BadRequest);
     }
@@ -267,7 +277,104 @@ fn build_query_string(dataset: &str, table: &str, columns: &[String]) -> Result<
         .collect::<Vec<_>>()
         .join(", ");
 
-    Ok(format!("SELECT {column_list} FROM `{dataset}`.`{table}`"))
+    let mut sql = format!("SELECT {column_list} FROM `{dataset}`.`{table}`");
+
+    if let Some(f) = filter {
+        sql.push_str(" WHERE ");
+        sql.push_str(&build_filter_sql(f)?);
+    }
+
+    Ok(sql)
+}
+
+/// Recursively renders a [`Filter`] tree into a WHERE clause fragment.
+///
+/// Column names inside `Condition` nodes are validated with
+/// [`is_valid_identifier`] before use. `And` and `Or` nodes must contain at
+/// least one child.
+fn build_filter_sql(filter: &Filter) -> Result<String, ApiError> {
+    match filter {
+        Filter::And(children) | Filter::Or(children) if children.is_empty() => {
+            Err(ApiError::BadRequest)
+        }
+        Filter::And(children) => {
+            let parts = children
+                .iter()
+                .map(build_filter_sql)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(format!("({})", parts.join(" AND ")))
+        }
+        Filter::Or(children) => {
+            let parts = children
+                .iter()
+                .map(build_filter_sql)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(format!("({})", parts.join(" OR ")))
+        }
+        Filter::Condition {
+            column,
+            operator,
+            value,
+        } => {
+            if !is_valid_identifier(column) {
+                return Err(ApiError::BadRequest);
+            }
+            build_condition_sql(column, operator, value)
+        }
+    }
+}
+
+/// Renders a single `column OP value` condition.
+///
+/// `IsNull` and `IsNotNull` ignore `value` entirely.
+fn build_condition_sql(
+    column: &str,
+    op: &Operator,
+    value: &FilterValue,
+) -> Result<String, ApiError> {
+    let col = format!("`{column}`");
+    match op {
+        Operator::IsNull => return Ok(format!("{col} IS NULL")),
+        Operator::IsNotNull => return Ok(format!("{col} IS NOT NULL")),
+        _ => {}
+    }
+
+    let op_str = match op {
+        Operator::Eq => "=",
+        Operator::Ne => "<>",
+        Operator::Lt => "<",
+        Operator::Le => "<=",
+        Operator::Gt => ">",
+        Operator::Ge => ">=",
+        Operator::Like => "LIKE",
+        Operator::IsNull | Operator::IsNotNull => unreachable!(), // safety: returns above
+    };
+
+    Ok(format!("{col} {op_str} {}", build_value_sql(value)?))
+}
+
+/// Formats a [`FilterValue`] as a safe SQL literal.
+///
+/// Strings are wrapped in single quotes with internal single quotes doubled
+/// (`'` → `''`), which is the standard SQL escaping mechanism. NaN and
+/// infinite floats are rejected because BigQuery has no SQL representation for
+/// them.
+fn build_value_sql(value: &FilterValue) -> Result<String, ApiError> {
+    match value {
+        FilterValue::String(s) => {
+            let escaped = s.replace('\'', "''");
+            Ok(format!("'{escaped}'"))
+        }
+        FilterValue::Integer(n) => Ok(n.to_string()),
+        FilterValue::Float(f) => {
+            if f.is_nan() || f.is_infinite() {
+                return Err(ApiError::BadRequest);
+            }
+            Ok(f.to_string())
+        }
+        FilterValue::Boolean(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
+        FilterValue::Null => Ok("NULL".to_string()),
+    }
 }
 
 /// Extracts the value at `index` from `row`, parsing it into the
