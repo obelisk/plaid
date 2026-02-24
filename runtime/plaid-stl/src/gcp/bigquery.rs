@@ -87,7 +87,7 @@ pub fn query_table(
     columns: &[impl Display],
 ) -> Result<ReadTableResponse, PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(bigquery, query_table);
+        new_host_function_with_error_buffer!(gcp_bigquery, query_table);
     }
 
     let params = ReadTableRequest {
@@ -101,7 +101,7 @@ pub fn query_table(
 
     let params = serde_json::to_string(&params).unwrap();
     let res = unsafe {
-        bigquery_query_table(
+        gcp_bigquery_query_table(
             params.as_bytes().as_ptr(),
             params.as_bytes().len(),
             return_buffer.as_mut_ptr(),
