@@ -348,7 +348,7 @@ fn build_condition_sql(
 
     let op_str = match op {
         Operator::Eq => "=",
-        Operator::Ne => "<>",
+        Operator::Ne => "!=",
         Operator::Lt => "<",
         Operator::Le => "<=",
         Operator::Gt => ">",
