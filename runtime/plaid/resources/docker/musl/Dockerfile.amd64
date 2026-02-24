@@ -6,8 +6,8 @@ WORKDIR /build
 COPY . .
 
 # Pin this version for now until the __rust_probestack issue is resolved 
-RUN rustup toolchain install 1.86.0
-RUN rustup default 1.86.0
+RUN rustup toolchain install 1.88.0
+RUN rustup default 1.88.0
 RUN rustup target add x86_64-unknown-linux-musl
 
 RUN cargo build --release --bin=plaid
