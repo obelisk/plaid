@@ -125,7 +125,7 @@ impl BigQuery {
     }
 
     /// Executes a `SELECT` query against a BigQuery table and returns the
-    /// results serialised as a [`ReadTableResponse`] JSON string.
+    /// results serialised as a [`QueryTableResponse`] JSON string.
     ///
     /// # Flow
     ///
@@ -138,7 +138,7 @@ impl BigQuery {
     /// 4. For each cell, looks up the column's [`ColumnType`] from the
     ///    configured schema (defaulting to `String` when absent) and calls
     ///    [`decode_column`] to produce the correct `serde_json::Value` variant.
-    /// 5. Wraps the rows in a [`ReadTableResponse`] and serializes to JSON.
+    /// 5. Wraps the rows in a [`QueryTableResponse`] and serializes to JSON.
     ///
     /// # Errors
     ///
