@@ -5,6 +5,15 @@ test_mode = false
 
 [loading.log_type_overrides]
 "hello_world.wasm" = "hello_world"
+"echo_json.wasm" = "echo_json"
+"counter.wasm" = "counter"
+"cron_heartbeat.wasm" = "cron_heartbeat"
+"webhook_router.wasm" = "webhook_router"
+"rate_limiter.wasm" = "rate_limiter"
+"request_logger.wasm" = "request_logger"
+"todo_api.wasm" = "todo_api"
+"http_proxy.wasm" = "http_proxy"
+"error_handling.wasm" = "error_handling"
 
 [loading.computation_amount]
 default = 55_000_000
