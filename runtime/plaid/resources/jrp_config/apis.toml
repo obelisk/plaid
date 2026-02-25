@@ -81,6 +81,7 @@ OF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r
 -----END PRIVATE KEY-----
 """
 
+key_type = "es256"
 allowed_rules = ["test_jwt.wasm"]
 allowlisted_extra_fields = ["ext"]
 allowlisted_extra_headers = ["smt", "cty"]
@@ -95,7 +96,51 @@ sa5i5Zy6yHszl8nBOEWDUOx2RC6UKaCPT+dgr8O4OZ/d0PKGMo0a4a69
 -----END PRIVATE KEY-----
 """
 
+key_type = "es256"
 allowed_rules = ["testing_test.wasm"]
+
+[apis."web".keys."0260c8c6d8f48d959858c57fc7392748"]
+# To generate an RSA key PEM, run the following command:
+# openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out rsa_2048_private.pem
+# This is a test key. Do not use it in production.
+private_key = """
+-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC8DGpRez+f61FI
+TBh6kAymntVXHyit+G6tsrP/WF+U71DvgGQ3XeQ2dxcrekk6MMaBtscTtXX4oM82
+x+RYuY/nNHbA+se9cSLC8b4WNtJjCnpMpUM4YAve2zOioYRR/UCWI8R0REWSExpk
+gXewUmb+egF8xbuJ4i1AQlH7nGuDh8Jde1QfpV2s6WA0+/SQSToOJYH3rowImcRL
+Ok9auhCfZMmx+hT0wjj9Hm75nCXtHaRpnX/FuX/uM3nbKmoA/7ABOrLip+KnTYVM
+ZgJ1nIubOHegOkHOhdJ/1y/xLZYXeeUSJo8yULKi9eZvoWNK6fRWtkuvQ0exweOc
+Ks06MI39AgMBAAECggEAK3nEV9fCjzbAqVIcg7OLlTcaFEUaKtSJxCNRbZrRKFYG
+9IROxyUwNq5kXzMrvGYb8s/e6U3V+zg0iBIBV0j5feb5gKbKKKCAPKlWvPyKOgcp
+XNCFgMJl5C1yG+qzNKB0PvIAgK/rFLlRbASptwxqDvIGp4HwmJF/zEA5A463paYG
+ei1+CQUSpfinrLBKkAl6mV1jXQ2pZGlHWg//NqvXJ3c9NwAws3a+5e14cOr2C0nj
+aCgki9sNUgPzPS98xGheiJ3t/6qE+LQ5jUKtXPTclawHpCk6QpWbxXPa0O7wcWDs
+dXdtCpx/yVIMaY9VQyDcFAUkcqjx2SxwSSe+6Gm0IQKBgQD4gtJcQLHoIfAd5Sii
+VJeO9LBGFQjze58Qql/wDmKFTtWujHZlZf3uHxblbyRPFZx4VGBU3SrpZF+R/cEO
+KUyofknbmycvs+2NjjkrGofnqFN901s4LvMjDPp2ageUgufP/zIbs5X8J0OB1prA
+A9MDB7KFvF+/0UhEGSBRxBZvIQKBgQDBtyVM5gQNWa8FWsmDYsKvLZ1h/qJcfUWW
+bCl4HpMhRZhxLggNUWcAMH7bcM4eMl3lEtoAyqZdpjh/p2aHjs8OXxNzLLbX47JQ
+MTs0ak3aWSmTXMdXt/bWV3WcFiH9xgBZ0xywLxPzC3cpOFcTwwA7MzEyrjA1LKhI
+B0Q2xN9PXQKBgQCE+KMMn8VR+07bADJE4dSStpTXewvmFIChTzi0X04SHIOzuQ7k
+5LUBw/rhWx3nfx3ROPyujAUZCw8kM84oAKs3ARQOAK/wE2uJsc8fJDwSFXxPOFd3
+8Y9BcwFVeRiDO6REJD2wmuAnIu85OxZkpeczmNvKOWhWX+o2HeewOKb0YQKBgGs0
+XRsyjHmK8XZIKQ9iH5Xs65Vo4xfGaDV4BHcqjIg0SMoSDHi6XQNY00vEIP3LJ/V3
+OliHzgwzyj6zOOW6XdJ5QX1S+Jl/tJX2uOooDo/RGlYoWVWtRJiYbEkGYqdb5aPQ
+VqcWVrcB2F9ig6Y3G7CngwmmJp226iZ6hwC8cU0tAoGBAOTinqbspmK9d6QzUlyk
+9o0pelY2dFqh/3DizDiBITgos2QS22qwty2pcc5/dt9O7gkBBbWxtQuXU5n9mhfs
+BLaCPYKOdilAcJUHkecVotP3qre58wV2M6GlF/uZR5ChffRvFS4n6a8uj1tdl+Kj
+YguxxuhDa6BnBlFU9lfnLzM5
+-----END PRIVATE KEY-----
+
+"""
+
+key_type = "rs256"
+allowed_rules = ["test_jwt.wasm"]
+
+[apis."web".keys."0260c8c6d8f48d959858c57fc7392748"."enforced_claims"]
+aud = "audience"
+iss = "issuer"
 
 [apis."yubikey"]
 client_id = 99999

@@ -150,13 +150,16 @@ rm plaidrules_key_ed25519*
 echo "Starting Plaid In The Background and waiting for it to boot"
 cd runtime
 
+# If the compiler is llvm, modify the config to use the llvm backend
 if [ "$1" == "llvm" ]; then
-  # If the compiler is llvm, modify the config to use the llvm backend
-  sed -i 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' ${CONFIG_WORKING_PATH}/loading.toml
+
   # If macOS
   if uname | grep -q Darwin; then
+    sed -i '' 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' "${CONFIG_WORKING_PATH}/loading.toml"
     export RUSTFLAGS="-L /opt/homebrew/lib/"
     export LLVM_SYS_180_PREFIX="/opt/homebrew/Cellar/llvm@18/18.1.8"
+  else
+    sed -i 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' ${CONFIG_WORKING_PATH}/loading.toml
   fi
 fi
 
