@@ -24,9 +24,13 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: HashMap::<String, Value>::new(),
         extra_fields: HashMap::<String, Value>::new(),
     };
+
+    let testcase = "simple request (es256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_ok() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Simple request - rs256
     let jwt_params = JwtParams {
@@ -38,9 +42,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: HashMap::<String, Value>::new(),
         extra_fields: HashMap::<String, Value>::new(),
     };
+    let testcase = "simple request (rs256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_ok() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Add a field which is allowlisted - es256
     let jwt_params = JwtParams {
@@ -52,9 +59,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: HashMap::<String, Value>::new(),
         extra_fields: [("ext".to_string(), Value::String("v".to_string()))].into(),
     };
+    let testcase = "add a field which is allowlisted (es256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_ok() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Add aud, which is an enforced claim but doesn't match enforced value - should fail
     let jwt_params = JwtParams {
@@ -66,9 +76,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: HashMap::<String, Value>::new(),
         extra_fields: HashMap::<String, Value>::new(),
     };
+    let testcase = "add aud which is an enforced claim but doesn't match enforced value (rs256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_err() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Add aud, which is an enforced claim but matches enforced value - should succeed
     let jwt_params = JwtParams {
@@ -80,10 +93,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: HashMap::<String, Value>::new(),
         extra_fields: HashMap::<String, Value>::new(),
     };
+    let testcase = "add aud which is an enforced claim but matches enforced value (rs256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_ok() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
-
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Add a field which is an enforced claim, and is not allowlisted - should fail
     let jwt_params = JwtParams {
@@ -95,9 +110,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: HashMap::<String, Value>::new(),
         extra_fields: [("iss".to_string(), Value::String("Something".to_string()))].into(),
     };
+    let testcase = "add a field which is an enforced claim, and is not allowlisted (rs256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_err() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Add a field which is NOT allowlisted - should fail
     let jwt_params = JwtParams {
@@ -113,9 +131,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         ]
         .into(),
     };
+    let testcase = "add a field which is NOT allowlisted (es256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_err() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Add a header which is allowlisted
     let jwt_params = JwtParams {
@@ -127,9 +148,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: [("cty".to_string(), Value::String("something".to_string()))].into(),
         extra_fields: HashMap::<String, Value>::new(),
     };
+    let testcase = "add a header which is allowlisted (es256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_ok() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Add a header which is NOT allowlisted - should fail
     let jwt_params = JwtParams {
@@ -141,9 +165,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: [("smt".to_string(), Value::String("something".to_string()))].into(),
         extra_fields: HashMap::<String, Value>::new(),
     };
+    let testcase = "add a header which is NOT allowlisted (es256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_err() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Use a key ID that we are not allowed to use - should fail
     let jwt_params = JwtParams {
@@ -155,9 +182,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: HashMap::<String, Value>::new(),
         extra_fields: HashMap::<String, Value>::new(),
     };
+    let testcase = "use a key ID that we are not allowed to use (es256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_err() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Use a key ID that does not exist - should fail
     let jwt_params = JwtParams {
@@ -169,9 +199,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: HashMap::<String, Value>::new(),
         extra_fields: HashMap::<String, Value>::new(),
     };
+    let testcase = "use a key ID that does not exist (es256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_err() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     // Make a request without exp. Since the key does not enforce a max TTL, this will fail
     let jwt_params = JwtParams {
@@ -183,9 +216,12 @@ fn main(_: String, _: LogSource) -> Result<(), i32> {
         extra_headers: HashMap::<String, Value>::new(),
         extra_fields: HashMap::<String, Value>::new(),
     };
+    let testcase = "make a request without exp (es256)";
+    let mut status= "FAIL";
     if issue_jwt(&jwt_params).is_err() {
-        make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        status = "OK";
     }
+    make_named_request("test-response",  &format!("{} - {}", status, testcase), HashMap::new()).unwrap();
 
     Ok(())
 }
