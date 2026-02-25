@@ -284,6 +284,16 @@ impl Web {
                 claims.insert("iat".to_string(), Value::Number(iat.into()));
         }
 
+        // aud (optional)
+        if let Some(aud) = &request.aud {
+            if aud.trim().is_empty() {
+                return Err(ApiError::WebError(WebError::UnsupportedField(
+                    "aud cannot be empty".to_string(),
+                )));
+            }
+            claims.insert("aud".to_string(), Value::String(aud.clone()));
+        }
+
         // exp (mandatory)
         // If the key enforces a max TTL, then the request may or may not pass an exp: if it does,
         // we take the minimum between that and now+TTL.
