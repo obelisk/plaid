@@ -11,7 +11,7 @@ use serde_json::Value;
 entrypoint_with_source!();
 
 const ES256_KEY_ID: &str = "46c642b0da02030407c6463c013a8dbd";
-const RS256_KEY_ID: &str = "b27b3d7279c0c6244e7e25e0f10ea4aa";
+const RS256_KEY_ID: &str = "0260c8c6d8f48d959858c57fc7392748";
 
 fn main(_: String, _: LogSource) -> Result<(), i32> {
     // Simple request - es256
