@@ -1,0 +1,67 @@
+name: Local Dev Check
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: "**"
+
+permissions:
+  contents: read
+
+jobs:
+  local-dev-smoke-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build local-dev docker-compose
+      run: docker compose -f local-dev/docker-compose.yml build
+
+    - name: Create empty secrets file
+      run: touch local-dev/secrets/secrets.toml
+
+    - name: Start services
+      run: docker compose -f local-dev/docker-compose.yml up -d
+
+    - name: Wait for healthy
+      run: |
+        timeout=120
+        elapsed=0
+        while [ $elapsed -lt $timeout ]; do
+          status=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose -f local-dev/docker-compose.yml ps -q plaid) 2>/dev/null || echo "unknown")
+          if [ "$status" = "healthy" ]; then
+            echo "Service is healthy after ${elapsed}s"
+            exit 0
+          fi
+          echo "Waiting for healthy... (${elapsed}s, status: $status)"
+          sleep 5
+          elapsed=$((elapsed + 5))
+        done
+        echo "Timed out waiting for healthy status after ${timeout}s"
+        exit 1
+
+    - name: Validate health endpoint
+      run: |
+        response=$(curl -sf http://localhost:8080/webhook/health)
+        if [ "$response" != "ok" ]; then
+          echo "Expected 'ok', got: $response"
+          exit 1
+        fi
+        echo "Health check returned: $response"
+
+    - name: Validate hello webhook
+      run: |
+        curl -sf -X POST \
+          -H "Content-Type: application/json" \
+          -d '{"test": true}' \
+          http://localhost:8080/webhook/hello
+
+    - name: Dump logs on failure
+      if: failure()
+      run: docker compose -f local-dev/docker-compose.yml logs
+
+    - name: Tear down
+      if: always()
+      run: docker compose -f local-dev/docker-compose.yml down -v
