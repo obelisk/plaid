@@ -26,9 +26,7 @@ pub struct QueryTableRequest {
 
 /// A node in a WHERE clause expression tree.
 ///
-/// Conditions can be nested arbitrarily using `And` and `Or`. The runtime
-/// validates all column names and renders the tree into safe BigQuery SQL —
-/// modules never construct raw SQL strings.
+/// Conditions can be nested using `And` and `Or`.
 ///
 /// # Example
 ///
