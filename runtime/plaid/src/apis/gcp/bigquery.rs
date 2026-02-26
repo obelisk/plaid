@@ -19,6 +19,10 @@ const TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 /// Maximum `And`/`Or` nesting depth for a [`Filter`] tree.
 const MAX_FILTER_DEPTH: usize = 4;
 
+/// Maximum number of sibling conditions allowed inside a single `And`/`Or`
+/// node. Prevents unbounded SQL string growth from a flat list of conditions.
+const MAX_FILTER_CHILDREN: usize = 16;
+
 #[derive(Error, Debug)]
 pub enum BigQueryError {
     #[error("Authentication error: {0}")]
@@ -283,6 +287,12 @@ impl BigQuery {
         module: &Arc<PlaidModule>,
         params: &QueryTableRequest,
     ) -> Result<QueryRequest, ApiError> {
+        // Validate dataset and table identifiers before the permission check so
+        // that the names logged inside check_module_permission are guaranteed to
+        // be safe ASCII identifiers
+        if !is_valid_identifier(&params.dataset) || !is_valid_identifier(&params.table) {
+            return Err(ApiError::BadRequest);
+        }
         self.check_module_permission(module, &params.dataset, &params.table)?;
         let query = build_query_string(
             &params.dataset,
@@ -344,8 +354,8 @@ fn build_query_string(
 ///
 /// Column names inside `Condition` nodes are validated with
 /// [`is_valid_identifier`] before use. `And` and `Or` nodes must contain at
-/// least one child. Nesting depth is limited to [`MAX_FILTER_DEPTH`]; trees
-/// deeper than that are rejected with `BadRequest`.
+/// least one child and no more than [`MAX_FILTER_CHILDREN`]. Nesting depth is
+/// limited to [`MAX_FILTER_DEPTH`]; exceeding either limit returns `BadRequest`.
 fn build_filter_sql(filter: &Filter, depth: usize) -> Result<String, ApiError> {
     if depth > MAX_FILTER_DEPTH {
         return Err(ApiError::BadRequest);
@@ -355,6 +365,9 @@ fn build_filter_sql(filter: &Filter, depth: usize) -> Result<String, ApiError> {
             Err(ApiError::BadRequest)
         }
         Filter::And(children) => {
+            if children.len() > MAX_FILTER_CHILDREN {
+                return Err(ApiError::BadRequest);
+            }
             let parts = children
                 .iter()
                 .map(|c| build_filter_sql(c, depth + 1))
@@ -362,6 +375,9 @@ fn build_filter_sql(filter: &Filter, depth: usize) -> Result<String, ApiError> {
             Ok(format!("({})", parts.join(" AND ")))
         }
         Filter::Or(children) => {
+            if children.len() > MAX_FILTER_CHILDREN {
+                return Err(ApiError::BadRequest);
+            }
             let parts = children
                 .iter()
                 .map(|c| build_filter_sql(c, depth + 1))
@@ -412,14 +428,16 @@ fn build_condition_sql(
 
 /// Formats a [`FilterValue`] as a safe SQL literal.
 ///
-/// Strings are wrapped in single quotes with internal single quotes doubled
-/// (`'` → `''`), which is the standard SQL escaping mechanism. NaN and
-/// infinite floats are rejected because BigQuery has no SQL representation for
-/// them.
+/// Strings are wrapped in single quotes. BigQuery Standard SQL recognises both
+/// `''` and `\'` as a literal single quote inside a string, so backslashes must
+/// be doubled first — otherwise a trailing `\` would turn our closing `''` into
+/// an escape sequence and allow injection. The order is critical: `\` → `\\`,
+/// then `'` → `''`. NaN and infinite floats are rejected because BigQuery has
+/// no SQL representation for them.
 fn build_value_sql(value: &FilterValue) -> Result<String, ApiError> {
     match value {
         FilterValue::String(s) => {
-            let escaped = s.replace('\'', "''");
+            let escaped = s.replace('\\', "\\\\").replace('\'', "''");
             Ok(format!("'{escaped}'"))
         }
         FilterValue::Integer(n) => Ok(n.to_string()),
