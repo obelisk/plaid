@@ -163,6 +163,7 @@ pub fn query_table(
     table: impl Display,
     columns: &[impl Display],
     filter: Option<Filter>,
+    return_buffer_size: usize,
 ) -> Result<QueryTableResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(gcp_bigquery, query_table);
@@ -175,8 +176,7 @@ pub fn query_table(
         filter,
     };
 
-    const RETURN_BUFFER_SIZE: usize = 10 * 1000 * 1000; // 10 MB
-    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+    let mut return_buffer = vec![0; return_buffer_size];
 
     let params = serde_json::to_string(&params).unwrap();
     let res = unsafe {
@@ -184,7 +184,7 @@ pub fn query_table(
             params.as_bytes().as_ptr(),
             params.as_bytes().len(),
             return_buffer.as_mut_ptr(),
-            RETURN_BUFFER_SIZE,
+            return_buffer_size,
         )
     };
 
