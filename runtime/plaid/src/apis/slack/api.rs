@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use plaid_stl::slack::{
-    CreateChannel, CreateChannelResponse, GetDndInfo, GetDndInfoResponse, GetIdFromEmail,
-    GetPresence, GetPresenceResponse, InviteToChannel, PostMessage, UserInfo, UserInfoResponse,
-    ViewOpen,
+    CreateChannel, GetDndInfo, GetDndInfoResponse, GetIdFromEmail, GetPresence,
+    GetPresenceResponse, InviteToChannel, PostMessage, UserInfo, UserInfoResponse, ViewOpen,
 };
 use reqwest::{Client, RequestBuilder};
 
@@ -291,11 +290,11 @@ impl Slack {
             .await
         {
             Ok((200, response)) => {
-                let cc_response: CreateChannelResponse =
-                    serde_json::from_str(&response).map_err(|e| {
-                        ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
+                let slack_response: GenericSlackResponse = serde_json::from_str(&response)
+                    .map_err(|_| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(response.clone()))
                     })?;
-                if !cc_response.ok {
+                if !slack_response.ok {
                     return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
                         response,
                     )));

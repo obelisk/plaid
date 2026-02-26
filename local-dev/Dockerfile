@@ -5,7 +5,8 @@
 # Stage 3: Minimal runtime image
 
 # ── Stage 1: Build plaid runtime ─────────────────────────────────────────────
-FROM rust:1.88.0-slim-bookworm AS runtime-builder
+ARG RUST_VERSION=1.93.0
+FROM rust:${RUST_VERSION}-slim-bookworm AS runtime-builder
 
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -27,7 +28,8 @@ RUN cargo build \
     --features=cranelift,sled
 
 # ── Stage 2: Build WASM modules ─────────────────────────────────────────────
-FROM rust:1.88.0-slim-bookworm AS module-builder
+ARG RUST_VERSION=1.93.0
+FROM rust:${RUST_VERSION}-slim-bookworm AS module-builder
 
 RUN rustup target add wasm32-unknown-unknown
 
