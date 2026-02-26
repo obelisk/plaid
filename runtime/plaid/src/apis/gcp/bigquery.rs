@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, io, sync::Arc};
 
 use google_cloud_bigquery::{
     client::{google_cloud_auth, Client, ClientConfig},
@@ -28,6 +28,8 @@ pub enum BigQueryError {
     IterError(#[from] google_cloud_bigquery::query::Error),
     #[error("Row decode error: {0}")]
     RowError(#[from] google_cloud_bigquery::query::row::Error),
+    #[error("Response too large: accumulated row data exceeded the configured max_response_size")]
+    ResponseTooLarge,
 }
 
 /// The BigQuery type a column should be decoded into.
@@ -76,6 +78,32 @@ pub struct BigQueryConfig {
     /// Timeout (in milliseconds) applied to all queries
     #[serde(default = "default_timeout_ms")]
     timeout_ms: i64,
+    /// Maximum total response size in bytes across all rows returned by a
+    /// single query. Defaults to 1 MiB. Queries whose accumulated decoded row
+    /// data exceeds this limit are aborted with a `ResponseTooLarge` error.
+    #[serde(default = "default_max_response_size")]
+    max_response_size: usize,
+}
+
+fn default_max_response_size() -> usize {
+    1024 * 1024 // 1 MiB
+}
+
+/// A zero-allocation `Write` sink that counts the bytes written to it.
+///
+/// Used with `serde_json::to_writer` to measure the serialized size of a value
+/// without allocating a temporary buffer — unlike `serde_json::to_vec`, which
+/// builds an owned `Vec<u8>` purely so we can call `.len()` on it.
+struct CountWriter(usize);
+
+impl io::Write for CountWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0 += buf.len();
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 /// The default timeout if none is provided.
@@ -143,7 +171,9 @@ impl BigQuery {
     /// # Errors
     ///
     /// Returns `ApiError::BadRequest` if permissions or identifier validation
-    /// fails, and `ApiError::BigQueryError` for any network or decoding error.
+    /// fails, `ApiError::BigQueryError(BigQueryError::ResponseTooLarge)` if the
+    /// accumulated decoded row data exceeds `max_response_size`, and
+    /// `ApiError::BigQueryError` for any other network or decoding error.
     pub async fn query_table(
         &self,
         params: &str,
@@ -176,10 +206,13 @@ impl BigQuery {
         // strings. Columns absent from the schema fall back to String, which is
         // always safe to attempt.
         //
-        // Memory safety: the BigQuery API enforces a hard 10 MB
-        // per-response cap server-side, so a malicious module cannot trigger an
-        // OOM by issuing a query that matches an arbitrarily large result set.
+        // Memory safety: each decoded row is serialised to JSON to measure its
+        // wire size, and the running total is checked against max_response_size
+        // before the row is buffered. This gives us a hard cap below BigQuery's
+        // own 10 MB server-side limit and prevents a large result set from
+        // exhausting process memory.
         let mut rows: Vec<HashMap<String, serde_json::Value>> = Vec::new();
+        let mut bytes_accumulated: usize = 0;
         while let Some(row) = iter.next().await.map_err(BigQueryError::from)? {
             let mut map = HashMap::new();
             for (i, col_name) in params.columns.iter().enumerate() {
@@ -189,6 +222,12 @@ impl BigQuery {
                     .unwrap_or(ColumnType::String);
                 let value = decode_column(&row, i, col_type).map_err(BigQueryError::from)?;
                 map.insert(col_name.clone(), value);
+            }
+            let mut counter = CountWriter(0);
+            serde_json::to_writer(&mut counter, &map).map_err(|_| ApiError::ImpossibleError)?;
+            bytes_accumulated += counter.0;
+            if bytes_accumulated > self.config.max_response_size {
+                return Err(ApiError::BigQueryError(BigQueryError::ResponseTooLarge));
             }
             rows.push(map);
         }
