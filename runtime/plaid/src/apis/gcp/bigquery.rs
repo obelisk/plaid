@@ -16,6 +16,9 @@ use log::error;
 
 const TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 
+/// Maximum `And`/`Or` nesting depth for a [`Filter`] tree.
+const MAX_FILTER_DEPTH: usize = 4;
+
 #[derive(Error, Debug)]
 pub enum BigQueryError {
     #[error("Authentication error: {0}")]
@@ -331,7 +334,7 @@ fn build_query_string(
 
     if let Some(f) = filter {
         sql.push_str(" WHERE ");
-        sql.push_str(&build_filter_sql(f)?);
+        sql.push_str(&build_filter_sql(f, 0)?);
     }
 
     Ok(sql)
@@ -341,8 +344,12 @@ fn build_query_string(
 ///
 /// Column names inside `Condition` nodes are validated with
 /// [`is_valid_identifier`] before use. `And` and `Or` nodes must contain at
-/// least one child.
-fn build_filter_sql(filter: &Filter) -> Result<String, ApiError> {
+/// least one child. Nesting depth is limited to [`MAX_FILTER_DEPTH`]; trees
+/// deeper than that are rejected with `BadRequest`.
+fn build_filter_sql(filter: &Filter, depth: usize) -> Result<String, ApiError> {
+    if depth > MAX_FILTER_DEPTH {
+        return Err(ApiError::BadRequest);
+    }
     match filter {
         Filter::And(children) | Filter::Or(children) if children.is_empty() => {
             Err(ApiError::BadRequest)
@@ -350,14 +357,14 @@ fn build_filter_sql(filter: &Filter) -> Result<String, ApiError> {
         Filter::And(children) => {
             let parts = children
                 .iter()
-                .map(build_filter_sql)
+                .map(|c| build_filter_sql(c, depth + 1))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(format!("({})", parts.join(" AND ")))
         }
         Filter::Or(children) => {
             let parts = children
                 .iter()
-                .map(build_filter_sql)
+                .map(|c| build_filter_sql(c, depth + 1))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(format!("({})", parts.join(" OR ")))
         }
