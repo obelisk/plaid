@@ -1,0 +1,22 @@
+# Rust build artifacts (these are rebuilt inside the container)
+**/target/
+
+# Git
+.git/
+
+# Local dev artifacts that aren't needed in build context
+local-dev/secrets/
+local-dev/scripts/
+
+# Editor / OS junk
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Compiled modules (rebuilt in container)
+compiled_modules/
+
+# Testing artifacts
+testing/

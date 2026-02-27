@@ -33,8 +33,9 @@ struct DynamicWebRequestResponse {
     cert: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct Config {
+    #[serde(default)]
     pub web_requests: HashMap<String, Request>,
 }
 

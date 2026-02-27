@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 base64 = "0.13"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
 paste = "1"
 regex = "1.11.0"
 serde = { version = "1", features = ["derive"] }
