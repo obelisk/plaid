@@ -2,7 +2,10 @@ use std::{collections::HashMap, io, sync::Arc};
 
 use google_cloud_bigquery::{
     client::{google_cloud_auth, Client, ClientConfig},
-    http::job::query::QueryRequest,
+    http::{
+        job::query::QueryRequest,
+        types::{QueryParameter, QueryParameterType, QueryParameterValue},
+    },
     query::row::Row,
 };
 use plaid_stl::gcp::bigquery::{
@@ -294,32 +297,45 @@ impl BigQuery {
             return Err(ApiError::BadRequest);
         }
         self.check_module_permission(module, &params.dataset, &params.table)?;
-        let query = build_query_string(
+        let (query, query_parameters) = build_query_string(
             &params.dataset,
             &params.table,
             &params.columns,
             params.filter.as_ref(),
         )?;
+
+        info!("{query}");
+        info!("{query_parameters:#?}");
+
+        let parameter_mode = if query_parameters.is_empty() {
+            None
+        } else {
+            Some("NAMED".to_string())
+        };
         Ok(QueryRequest {
             timeout_ms: Some(self.config.timeout_ms),
             query,
+            parameter_mode,
+            query_parameters,
             ..Default::default()
         })
     }
 }
 
 /// Validates every identifier and builds the full `SELECT … FROM … [WHERE …]`
-/// query string.
+/// query string together with its associated named query parameters.
 ///
 /// Column names, dataset, and table are validated against a strict identifier
 /// allowlist. The optional `filter` is rendered via [`build_filter_sql`], which
-/// recursively validates all column names inside the condition tree.
+/// recursively validates all column names inside the condition tree. Filter
+/// values are not inlined — they are returned as [`QueryParameter`] entries to
+/// be bound by the BigQuery API.
 fn build_query_string(
     dataset: &str,
     table: &str,
     columns: &[String],
     filter: Option<&Filter>,
-) -> Result<String, ApiError> {
+) -> Result<(String, Vec<QueryParameter>), ApiError> {
     if !is_valid_identifier(dataset) || !is_valid_identifier(table) {
         return Err(ApiError::BadRequest);
     }
@@ -341,13 +357,14 @@ fn build_query_string(
         .join(", ");
 
     let mut sql = format!("SELECT {column_list} FROM `{dataset}`.`{table}`");
+    let mut params: Vec<QueryParameter> = Vec::new();
 
     if let Some(f) = filter {
         sql.push_str(" WHERE ");
-        sql.push_str(&build_filter_sql(f, 0)?);
+        sql.push_str(&build_filter_sql(f, 0, &mut params)?);
     }
 
-    Ok(sql)
+    Ok((sql, params))
 }
 
 /// Recursively renders a [`Filter`] tree into a WHERE clause fragment.
@@ -356,7 +373,14 @@ fn build_query_string(
 /// [`is_valid_identifier`] before use. `And` and `Or` nodes must contain at
 /// least one child and no more than [`MAX_FILTER_CHILDREN`]. Nesting depth is
 /// limited to [`MAX_FILTER_DEPTH`]; exceeding either limit returns `BadRequest`.
-fn build_filter_sql(filter: &Filter, depth: usize) -> Result<String, ApiError> {
+///
+/// Leaf values are not inlined as SQL literals — they are appended to `params`
+/// as typed [`QueryParameter`] entries and referenced via `@pN` placeholders.
+fn build_filter_sql(
+    filter: &Filter,
+    depth: usize,
+    params: &mut Vec<QueryParameter>,
+) -> Result<String, ApiError> {
     if depth > MAX_FILTER_DEPTH {
         return Err(ApiError::BadRequest);
     }
@@ -370,7 +394,7 @@ fn build_filter_sql(filter: &Filter, depth: usize) -> Result<String, ApiError> {
             }
             let parts = children
                 .iter()
-                .map(|c| build_filter_sql(c, depth + 1))
+                .map(|c| build_filter_sql(c, depth + 1, params))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(format!("({})", parts.join(" AND ")))
         }
@@ -380,7 +404,7 @@ fn build_filter_sql(filter: &Filter, depth: usize) -> Result<String, ApiError> {
             }
             let parts = children
                 .iter()
-                .map(|c| build_filter_sql(c, depth + 1))
+                .map(|c| build_filter_sql(c, depth + 1, params))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(format!("({})", parts.join(" OR ")))
         }
@@ -392,18 +416,21 @@ fn build_filter_sql(filter: &Filter, depth: usize) -> Result<String, ApiError> {
             if !is_valid_identifier(column) {
                 return Err(ApiError::BadRequest);
             }
-            build_condition_sql(column, operator, value)
+            build_condition_sql(column, operator, value, params)
         }
     }
 }
 
 /// Renders a single `column OP value` condition.
 ///
-/// `IsNull` and `IsNotNull` ignore `value` entirely.
+/// `IsNull` and `IsNotNull` emit `IS NULL` / `IS NOT NULL` directly and leave
+/// `params` unchanged. All other operators append a typed named parameter to
+/// `params` and emit `column OP @pN`.
 fn build_condition_sql(
     column: &str,
     op: &Operator,
     value: &FilterValue,
+    params: &mut Vec<QueryParameter>,
 ) -> Result<String, ApiError> {
     let col = format!("`{column}`");
     match op {
@@ -423,33 +450,46 @@ fn build_condition_sql(
         Operator::IsNull | Operator::IsNotNull => unreachable!(), // safety: returns above
     };
 
-    Ok(format!("{col} {op_str} {}", build_value_sql(value)?))
+    let placeholder = push_value_param(value, params)?;
+    Ok(format!("{col} {op_str} {placeholder}"))
 }
 
-/// Formats a [`FilterValue`] as a safe SQL literal.
+/// Appends a typed [`QueryParameter`] to `params` and returns the corresponding
+/// `@pN` placeholder string.
 ///
-/// Strings are wrapped in single quotes. BigQuery Standard SQL recognises both
-/// `''` and `\'` as a literal single quote inside a string, so backslashes must
-/// be doubled first — otherwise a trailing `\` would turn our closing `''` into
-/// an escape sequence and allow injection. The order is critical: `\` → `\\`,
-/// then `'` → `''`. NaN and infinite floats are rejected because BigQuery has
-/// no SQL representation for them.
-fn build_value_sql(value: &FilterValue) -> Result<String, ApiError> {
-    match value {
-        FilterValue::String(s) => {
-            let escaped = s.replace('\\', "\\\\").replace('\'', "''");
-            Ok(format!("'{escaped}'"))
-        }
-        FilterValue::Integer(n) => Ok(n.to_string()),
+/// NaN and infinite floats are rejected because BigQuery has no wire representation for them.
+fn push_value_param(
+    value: &FilterValue,
+    params: &mut Vec<QueryParameter>,
+) -> Result<String, ApiError> {
+    let name = format!("p{}", params.len());
+
+    let (type_str, scalar_value) = match value {
+        FilterValue::String(s) => ("STRING", Some(s.clone())),
+        FilterValue::Integer(n) => ("INT64", Some(n.to_string())),
         FilterValue::Float(f) => {
             if f.is_nan() || f.is_infinite() {
                 return Err(ApiError::BadRequest);
             }
-            Ok(f.to_string())
+            ("FLOAT64", Some(f.to_string()))
         }
-        FilterValue::Boolean(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
-        FilterValue::Null => Ok("NULL".to_string()),
-    }
+        FilterValue::Boolean(b) => ("BOOL", Some(b.to_string())),
+        FilterValue::Null => ("STRING", None),
+    };
+
+    params.push(QueryParameter {
+        name: Some(name.clone()),
+        parameter_type: QueryParameterType {
+            parameter_type: type_str.to_string(),
+            ..Default::default()
+        },
+        parameter_value: QueryParameterValue {
+            value: scalar_value,
+            ..Default::default()
+        },
+    });
+
+    Ok(format!("@{name}"))
 }
 
 /// Extracts the value at `index` from `row`, parsing it into the
