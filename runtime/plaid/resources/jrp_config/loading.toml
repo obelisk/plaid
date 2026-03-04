@@ -31,6 +31,32 @@ test_mode_exemptions = []
 [loading.secrets."test_geteverything"]
 "my_secret" = "verySecureSecret"
 
+[loading.secrets."test_jwt"]
+# public keys for JWT validation
+# To get the public key from the PEM, use the following command:
+# openssl pkey -in private_key.pem -pubout -out public_key.pem 
+
+# ECDSA256 public key 
+pub_46c642b0da02030407c6463c013a8dbd = """
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEY2XabgUJlisa/ghcIlkHF6PKnmbw
+a7GuYuWcush7M5fJwThFg1DsdkQulCmgj0/nYK/DuDmf3dDyhjKNGuGuvQ==
+-----END PUBLIC KEY-----
+"""
+
+# RSA public key
+pub_0260c8c6d8f48d959858c57fc7392748 = """
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvAxqUXs/n+tRSEwYepAM
+pp7VVx8orfhurbKz/1hflO9Q74BkN13kNncXK3pJOjDGgbbHE7V1+KDPNsfkWLmP
+5zR2wPrHvXEiwvG+FjbSYwp6TKVDOGAL3tszoqGEUf1AliPEdERFkhMaZIF3sFJm
+/noBfMW7ieItQEJR+5xrg4fCXXtUH6VdrOlgNPv0kEk6DiWB966MCJnESzpPWroQ
+n2TJsfoU9MI4/R5u+Zwl7R2kaZ1/xbl/7jN52ypqAP+wATqy4qfip02FTGYCdZyL
+mzh3oDpBzoXSf9cv8S2WF3nlEiaPMlCyovXmb6FjSun0VrZLr0NHscHjnCrNOjCN
+/QIDAQAB
+-----END PUBLIC KEY-----
+"""
+
 [loading.log_type_overrides]
 "just_run_please.wasm" = "justrunplease"
 
