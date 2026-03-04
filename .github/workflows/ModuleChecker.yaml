@@ -17,8 +17,8 @@ jobs:
       - name: Build module checker
         run: |
           cd runtime
-          rustup toolchain install 1.86.0
-          rustup default 1.86.0
+          rustup toolchain install 1.93.1
+          rustup default 1.93.1
           cargo build --release --bin module_checker --no-default-features --features cranelift
 
       - name: Upload artifact

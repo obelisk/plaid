@@ -157,7 +157,7 @@ if [ "$1" == "llvm" ]; then
   if uname | grep -q Darwin; then
     sed -i '' 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' "${CONFIG_WORKING_PATH}/loading.toml"
     export RUSTFLAGS="-L /opt/homebrew/lib/"
-    export LLVM_SYS_180_PREFIX="/opt/homebrew/Cellar/llvm@18/18.1.8"
+    export LLVM_SYS_211_PREFIX="/opt/homebrew/Cellar/llvm@21/21.1.8"
   else
     sed -i 's/compiler_backend = "cranelift"/compiler_backend = "llvm"/g' ${CONFIG_WORKING_PATH}/loading.toml
   fi
