@@ -1,0 +1,47 @@
+# API configuration for local development.
+#
+# To add external API integrations, define them here and add
+# corresponding secrets to secrets/secrets.toml.
+#
+# See the full config reference in runtime/plaid/resources/jrp_config/apis.toml
+# for examples of GitHub, Slack, AWS, GCP, blockchain, and other integrations.
+
+[apis."general"]
+
+# ──────────────────────────────────────────────────────────────
+# http-proxy example: outbound HTTP requests to httpbin.org
+# ──────────────────────────────────────────────────────────────
+
+[apis."general".network.web_requests."httpbin_get"]
+verb = "get"
+uri = "https://httpbin.org/get"
+return_body = true
+return_code = true
+return_cert = false
+allowed_rules = ["http_proxy.wasm"]
+[apis."general".network.web_requests."httpbin_get".headers]
+
+[apis."general".network.web_requests."httpbin_post"]
+verb = "post"
+uri = "https://httpbin.org/post"
+return_body = true
+return_code = true
+return_cert = false
+allowed_rules = ["http_proxy.wasm"]
+[apis."general".network.web_requests."httpbin_post".headers]
+Content-Type = "application/json"
+
+# Example: Slack integration
+# [apis."slack"]
+# [apis."slack".webhooks]
+# alerts = "{plaid-secret{slack-webhook-url}}"
+# [apis."slack".bot_tokens]
+# mybot = "{plaid-secret{slack-bot-token}}"
+
+# Example: GitHub integration (GitHub App)
+# [apis."github"]
+# [apis."github".authentication]
+# app_id = 123456
+# installation_id = 654321
+# private_key = """{plaid-secret{github-app-private-key}}"""
+# [apis."github".graphql_queries]

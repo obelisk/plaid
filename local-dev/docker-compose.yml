@@ -1,0 +1,28 @@
+services:
+  plaid:
+    build:
+      context: ..
+      dockerfile: local-dev/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      # Config files — edit these to configure APIs, webhooks, etc.
+      - ./config:/config:ro
+      # Secrets — copy secrets.toml.example to secrets.toml and add your keys
+      - ./secrets:/secrets:ro
+      # Persistent storage (when using Sled backend)
+      - plaid-data:/data
+    environment:
+      - RUST_LOG=plaid=debug
+    init: true
+    stop_grace_period: 5s
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/webhook/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  plaid-data:

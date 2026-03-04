@@ -1,0 +1,75 @@
+[webhooks."local"]
+listen_address = "0.0.0.0:8080"
+
+# Default webhook — receives POST requests at /webhook/default
+# Triggers any rule with log_type "default"
+[webhooks."local".webhooks."default"]
+log_type = "default"
+headers = ["Content-Type", "Authorization", "X-Custom-Header"]
+logbacks_allowed = "Unlimited"
+
+# Hello world webhook — receives POST requests at /webhook/hello
+# Triggers the hello_world rule
+[webhooks."local".webhooks."hello"]
+log_type = "hello_world"
+headers = []
+logbacks_allowed = "Unlimited"
+
+# GET handler example — returns static text at GET /webhook/health
+[webhooks."local".webhooks."health"]
+log_type = "health"
+headers = []
+[webhooks."local".webhooks."health".get_mode]
+response_mode = "static:ok"
+
+# ──────────────────────────────────────────────────────────────
+# Examples
+# ──────────────────────────────────────────────────────────────
+
+# echo-json: Parse JSON and return a response
+[webhooks."local".webhooks."echo"]
+log_type = "echo_json"
+headers = ["Content-Type"]
+logbacks_allowed = { Limited = 0 }
+
+# counter: Increment persistent + in-memory counters
+[webhooks."local".webhooks."counter"]
+log_type = "counter"
+headers = []
+logbacks_allowed = { Limited = 0 }
+
+# webhook-router: Forward payloads to other rules via logback
+[webhooks."local".webhooks."router"]
+log_type = "webhook_router"
+headers = ["Content-Type"]
+logbacks_allowed = "Unlimited"
+
+# rate-limiter: Per-key rate limiting using cache
+[webhooks."local".webhooks."rate-limit"]
+log_type = "rate_limiter"
+headers = ["Content-Type"]
+logbacks_allowed = { Limited = 0 }
+
+# request-logger: Inspect headers, query params, and metadata
+[webhooks."local".webhooks."inspect"]
+log_type = "request_logger"
+headers = ["Content-Type", "Authorization", "User-Agent", "X-Custom-Header"]
+logbacks_allowed = { Limited = 0 }
+
+# todo-api: CRUD operations backed by persistent storage
+[webhooks."local".webhooks."todos"]
+log_type = "todo_api"
+headers = ["Content-Type"]
+logbacks_allowed = { Limited = 0 }
+
+# http-proxy: Outbound HTTP requests via named request system
+[webhooks."local".webhooks."proxy"]
+log_type = "http_proxy"
+headers = ["Content-Type"]
+logbacks_allowed = { Limited = 0 }
+
+# error-handling: Production error patterns
+[webhooks."local".webhooks."errors"]
+log_type = "error_handling"
+headers = ["Content-Type"]
+logbacks_allowed = { Limited = 0 }

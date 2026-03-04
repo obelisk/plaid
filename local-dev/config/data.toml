@@ -1,0 +1,7 @@
+[data]
+
+# cron-heartbeat example: fires every 30 seconds
+[data.interval]
+[data.interval.jobs."heartbeat"]
+schedule = "0,30 * * * * * *"
+log_type = "cron_heartbeat"

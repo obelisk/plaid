@@ -1,0 +1,13 @@
+[package]
+name = "hello_world"
+description = "Minimal example plaid rule — logs the incoming webhook payload"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plaid_stl = { path = "../../../runtime/plaid-stl" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+crate-type = ["cdylib"]
