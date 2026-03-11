@@ -23,6 +23,20 @@ impl StorageProvider for InMemoryDb {
         false
     }
 
+    async fn insert_batch(
+        &self,
+        namespace: String,
+        items: Vec<(String, Vec<u8>)>,
+    ) -> Result<(), StorageError> {
+        let mut db = self.db.write().await;
+        let ns = db.entry(namespace).or_default();
+        for (key, value) in items {
+            ns.insert(key, value);
+        }
+
+        Ok(())
+    }
+
     async fn insert(
         &self,
         namespace: String,
