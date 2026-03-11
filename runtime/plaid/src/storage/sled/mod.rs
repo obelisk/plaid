@@ -33,6 +33,17 @@ impl StorageProvider for Sled {
         true
     }
 
+    async fn insert_batch(
+        &self,
+        _namespace: String,
+        _items: Vec<(String, Vec<u8>)>,
+    ) -> Result<(), StorageError> {
+        Err(StorageError::Unimplemented {
+            operation: "insert_batch".to_string(),
+            provider: "Sled".to_string(),
+        })
+    }
+
     async fn insert(
         &self,
         namespace: String,

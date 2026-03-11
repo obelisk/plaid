@@ -74,6 +74,9 @@ pub enum StorageError {
     CouldNotAccessStorage(String),
     Access(String),
     SharedDbError(String),
+    Unimplemented { operation: String, provider: String },
+    BuildError(String),
+    BatchWriteError(String),
 }
 
 impl std::fmt::Display for StorageError {
@@ -89,6 +92,19 @@ impl std::fmt::Display for StorageError {
             Self::Access(ref e) => write!(f, "There was a failure accessing a key: {e}"),
             Self::SharedDbError(ref e) => {
                 write!(f, "Error while attempting an operation on a shared DB: {e}")
+            }
+            Self::Unimplemented {
+                operation,
+                provider,
+            } => {
+                write!(
+                    f,
+                    "The {operation} operation is not available for {provider}"
+                )
+            }
+            Self::BuildError(e) => write!(f, "Failed to build: {e}"),
+            Self::BatchWriteError(e) => {
+                write!(f, "Error while attempting to batch write items: {e}")
             }
         }
     }
@@ -109,6 +125,11 @@ pub trait StorageProvider {
         key: String,
         value: Vec<u8>,
     ) -> Result<Option<Vec<u8>>, StorageError>;
+    async fn insert_batch(
+        &self,
+        namespace: String,
+        items: Vec<(String, Vec<u8>)>,
+    ) -> Result<(), StorageError>;
     /// Get a value by key from the storage provider. If the key doesn't exist, then it will
     /// return Ok(None) signifying the storage provider was successfully able to identify
     /// the key was not set.
@@ -223,6 +244,14 @@ impl Storage {
         value: Vec<u8>,
     ) -> Result<Option<Vec<u8>>, StorageError> {
         self.database.insert(namespace, key, value).await
+    }
+
+    pub async fn insert_batch(
+        &self,
+        namespace: String,
+        items: Vec<(String, Vec<u8>)>,
+    ) -> Result<(), StorageError> {
+        self.database.insert_batch(namespace, items).await
     }
 
     pub async fn get(&self, namespace: &str, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
