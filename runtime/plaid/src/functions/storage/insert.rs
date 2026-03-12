@@ -116,7 +116,7 @@ pub fn insert_shared(
     match insert_common(
         env_data,
         storage,
-        env_data.module.name.clone(),
+        namespace,
         key,
         value,
         memory_view,
