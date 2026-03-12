@@ -109,7 +109,9 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
             make_named_request("test-response", "OK", HashMap::new()).unwrap();
         }
         "insert batch and check" => {
-            plaid::print_debug_string(&format!("[{RULE_NAME}] Writing 3 items to DB..."));
+            plaid::print_debug_string(&format!(
+                "[{RULE_NAME}] Writing {BATCH_INSERT_SIZE} items to DB..."
+            ));
 
             plaid::storage::insert_batch_shared(SHARED_DB, &batch_insert_items).unwrap();
 
@@ -124,6 +126,15 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
                 }
             }
             make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        }
+        "delete batch inserts" => {
+            plaid::print_debug_string(&format!(
+                "[{RULE_NAME}] Deleting {BATCH_INSERT_SIZE} items from DB..."
+            ));
+
+            for item in batch_insert_items {
+                plaid::storage::delete_shared(SHARED_DB, &item.key).unwrap();
+            }
         }
         _ => panic!("Got an unexpected log"),
     }
