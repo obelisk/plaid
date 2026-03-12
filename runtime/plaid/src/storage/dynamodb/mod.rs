@@ -11,7 +11,7 @@ use aws_sdk_dynamodb::{
 use aws_sdk_s3::primitives::Blob;
 use serde::Deserialize;
 
-use crate::{get_aws_sdk_config, AwsAuthentication};
+use crate::{get_aws_sdk_config, storage::Item, AwsAuthentication};
 
 use super::{StorageError, StorageProvider};
 
@@ -84,16 +84,12 @@ impl StorageProvider for DynamoDb {
         true
     }
 
-    async fn insert_batch(
-        &self,
-        namespace: String,
-        items: Vec<(String, Vec<u8>)>,
-    ) -> Result<(), StorageError> {
+    async fn insert_batch(&self, namespace: String, items: Vec<Item>) -> Result<(), StorageError> {
         let write_items = items
             .into_iter()
-            .map(|(k, v)| {
+            .map(|item| {
                 let put = Put::builder()
-                    .item(k, AttributeValue::B(Blob::new(v)))
+                    .item(item.key, AttributeValue::B(Blob::new(item.value)))
                     .table_name(&namespace)
                     .build()
                     .map_err(|e| StorageError::BuildError(e.to_string()))?;

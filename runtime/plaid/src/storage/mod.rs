@@ -66,6 +66,13 @@ pub struct Storage {
     pub shared_dbs: Option<HashMap<String, SharedDb>>,
 }
 
+/// Represents an (Key, Value) pair in a database
+#[derive(Deserialize)]
+pub struct Item {
+    pub key: String,
+    pub value: Vec<u8>,
+}
+
 /// Errors encountered while trying to use Plaid's persistent storage.
 #[derive(Debug)]
 pub enum StorageError {
@@ -125,11 +132,7 @@ pub trait StorageProvider {
         key: String,
         value: Vec<u8>,
     ) -> Result<Option<Vec<u8>>, StorageError>;
-    async fn insert_batch(
-        &self,
-        namespace: String,
-        items: Vec<(String, Vec<u8>)>,
-    ) -> Result<(), StorageError>;
+    async fn insert_batch(&self, namespace: String, items: Vec<Item>) -> Result<(), StorageError>;
     /// Get a value by key from the storage provider. If the key doesn't exist, then it will
     /// return Ok(None) signifying the storage provider was successfully able to identify
     /// the key was not set.
@@ -249,7 +252,7 @@ impl Storage {
     pub async fn insert_batch(
         &self,
         namespace: String,
-        items: Vec<(String, Vec<u8>)>,
+        items: Vec<Item>,
     ) -> Result<(), StorageError> {
         self.database.insert_batch(namespace, items).await
     }
