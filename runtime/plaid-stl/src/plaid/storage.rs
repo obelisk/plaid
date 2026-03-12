@@ -1,9 +1,18 @@
 use std::fmt::Display;
 
+use serde::{Deserialize, Serialize};
+
 use crate::PlaidFunctionError;
 
 pub enum StorageError {
     BufferSizeMismatch,
+}
+
+/// A key/value pair for use with batch insert operations.
+#[derive(Serialize, Deserialize)]
+pub struct Item<'a> {
+    pub key: &'a str,
+    pub value: &'a [u8],
 }
 
 pub fn insert(key: &str, value: &[u8]) -> Result<Vec<u8>, PlaidFunctionError> {
@@ -119,6 +128,61 @@ pub fn insert_shared(
         Ok(data_buffer)
     } else {
         Err(PlaidFunctionError::ReturnBufferTooSmall)
+    }
+}
+
+/// Insert multiple key/value pairs in a single batch operation.
+///
+/// `items` is serialised as a JSON-encoded `Vec<Item>` and forwarded to the host in one call.
+/// Returns `Ok(())` on success.
+pub fn insert_batch(items: &[Item<'_>]) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        fn storage_insert_batch(items_buf: *const u8, items_buf_len: usize) -> i32;
+    }
+
+    let items_json =
+        serde_json::to_vec(items).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    let result = unsafe { storage_insert_batch(items_json.as_ptr(), items_json.len()) };
+
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(result.into())
+    }
+}
+
+/// Insert multiple key/value pairs into a shared namespace in a single batch operation.
+///
+/// `items` is serialised as a JSON-encoded `Vec<Item>` and forwarded to the host in one call.
+/// Returns `Ok(())` on success.
+pub fn insert_batch_shared(namespace: &str, items: &[Item<'_>]) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        fn storage_insert_batch_shared(
+            namespace: *const u8,
+            namespace_len: usize,
+            items_buf: *const u8,
+            items_buf_len: usize,
+        ) -> i32;
+    }
+
+    let namespace_bytes = namespace.as_bytes();
+    let items_json =
+        serde_json::to_vec(items).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    let result = unsafe {
+        storage_insert_batch_shared(
+            namespace_bytes.as_ptr(),
+            namespace_bytes.len(),
+            items_json.as_ptr(),
+            items_json.len(),
+        )
+    };
+
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(result.into())
     }
 }
 

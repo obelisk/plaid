@@ -666,6 +666,12 @@ pub fn to_api_function(
         "storage_insert_shared" => {
             Function::new_typed_with_env(&mut store, &env, super::storage::insert_shared)
         }
+        "storage_insert_batch" => {
+            Function::new_typed_with_env(&mut store, &env, super::storage::insert_batch)
+        }
+        "storage_insert_batch_shared" => {
+            Function::new_typed_with_env(&mut store, &env, super::storage::insert_batch_shared)
+        }
         "storage_get" => Function::new_typed_with_env(&mut store, &env, super::storage::get),
         "storage_get_shared" => {
             Function::new_typed_with_env(&mut store, &env, super::storage::get_shared)
