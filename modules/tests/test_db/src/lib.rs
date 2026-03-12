@@ -26,6 +26,20 @@ fn handle_post(log: &str) -> Result<(), i32> {
         "insert" => {
             plaid::storage::insert(parts[1], parts[2].as_bytes()).unwrap();
         }
+        "insert_batch" => {
+            // Format: insert_batch:key1=value1|key2=value2|...
+            let items: Vec<plaid::storage::Item> = parts[1]
+                .split('|')
+                .map(|pair| {
+                    let (key, value) = pair.split_once('=').expect("invalid key=value pair");
+                    plaid::storage::Item {
+                        key,
+                        value: value.as_bytes(),
+                    }
+                })
+                .collect();
+            plaid::storage::insert_batch(&items).unwrap();
+        }
         "delete" => {
             plaid::storage::delete(parts[1]).unwrap();
         }
