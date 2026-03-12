@@ -1,13 +1,9 @@
 use std::sync::{Arc, RwLock};
 
+use plaid_stl::plaid::storage::Item;
 use wasmer::{AsStoreRef, FunctionEnvMut, MemoryView, WasmPtr};
 
-use crate::{
-    executor::Env,
-    functions::FunctionErrors,
-    loader::LimitValue,
-    storage::{Item, Storage},
-};
+use crate::{executor::Env, functions::FunctionErrors, loader::LimitValue, storage::Storage};
 
 use super::{
     calculate_max_buffer_size, get_memory, safely_get_memory, safely_get_string,
