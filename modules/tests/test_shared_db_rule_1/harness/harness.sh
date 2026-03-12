@@ -38,7 +38,7 @@ sleep 2
 curl -d "write to full db" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
 curl -d "write to non-existing db" http://$PLAID_LOCATION/webhook/$URL2
-
+sleep 2
 
 kill $RH_PID 2>&1 > /dev/null
 
