@@ -10,9 +10,9 @@ pub enum StorageError {
 
 /// A key/value pair for use with batch insert operations.
 #[derive(Serialize, Deserialize)]
-pub struct Item<'a> {
-    pub key: &'a str,
-    pub value: &'a [u8],
+pub struct Item {
+    pub key: String,
+    pub value: Vec<u8>,
 }
 
 pub fn insert(key: &str, value: &[u8]) -> Result<Vec<u8>, PlaidFunctionError> {
@@ -135,7 +135,7 @@ pub fn insert_shared(
 ///
 /// `items` is serialised as a JSON-encoded `Vec<Item>` and forwarded to the host in one call.
 /// Returns `Ok(())` on success.
-pub fn insert_batch(items: &[Item<'_>]) -> Result<(), PlaidFunctionError> {
+pub fn insert_batch(items: &[Item]) -> Result<(), PlaidFunctionError> {
     extern "C" {
         fn storage_insert_batch(items_buf: *const u8, items_buf_len: usize) -> i32;
     }
@@ -156,7 +156,7 @@ pub fn insert_batch(items: &[Item<'_>]) -> Result<(), PlaidFunctionError> {
 ///
 /// `items` is serialised as a JSON-encoded `Vec<Item>` and forwarded to the host in one call.
 /// Returns `Ok(())` on success.
-pub fn insert_batch_shared(namespace: &str, items: &[Item<'_>]) -> Result<(), PlaidFunctionError> {
+pub fn insert_batch_shared(namespace: &str, items: &[Item]) -> Result<(), PlaidFunctionError> {
     extern "C" {
         fn storage_insert_batch_shared(
             namespace: *const u8,

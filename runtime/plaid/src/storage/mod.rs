@@ -15,6 +15,7 @@ pub mod in_memory;
 
 use futures_util::future::join_all;
 use in_memory::InMemoryDb;
+use plaid_stl::plaid::storage::Item;
 use serde::Deserialize;
 
 use crate::loader::LimitValue;
@@ -64,13 +65,6 @@ pub struct Config {
 pub struct Storage {
     database: Box<dyn StorageProvider + Send + Sync>,
     pub shared_dbs: Option<HashMap<String, SharedDb>>,
-}
-
-/// Represents an (Key, Value) pair in a database
-#[derive(Deserialize)]
-pub struct Item {
-    pub key: String,
-    pub value: Vec<u8>,
 }
 
 /// Errors encountered while trying to use Plaid's persistent storage.

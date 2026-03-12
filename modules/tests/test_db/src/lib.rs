@@ -33,8 +33,8 @@ fn handle_post(log: &str) -> Result<(), i32> {
                 .map(|pair| {
                     let (key, value) = pair.split_once('=').expect("invalid key=value pair");
                     plaid::storage::Item {
-                        key,
-                        value: value.as_bytes(),
+                        key: key.to_string(),
+                        value: value.as_bytes().to_vec(),
                     }
                 })
                 .collect();
