@@ -17,9 +17,7 @@ pub fn get(
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let storage = if let Some(storage) = &env_data.storage {
-        storage
-    } else {
+    let Some(storage) = &env_data.storage else {
         return FunctionErrors::ApiNotConfigured as i32;
     };
 
@@ -27,8 +25,8 @@ pub fn get(
         Ok(memory_view) => memory_view,
         Err(e) => {
             error!(
-                "{}: Memory error in storage_get: {:?}",
-                env_data.module.name, e
+                "{}: Memory error in storage_get: {e:?}",
+                env_data.module.name,
             );
             return FunctionErrors::CouldNotGetAdequateMemory as i32;
         }
