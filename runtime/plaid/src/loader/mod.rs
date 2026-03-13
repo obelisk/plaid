@@ -30,6 +30,7 @@ use wasmer::sys::Cranelift;
 use wasmer::{sys::BaseTunables, Engine, Module, Pages};
 use wasmer_middlewares::Metering;
 
+use crate::functions::is_known_api_function;
 use crate::storage::Storage;
 
 /// Limit imposed on some resource
@@ -163,6 +164,18 @@ pub struct Configuration {
     /// If this value is set, Plaid will treat it as an absolute path, create a text file and write "READY"
     /// when the system is fully up and ready to receive traffic.
     pub readiness_check_file: Option<String>,
+    /// Defines how Plaid will behave when it encounters failures during module load. By default, Plaid will skip
+    /// any failed module.
+    #[serde(default)]
+    pub failure_behavior: FailureBehavior,
+}
+
+#[derive(Default, Deserialize)]
+pub struct FailureBehavior {
+    /// If set, panics when Plaid fails to parse the filename and bytes of a provided wasm file
+    pub panic_on_module_parsing_failure: bool,
+    /// If set, panics when Plaid fails to compile a WASM blob to a `PlaidModule`
+    pub panic_on_modele_compilation_failure: bool,
 }
 
 /// Deserializer for a LimitedAmount where none of the provided values can be 0.
@@ -212,6 +225,11 @@ pub struct ModuleSigningConfiguration {
     pub signature_namespace: String,
     /// The number of valid signatures required on each module
     pub signatures_required: usize,
+    /// If this value is set, Plaid will panic if a module signature is invalid
+    ///
+    /// Defaults to `false` if not provided.
+    #[serde(default)]
+    pub panic_on_invalid_signature: bool,
 }
 
 /// Deserializer for a public key
@@ -379,17 +397,29 @@ impl PlaidModule {
         engine.set_tunables(tunables);
 
         // Compile the module using the middleware and tunables we just set up
-        let mut module =
-            Module::new(&engine, module_bytes).map_err(|e: wasmer::CompileError| {
-                error!("Failed to compile module [{filename}]. Error: {e}");
-                Errors::CompileError(e)
-            })?;
+        let mut module = Module::new(&engine, module_bytes).map_err(Errors::CompileError)?;
         module.set_name(&filename);
+
+        // Validate that every import the module requires can be satisfied
+        for import in module.imports() {
+            let function_name = import.name();
+
+            if function_name.starts_with("__wbindgen") {
+                continue;
+            }
+
+            if !is_known_api_function(function_name) {
+                return Err(Errors::MissingFunction(function_name.to_string()));
+            }
+        }
 
         // Count bytes already in storage
         let storage_current_bytes: u64 = match storage {
             None => 0,
-            Some(s) => s.get_namespace_byte_size(filename).await.unwrap(),
+            Some(s) => s
+                .get_namespace_byte_size(filename)
+                .await
+                .map_err(Errors::StorageError)?,
         };
         let storage_current = Arc::new(RwLock::new(storage_current_bytes));
 
@@ -475,13 +505,18 @@ pub async fn load(
 
     for path in module_paths {
         let (filename, module_bytes) = match path {
-            Ok(path) => {
-                if let Ok(filename_and_bytes) = read_and_parse_modules(&path) {
-                    filename_and_bytes
-                } else {
-                    continue;
+            Ok(path) => match read_and_parse_modules(&path) {
+                Ok(filename_and_bytes) => filename_and_bytes,
+                Err(e) => {
+                    let file_path = path.path().to_string_lossy().into_owned();
+                    if config.failure_behavior.panic_on_module_parsing_failure {
+                        panic!("Failed to parse module at [{file_path}]: {e}")
+                    } else {
+                        error!("Failed to parse module at [{file_path}]: {e}. Skipping load");
+                        continue;
+                    }
                 }
-            }
+            },
             Err(e) => {
                 error!("Bad entry in modules directory - skipping. Error: {e}");
                 continue;
@@ -492,10 +527,14 @@ pub async fn load(
         // rule signing. If any rule does not have enough valid signatures it will not be loaded.
         if let Some(signing) = &config.module_signing {
             if let Err(e) = check_module_signatures(signing, &filename, &module_bytes) {
-                error!(
-                    "Module [{filename}] failed signature verification: {e}. Skipping module load"
-                );
-                continue;
+                if signing.panic_on_invalid_signature {
+                    panic!("Module [{filename}] failed signature verification: {e}")
+                } else {
+                    error!(
+                        "Module [{filename}] failed signature verification: {e}. Skipping module load"
+                    );
+                    continue;
+                }
             }
         }
 
@@ -523,7 +562,7 @@ pub async fn load(
         let test_mode = config.test_mode && !config.test_mode_exemptions.contains(&filename);
 
         // Configure and compile module
-        let Ok(mut plaid_module) = PlaidModule::configure_and_compile(
+        let mut plaid_module = match PlaidModule::configure_and_compile(
             &filename,
             &config.computation_amount,
             &config.memory_page_count,
@@ -535,8 +574,16 @@ pub async fn load(
             &config.compiler_backend,
         )
         .await
-        else {
-            continue;
+        {
+            Ok(pm) => pm,
+            Err(e) => {
+                if config.failure_behavior.panic_on_modele_compilation_failure {
+                    panic!("Module [{filename}] failed to load: {e}")
+                } else {
+                    error!("Module [{filename}] failed to load: {e}. Skipping module load");
+                    continue;
+                }
+            }
         };
 
         // Persistent response is available to be set per module. This allows it to persistently
