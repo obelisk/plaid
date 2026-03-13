@@ -27,6 +27,12 @@ curl -d "delete and check" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
 curl -d "read after deletion" http://$PLAID_LOCATION/webhook/$URL1
 sleep 2
+curl -d "insert batch and check" http://$PLAID_LOCATION/webhook/$URL2
+sleep 2
+curl -d "read after batch insert" http://$PLAID_LOCATION/webhook/$URL1
+sleep 2
+curl -d "delete batch inserts" http://$PLAID_LOCATION/webhook/$URL2
+sleep 2
 curl -d "fill up the db" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
 curl -d "write to full db" http://$PLAID_LOCATION/webhook/$URL2
@@ -36,7 +42,7 @@ sleep 2
 
 kill $RH_PID 2>&1 > /dev/null
 
-echo -e "OK\nOK\nOK\nOK\nOK\nOK\nOK\nOK" > expected.txt
+echo -e "OK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK" > expected.txt
 diff expected.txt $FILE
 RESULT=$?
 

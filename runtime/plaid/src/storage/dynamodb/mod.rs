@@ -5,12 +5,13 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use aws_sdk_dynamodb::{
-    types::{AttributeValue, KeyType},
+    types::{AttributeValue, KeyType, Put, TransactWriteItem},
     Client,
 };
+use aws_sdk_s3::primitives::Blob;
 use serde::Deserialize;
 
-use crate::{get_aws_sdk_config, AwsAuthentication};
+use crate::{get_aws_sdk_config, storage::Item, AwsAuthentication};
 
 use super::{StorageError, StorageProvider};
 
@@ -81,6 +82,30 @@ impl DynamoDb {
 impl StorageProvider for DynamoDb {
     fn is_persistent(&self) -> bool {
         true
+    }
+
+    async fn insert_batch(&self, namespace: String, items: Vec<Item>) -> Result<(), StorageError> {
+        let write_items = items
+            .into_iter()
+            .map(|item| {
+                let put = Put::builder()
+                    .item(item.key, AttributeValue::B(Blob::new(item.value)))
+                    .table_name(&namespace)
+                    .build()
+                    .map_err(|e| StorageError::BuildError(e.to_string()))?;
+
+                Ok(TransactWriteItem::builder().put(put).build())
+            })
+            .collect::<Result<Vec<_>, StorageError>>()?;
+
+        self.client
+            .transact_write_items()
+            .set_transact_items(Some(write_items))
+            .send()
+            .await
+            .map_err(|e| StorageError::BatchWriteError(e.to_string()))?;
+
+        Ok(())
     }
 
     async fn insert(

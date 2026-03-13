@@ -1,5 +1,7 @@
 //! This module provides a way for Plaid to use an in-memory store as a DB. Note - This storage is not persisted across reboots.
 
+use crate::storage::Item;
+
 use super::{StorageError, StorageProvider};
 use async_trait::async_trait;
 use std::{collections::HashMap, sync::Arc};
@@ -21,6 +23,16 @@ impl InMemoryDb {
 impl StorageProvider for InMemoryDb {
     fn is_persistent(&self) -> bool {
         false
+    }
+
+    async fn insert_batch(&self, namespace: String, items: Vec<Item>) -> Result<(), StorageError> {
+        let mut db = self.db.write().await;
+        let ns = db.entry(namespace).or_default();
+        for item in items {
+            ns.insert(item.key, item.value);
+        }
+
+        Ok(())
     }
 
     async fn insert(

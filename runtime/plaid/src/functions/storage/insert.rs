@@ -1,5 +1,6 @@
 use std::sync::{Arc, RwLock};
 
+use plaid_stl::plaid::storage::Item;
 use wasmer::{AsStoreRef, FunctionEnvMut, MemoryView, WasmPtr};
 
 use crate::{executor::Env, functions::FunctionErrors, loader::LimitValue, storage::Storage};
@@ -8,6 +9,216 @@ use super::{
     calculate_max_buffer_size, get_memory, safely_get_memory, safely_get_string,
     safely_write_data_back,
 };
+
+/// Insert multiple key/value pairs into the storage system in a single batch operation.
+///
+/// The guest passes a single JSON-encoded `Vec<Item>` in `items_buf`.
+/// Returns 0 on success.
+pub fn insert_batch(env: FunctionEnvMut<Env>, items_buf: WasmPtr<u8>, items_buf_len: u32) -> i32 {
+    let store = env.as_store_ref();
+    let env_data = env.data();
+
+    let Some(storage) = &env_data.storage else {
+        return FunctionErrors::ApiNotConfigured as i32;
+    };
+
+    let memory_view = match get_memory(&env, &store) {
+        Ok(memory_view) => memory_view,
+        Err(e) => {
+            error!(
+                "{}: Memory error in storage_insert_batch: {e:?}",
+                env_data.module.name,
+            );
+            return FunctionErrors::CouldNotGetAdequateMemory as i32;
+        }
+    };
+
+    safely_get_guest_string!(items_json, memory_view, items_buf, items_buf_len, env_data);
+
+    match insert_batch_common(
+        env_data,
+        storage,
+        env_data.module.name.clone(),
+        items_json,
+        env_data.module.storage_limit.clone(),
+        env_data.module.storage_current.clone(),
+    ) {
+        Ok(code) => code,
+        Err(e) => e as i32,
+    }
+}
+
+/// Insert multiple key/value pairs into a shared namespace in a single batch operation.
+///
+/// The guest passes a single JSON-encoded `Vec<Item>` in `items_buf`.
+/// Returns 0 on success.
+pub fn insert_batch_shared(
+    env: FunctionEnvMut<Env>,
+    namespace_buf: WasmPtr<u8>,
+    namespace_buf_len: u32,
+    items_buf: WasmPtr<u8>,
+    items_buf_len: u32,
+) -> i32 {
+    let store = env.as_store_ref();
+    let env_data = env.data();
+
+    let Some(storage) = &env_data.storage else {
+        return FunctionErrors::ApiNotConfigured as i32;
+    };
+
+    let Some(shared_dbs) = &storage.shared_dbs else {
+        return FunctionErrors::OperationNotAllowed as i32;
+    };
+
+    let memory_view = match get_memory(&env, &store) {
+        Ok(memory_view) => memory_view,
+        Err(e) => {
+            error!(
+                "{}: Memory error in storage_insert_batch_shared: {e:?}",
+                env_data.module.name,
+            );
+            return FunctionErrors::CouldNotGetAdequateMemory as i32;
+        }
+    };
+
+    safely_get_guest_string!(
+        namespace,
+        memory_view,
+        namespace_buf,
+        namespace_buf_len,
+        env_data
+    );
+
+    let Some(db) = shared_dbs.get(&namespace) else {
+        return FunctionErrors::SharedDbError as i32;
+    };
+
+    if !db.config.rw.contains(&env_data.module.name) {
+        return FunctionErrors::OperationNotAllowed as i32;
+    }
+
+    safely_get_guest_string!(items_json, memory_view, items_buf, items_buf_len, env_data);
+
+    match insert_batch_common(
+        env_data,
+        storage,
+        namespace,
+        items_json,
+        db.config.size_limit.clone(),
+        db.used_storage.clone(),
+    ) {
+        Ok(code) => code,
+        Err(e) => e as i32,
+    }
+}
+
+/// Code common to [`insert_batch`] and [`insert_batch_shared`].
+///
+/// `items_json` is a JSON-encoded `Vec<Item>`.
+/// Storage-limit accounting mirrors [`insert_common`]: for each item we subtract the size of any
+/// existing data that would be overwritten.
+fn insert_batch_common(
+    env_data: &Env,
+    storage: &Arc<Storage>,
+    namespace: String,
+    items_json: String,
+    storage_limit: LimitValue,
+    storage_counter: Arc<RwLock<u64>>,
+) -> Result<i32, FunctionErrors> {
+    let items: Vec<Item> = match serde_json::from_str(&items_json) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(
+                "{}: Failed to deserialize items for storage_insert_batch: {e}",
+                env_data.module.name,
+            );
+            return Err(FunctionErrors::ErrorCouldNotSerialize);
+        }
+    };
+
+    info!(
+        "[{}]: batch inserting {} items to namespace {namespace}",
+        env_data.module.name,
+        items.len()
+    );
+
+    // For a limited namespace, check that the entire batch would fit before writing anything.
+    match storage_limit {
+        LimitValue::Unlimited => {
+            // The storage is unlimited, so we don't check / update any counters and just proceed with the operation
+            let result = env_data
+                .api
+                .clone()
+                .runtime
+                .block_on(async move { storage.insert_batch(namespace, items).await });
+
+            match result {
+                Ok(()) => Ok(0),
+                Err(e) => {
+                    error!(
+                        "{}: Storage error during insert_batch: {e}",
+                        env_data.module.name,
+                    );
+                    Err(FunctionErrors::InternalApiError)
+                }
+            }
+        }
+        LimitValue::Limited(limit) => {
+            let mut storage_current = match storage_counter.write() {
+                Ok(g) => g,
+                Err(e) => {
+                    error!("Critical error getting a lock on used storage: {e:?}");
+                    return Err(FunctionErrors::InternalApiError);
+                }
+            };
+
+            // Compute the net byte delta for the whole batch, accounting for any data that would
+            // be overwritten by keys that already exist.
+            let mut net_delta: i64 = 0;
+            for item in &items {
+                let key_len = item.key.as_bytes().len() as u64;
+                let existing = fetch_existing_data_size(env_data, storage, &namespace, &item.key)?;
+
+                // New contribution: key + value. Subtract what was already counted.
+                net_delta += (key_len + item.value.len() as u64) as i64 - existing as i64;
+            }
+
+            let would_be_used = (*storage_current as i64 + net_delta) as u64;
+            if would_be_used > limit {
+                error!(
+                    "{}: Batch insert rejected: would exceed the configured storage limit.",
+                    env_data.module.name,
+                );
+                let _ = env_data.external_logging_system.log_module_error(
+                    env_data.module.name.clone(),
+                    "Batch insert rejected: would exceed the configured storage limit.".to_string(),
+                    vec![],
+                );
+                return Err(FunctionErrors::StorageLimitReached);
+            }
+
+            let result = env_data
+                .api
+                .clone()
+                .runtime
+                .block_on(async move { storage.insert_batch(namespace, items).await });
+
+            match result {
+                Ok(()) => {
+                    *storage_current = would_be_used;
+                    Ok(0)
+                }
+                Err(e) => {
+                    error!(
+                        "{}: Storage error during insert_batch: {e}",
+                        env_data.module.name,
+                    );
+                    Err(FunctionErrors::InternalApiError)
+                }
+            }
+        }
+    }
+}
 
 /// Store data in the storage system if one is configured
 pub fn insert(

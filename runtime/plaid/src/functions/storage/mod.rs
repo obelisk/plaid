@@ -5,7 +5,7 @@ use super::{
 
 pub use delete::{delete, delete_shared};
 pub use get::{get, get_shared};
-pub use insert::{insert, insert_shared};
+pub use insert::{insert, insert_batch, insert_batch_shared, insert_shared};
 pub use list::{list_keys, list_keys_shared};
 
 macro_rules! safely_get_guest_string {

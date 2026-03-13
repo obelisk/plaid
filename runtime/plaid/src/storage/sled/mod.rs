@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use sled::Db;
 
-use super::{StorageError, StorageProvider};
+use super::{Item, StorageError, StorageProvider};
 
 /// Configuration for a Sled DB
 #[derive(Deserialize)]
@@ -31,6 +31,17 @@ impl Sled {
 impl StorageProvider for Sled {
     fn is_persistent(&self) -> bool {
         true
+    }
+
+    async fn insert_batch(
+        &self,
+        _namespace: String,
+        _items: Vec<Item>,
+    ) -> Result<(), StorageError> {
+        Err(StorageError::Unimplemented {
+            operation: "insert_batch".to_string(),
+            provider: "Sled".to_string(),
+        })
     }
 
     async fn insert(

@@ -62,6 +62,10 @@ curl -d "delete_check_returned_data:some_key:a" http://$PLAID_LOCATION/webhook/$
 curl -d "insert:some_key:some_value" http://$PLAID_LOCATION/webhook/$URL
 curl -d "delete_check_returned_data:some_key:some_value" http://$PLAID_LOCATION/webhook/$URL
 # the DB is empty
+curl -d "insert_batch:key1=value1|key2=value2|key3=value3" http://$PLAID_LOCATION/webhook/$URL
+curl -d "get:key1" http://$PLAID_LOCATION/webhook/$URL
+curl -d "get:key2" http://$PLAID_LOCATION/webhook/$URL
+curl -d "get:key3" http://$PLAID_LOCATION/webhook/$URL
 
 sleep 2
 
@@ -83,8 +87,11 @@ kill $RH_PID 2>&1 > /dev/null
 # OK
 # OK
 # OK
+# value1
+# value2
+# value3
 
-echo -e "Empty\nEmpty\nfirst_value\nEmpty\nsecond_value\nEmpty\nEmpty\nEmpty\na\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nOK\nOK\nOK\nOK\nOK" > expected.txt
+echo -e "Empty\nEmpty\nfirst_value\nEmpty\nsecond_value\nEmpty\nEmpty\nEmpty\na\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nOK\nOK\nOK\nOK\nOK\nvalue1\nvalue2\nvalue3" > expected.txt
 diff expected.txt $FILE
 RESULT=$?
 

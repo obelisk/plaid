@@ -47,6 +47,19 @@ fn main(log: String, _: LogSource) -> Result<(), i32> {
             }
             make_named_request("test-response", "OK", HashMap::new()).unwrap();
         }
+        "read after batch insert" => {
+            for i in 0..3 {
+                let key = format!("key{i}");
+                let expected_value = format!("value{i}");
+
+                let actual_value = plaid::storage::get_shared(SHARED_DB, &key).unwrap();
+
+                if expected_value.as_bytes() != actual_value {
+                    panic!("Return value does not match expected value for key {key}");
+                }
+            }
+            make_named_request("test-response", "OK", HashMap::new()).unwrap();
+        }
         _ => panic!("Got an unexpected log"),
     }
 
