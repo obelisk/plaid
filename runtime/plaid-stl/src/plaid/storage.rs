@@ -131,10 +131,7 @@ pub fn insert_shared(
     }
 }
 
-/// Insert multiple key/value pairs in a single batch operation.
-///
-/// `items` is serialised as a JSON-encoded `Vec<Item>` and forwarded to the host in one call.
-/// Returns `Ok(())` on success.
+/// Insert multiple key/value pairs in a single atomic batch operation.
 pub fn insert_batch(items: &[Item]) -> Result<(), PlaidFunctionError> {
     extern "C" {
         fn storage_insert_batch(items_buf: *const u8, items_buf_len: usize) -> i32;
@@ -152,10 +149,7 @@ pub fn insert_batch(items: &[Item]) -> Result<(), PlaidFunctionError> {
     }
 }
 
-/// Insert multiple key/value pairs into a shared namespace in a single batch operation.
-///
-/// `items` is serialised as a JSON-encoded `Vec<Item>` and forwarded to the host in one call.
-/// Returns `Ok(())` on success.
+/// Insert multiple key/value pairs into a shared namespace in a single atomic batch operation.
 pub fn insert_batch_shared(namespace: &str, items: &[Item]) -> Result<(), PlaidFunctionError> {
     extern "C" {
         fn storage_insert_batch_shared(
