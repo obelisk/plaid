@@ -175,7 +175,7 @@ pub struct FailureBehavior {
     /// If set, panics when Plaid fails to parse the filename and bytes of a provided wasm file
     pub panic_on_module_parsing_failure: bool,
     /// If set, panics when Plaid fails to compile a WASM blob to a `PlaidModule`
-    pub panic_on_modele_compilation_failure: bool,
+    pub panic_on_module_compilation_failure: bool,
 }
 
 /// Deserializer for a LimitedAmount where none of the provided values can be 0.
@@ -577,7 +577,7 @@ pub async fn load(
         {
             Ok(pm) => pm,
             Err(e) => {
-                if config.failure_behavior.panic_on_modele_compilation_failure {
+                if config.failure_behavior.panic_on_module_compilation_failure {
                     panic!("Module [{filename}] failed to load: {e}")
                 } else {
                     error!("Module [{filename}] failed to load: {e}. Skipping module load");
