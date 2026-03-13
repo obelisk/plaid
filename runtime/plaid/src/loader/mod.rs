@@ -173,8 +173,10 @@ pub struct Configuration {
 #[derive(Default, Deserialize)]
 pub struct FailureBehavior {
     /// If set, panics when Plaid fails to parse the filename and bytes of a provided wasm file
+    #[serde(default)]
     pub panic_on_module_parsing_failure: bool,
     /// If set, panics when Plaid fails to compile a WASM blob to a `PlaidModule`
+    #[serde(default)]
     pub panic_on_module_compilation_failure: bool,
 }
 
