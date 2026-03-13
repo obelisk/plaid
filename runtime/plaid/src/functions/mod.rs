@@ -9,6 +9,7 @@ mod storage;
 
 use memory::*;
 
+pub use api::is_known_api_function;
 use api::to_api_function;
 use wasmer::{Exports, Function, FunctionEnv, Module, Store};
 
