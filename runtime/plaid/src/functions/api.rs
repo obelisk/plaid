@@ -622,9 +622,6 @@ impl_new_function_with_error_buffer!(bloom_filter, build_with_items, ALLOW_IN_TE
 ///
 /// `with_env` entries produce `Function::new_typed_with_env`
 /// `without_env` entries produce `Function::new_typed` (for host functions that need no env, e.g. `get_time`).
-///
-/// Both generated functions share exactly the same match arms, so adding a new host function
-/// only requires one change in the invocation below.
 macro_rules! define_api_functions {
     (
         with_env: [
