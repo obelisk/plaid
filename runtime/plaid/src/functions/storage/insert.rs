@@ -136,6 +136,12 @@ fn insert_batch_common(
         }
     };
 
+    info!(
+        "[{}]: batch inserting {} items to namespace {namespace}",
+        env_data.module.name,
+        items.len()
+    );
+
     // For a limited namespace, check that the entire batch would fit before writing anything.
     match storage_limit {
         LimitValue::Unlimited => {
