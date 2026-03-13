@@ -6,6 +6,7 @@
 module_dir = "../compiled_modules/"
 compiler_backend = "cranelift"
 readiness_check_file = "./plaid_ready"
+panic_on_module_load_failure = true
 
 test_mode = true
 test_mode_exemptions = [
@@ -31,7 +32,7 @@ test_mode_exemptions = [
     "test_dynamodb.wasm",
     "test_mnr_return_cert.wasm",
     "test_tls_cert_with_sni.wasm",
-    "test_gh_id_conversion.wasm"
+    "test_gh_id_conversion.wasm",
 ]
 
 [loading.persistent_response_size]
@@ -148,3 +149,8 @@ default = "Unlimited"
 [loading.module_signing]
 authorized_signers = ["{plaid-secret{public-key}}"]
 signatures_required = 1
+panic_on_invalid_signature = true
+
+[loading.failure_behavior]
+panic_on_module_parsing_failure = true
+panic_on_module_compilation_failure = true
