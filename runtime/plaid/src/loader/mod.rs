@@ -164,20 +164,11 @@ pub struct Configuration {
     /// If this value is set, Plaid will treat it as an absolute path, create a text file and write "READY"
     /// when the system is fully up and ready to receive traffic.
     pub readiness_check_file: Option<String>,
-    /// Defines how Plaid will behave when it encounters failures during module load. By default, Plaid will skip
-    /// any failed module.
-    #[serde(default)]
-    pub failure_behavior: FailureBehavior,
-}
-
-#[derive(Default, Deserialize)]
-pub struct FailureBehavior {
-    /// If set, panics when Plaid fails to parse the filename and bytes of a provided wasm file
-    #[serde(default)]
-    pub panic_on_module_parsing_failure: bool,
-    /// If set, panics when Plaid fails to compile a WASM blob to a `PlaidModule`
-    #[serde(default)]
-    pub panic_on_module_compilation_failure: bool,
+    /// If this value is set, Plaid will panic if a module fails to load
+    ///
+    /// Defaults to `true` if not provided.
+    #[serde(default = "default_panic_on_load_failure")]
+    pub panic_on_module_load_failure: bool,
 }
 
 /// Deserializer for a LimitedAmount where none of the provided values can be 0.
@@ -229,9 +220,13 @@ pub struct ModuleSigningConfiguration {
     pub signatures_required: usize,
     /// If this value is set, Plaid will panic if a module signature is invalid
     ///
-    /// Defaults to `false` if not provided.
-    #[serde(default)]
+    /// Defaults to `true` if not provided.
+    #[serde(default = "default_panic_on_load_failure")]
     pub panic_on_invalid_signature: bool,
+}
+
+fn default_panic_on_load_failure() -> bool {
+    true
 }
 
 /// Deserializer for a public key
@@ -511,7 +506,7 @@ pub async fn load(
                 Ok(filename_and_bytes) => filename_and_bytes,
                 Err(e) => {
                     let file_path = path.path().to_string_lossy().into_owned();
-                    if config.failure_behavior.panic_on_module_parsing_failure {
+                    if config.panic_on_module_load_failure {
                         panic!("Failed to parse module at [{file_path}]: {e}")
                     } else {
                         error!("Failed to parse module at [{file_path}]: {e}. Skipping load");
@@ -579,7 +574,7 @@ pub async fn load(
         {
             Ok(pm) => pm,
             Err(e) => {
-                if config.failure_behavior.panic_on_module_compilation_failure {
+                if config.panic_on_module_load_failure {
                     panic!("Module [{filename}] failed to load: {e}")
                 } else {
                     error!("Module [{filename}] failed to load: {e}. Skipping module load");
