@@ -150,7 +150,3 @@ default = "Unlimited"
 authorized_signers = ["{plaid-secret{public-key}}"]
 signatures_required = 1
 panic_on_invalid_signature = true
-
-[loading.failure_behavior]
-panic_on_module_parsing_failure = true
-panic_on_module_compilation_failure = true
