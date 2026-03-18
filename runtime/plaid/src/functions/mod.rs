@@ -73,7 +73,10 @@ pub fn link_functions_to_module(
     for import in module.imports() {
         let function_name = import.name();
 
-        if function_name.starts_with("__wbindgen") || function_name.starts_with("__wbg__wbindgen") {
+        if function_name.starts_with("__wbindgen")
+            || function_name.starts_with("__wbg_wbindgen")
+            || function_name.contains("__wbg___wbindgen")
+        {
             continue;
         }
 
@@ -107,11 +110,8 @@ pub fn create_bindgen_placeholder(module: &Module, mut store: &mut Store) -> Exp
         let name = import.name();
         // From wasm-bindgen 0.2.102 to 0.2.104, it's __wbg_wbindgenthrow_{hash}
         // From wasm-bindgen 0.2.105 onwards, it's __wbg___wbindgen_throw_{hash}
-        if name.starts_with("__wbg_") && name.contains("wbindgen_throw") {
-            exports.insert(
-                name,
-                Function::new_typed(&mut store, fake_wbindgen_throw),
-            );
+        if name.starts_with("__wbg_wbindgenthrow_") || name.contains("__wbg___wbindgen_throw_") {
+            exports.insert(name, Function::new_typed(&mut store, fake_wbindgen_throw));
         }
     }
 
