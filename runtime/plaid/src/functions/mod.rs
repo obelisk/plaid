@@ -73,6 +73,9 @@ pub fn link_functions_to_module(
     for import in module.imports() {
         let function_name = import.name();
 
+        // Before 0.2.102, it's __wbingen*
+        // From wasm-bindgen 0.2.102 to 0.2.104, it's __wbg_wbindgen*
+        // From wasm-bindgen 0.2.105 onwards, it's __wbg___wbindgen*
         if function_name.starts_with("__wbindgen")
             || function_name.starts_with("__wbg_wbindgen")
             || function_name.contains("__wbg___wbindgen")
