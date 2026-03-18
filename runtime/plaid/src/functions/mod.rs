@@ -51,7 +51,7 @@ pub fn fake_wbindgen_describe(placeholder: i32) {
 }
 
 pub fn fake_wbindgen_throw(x: i32, y: i32) {
-    warn!("Fake __wbindgen_throw called with placeholder: {x}, {y}");
+    warn!("Fake __wbindgen_throw or __wbg___wbindgen_throw_* called with placeholder: {x}, {y}");
 }
 
 pub fn fake_wbindgen_externref_table_grow(x: i32) -> i32 {
@@ -73,7 +73,7 @@ pub fn link_functions_to_module(
     for import in module.imports() {
         let function_name = import.name();
 
-        if function_name.starts_with("__wbindgen") {
+        if function_name.starts_with("__wbindgen") || function_name.starts_with("__wbg__wbindgen") {
             continue;
         }
 
@@ -88,7 +88,7 @@ pub fn link_functions_to_module(
     Ok(exports)
 }
 
-pub fn create_bindgen_placeholder(mut store: &mut Store) -> Exports {
+pub fn create_bindgen_placeholder(module: &Module, mut store: &mut Store) -> Exports {
     let mut exports = Exports::new();
 
     exports.insert(
@@ -100,6 +100,17 @@ pub fn create_bindgen_placeholder(mut store: &mut Store) -> Exports {
         "__wbindgen_throw",
         Function::new_typed(&mut store, fake_wbindgen_throw),
     );
+
+    // wasm-bindgen >= 0.2.102 generates mangled import names for intrinsics like __wbindgen_throw
+    for import in module.imports() {
+        let name = import.name();
+        if name.starts_with("__wbg___wbindgen_throw") {
+            exports.insert(
+                name,
+                Function::new_typed(&mut store, fake_wbindgen_throw),
+            );
+        }
+    }
 
     exports
 }
