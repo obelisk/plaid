@@ -348,7 +348,7 @@ fn prepare_for_execution(
     imports.register_namespace("env", exports);
     imports.register_namespace(
         "__wbindgen_placeholder__",
-        create_bindgen_placeholder(&mut store),
+        create_bindgen_placeholder(&plaid_module.module, &mut store),
     );
     imports.register_namespace(
         "__wbindgen_externref_xform__",
