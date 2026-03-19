@@ -150,7 +150,7 @@ impl Slack {
 
     /// Call the Slack postMessage API. The message and location are defined by the module but the bot
     /// must be configured in Plaid.
-    pub async fn post_message(&self, params: &str, module: Arc<PlaidModule>) -> Result<u32> {
+    pub async fn post_message(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
         let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         match self
             .call_slack(p.bot.clone(), Apis::PostMessage(p), module)
@@ -166,7 +166,7 @@ impl Slack {
                         response,
                     )));
                 }
-                Ok(0)
+                Ok(response)
             }
             Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                 status,

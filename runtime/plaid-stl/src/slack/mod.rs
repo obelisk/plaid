@@ -94,9 +94,13 @@ pub struct PostMessage {
     pub body: String,
 }
 
-pub fn post_message(bot: &str, channel: &str, text: &str) -> Result<(), PlaidFunctionError> {
+pub fn post_message_detailed(
+    bot: &str,
+    channel: &str,
+    text: &str,
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
-        new_host_function!(slack, post_message);
+        new_host_function_with_error_buffer!(slack, post_message);
     }
 
     let message = SlackMessage {
@@ -104,28 +108,45 @@ pub fn post_message(bot: &str, channel: &str, text: &str) -> Result<(), PlaidFun
         text: text.to_owned(),
     };
 
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
     let params = serde_json::to_string(&PostMessage {
         bot: bot.to_string(),
         body: serde_json::to_string(&message).unwrap(),
     })
     .unwrap();
 
-    let res = unsafe { slack_post_message(params.as_ptr(), params.len()) };
+    let res = unsafe {
+        slack_post_message(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
 
     if res < 0 {
         return Err(res.into());
     }
 
-    Ok(())
+    return_buffer.truncate(res as usize);
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    Ok(res)
 }
 
-pub fn post_message_with_blocks(
+pub fn post_message(bot: &str, channel: &str, text: &str) -> Result<(), PlaidFunctionError> {
+    post_message_detailed(bot, channel, text).map(|_| ())
+}
+
+pub fn post_message_with_blocks_detailed(
     bot: &str,
     channel: &str,
     text: &str,
-) -> Result<(), PlaidFunctionError> {
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
-        new_host_function!(slack, post_message);
+        new_host_function_with_error_buffer!(slack, post_message);
     }
 
     let message = SlackMessageWithBlocks {
@@ -133,19 +154,40 @@ pub fn post_message_with_blocks(
         blocks: text.to_owned(),
     };
 
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
     let params = serde_json::to_string(&PostMessage {
         bot: bot.to_string(),
         body: serde_json::to_string(&message).unwrap(),
     })
     .unwrap();
 
-    let res = unsafe { slack_post_message(params.as_ptr(), params.len()) };
+    let res = unsafe {
+        slack_post_message(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
 
     if res < 0 {
         return Err(res.into());
     }
 
-    Ok(())
+    return_buffer.truncate(res as usize);
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    Ok(res)
+}
+
+pub fn post_message_with_blocks(
+    bot: &str,
+    channel: &str,
+    text: &str,
+) -> Result<(), PlaidFunctionError> {
+    post_message_with_blocks_detailed(bot, channel, text).map(|_| ())
 }
 
 /// Data to be sent to the runtime to open a view
