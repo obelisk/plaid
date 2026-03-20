@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::storage::StorageError;
+
 #[derive(Debug)]
 pub enum Errors {
     InvalidFileType(String, String),
@@ -7,6 +9,8 @@ pub enum Errors {
     SigningError(sshcerts::error::Error),
     NotEnoughValidSignatures(usize, usize),
     FileError(std::io::Error),
+    MissingFunction(String),
+    StorageError(StorageError),
 }
 
 impl Display for Errors {
@@ -23,6 +27,13 @@ impl Display for Errors {
                 "Expected {expected} valid signatures but only received {received}"
             ),
             Self::FileError(error) => write!(f, "IO error: {error}"),
+            Self::MissingFunction(name) => {
+                write!(f, "Module imports unknown host function: {name}")
+            }
+            Self::StorageError(e) => write!(
+                f,
+                "Plaid encountered a storage error during module load: {e}"
+            ),
         }
     }
 }
