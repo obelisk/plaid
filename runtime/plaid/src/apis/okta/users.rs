@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use http::StatusCode;
+
 use crate::{
     apis::{okta::OktaError, ApiError},
     loader::PlaidModule,
@@ -17,30 +19,27 @@ impl Okta {
         let res = self
             .client
             .get(format!(
-                "https://{}/api/v1/users/{}",
-                &self.config.domain, query
+                "https://{}/api/v1/users/{query}",
+                &self.config.domain
             ))
             .header(
                 "Authorization",
                 self.get_authorization_header(&OktaOperation::GetUserInfo)
                     .await
-                    .map_err(|e| ApiError::OktaError(e))?,
+                    .map_err(ApiError::OktaError)?,
             )
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
 
-        let response = res.send().await.map_err(|e| ApiError::NetworkError(e))?;
-        let data = response
-            .bytes()
-            .await
-            .map_err(|e| ApiError::NetworkError(e))?;
+        let response = res.send().await.map_err(ApiError::NetworkError)?;
+        let status = response.status();
 
-        match String::from_utf8(data.to_vec()) {
-            Ok(x) => Ok(x),
-            Err(e) => {
-                error!("Server returned data that was not encoded in a way we understand");
-                Err(ApiError::OktaError(OktaError::BadData(e)))
-            }
+        if status != StatusCode::OK {
+            return Err(ApiError::OktaError(OktaError::UnexpectedStatusCode(
+                status.as_u16(),
+            )));
         }
+
+        response.text().await.map_err(ApiError::NetworkError)
     }
 }
