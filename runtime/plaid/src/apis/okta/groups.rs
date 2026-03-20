@@ -1,5 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
+use http::StatusCode;
+
 use crate::{apis::ApiError, loader::PlaidModule};
 
 use super::{Okta, OktaError};
@@ -27,22 +29,20 @@ impl Okta {
                 "Authorization",
                 self.get_authorization_header(&super::OktaOperation::RemoveUserFromGroup)
                     .await
-                    .map_err(|e| ApiError::OktaError(e))?,
+                    .map_err(ApiError::OktaError)?,
             )
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
 
-        match res.send().await {
-            Ok(r) => {
-                if r.status() == 204 {
-                    Ok(0)
-                } else {
-                    Err(ApiError::OktaError(OktaError::UnexpectedStatusCode(
-                        r.status().as_u16(),
-                    )))
-                }
-            }
-            Err(e) => Err(ApiError::NetworkError(e)),
+        let response = res.send().await.map_err(ApiError::NetworkError)?;
+
+        let status = response.status();
+        if status == StatusCode::NO_CONTENT {
+            Ok(0)
+        } else {
+            Err(ApiError::OktaError(OktaError::UnexpectedStatusCode(
+                status.as_u16(),
+            )))
         }
     }
 }
