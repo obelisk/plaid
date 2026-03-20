@@ -33,7 +33,6 @@ impl Okta {
 
         let response = res.send().await.map_err(ApiError::NetworkError)?;
         let status = response.status();
-        let data = response.text().await.map_err(ApiError::NetworkError)?;
 
         if status != StatusCode::OK {
             return Err(ApiError::OktaError(OktaError::UnexpectedStatusCode(
@@ -41,6 +40,6 @@ impl Okta {
             )));
         }
 
-        Ok(data)
+        response.text().await.map_err(ApiError::NetworkError)
     }
 }
