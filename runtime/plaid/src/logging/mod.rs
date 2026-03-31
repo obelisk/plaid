@@ -1,7 +1,7 @@
+mod influxdb;
 mod splunk;
-mod webhook;
-
 mod stdout;
+mod webhook;
 
 use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender};
 
@@ -94,6 +94,9 @@ pub struct LoggingConfiguration {
     /// so it's easy to operate on Plaid events. It's likely in future the
     /// Splunk logger code will be a specific instantiation of this.
     webhook: Option<webhook::Config>,
+    /// Log to InfluxDB for timeseries data. The influxdb module contains more
+    /// information on configuring this logger.
+    influxdb: Option<influxdb::Config>,
     /// Determines whether logs forwarded to rules are output to the configured logging destinations when a module fails.
     /// When set to `true`, logs are displayed for debugging; when `false`, they are omitted.
     /// Defaults to `true` if not explicitly configured.
@@ -118,6 +121,8 @@ pub enum LoggingError {
     CommunicationError(String),
     /// Logging system has gone away
     LoggingSystemDead,
+    /// Errors specific to InfluxDB logging
+    InfluxDbError(influxdb::InfluxDbError),
 }
 
 impl std::fmt::Display for LoggingError {
@@ -126,6 +131,7 @@ impl std::fmt::Display for LoggingError {
             LoggingError::SerializationError(e) => write!(f, "Logging serialization error: {}", e),
             LoggingError::CommunicationError(e) => write!(f, "Logging communication error: {}", e),
             LoggingError::LoggingSystemDead => write!(f, "Logging system has gone away"),
+            LoggingError::InfluxDbError(e) => write!(f, "InfluxDB logging error: {:?}", e),
         }
     }
 }
@@ -133,7 +139,7 @@ impl std::fmt::Display for LoggingError {
 /// To implement a new logger, it must implement the `send_log` function
 /// and return success or failure.
 trait PlaidLogger {
-    fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError>;
+    async fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError>;
 }
 
 #[derive(Clone)]
@@ -205,7 +211,7 @@ impl Logger {
     /// will send a heartbeat message instead. For stdout, and influx, this is
     /// a noop and will not actually be sent to the backend (or logged to the
     /// screen).
-    fn logging_thread_loop(
+    async fn logging_thread_loop(
         config: LoggingConfiguration,
         log_receiver: Receiver<Log>,
     ) -> Result<(), LoggingError> {
@@ -242,6 +248,14 @@ impl Logger {
             None => None,
         };
 
+        let influxdb_logger = match config.influxdb {
+            Some(config) => {
+                info!("Configured logger: influxdb");
+                Some(influxdb::InfluxDBLogger::new(config))
+            }
+            None => None,
+        };
+
         // Main logging loop
         loop {
             let log = match log_receiver.recv_timeout(Duration::from_secs(heartbeat_interval)) {
@@ -256,20 +270,26 @@ impl Logger {
             };
 
             if let Some(logger) = &stdout_logger {
-                if let Err(_) = logger.send_log(&log) {
+                if let Err(_) = logger.send_log(&log).await {
                     error!("Could not send logs to stdout");
                 }
             }
 
             if let Some(logger) = &splunk_logger {
-                if let Err(_) = logger.send_log(&log) {
+                if let Err(_) = logger.send_log(&log).await {
                     error!("Could not send logs to Splunk");
                 }
             }
 
             if let Some(logger) = &webhook_logger {
-                if let Err(_) = logger.send_log(&log) {
+                if let Err(_) = logger.send_log(&log).await {
                     error!("Could not send logs to webhook");
+                }
+            }
+
+            if let Some(logger) = &influxdb_logger {
+                if let Err(_) = logger.send_log(&log).await {
+                    error!("Could not send logs to InfluxDB");
                 }
             }
         }
@@ -281,7 +301,10 @@ impl Logger {
     pub fn start(config: LoggingConfiguration) -> (Self, JoinHandle<Result<(), LoggingError>>) {
         let (sender, rx) = bounded(CHANNEL_CAPACITY);
         let show_log_on_error = config.show_log_on_error;
-        let _handle = thread::spawn(move || Self::logging_thread_loop(config, rx));
+        let _handle = thread::spawn(move || {
+            let runtime = Runtime::new().unwrap();
+            runtime.block_on(Self::logging_thread_loop(config, rx))
+        });
 
         (
             Self {
