@@ -14,6 +14,8 @@ pub struct SlackMessage {
 pub struct SlackMessageWithBlocks {
     channel: String,
     blocks: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thread_ts: Option<String>,
 }
 
 #[inline]
@@ -152,6 +154,7 @@ pub fn post_message_with_blocks_detailed(
     let message = SlackMessageWithBlocks {
         channel: channel.to_owned(),
         blocks: text.to_owned(),
+        thread_ts: None,
     };
 
     const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
@@ -188,6 +191,62 @@ pub fn post_message_with_blocks(
     text: &str,
 ) -> Result<(), PlaidFunctionError> {
     post_message_with_blocks_detailed(bot, channel, text).map(|_| ())
+}
+
+/// Post a Block Kit message as a thread reply under an existing message.
+/// Returns the full Slack API response (including the new message's `ts`).
+pub fn post_message_with_blocks_in_thread_detailed(
+    bot: &str,
+    channel: &str,
+    blocks: &str,
+    thread_ts: &str,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, post_message);
+    }
+
+    let message = SlackMessageWithBlocks {
+        channel: channel.to_owned(),
+        blocks: blocks.to_owned(),
+        thread_ts: Some(thread_ts.to_owned()),
+    };
+
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&PostMessage {
+        bot: bot.to_string(),
+        body: serde_json::to_string(&message).unwrap(),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_post_message(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    Ok(res)
+}
+
+/// Post a Block Kit message as a thread reply under an existing message.
+pub fn post_message_with_blocks_in_thread(
+    bot: &str,
+    channel: &str,
+    blocks: &str,
+    thread_ts: &str,
+) -> Result<(), PlaidFunctionError> {
+    post_message_with_blocks_in_thread_detailed(bot, channel, blocks, thread_ts).map(|_| ())
 }
 
 /// Data to be sent to the runtime to open a view
@@ -592,4 +651,78 @@ pub fn invite_to_channel(
     }
 
     Ok(())
+}
+
+#[derive(Serialize)]
+struct SlackUpdateMessageWithBlocks {
+    channel: String,
+    ts: String,
+    blocks: String,
+}
+
+/// Data to be sent to the Plaid runtime for updating a message
+#[derive(Serialize, Deserialize)]
+pub struct UpdateMessage {
+    pub bot: String,
+    pub body: String,
+}
+
+/// Update an existing Slack message with new Block Kit content (chat.update).
+/// Returns the full Slack API response.
+/// - `bot`: configured bot name
+/// - `channel`: channel containing the message
+/// - `ts`: timestamp of the message to update
+/// - `blocks`: new Block Kit JSON content
+pub fn update_message_with_blocks_detailed(
+    bot: &str,
+    channel: &str,
+    ts: &str,
+    blocks: &str,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, update_message);
+    }
+
+    let message = SlackUpdateMessageWithBlocks {
+        channel: channel.to_owned(),
+        ts: ts.to_owned(),
+        blocks: blocks.to_owned(),
+    };
+
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&UpdateMessage {
+        bot: bot.to_string(),
+        body: serde_json::to_string(&message).unwrap(),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_update_message(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    Ok(res)
+}
+
+/// Update an existing Slack message with new Block Kit content (chat.update).
+pub fn update_message_with_blocks(
+    bot: &str,
+    channel: &str,
+    ts: &str,
+    blocks: &str,
+) -> Result<(), PlaidFunctionError> {
+    update_message_with_blocks_detailed(bot, channel, ts, blocks).map(|_| ())
 }
