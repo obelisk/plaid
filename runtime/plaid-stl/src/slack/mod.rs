@@ -193,14 +193,21 @@ pub fn post_message_with_blocks(
     post_message_with_blocks_detailed(bot, channel, text).map(|_| ())
 }
 
+/// Slack API response for message operations (chat.postMessage, chat.update).
+#[derive(Serialize, Deserialize)]
+pub struct SlackMessageResponse {
+    pub ok: bool,
+    pub channel: String,
+    pub ts: String,
+}
+
 /// Post a Block Kit message as a thread reply under an existing message.
-/// Returns the full Slack API response (including the new message's `ts`).
-pub fn post_message_with_blocks_in_thread_detailed(
+pub fn post_message_with_blocks_in_thread(
     bot: &str,
     channel: &str,
     blocks: &str,
     thread_ts: &str,
-) -> Result<String, PlaidFunctionError> {
+) -> Result<SlackMessageResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(slack, post_message);
     }
@@ -236,17 +243,7 @@ pub fn post_message_with_blocks_in_thread_detailed(
     return_buffer.truncate(res as usize);
     let res = String::from_utf8(return_buffer).unwrap();
 
-    Ok(res)
-}
-
-/// Post a Block Kit message as a thread reply under an existing message.
-pub fn post_message_with_blocks_in_thread(
-    bot: &str,
-    channel: &str,
-    blocks: &str,
-    thread_ts: &str,
-) -> Result<(), PlaidFunctionError> {
-    post_message_with_blocks_in_thread_detailed(bot, channel, blocks, thread_ts).map(|_| ())
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
 }
 
 /// Data to be sent to the runtime to open a view
@@ -668,17 +665,16 @@ pub struct UpdateMessage {
 }
 
 /// Update an existing Slack message with new Block Kit content (chat.update).
-/// Returns the full Slack API response.
 /// - `bot`: configured bot name
-/// - `channel`: channel containing the message
+/// - `channel`: channel ID containing the message
 /// - `ts`: timestamp of the message to update
 /// - `blocks`: new Block Kit JSON content
-pub fn update_message_with_blocks_detailed(
+pub fn update_message_with_blocks(
     bot: &str,
     channel: &str,
     ts: &str,
     blocks: &str,
-) -> Result<String, PlaidFunctionError> {
+) -> Result<SlackMessageResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(slack, update_message);
     }
@@ -714,15 +710,5 @@ pub fn update_message_with_blocks_detailed(
     return_buffer.truncate(res as usize);
     let res = String::from_utf8(return_buffer).unwrap();
 
-    Ok(res)
-}
-
-/// Update an existing Slack message with new Block Kit content (chat.update).
-pub fn update_message_with_blocks(
-    bot: &str,
-    channel: &str,
-    ts: &str,
-    blocks: &str,
-) -> Result<(), PlaidFunctionError> {
-    update_message_with_blocks_detailed(bot, channel, ts, blocks).map(|_| ())
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
 }
