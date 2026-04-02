@@ -562,6 +562,7 @@ impl_new_function_with_error_buffer!(rustica, new_mtls_cert, DISALLOW_IN_TEST_MO
 // Slack Functions
 impl_new_function!(slack, views_open, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, post_message, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, update_message, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, get_id_from_email, ALLOW_IN_TEST_MODE);
 impl_new_function!(slack, post_to_arbitrary_webhook, ALLOW_IN_TEST_MODE);
 impl_new_function!(slack, post_to_named_webhook, ALLOW_IN_TEST_MODE);
@@ -894,6 +895,9 @@ pub fn to_api_function(
             Function::new_typed_with_env(&mut store, &env, slack_post_to_arbitrary_webhook)
         }
         "slack_post_message" => Function::new_typed_with_env(&mut store, &env, slack_post_message),
+        "slack_update_message" => {
+            Function::new_typed_with_env(&mut store, &env, slack_update_message)
+        }
         "slack_views_open" => Function::new_typed_with_env(&mut store, &env, slack_views_open),
         "slack_get_id_from_email" => {
             Function::new_typed_with_env(&mut store, &env, slack_get_id_from_email)

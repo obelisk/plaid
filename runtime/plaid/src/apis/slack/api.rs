@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use plaid_stl::slack::{
     CreateChannel, CreateChannelResponse, GetDndInfo, GetDndInfoResponse, GetIdFromEmail,
-    GetPresence, GetPresenceResponse, InviteToChannel, PostMessage, UserInfo, UserInfoResponse,
-    ViewOpen,
+    GetPresence, GetPresenceResponse, InviteToChannel, PostMessage, UpdateMessage, UserInfo,
+    UserInfoResponse, ViewOpen,
 };
 use reqwest::{Client, RequestBuilder};
 
@@ -16,6 +16,7 @@ use super::Slack;
 
 enum Apis {
     PostMessage(plaid_stl::slack::PostMessage),
+    UpdateMessage(plaid_stl::slack::UpdateMessage),
     ViewsOpen(plaid_stl::slack::ViewOpen),
     LookupByEmail(plaid_stl::slack::GetIdFromEmail),
     GetPresence(plaid_stl::slack::GetPresence),
@@ -40,6 +41,10 @@ impl Apis {
         match self {
             Self::PostMessage(p) => client
                 .post(format!("{SLACK_API_URL}{api}", api = "chat.postMessage"))
+                .body(p.body.clone())
+                .header("Content-Type", "application/json; charset=utf-8"),
+            Self::UpdateMessage(p) => client
+                .post(format!("{SLACK_API_URL}{api}", api = "chat.update"))
                 .body(p.body.clone())
                 .header("Content-Type", "application/json; charset=utf-8"),
             Self::ViewsOpen(p) => client
@@ -80,6 +85,7 @@ impl std::fmt::Display for Apis {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PostMessage(_) => write!(f, "PostMessage"),
+            Self::UpdateMessage(_) => write!(f, "UpdateMessage"),
             Self::ViewsOpen(_) => write!(f, "ViewsOpen"),
             Self::LookupByEmail(_) => write!(f, "LookupByEmail"),
             Self::GetPresence(_) => write!(f, "GetPresence"),
@@ -154,6 +160,33 @@ impl Slack {
         let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         match self
             .call_slack(p.bot.clone(), Apis::PostMessage(p), module)
+            .await
+        {
+            Ok((200, response)) => {
+                let slack_response: GenericSlackResponse = serde_json::from_str(&response)
+                    .map_err(|_| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(response.clone()))
+                    })?;
+                if !slack_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(response)
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Call the Slack chat.update API. Updates an existing message identified by its ts.
+    /// The bot must be configured in Plaid.
+    pub async fn update_message(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
+        let p: UpdateMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::UpdateMessage(p), module)
             .await
         {
             Ok((200, response)) => {
