@@ -73,7 +73,13 @@ pub fn link_functions_to_module(
     for import in module.imports() {
         let function_name = import.name();
 
-        if function_name.starts_with("__wbindgen") {
+        // Before 0.2.102, it's __wbingen*
+        // From wasm-bindgen 0.2.102 to 0.2.104, it's __wbg_wbindgen*
+        // From wasm-bindgen 0.2.105 onwards, it's __wbg___wbindgen*
+        if function_name.starts_with("__wbindgen")
+            || function_name.starts_with("__wbg_wbindgen")
+            || function_name.starts_with("__wbg___wbindgen")
+        {
             continue;
         }
 
@@ -88,7 +94,7 @@ pub fn link_functions_to_module(
     Ok(exports)
 }
 
-pub fn create_bindgen_placeholder(mut store: &mut Store) -> Exports {
+pub fn create_bindgen_placeholder(module: &Module, mut store: &mut Store) -> Exports {
     let mut exports = Exports::new();
 
     exports.insert(
@@ -100,6 +106,17 @@ pub fn create_bindgen_placeholder(mut store: &mut Store) -> Exports {
         "__wbindgen_throw",
         Function::new_typed(&mut store, fake_wbindgen_throw),
     );
+
+    // wasm-bindgen >= 0.2.102 generates mangled import names for some intrinsics
+    // including __wbindgen_throw
+    for import in module.imports() {
+        let name = import.name();
+        // From wasm-bindgen 0.2.102 to 0.2.104, it's __wbg_wbindgenthrow_{hash}
+        // From wasm-bindgen 0.2.105 onwards, it's __wbg___wbindgen_throw_{hash}
+        if name.starts_with("__wbg_wbindgenthrow_") || name.starts_with("__wbg___wbindgen_throw_") {
+            exports.insert(name, Function::new_typed(&mut store, fake_wbindgen_throw));
+        }
+    }
 
     exports
 }
