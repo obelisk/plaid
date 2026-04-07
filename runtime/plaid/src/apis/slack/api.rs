@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use plaid_stl::slack::{
     CreateChannel, CreateChannelResponse, GetDndInfo, GetDndInfoResponse, GetIdFromEmail,
-    GetPresence, GetPresenceResponse, InviteToChannel, PostMessage, UpdateMessage, UserInfo,
-    UserInfoResponse, ViewOpen,
+    GetPresence, GetPresenceResponse, InviteToChannel, PostMessage, RemoveFromChannel,
+    UpdateMessage, UserInfo, UserInfoResponse, ViewOpen,
 };
 use reqwest::{Client, RequestBuilder};
 
@@ -24,6 +24,7 @@ enum Apis {
     UserInfo(plaid_stl::slack::UserInfo),
     CreateChannel(plaid_stl::slack::CreateChannel),
     InviteToChannel(plaid_stl::slack::InviteToChannel),
+    RemoveFromChannel(plaid_stl::slack::RemoveFromChannel),
 }
 
 const SLACK_API_URL: &str = "https://slack.com/api/";
@@ -77,6 +78,10 @@ impl Apis {
                 ))
                 .body(p.body().unwrap_or_default()) // TODO this is not great: maybe this method should be fallible
                 .header("Content-Type", "application/json; charset=utf-8"),
+            Self::RemoveFromChannel(p) => client
+                .post(format!("{SLACK_API_URL}{api}", api = "conversations.kick"))
+                .body(p.body().unwrap_or_default()) // TODO this is not great: maybe this method should be fallible
+                .header("Content-Type", "application/json; charset=utf-8"),
         }
     }
 }
@@ -93,6 +98,7 @@ impl std::fmt::Display for Apis {
             Self::UserInfo(_) => write!(f, "UserInfo"),
             Self::CreateChannel(_) => write!(f, "CreateChannel"),
             Self::InviteToChannel(_) => write!(f, "InviteToChannel"),
+            Self::RemoveFromChannel(_) => write!(f, "RemoveFromChannel"),
         }
     }
 }
@@ -355,6 +361,33 @@ impl Slack {
                         ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
                     })?;
                 if !invite_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(0)
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Remove a user from a Slack channel
+    pub async fn remove_from_channel(&self, params: &str, module: Arc<PlaidModule>) -> Result<u32> {
+        let p: RemoveFromChannel =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::RemoveFromChannel(p), module)
+            .await
+        {
+            Ok((200, response)) => {
+                let remove_response: GenericSlackResponse = serde_json::from_str(&response)
+                    .map_err(|e| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(e.to_string()))
+                    })?;
+                if !remove_response.ok {
                     return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
                         response,
                     )));

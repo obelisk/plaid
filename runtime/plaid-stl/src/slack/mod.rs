@@ -712,3 +712,53 @@ pub fn update_message_with_blocks(
 
     serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct RemoveFromChannel {
+    pub bot: String,
+    pub channel: String,
+    pub user: String,
+}
+
+impl RemoveFromChannel {
+    /// Serialize the body for the Slack API request
+    pub fn body(&self) -> Result<String, String> {
+        #[derive(Serialize)]
+        struct RemoveFromChannelBody<'a> {
+            channel: &'a str,
+            user: &'a str,
+        }
+
+        let body = RemoveFromChannelBody {
+            channel: &self.channel,
+            user: &self.user,
+        };
+
+        serde_json::to_string(&body).map_err(|e| format!("Failed to serialize body: {}", e))
+    }
+}
+
+/// Remove a user from a Slack channel
+/// - `bot`: bot to use for removing the user
+/// - `channel`: ID of the channel to remove the user from
+/// - `user`: ID of the user to remove
+pub fn remove_from_channel(bot: &str, channel: &str, user: &str) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(slack, remove_from_channel);
+    }
+
+    let params = serde_json::to_string(&RemoveFromChannel {
+        bot: bot.to_string(),
+        channel: channel.to_string(),
+        user: user.to_string(),
+    })
+    .unwrap();
+
+    let res = unsafe { slack_remove_from_channel(params.as_ptr(), params.len()) };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
