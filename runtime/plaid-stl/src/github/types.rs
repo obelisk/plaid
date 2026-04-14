@@ -28,7 +28,8 @@ pub enum InstallationAccessTokenPermissionValue {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InstallationAccessTokenRequest {
     pub scope: InstallationAccessTokenScope,
-    pub permissions: HashMap<InstallationAccessTokenPermissionKey, InstallationAccessTokenPermissionValue>,
+    pub permissions:
+        HashMap<InstallationAccessTokenPermissionKey, InstallationAccessTokenPermissionValue>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

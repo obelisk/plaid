@@ -1,5 +1,5 @@
-mod app;
 mod actions;
+mod app;
 mod code;
 mod copilot;
 mod deploy_keys;

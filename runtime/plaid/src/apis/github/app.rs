@@ -8,7 +8,10 @@ use plaid_stl::github::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    apis::{ApiError, github::{Authentication, GitHubError}},
+    apis::{
+        github::{Authentication, GitHubError},
+        ApiError,
+    },
     loader::PlaidModule,
 };
 
@@ -40,26 +43,38 @@ impl Github {
         let request: InstallationAccessTokenRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let (repositories, repository_ids, scope_label) = match request.scope {
-            InstallationAccessTokenScope::AllRepositories => (None, None, "all"),
-            InstallationAccessTokenScope::SelectedRepositories { repositories } => (
-                Some(validate_repository_scope(self, repositories)?),
-                None,
-                "repositories",
-            ),
-            InstallationAccessTokenScope::SelectedRepositoryIds { repository_ids } => (
-                None,
-                Some(validate_repository_id_scope(repository_ids)?),
-                "repository_ids",
-            ),
-        };
-
         let installation_id = if let Authentication::App {
             installation_id, ..
-        } = self.config.authentication {
+        } = self.config.authentication
+        {
             installation_id
         } else {
-            return Err(ApiError::ConfigurationError("Github App is required for creating installation access token".to_string()));
+            return Err(ApiError::ConfigurationError(
+                "Github App is required for creating installation access token".to_string(),
+            ));
+        };
+
+        let (repositories, repository_ids) = match request.scope {
+            InstallationAccessTokenScope::AllRepositories => {
+                info!(
+                    "Creating a GitHub installation access token with [all_repositories] scope and [{}] permissions on behalf of {module}", request.permissions,
+                );
+                (None, None)
+            }
+            InstallationAccessTokenScope::SelectedRepositories { repositories } => {
+                info!(
+                    "Creating a GitHub installation access token with [{repositories}] scope and [{}] permissions on behalf of {module}", request.permissions,
+                );
+
+                (Some(validate_repository_scope(self, repositories)?), None)
+            }
+            InstallationAccessTokenScope::SelectedRepositoryIds { repository_ids } => {
+                info!(
+                    "Creating a GitHub installation access token with [{repository_ids}] scope and [{}] permissions on behalf of {module}", request.permissions,
+                );
+
+                (None, Some(validate_repository_id_scope(repository_ids)?))
+            }
         };
 
         let body = CreateInstallationAccessTokenBody {
@@ -69,9 +84,6 @@ impl Github {
         };
 
         let address = format!("/app/installations/{installation_id}/access_tokens");
-        info!(
-            "Creating a GitHub installation access token with [{scope_label}] scope and [{}] permissions on behalf of {module}", body.permissions,
-        );
 
         match self.make_generic_post_request(address, &body, module).await {
             Ok((status, Ok(body))) => {
