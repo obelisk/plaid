@@ -2,6 +2,8 @@
    INSTALLATION ACCESS TOKENS
 *******************************************************************************************/
 
+use std::collections::HashMap;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum InstallationAccessTokenScope {
@@ -10,7 +12,7 @@ pub enum InstallationAccessTokenScope {
     SelectedRepositoryIds { repository_ids: Vec<u64> },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallationAccessTokenPermissionKey {
     Contents,
@@ -24,15 +26,9 @@ pub enum InstallationAccessTokenPermissionValue {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct InstallationAccessTokenPermission {
-    pub key: InstallationAccessTokenPermissionKey,
-    pub value: InstallationAccessTokenPermissionValue,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct InstallationAccessTokenRequest {
     pub scope: InstallationAccessTokenScope,
-    pub permission: InstallationAccessTokenPermission,
+    pub permissions: HashMap<InstallationAccessTokenPermissionKey, InstallationAccessTokenPermissionValue>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

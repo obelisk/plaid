@@ -8,14 +8,15 @@ use plaid_stl::github::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    apis::{github::GitHubError, ApiError},
+    apis::{ApiError, github::{Authentication, GitHubError}},
     loader::PlaidModule,
 };
 
-use super::{build_github_app_client, Github};
+use super::Github;
 
 impl Github {
     /// Create a GitHub App installation access token with an explicit scope and permission set.
+    /// For more details, see https://docs.github.com/en/rest/apps/apps?apiVersion=2026-03-10#create-an-installation-access-token-for-an-app
     pub async fn create_installation_access_token(
         &self,
         params: &str,
@@ -38,10 +39,6 @@ impl Github {
 
         let request: InstallationAccessTokenRequest =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
-        let permissions = HashMap::from([(
-            permission_key(request.permission.key).to_string(),
-            permission_level(request.permission.value).to_string(),
-        )]);
 
         let (repositories, repository_ids, scope_label) = match request.scope {
             InstallationAccessTokenScope::AllRepositories => (None, None, "all"),
@@ -57,102 +54,37 @@ impl Github {
             ),
         };
 
-        let (client, installation_id) = build_github_app_client(&self.config.authentication)?;
-        let address = format!("/app/installations/{installation_id}/access_tokens");
-        info!(
-            "Creating a GitHub installation access token with {scope_label} scope on behalf of {module}"
-        );
-
-        let request = CreateInstallationAccessTokenBody {
-            repositories,
-            repository_ids,
-            permissions,
+        let installation_id = if let Authentication::App {
+            installation_id, ..
+        } = self.config.authentication {
+            installation_id
+        } else {
+            return Err(ApiError::ConfigurationError("Github App is required for creating installation access token".to_string()));
         };
 
-        match client._post(address, Some(&request)).await {
-            Ok(response) => {
-                let status = response.status().as_u16();
-                let body = client.body_to_string(response).await.map_err(|e| {
-                    ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                })?;
+        let body = CreateInstallationAccessTokenBody {
+            repositories,
+            repository_ids,
+            permissions: request.permissions.into(),
+        };
 
-                if status != 201 {
-                    return Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+        let address = format!("/app/installations/{installation_id}/access_tokens");
+        info!(
+            "Creating a GitHub installation access token with [{scope_label}] scope and [{}] permissions on behalf of {module}", body.permissions,
+        );
+
+        match self.make_generic_post_request(address, &body, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 201 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
-                    )));
+                    )))
                 }
-
-                let token: RawInstallationAccessToken = serde_json::from_str(&body)
-                    .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
-                serde_json::to_string(&InstallationAccessToken {
-                    token: token.token,
-                    expires_at: token.expires_at,
-                })
-                .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
             }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
         }
     }
-}
-
-fn permission_key(key: InstallationAccessTokenPermissionKey) -> &'static str {
-    match key {
-        InstallationAccessTokenPermissionKey::Contents => "contents",
-    }
-}
-
-fn permission_level(level: InstallationAccessTokenPermissionValue) -> &'static str {
-    match level {
-        InstallationAccessTokenPermissionValue::Read => "read",
-        InstallationAccessTokenPermissionValue::Write => "write",
-    }
-}
-
-fn validate_repository_scope(
-    github: &Github,
-    repositories: Vec<String>,
-) -> Result<Vec<String>, ApiError> {
-    if repositories.is_empty() {
-        return Err(ApiError::BadRequest);
-    }
-
-    let mut validated = Vec::new();
-    for full_name in repositories {
-        github.validate_repository_name(&full_name)?;
-
-        let mut parts = full_name.split('/');
-        let owner = parts.next().ok_or(ApiError::BadRequest)?;
-        let repo = parts.next().ok_or(ApiError::BadRequest)?;
-        if parts.next().is_some() {
-            return Err(ApiError::BadRequest);
-        }
-
-        github.validate_org(owner)?;
-        github.validate_repository_name(repo)?;
-        if !validated.iter().any(|existing| existing == repo) {
-            validated.push(repo.to_string());
-        }
-    }
-
-    Ok(validated)
-}
-
-fn validate_repository_id_scope(repository_ids: Vec<u64>) -> Result<Vec<u64>, ApiError> {
-    if repository_ids.is_empty() {
-        return Err(ApiError::BadRequest);
-    }
-
-    let mut validated = Vec::new();
-    for repository_id in repository_ids {
-        if repository_id == 0 || validated.contains(&repository_id) {
-            if repository_id == 0 {
-                return Err(ApiError::BadRequest);
-            }
-            continue;
-        }
-
-        validated.push(repository_id);
-    }
-
-    Ok(validated)
 }
