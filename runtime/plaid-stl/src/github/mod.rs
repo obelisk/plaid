@@ -1,4 +1,5 @@
 mod actions;
+mod app;
 mod copilot;
 mod fpat;
 mod graphql;
@@ -14,6 +15,7 @@ mod team;
 mod types;
 
 pub use actions::*;
+pub use app::*;
 pub use copilot::*;
 pub use fpat::*;
 pub use graphql::*;

@@ -406,6 +406,7 @@ impl_new_function!(github, remove_repo_from_team, DISALLOW_IN_TEST_MODE);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, create_installation_access_token, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, fetch_commit, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, list_files, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(
@@ -775,6 +776,9 @@ pub fn to_api_function(
         }
         "github_make_advanced_graphql_query" => {
             Function::new_typed_with_env(&mut store, &env, github_make_advanced_graphql_query)
+        }
+        "github_create_installation_access_token" => {
+            Function::new_typed_with_env(&mut store, &env, github_create_installation_access_token)
         }
         "github_fetch_commit" => {
             Function::new_typed_with_env(&mut store, &env, github_fetch_commit)
