@@ -1,3 +1,4 @@
+mod app;
 mod actions;
 mod code;
 mod copilot;
@@ -267,4 +268,38 @@ pub fn build_github_client(authentication: &Authentication) -> Octocrab {
     }
 
     client
+}
+
+fn build_github_app_client(authentication: &Authentication) -> Result<(Octocrab, u64), ApiError> {
+    let Authentication::App {
+        app_id,
+        installation_id,
+        private_key,
+    } = authentication
+    else {
+        return Err(ApiError::ConfigurationError(
+            "GitHub App authentication is required for installation token generation".to_string(),
+        ));
+    };
+
+    let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
+        ApiError::ConfigurationError(format!(
+            "Failed to create GitHub App encoding key for installation token generation: {e}"
+        ))
+    })?;
+
+    let client = Octocrab::builder()
+        .app((*app_id).into(), encoding_key)
+        .add_header(
+            USER_AGENT,
+            format!("Rust/Plaid{}", env!("CARGO_PKG_VERSION")),
+        )
+        .build()
+        .map_err(|e| {
+            ApiError::ConfigurationError(format!(
+                "Failed to create GitHub App client for installation token generation: {e}"
+            ))
+        })?;
+
+    Ok((client, *installation_id))
 }

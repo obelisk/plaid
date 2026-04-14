@@ -1,4 +1,47 @@
 /*******************************************************************************************
+   INSTALLATION ACCESS TOKENS
+*******************************************************************************************/
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum InstallationAccessTokenScope {
+    AllRepositories,
+    SelectedRepositories { repositories: Vec<String> },
+    SelectedRepositoryIds { repository_ids: Vec<u64> },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallationAccessTokenPermissionKey {
+    Contents,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InstallationAccessTokenPermissionValue {
+    Read,
+    Write,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InstallationAccessTokenPermission {
+    pub key: InstallationAccessTokenPermissionKey,
+    pub value: InstallationAccessTokenPermissionValue,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InstallationAccessTokenRequest {
+    pub scope: InstallationAccessTokenScope,
+    pub permission: InstallationAccessTokenPermission,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InstallationAccessToken {
+    pub token: String,
+    pub expires_at: String,
+}
+
+/*******************************************************************************************
    SBOM
 *******************************************************************************************/
 

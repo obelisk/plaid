@@ -1,3 +1,4 @@
+mod app;
 mod actions;
 mod copilot;
 mod fpat;
@@ -13,6 +14,7 @@ mod stats;
 mod team;
 mod types;
 
+pub use app::*;
 pub use actions::*;
 pub use copilot::*;
 pub use fpat::*;
