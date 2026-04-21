@@ -18,6 +18,7 @@ pub fn search_code(
     filename: Option<impl Display>,
     extension: Option<impl Display>,
     path: Option<impl Display>,
+    file_content: Option<impl Display>,
     search_criteria: Option<&CodeSearchCriteria>,
 ) -> Result<Vec<FileSearchResultItem>, PlaidFunctionError> {
     extern "C" {
@@ -33,6 +34,9 @@ pub fn search_code(
     }
     if let Some(path) = path {
         params.insert("path", path.to_string());
+    }
+    if let Some(content) = file_content {
+        params.insert("file_content", content.to_string());
     }
 
     // If we are given selection criteria, then we divide them between

@@ -28,6 +28,11 @@ impl Github {
         We simply validate individual parameters if present.
         */
 
+        let file_content = match request.get("file_content") {
+            None => String::new(),
+            Some(content) => content.to_string(),
+        };
+
         let filename = match request.get("filename") {
             None => String::new(),
             Some(filename) => format!("filename:{}", self.validate_filename(filename)?),
@@ -79,7 +84,7 @@ impl Github {
             .map_err(|_| ApiError::BadRequest)?;
 
         // Construct the query with the piece we have. Multiple spaces, if present, do not cause problems.
-        let query = format!("{filename} {extension} {path} {org_and_repo}");
+        let query = format!("{file_content} {filename} {extension} {path} {org_and_repo}");
 
         // Log what we are doing
         info!("Searching code in GH with query [{query}] on behalf of [{module}]");
