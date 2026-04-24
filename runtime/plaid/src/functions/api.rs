@@ -403,6 +403,7 @@ impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, require_signed_commits, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, add_repo_to_team, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, remove_repo_from_team, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_repo_teams, ALLOW_IN_TEST_MODE);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query, ALLOW_IN_TEST_MODE);
@@ -857,6 +858,9 @@ pub fn to_api_function(
         }
         "github_remove_repo_from_team" => {
             Function::new_typed_with_env(&mut store, &env, github_remove_repo_from_team)
+        }
+        "github_get_repo_teams" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repo_teams)
         }
         "github_get_reference" => {
             Function::new_typed_with_env(&mut store, &env, github_get_reference)

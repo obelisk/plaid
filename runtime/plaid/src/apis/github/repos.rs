@@ -338,6 +338,7 @@ impl Github {
             .unwrap_or(&"1")
             .parse::<u16>()
             .map_err(|_| ApiError::BadRequest)?;
+        let affiliation = request.get("affiliation").unwrap_or(&"all");
 
         if per_page > 100 {
             // GitHub supports up to 100 results per page
@@ -346,7 +347,7 @@ impl Github {
 
         info!("Fetching collaborators for [{repo}] on behalf of {module}");
         let address =
-            format!("/repos/{owner}/{repo}/collaborators?per_page={per_page}&page={page}");
+            format!("/repos/{owner}/{repo}/collaborators?per_page={per_page}&affiliation={affiliation}&page={page}");
 
         match self.make_generic_get_request(address, module).await {
             Ok((status, Ok(body))) => {
