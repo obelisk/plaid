@@ -339,6 +339,11 @@ impl Github {
             .parse::<u16>()
             .map_err(|_| ApiError::BadRequest)?;
         let affiliation = request.get("affiliation").unwrap_or(&"all");
+        // See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#list-repository-collaborators
+        // for more details on the possible values for affiliation
+        if !["outside", "direct", "all"].contains(affiliation) {
+            return Err(ApiError::BadRequest);
+        }
 
         if per_page > 100 {
             // GitHub supports up to 100 results per page
