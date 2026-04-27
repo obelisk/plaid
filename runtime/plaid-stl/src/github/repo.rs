@@ -132,12 +132,32 @@ pub fn get_all_repository_collaborators(
     owner: impl Display,
     repo: impl Display,
 ) -> Result<Vec<RepositoryCollaborator>, PlaidFunctionError> {
+    get_all_repository_collaborators_detailed(owner, repo, None)
+}
+
+/// Get all collaborators on a repository with direct access.
+pub fn get_all_repository_collaborators_direct_access(
+    owner: impl Display,
+    repo: impl Display,
+) -> Result<Vec<RepositoryCollaborator>, PlaidFunctionError> {
+    get_all_repository_collaborators_detailed(owner, repo, Some("direct"))
+}
+
+/// Get all collaborators on a repository with affiliation filter.
+pub fn get_all_repository_collaborators_detailed(
+    owner: impl Display,
+    repo: impl Display,
+    affiliation: Option<&str>,
+) -> Result<Vec<RepositoryCollaborator>, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, get_repository_collaborators);
     }
     let mut params: HashMap<&str, String> = HashMap::new();
     params.insert("owner", owner.to_string());
     params.insert("repo", repo.to_string());
+    if let Some(affiliation) = affiliation {
+        params.insert("affiliation", affiliation.to_string());
+    }
 
     let mut collaborators = Vec::<RepositoryCollaborator>::new();
     let mut page = 0;

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use crate::PlaidFunctionError;
+use crate::{github::GitHubRepoTeam, PlaidFunctionError};
 
 // TODO: Do not use this function, it is deprecated and will be removed soon
 pub fn add_user_to_team(team: &str, user: &str, org: &str, role: &str) -> Result<(), i32> {
@@ -141,4 +141,58 @@ pub fn remove_repo_from_team(
     }
 
     Ok(())
+}
+
+/// Get the teams that have access to a repository.
+pub fn get_repo_teams(
+    org: impl Display,
+    repo: impl Display,
+) -> Result<Vec<GitHubRepoTeam>, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_repo_teams);
+    }
+
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("org", org.to_string());
+    params.insert("repo", repo.to_string());
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+
+    let mut teams = Vec::<GitHubRepoTeam>::new();
+    let mut page = 0;
+    loop {
+        page += 1;
+        params.insert("page", page.to_string());
+
+        let request = serde_json::to_string(&params).unwrap();
+
+        let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+        let res = unsafe {
+            github_get_repo_teams(
+                request.as_bytes().as_ptr(),
+                request.as_bytes().len(),
+                return_buffer.as_mut_ptr(),
+                RETURN_BUFFER_SIZE,
+            )
+        };
+
+        if res < 0 {
+            return Err(res.into());
+        }
+
+        return_buffer.truncate(res as usize);
+        // This should be safe because unless the Plaid runtime is expressly trying
+        // to mess with us, this came from a String in the API module.
+        let this_page = String::from_utf8(return_buffer).unwrap();
+        if this_page == "[]" {
+            break;
+        }
+        teams.extend(
+            serde_json::from_str::<Vec<GitHubRepoTeam>>(&this_page)
+                .map_err(|_| PlaidFunctionError::InternalApiError)?,
+        );
+    }
+
+    Ok(teams)
 }
