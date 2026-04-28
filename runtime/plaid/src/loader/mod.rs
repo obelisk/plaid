@@ -171,6 +171,10 @@ pub struct Configuration {
     pub panic_on_module_load_failure: bool,
 }
 
+fn default_panic_on_load_failure() -> bool {
+    true
+}
+
 /// Deserializer for a LimitedAmount where none of the provided values can be 0.
 fn deserialize_limited_amount<'de, D>(deserializer: D) -> Result<LimitedAmount, D::Error>
 where
@@ -221,11 +225,11 @@ pub struct ModuleSigningConfiguration {
     /// If this value is set, Plaid will panic if a module signature is invalid
     ///
     /// Defaults to `true` if not provided.
-    #[serde(default = "default_panic_on_load_failure")]
+    #[serde(default = "default_panic_on_invalid_signature")]
     pub panic_on_invalid_signature: bool,
 }
 
-fn default_panic_on_load_failure() -> bool {
+fn default_panic_on_invalid_signature() -> bool {
     true
 }
 
