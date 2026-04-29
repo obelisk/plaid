@@ -216,7 +216,7 @@ impl BigQuery {
         // strings. Columns absent from the schema fall back to String, which is
         // always safe to attempt.
         //
-        // Memory safety: each decoded row is serialised to JSON to measure its
+        // Memory safety: each decoded row is serialized to JSON to measure its
         // wire size, and the running total is checked against max_response_size
         // before the row is buffered. This gives us a hard cap below BigQuery's
         // own 10 MB server-side limit and prevents a large result set from
@@ -304,9 +304,6 @@ impl BigQuery {
             params.filter.as_ref(),
         )?;
 
-        info!("{query}");
-        info!("{query_parameters:#?}");
-
         let parameter_mode = if query_parameters.is_empty() {
             None
         } else {
@@ -336,18 +333,12 @@ fn build_query_string(
     columns: &[String],
     filter: Option<&Filter>,
 ) -> Result<(String, Vec<QueryParameter>), ApiError> {
-    if !is_valid_identifier(dataset) || !is_valid_identifier(table) {
-        return Err(ApiError::BadRequest);
-    }
-
     if columns.is_empty() {
         return Err(ApiError::BadRequest);
     }
 
-    for col in columns {
-        if !is_valid_identifier(col) {
-            return Err(ApiError::BadRequest);
-        }
+    if columns.iter().any(|col| !is_valid_identifier(col)) {
+        return Err(ApiError::BadRequest);
     }
 
     let column_list = columns
@@ -474,6 +465,7 @@ fn push_value_param(
             ("FLOAT64", Some(f.to_string()))
         }
         FilterValue::Boolean(b) => ("BOOL", Some(b.to_string())),
+        FilterValue::Timestamp(t) => ("TIMESTAMP", Some(t.to_string())),
         FilterValue::Null => ("STRING", None),
     };
 

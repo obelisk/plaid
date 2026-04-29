@@ -90,6 +90,7 @@ pub enum FilterValue {
     Float(f64),
     Boolean(bool),
     Null,
+    Timestamp(String),
 }
 
 /// Response returned by the runtime for a BigQuery query.
