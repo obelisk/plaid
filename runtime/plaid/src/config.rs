@@ -16,6 +16,8 @@ use super::loader::Configuration as LoaderConfiguration;
 use super::logging::LoggingConfiguration;
 use super::storage::Config as StorageConfig;
 
+pub const DEFAULT_WEBHOOK_BODY_SIZE: usize = 1024 * 256; // 256KiB
+
 /// How should responses to GET requests be cached.
 #[derive(Default, Deserialize, Clone)]
 #[serde(tag = "type")]
@@ -75,6 +77,10 @@ pub struct WebhookConfig {
     pub log_type: String,
     /// What headers do you want forwarded to the logging channel
     pub headers: Vec<String>,
+    /// The maximum size of a request body that will be processed.
+    /// Defaults to 256KiB if no value is provided.
+    #[serde(default = "default_webhook_body_size")]
+    pub max_body_size: usize,
     /// See GetMode
     pub get_mode: Option<GetMode>,
     /// An optional label for the webhook. If this is populated, it will be
@@ -167,6 +173,10 @@ pub struct ConfigurationWithRoles {
 /// This function provides the default log queue size in the event that one isn't provided
 fn default_log_queue_size() -> usize {
     2048
+}
+
+fn default_webhook_body_size() -> usize {
+    DEFAULT_WEBHOOK_BODY_SIZE
 }
 
 /// All errors that can be encountered while configuring Plaid
