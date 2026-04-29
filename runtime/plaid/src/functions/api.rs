@@ -825,11 +825,7 @@ define_api_functions! {
         #[cfg(feature = "gcp")] "gcp_google_docs_create_folder"            => gcp_google_docs_create_folder,
         #[cfg(feature = "gcp")] "gcp_google_docs_create_doc_from_markdown" => gcp_google_docs_create_doc_from_markdown,
         #[cfg(feature = "gcp")] "gcp_google_docs_create_sheet_from_csv"    => gcp_google_docs_create_sheet_from_csv,
-
-        #[cfg(feature = "gcp")]
-        "gcp_bigquery_query_table" => {
-            Function::new_typed_with_env(&mut store, &env, gcp_bigquery_query_table)
-        }
+        #[cfg(feature = "gcp")] "gcp_bigquery_query_table"                 => gcp_bigquery_query_table,
 
         // PagerDuty Calls
         "pagerduty_trigger_incident" => pagerduty_trigger_incident,
