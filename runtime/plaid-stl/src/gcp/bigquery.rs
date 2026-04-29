@@ -89,7 +89,6 @@ pub enum FilterValue {
     Integer(i64),
     Float(f64),
     Boolean(bool),
-    Null,
     Timestamp(String),
 }
 
@@ -97,21 +96,6 @@ pub enum FilterValue {
 ///
 /// Each row is a [`HashMap`] keyed by column name. NULL database values are
 /// represented as [`Value::Null`].
-///
-/// `QueryTableResponse` implements [`Deref`] to `[HashMap<String, Value>]` and
-/// both consuming and borrowing [`IntoIterator`], so it can be used directly as
-/// a collection without accessing the inner field:
-///
-/// ```ignore
-/// let rows = query_table("my_dataset", "events", &["user_id", "count"])?;
-///
-/// for row in &rows {
-///     let user = &row["user_id"];   // Value::String
-///     let count = &row["count"];    // Value::Number (if schema declares integer)
-/// }
-///
-/// println!("{} rows returned", rows.len());
-/// ```
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct QueryTableResponse {
     pub rows: Vec<HashMap<String, Value>>,

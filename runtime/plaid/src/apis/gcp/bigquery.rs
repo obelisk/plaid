@@ -424,11 +424,6 @@ fn build_condition_sql(
     params: &mut Vec<QueryParameter>,
 ) -> Result<String, ApiError> {
     let col = format!("`{column}`");
-    match op {
-        Operator::IsNull => return Ok(format!("{col} IS NULL")),
-        Operator::IsNotNull => return Ok(format!("{col} IS NOT NULL")),
-        _ => {}
-    }
 
     let op_str = match op {
         Operator::Eq => "=",
@@ -438,7 +433,8 @@ fn build_condition_sql(
         Operator::Gt => ">",
         Operator::Ge => ">=",
         Operator::Like => "LIKE",
-        Operator::IsNull | Operator::IsNotNull => unreachable!(), // safety: returns above
+        Operator::IsNull => return Ok(format!("{col} IS NULL")),
+        Operator::IsNotNull => return Ok(format!("{col} IS NOT NULL")),
     };
 
     let placeholder = push_value_param(value, params)?;
@@ -466,7 +462,6 @@ fn push_value_param(
         }
         FilterValue::Boolean(b) => ("BOOL", Some(b.to_string())),
         FilterValue::Timestamp(t) => ("TIMESTAMP", Some(t.to_string())),
-        FilterValue::Null => ("STRING", None),
     };
 
     params.push(QueryParameter {
@@ -528,9 +523,7 @@ fn decode_column(
 ///
 /// This is a strict allowlist. Any character outside that set — including
 /// spaces, quotes, backticks, semicolons, parentheses, and comment markers
-/// (`--`, `/*`) — causes the function to return `false`, making SQL injection
-/// via crafted identifier names impossible regardless of the surrounding query
-/// structure.
+/// (`--`, `/*`) — causes the function to return `false`
 fn is_valid_identifier(s: &str) -> bool {
     !s.is_empty()
         && s.chars()
