@@ -1,16 +1,10 @@
 use std::sync::Arc;
 
-use super::{PagerDuty, PagerDutyRestConfig};
+use super::{PagerDuty, PagerDutyGetIncidentAlertsConfig};
 use crate::{apis::ApiError, loader::PlaidModule};
-use plaid_stl::pagerduty::IncidentAlertsResponse;
-use serde::Deserialize;
+use plaid_stl::pagerduty::{GetIncidentAlertsRequest, IncidentAlertsResponse};
 
 const PAGERDUTY_API_ADDRESS: &str = "https://api.pagerduty.com";
-
-#[derive(Deserialize)]
-struct GetIncidentAlertsRequest {
-    incident_id: String,
-}
 
 impl PagerDuty {
     /// Get alerts for an existing PagerDuty incident.
@@ -22,7 +16,13 @@ impl PagerDuty {
         let request: GetIncidentAlertsRequest =
             serde_json::from_str(request).map_err(|_| ApiError::BadRequest)?;
 
-        let rest_config = self.rest_config_for_incident_alerts(module)?;
+        let incident_alerts_config = self.config_for_get_incident_alerts(module.as_ref())?;
+
+        if !valid_pagerduty_incident_id(&request.incident_id) {
+            warn!("{module} tried to get PagerDuty incident alerts with an invalid incident id");
+            return Err(ApiError::BadRequest);
+        }
+
         let url = format!(
             "{PAGERDUTY_API_ADDRESS}/incidents/{}/alerts",
             request.incident_id
@@ -34,7 +34,7 @@ impl PagerDuty {
             .header("Accept", "application/vnd.pagerduty+json;version=2")
             .header(
                 "Authorization",
-                format!("Token token={}", rest_config.token),
+                format!("Token token={}", incident_alerts_config.token),
             )
             .send()
             .await
@@ -54,28 +54,28 @@ impl PagerDuty {
         serde_json::to_string(&parsed).map_err(|_| ApiError::ImpossibleError)
     }
 
-    fn rest_config_for_incident_alerts(
+    fn config_for_get_incident_alerts(
         &self,
-        module: Arc<PlaidModule>,
-    ) -> Result<&PagerDutyRestConfig, ApiError> {
-        let rest_config = self.config.rest.as_ref().ok_or_else(|| {
-            ApiError::ConfigurationError("PagerDuty REST API is not configured".into())
+        module: &PlaidModule,
+    ) -> Result<&PagerDutyGetIncidentAlertsConfig, ApiError> {
+        let incident_alerts_config = self.config.get_incident_alerts.as_ref().ok_or_else(|| {
+            ApiError::ConfigurationError("PagerDuty get_incident_alerts is not configured".into())
         })?;
 
-        if !rest_config
-            .incident_alerts
+        if !incident_alerts_config
             .allowed_rules
             .contains(&module.to_string())
         {
-            error!("{module} tried to get PagerDuty incident alerts without permission");
+            warn!("{module} tried to get PagerDuty incident alerts without permission");
             return Err(ApiError::BadRequest);
         }
 
-        if module.test_mode && !rest_config.incident_alerts.available_in_test_mode {
-            error!("{module} tried to get PagerDuty incident alerts in test mode");
-            return Err(ApiError::TestMode);
-        }
-
-        Ok(rest_config)
+        Ok(incident_alerts_config)
     }
+}
+
+fn valid_pagerduty_incident_id(incident_id: &str) -> bool {
+    !incident_id.is_empty()
+        && incident_id.len() <= 64
+        && incident_id.bytes().all(|b| b.is_ascii_alphanumeric())
 }

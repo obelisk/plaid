@@ -403,6 +403,7 @@ impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, require_signed_commits, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, add_repo_to_team, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, remove_repo_from_team, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_repo_teams, ALLOW_IN_TEST_MODE);
 
 impl_new_function_with_error_buffer!(github, make_graphql_query, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, make_advanced_graphql_query, ALLOW_IN_TEST_MODE);
@@ -618,478 +619,244 @@ impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_block, ALLO
 // Bloom filter functions
 impl_new_function_with_error_buffer!(bloom_filter, build_with_items, ALLOW_IN_TEST_MODE);
 
-pub fn to_api_function(
-    name: &str,
-    mut store: &mut Store,
-    env: FunctionEnv<Env>,
-) -> Option<Function> {
-    Some(match name {
-        // The below are types that deal with getting data into the guest that comes
-        // from the message itself.
-        "fetch_data" => Function::new_typed_with_env(&mut store, &env, super::message::fetch_data),
-        "fetch_source" => {
-            Function::new_typed_with_env(&mut store, &env, super::message::fetch_source)
+/// Generates `to_api_function` and `is_known_api_function` from a single source-of-truth list.
+///
+/// `with_env` entries produce `Function::new_typed_with_env`
+/// `without_env` entries produce `Function::new_typed` (for host functions that need no env, e.g. `get_time`).
+macro_rules! define_api_functions {
+    (
+        with_env: [
+            $($(#[$we_attr:meta])* $we_name:literal => $we_fn:expr),* $(,)?
+        ],
+        without_env: [
+            $($(#[$woe_attr:meta])* $woe_name:literal => $woe_fn:expr),* $(,)?
+        ] $(,)?
+    ) => {
+        pub fn to_api_function(
+            name: &str,
+            mut store: &mut Store,
+            env: FunctionEnv<Env>,
+        ) -> Option<Function> {
+            Some(match name {
+                $(
+                    $(#[$we_attr])*
+                    $we_name => Function::new_typed_with_env(&mut store, &env, $we_fn),
+                )*
+                $(
+                    $(#[$woe_attr])*
+                    $woe_name => Function::new_typed(&mut store, $woe_fn),
+                )*
+                _ => return None,
+            })
         }
-        "fetch_data_and_source" => {
-            Function::new_typed_with_env(&mut store, &env, super::message::fetch_data_and_source)
+
+        /// Returns `true` if `name` is a host function known to Plaid.
+        pub fn is_known_api_function(name: &str) -> bool {
+            match name {
+                $(
+                    $(#[$we_attr])*
+                    $we_name => true,
+                )*
+                $(
+                    $(#[$woe_attr])*
+                    $woe_name => true,
+                )*
+                _ => false,
+            }
         }
-        "get_accessory_data" => {
-            Function::new_typed_with_env(&mut store, &env, super::runtime_data::get_accessory_data)
-        }
-        "get_secrets" => {
-            Function::new_typed_with_env(&mut store, &env, super::runtime_data::get_secrets)
-        }
-        "get_headers" => {
-            Function::new_typed_with_env(&mut store, &env, super::message::get_headers)
-        }
-        "get_query_params" => {
-            Function::new_typed_with_env(&mut store, &env, super::message::get_query_params)
-        }
-        "fetch_random_bytes" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::fetch_random_bytes)
-        }
+    };
+}
+
+define_api_functions! {
+    with_env: [
+        // Message / request data
+        "fetch_data"            => super::message::fetch_data,
+        "fetch_source"          => super::message::fetch_source,
+        "fetch_data_and_source" => super::message::fetch_data_and_source,
+        "get_accessory_data"    => super::runtime_data::get_accessory_data,
+        "get_secrets"           => super::runtime_data::get_secrets,
+        "get_headers"           => super::message::get_headers,
+        "get_query_params"      => super::message::get_query_params,
+        "fetch_random_bytes"    => super::internal::fetch_random_bytes,
 
         // The below are types that deal with Plaid specific internals like
         // the data base or caching systems. These usually have specific implementations
         // so are broken out into their own module.
-        "get_response" => {
-            Function::new_typed_with_env(&mut store, &env, super::response::get_response)
-        }
-        "set_response" => {
-            Function::new_typed_with_env(&mut store, &env, super::response::set_response)
-        }
-        "set_error_context" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::set_error_context)
-        }
-        "print_debug_string" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::print_debug_string)
-        }
-        "get_time" => Function::new_typed(&mut store, super::internal::get_time),
-        "storage_insert" => Function::new_typed_with_env(&mut store, &env, super::storage::insert),
-        "storage_insert_shared" => {
-            Function::new_typed_with_env(&mut store, &env, super::storage::insert_shared)
-        }
-        "storage_get" => Function::new_typed_with_env(&mut store, &env, super::storage::get),
-        "storage_get_shared" => {
-            Function::new_typed_with_env(&mut store, &env, super::storage::get_shared)
-        }
-        "storage_delete" => Function::new_typed_with_env(&mut store, &env, super::storage::delete),
-        "storage_delete_shared" => {
-            Function::new_typed_with_env(&mut store, &env, super::storage::delete_shared)
-        }
-        "storage_list_keys" => {
-            Function::new_typed_with_env(&mut store, &env, super::storage::list_keys)
-        }
-        "storage_list_keys_shared" => {
-            Function::new_typed_with_env(&mut store, &env, super::storage::list_keys_shared)
-        }
-        "cache_insert" => Function::new_typed_with_env(&mut store, &env, super::cache::insert),
-        "cache_get" => Function::new_typed_with_env(&mut store, &env, super::cache::get),
-        "log_back" => Function::new_typed_with_env(&mut store, &env, super::internal::log_back),
-        "log_back_unlimited" => {
-            Function::new_typed_with_env(&mut store, &env, super::internal::log_back_unlimited)
-        }
+        "get_response"             => super::response::get_response,
+        "set_response"             => super::response::set_response,
+        "set_error_context"        => super::internal::set_error_context,
+        "print_debug_string"       => super::internal::print_debug_string,
+        "storage_insert"           => super::storage::insert,
+        "storage_insert_shared"    => super::storage::insert_shared,
+        "storage_get"              => super::storage::get,
+        "storage_get_shared"       => super::storage::get_shared,
+        "storage_delete"           => super::storage::delete,
+        "storage_delete_shared"    => super::storage::delete_shared,
+        "storage_list_keys"        => super::storage::list_keys,
+        "storage_list_keys_shared" => super::storage::list_keys_shared,
+        "cache_insert"             => super::cache::insert,
+        "cache_get"                => super::cache::get,
+        "log_back"                 => super::internal::log_back,
+        "log_back_unlimited"       => super::internal::log_back_unlimited,
+
         // Npm Calls
-        "npm_publish_empty_stub" => {
-            Function::new_typed_with_env(&mut store, &env, npm_publish_empty_stub)
-        }
+        "npm_publish_empty_stub"                  => npm_publish_empty_stub,
+        "npm_set_team_permission_on_package"      => npm_set_team_permission_on_package,
+        "npm_create_granular_token_for_packages"  => npm_create_granular_token_for_packages,
+        "npm_delete_granular_token"               => npm_delete_granular_token,
+        "npm_list_granular_tokens"                => npm_list_granular_tokens,
+        "npm_delete_package"                      => npm_delete_package,
+        "npm_add_user_to_team"                    => npm_add_user_to_team,
+        "npm_remove_user_from_team"               => npm_remove_user_from_team,
+        "npm_remove_user_from_organization"       => npm_remove_user_from_organization,
+        "npm_invite_user_to_organization"         => npm_invite_user_to_organization,
+        "npm_get_org_user_list"                   => npm_get_org_user_list,
+        "npm_get_org_users_without_2fa"           => npm_get_org_users_without_2fa,
+        "npm_list_packages_with_team_permission"  => npm_list_packages_with_team_permission,
+        "npm_get_token_details"                   => npm_get_token_details,
 
-        "npm_set_team_permission_on_package" => {
-            Function::new_typed_with_env(&mut store, &env, npm_set_team_permission_on_package)
-        }
-
-        "npm_create_granular_token_for_packages" => {
-            Function::new_typed_with_env(&mut store, &env, npm_create_granular_token_for_packages)
-        }
-
-        "npm_delete_granular_token" => {
-            Function::new_typed_with_env(&mut store, &env, npm_delete_granular_token)
-        }
-
-        "npm_list_granular_tokens" => {
-            Function::new_typed_with_env(&mut store, &env, npm_list_granular_tokens)
-        }
-
-        "npm_delete_package" => Function::new_typed_with_env(&mut store, &env, npm_delete_package),
-
-        "npm_add_user_to_team" => {
-            Function::new_typed_with_env(&mut store, &env, npm_add_user_to_team)
-        }
-
-        "npm_remove_user_from_team" => {
-            Function::new_typed_with_env(&mut store, &env, npm_remove_user_from_team)
-        }
-
-        "npm_remove_user_from_organization" => {
-            Function::new_typed_with_env(&mut store, &env, npm_remove_user_from_organization)
-        }
-
-        "npm_invite_user_to_organization" => {
-            Function::new_typed_with_env(&mut store, &env, npm_invite_user_to_organization)
-        }
-
-        "npm_get_org_user_list" => {
-            Function::new_typed_with_env(&mut store, &env, npm_get_org_user_list)
-        }
-
-        "npm_get_org_users_without_2fa" => {
-            Function::new_typed_with_env(&mut store, &env, npm_get_org_users_without_2fa)
-        }
-
-        "npm_list_packages_with_team_permission" => {
-            Function::new_typed_with_env(&mut store, &env, npm_list_packages_with_team_permission)
-        }
-
-        "npm_get_token_details" => {
-            Function::new_typed_with_env(&mut store, &env, npm_get_token_details)
-        }
-
-        // Okta Calls
-        "okta_remove_user_from_group" => {
-            Function::new_typed_with_env(&mut store, &env, okta_remove_user_from_group)
-        }
-        "okta_get_user_data" => Function::new_typed_with_env(&mut store, &env, okta_get_user_data),
+        // Okta
+        "okta_remove_user_from_group" => okta_remove_user_from_group,
+        "okta_get_user_data"          => okta_get_user_data,
 
         // AES calls
-        "cryptography_aes_128_cbc_encrypt" => {
-            Function::new_typed_with_env(&mut store, &env, cryptography_aes_128_cbc_encrypt)
-        }
-        "cryptography_aes_128_cbc_decrypt" => {
-            Function::new_typed_with_env(&mut store, &env, cryptography_aes_128_cbc_decrypt)
-        }
+        "cryptography_aes_128_cbc_encrypt" => cryptography_aes_128_cbc_encrypt,
+        "cryptography_aes_128_cbc_decrypt" => cryptography_aes_128_cbc_decrypt,
 
         // GitHub Calls
-        "github_remove_user_from_repo" => {
-            Function::new_typed_with_env(&mut store, &env, github_remove_user_from_repo)
-        }
-        "github_add_user_to_repo" => {
-            Function::new_typed_with_env(&mut store, &env, github_add_user_to_repo)
-        }
-        "github_add_user_to_team" => {
-            Function::new_typed_with_env(&mut store, &env, github_add_user_to_team)
-        }
-        "github_remove_user_from_team" => {
-            Function::new_typed_with_env(&mut store, &env, github_remove_user_from_team)
-        }
-        "github_make_graphql_query" => {
-            Function::new_typed_with_env(&mut store, &env, github_make_graphql_query)
-        }
-        "github_make_advanced_graphql_query" => {
-            Function::new_typed_with_env(&mut store, &env, github_make_advanced_graphql_query)
-        }
-        "github_fetch_commit" => {
-            Function::new_typed_with_env(&mut store, &env, github_fetch_commit)
-        }
-        "github_list_files" => Function::new_typed_with_env(&mut store, &env, github_list_files),
-        "github_fetch_file_with_custom_media_type" => {
-            Function::new_typed_with_env(&mut store, &env, github_fetch_file_with_custom_media_type)
-        }
-        "github_list_fpat_requests_for_org" => {
-            Function::new_typed_with_env(&mut store, &env, github_list_fpat_requests_for_org)
-        }
-        "github_review_fpat_requests_for_org" => {
-            Function::new_typed_with_env(&mut store, &env, github_review_fpat_requests_for_org)
-        }
-        "github_get_repos_for_fpat" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_repos_for_fpat)
-        }
-        "github_get_branch_protection_rules" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_branch_protection_rules)
-        }
-        "github_get_branch_protection_ruleset" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_branch_protection_ruleset)
-        }
-        "github_get_repository_collaborators" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_repository_collaborators)
-        }
-        "github_get_custom_properties_values" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_custom_properties_values)
-        }
-        "github_check_codeowners_file" => {
-            Function::new_typed_with_env(&mut store, &env, github_check_codeowners_file)
-        }
-        "github_update_branch_protection_rule" => {
-            Function::new_typed_with_env(&mut store, &env, github_update_branch_protection_rule)
-        }
-        "github_create_environment_for_repo" => {
-            Function::new_typed_with_env(&mut store, &env, github_create_environment_for_repo)
-        }
-        "github_configure_secret" => {
-            Function::new_typed_with_env(&mut store, &env, github_configure_secret)
-        }
-        "github_create_deployment_branch_protection_rule" => Function::new_typed_with_env(
-            &mut store,
-            &env,
-            github_create_deployment_branch_protection_rule,
-        ),
-        "github_search_code" => Function::new_typed_with_env(&mut store, &env, github_search_code),
-        "github_add_users_to_org_copilot" => {
-            Function::new_typed_with_env(&mut store, &env, github_add_users_to_org_copilot)
-        }
-        "github_remove_users_from_org_copilot" => {
-            Function::new_typed_with_env(&mut store, &env, github_remove_users_from_org_copilot)
-        }
-        "github_list_seats_in_org_copilot" => {
-            Function::new_typed_with_env(&mut store, &env, github_list_seats_in_org_copilot)
-        }
-        "github_trigger_repo_dispatch" => {
-            Function::new_typed_with_env(&mut store, &env, github_trigger_repo_dispatch)
-        }
-        "github_check_org_membership_of_user" => {
-            Function::new_typed_with_env(&mut store, &env, github_check_org_membership_of_user)
-        }
-        "github_comment_on_pull_request" => {
-            Function::new_typed_with_env(&mut store, &env, github_comment_on_pull_request)
-        }
-        "github_delete_deploy_key" => {
-            Function::new_typed_with_env(&mut store, &env, github_delete_deploy_key)
-        }
-        "github_pull_request_request_reviewers" => {
-            Function::new_typed_with_env(&mut store, &env, github_pull_request_request_reviewers)
-        }
-        "github_require_signed_commits" => {
-            Function::new_typed_with_env(&mut store, &env, github_require_signed_commits)
-        }
-        "github_get_weekly_commit_count" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_weekly_commit_count)
-        }
-        "github_add_repo_to_team" => {
-            Function::new_typed_with_env(&mut store, &env, github_add_repo_to_team)
-        }
-        "github_remove_repo_from_team" => {
-            Function::new_typed_with_env(&mut store, &env, github_remove_repo_from_team)
-        }
-        "github_get_reference" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_reference)
-        }
-        "github_create_reference" => {
-            Function::new_typed_with_env(&mut store, &env, github_create_reference)
-        }
-        "github_get_pull_requests" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_pull_requests)
-        }
-        "github_create_pull_request" => {
-            Function::new_typed_with_env(&mut store, &env, github_create_pull_request)
-        }
-        "github_create_file" => Function::new_typed_with_env(&mut store, &env, github_create_file),
-        "github_get_repo_sbom" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_repo_sbom)
-        }
-        "github_add_labels" => Function::new_typed_with_env(&mut store, &env, github_add_labels),
-        "github_get_user_id_from_username" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_user_id_from_username)
-        }
-        "github_get_username_from_user_id" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_username_from_user_id)
-        }
-        "github_get_repo_id_from_repo_name" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_repo_id_from_repo_name)
-        }
-        "github_get_repo_name_from_repo_id" => {
-            Function::new_typed_with_env(&mut store, &env, github_get_repo_name_from_repo_id)
-        }
+        "github_add_user_to_repo"                          => github_add_user_to_repo,
+        "github_remove_user_from_repo"                     => github_remove_user_from_repo,
+        "github_add_user_to_team"                          => github_add_user_to_team,
+        "github_remove_user_from_team"                     => github_remove_user_from_team,
+        "github_make_graphql_query"                        => github_make_graphql_query,
+        "github_make_advanced_graphql_query"               => github_make_advanced_graphql_query,
+        "github_fetch_commit"                              => github_fetch_commit,
+        "github_list_files"                                => github_list_files,
+        "github_fetch_file_with_custom_media_type"         => github_fetch_file_with_custom_media_type,
+        "github_list_fpat_requests_for_org"                => github_list_fpat_requests_for_org,
+        "github_review_fpat_requests_for_org"              => github_review_fpat_requests_for_org,
+        "github_get_repos_for_fpat"                        => github_get_repos_for_fpat,
+        "github_get_branch_protection_rules"               => github_get_branch_protection_rules,
+        "github_get_branch_protection_ruleset"             => github_get_branch_protection_ruleset,
+        "github_get_repository_collaborators"              => github_get_repository_collaborators,
+        "github_get_custom_properties_values"              => github_get_custom_properties_values,
+        "github_check_codeowners_file"                     => github_check_codeowners_file,
+        "github_update_branch_protection_rule"             => github_update_branch_protection_rule,
+        "github_create_environment_for_repo"               => github_create_environment_for_repo,
+        "github_configure_secret"                          => github_configure_secret,
+        "github_create_deployment_branch_protection_rule"  => github_create_deployment_branch_protection_rule,
+        "github_search_code"                               => github_search_code,
+        "github_add_users_to_org_copilot"                  => github_add_users_to_org_copilot,
+        "github_remove_users_from_org_copilot"             => github_remove_users_from_org_copilot,
+        "github_list_seats_in_org_copilot"                 => github_list_seats_in_org_copilot,
+        "github_trigger_repo_dispatch"                     => github_trigger_repo_dispatch,
+        "github_check_org_membership_of_user"              => github_check_org_membership_of_user,
+        "github_comment_on_pull_request"                   => github_comment_on_pull_request,
+        "github_delete_deploy_key"                         => github_delete_deploy_key,
+        "github_pull_request_request_reviewers"            => github_pull_request_request_reviewers,
+        "github_require_signed_commits"                    => github_require_signed_commits,
+        "github_get_weekly_commit_count"                   => github_get_weekly_commit_count,
+        "github_add_repo_to_team"                          => github_add_repo_to_team,
+        "github_remove_repo_from_team"                     => github_remove_repo_from_team,
+        "github_get_reference"                             => github_get_reference,
+        "github_create_reference"                          => github_create_reference,
+        "github_get_pull_requests"                         => github_get_pull_requests,
+        "github_create_pull_request"                       => github_create_pull_request,
+        "github_create_file"                               => github_create_file,
+        "github_get_repo_sbom"                             => github_get_repo_sbom,
+        "github_add_labels"                                => github_add_labels,
+        "github_get_user_id_from_username"                 => github_get_user_id_from_username,
+        "github_get_username_from_user_id"                 => github_get_username_from_user_id,
+        "github_get_repo_id_from_repo_name"                => github_get_repo_id_from_repo_name,
+        "github_get_repo_name_from_repo_id"                => github_get_repo_name_from_repo_id,
+        "github_get_repo_teams"                            => github_get_repo_teams,
 
         // Slack Calls
-        "slack_post_to_named_webhook" => {
-            Function::new_typed_with_env(&mut store, &env, slack_post_to_named_webhook)
-        }
-        "slack_post_to_arbitrary_webhook" => {
-            Function::new_typed_with_env(&mut store, &env, slack_post_to_arbitrary_webhook)
-        }
-        "slack_post_message" => Function::new_typed_with_env(&mut store, &env, slack_post_message),
-        "slack_update_message" => {
-            Function::new_typed_with_env(&mut store, &env, slack_update_message)
-        }
-        "slack_views_open" => Function::new_typed_with_env(&mut store, &env, slack_views_open),
-        "slack_get_id_from_email" => {
-            Function::new_typed_with_env(&mut store, &env, slack_get_id_from_email)
-        }
-        "slack_get_presence" => Function::new_typed_with_env(&mut store, &env, slack_get_presence),
-        "slack_get_dnd" => Function::new_typed_with_env(&mut store, &env, slack_get_dnd),
-        "slack_user_info" => Function::new_typed_with_env(&mut store, &env, slack_user_info),
-        "slack_create_channel" => {
-            Function::new_typed_with_env(&mut store, &env, slack_create_channel)
-        }
-        "slack_invite_to_channel" => {
-            Function::new_typed_with_env(&mut store, &env, slack_invite_to_channel)
-        }
-        "slack_remove_from_channel" => {
-            Function::new_typed_with_env(&mut store, &env, slack_remove_from_channel)
-        }
+        "slack_post_to_named_webhook"     => slack_post_to_named_webhook,
+        "slack_post_to_arbitrary_webhook" => slack_post_to_arbitrary_webhook,
+        "slack_post_message"              => slack_post_message,
+        "slack_views_open"                => slack_views_open,
+        "slack_get_id_from_email"         => slack_get_id_from_email,
+        "slack_get_presence"              => slack_get_presence,
+        "slack_get_dnd"                   => slack_get_dnd,
+        "slack_user_info"                 => slack_user_info,
+        "slack_create_channel"            => slack_create_channel,
+        "slack_invite_to_channel"         => slack_invite_to_channel,
+        "slack_update_message"            => slack_update_message,
+        "slack_remove_from_channel"       => slack_remove_from_channel,
 
         // General Calls
-        "general_simple_json_post_request" => {
-            Function::new_typed_with_env(&mut store, &env, general_simple_json_post_request)
-        }
-        "general_make_named_request" => {
-            Function::new_typed_with_env(&mut store, &env, general_make_named_request)
-        }
-
-        "general_retrieve_tls_certificate_with_sni" => Function::new_typed_with_env(
-            &mut store,
-            &env,
-            general_retrieve_tls_certificate_with_sni,
-        ),
+        "general_simple_json_post_request"          => general_simple_json_post_request,
+        "general_make_named_request"                => general_make_named_request,
+        "general_retrieve_tls_certificate_with_sni" => general_retrieve_tls_certificate_with_sni,
 
         // Jira Calls
-        "jira_create_issue" => Function::new_typed_with_env(&mut store, &env, jira_create_issue),
-        "jira_get_issue" => Function::new_typed_with_env(&mut store, &env, jira_get_issue),
-        "jira_update_issue" => Function::new_typed_with_env(&mut store, &env, jira_update_issue),
-        "jira_get_user" => Function::new_typed_with_env(&mut store, &env, jira_get_user),
-        "jira_post_comment" => Function::new_typed_with_env(&mut store, &env, jira_post_comment),
-        "jira_search_issues" => Function::new_typed_with_env(&mut store, &env, jira_search_issues),
+        "jira_create_issue"  => jira_create_issue,
+        "jira_get_issue"     => jira_get_issue,
+        "jira_update_issue"  => jira_update_issue,
+        "jira_get_user"      => jira_get_user,
+        "jira_post_comment"  => jira_post_comment,
+        "jira_search_issues" => jira_search_issues,
 
         // KMS calls
-        #[cfg(feature = "aws")]
-        "aws_kms_generate_mac" => {
-            Function::new_typed_with_env(&mut store, &env, aws_kms_generate_mac)
-        }
-
-        #[cfg(feature = "aws")]
-        "aws_kms_verify_mac" => Function::new_typed_with_env(&mut store, &env, aws_kms_verify_mac),
-
-        #[cfg(feature = "aws")]
-        "aws_kms_sign_arbitrary_message" => {
-            Function::new_typed_with_env(&mut store, &env, aws_kms_sign_arbitrary_message)
-        }
-
-        #[cfg(feature = "aws")]
-        "aws_kms_get_public_key" => {
-            Function::new_typed_with_env(&mut store, &env, aws_kms_get_public_key)
-        }
+        #[cfg(feature = "aws")] "aws_kms_generate_mac"           => aws_kms_generate_mac,
+        #[cfg(feature = "aws")] "aws_kms_verify_mac"             => aws_kms_verify_mac,
+        #[cfg(feature = "aws")] "aws_kms_sign_arbitrary_message" => aws_kms_sign_arbitrary_message,
+        #[cfg(feature = "aws")] "aws_kms_get_public_key"         => aws_kms_get_public_key,
 
         // DynamoDB calls
-        #[cfg(feature = "aws")]
-        "aws_dynamodb_put_item" => {
-            Function::new_typed_with_env(&mut store, &env, aws_dynamodb_put_item)
-        }
+        #[cfg(feature = "aws")] "aws_dynamodb_put_item"    => aws_dynamodb_put_item,
+        #[cfg(feature = "aws")] "aws_dynamodb_delete_item" => aws_dynamodb_delete_item,
+        #[cfg(feature = "aws")] "aws_dynamodb_query"       => aws_dynamodb_query,
 
-        #[cfg(feature = "aws")]
-        "aws_dynamodb_delete_item" => {
-            Function::new_typed_with_env(&mut store, &env, aws_dynamodb_delete_item)
-        }
-
-        #[cfg(feature = "aws")]
-        "aws_dynamodb_query" => Function::new_typed_with_env(&mut store, &env, aws_dynamodb_query),
+        // S3 calls
+        #[cfg(feature = "aws")] "aws_s3_delete_object"         => aws_s3_delete_object,
+        #[cfg(feature = "aws")] "aws_s3_get_object"            => aws_s3_get_object,
+        #[cfg(feature = "aws")] "aws_s3_get_object_attributes" => aws_s3_get_object_attributes,
+        #[cfg(feature = "aws")] "aws_s3_list_objects"          => aws_s3_list_objects,
+        #[cfg(feature = "aws")] "aws_s3_list_object_versions"  => aws_s3_list_object_versions,
+        #[cfg(feature = "aws")] "aws_s3_put_object"            => aws_s3_put_object,
+        #[cfg(feature = "aws")] "aws_s3_put_object_tags"       => aws_s3_put_object_tags,
 
         // GCP
-        #[cfg(feature = "gcp")]
-        "gcp_google_docs_upload_file" => {
-            Function::new_typed_with_env(&mut store, &env, gcp_google_docs_upload_file)
-        }
-
-        #[cfg(feature = "gcp")]
-        "gcp_google_docs_copy_file" => {
-            Function::new_typed_with_env(&mut store, &env, gcp_google_docs_copy_file)
-        }
-
-        #[cfg(feature = "gcp")]
-        "gcp_google_docs_create_folder" => {
-            Function::new_typed_with_env(&mut store, &env, gcp_google_docs_create_folder)
-        }
-
-        #[cfg(feature = "gcp")]
-        "gcp_google_docs_create_doc_from_markdown" => {
-            Function::new_typed_with_env(&mut store, &env, gcp_google_docs_create_doc_from_markdown)
-        }
-
-        #[cfg(feature = "gcp")]
-        "gcp_google_docs_create_sheet_from_csv" => {
-            Function::new_typed_with_env(&mut store, &env, gcp_google_docs_create_sheet_from_csv)
-        }
+        #[cfg(feature = "gcp")] "gcp_google_docs_upload_file"              => gcp_google_docs_upload_file,
+        #[cfg(feature = "gcp")] "gcp_google_docs_copy_file"                => gcp_google_docs_copy_file,
+        #[cfg(feature = "gcp")] "gcp_google_docs_create_folder"            => gcp_google_docs_create_folder,
+        #[cfg(feature = "gcp")] "gcp_google_docs_create_doc_from_markdown" => gcp_google_docs_create_doc_from_markdown,
+        #[cfg(feature = "gcp")] "gcp_google_docs_create_sheet_from_csv"    => gcp_google_docs_create_sheet_from_csv,
 
         // PagerDuty Calls
-        "pagerduty_trigger_incident" => {
-            Function::new_typed_with_env(&mut store, &env, pagerduty_trigger_incident)
-        }
-        "pagerduty_get_incident_alerts" => {
-            Function::new_typed_with_env(&mut store, &env, pagerduty_get_incident_alerts)
-        }
+        "pagerduty_trigger_incident" => pagerduty_trigger_incident,
+        "pagerduty_get_incident_alerts" => pagerduty_get_incident_alerts,
 
         // Rustica Calls
-        "rustica_new_mtls_cert" => {
-            Function::new_typed_with_env(&mut store, &env, rustica_new_mtls_cert)
-        }
+        "rustica_new_mtls_cert" => rustica_new_mtls_cert,
 
         // Yubikey Calls
-        "yubikey_verify_otp" => Function::new_typed_with_env(&mut store, &env, yubikey_verify_otp),
-
-        // S3 Calls
-        #[cfg(feature = "aws")]
-        "aws_s3_delete_object" => {
-            Function::new_typed_with_env(&mut store, &env, aws_s3_delete_object)
-        }
-
-        #[cfg(feature = "aws")]
-        "aws_s3_get_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_get_object),
-
-        #[cfg(feature = "aws")]
-        "aws_s3_get_object_attributes" => {
-            Function::new_typed_with_env(&mut store, &env, aws_s3_get_object_attributes)
-        }
-
-        #[cfg(feature = "aws")]
-        "aws_s3_list_objects" => {
-            Function::new_typed_with_env(&mut store, &env, aws_s3_list_objects)
-        }
-
-        #[cfg(feature = "aws")]
-        "aws_s3_list_object_versions" => {
-            Function::new_typed_with_env(&mut store, &env, aws_s3_list_object_versions)
-        }
-
-        #[cfg(feature = "aws")]
-        "aws_s3_put_object" => Function::new_typed_with_env(&mut store, &env, aws_s3_put_object),
-
-        #[cfg(feature = "aws")]
-        "aws_s3_put_object_tags" => {
-            Function::new_typed_with_env(&mut store, &env, aws_s3_put_object_tags)
-        }
+        "yubikey_verify_otp" => yubikey_verify_otp,
 
         // Splunk Calls
-        "splunk_post_hec" => Function::new_typed_with_env(&mut store, &env, splunk_post_hec),
+        "splunk_post_hec" => splunk_post_hec,
 
         // Web Calls
-        "web_issue_jwt" => Function::new_typed_with_env(&mut store, &env, web_issue_jwt),
+        "web_issue_jwt" => web_issue_jwt,
 
         // Blockchain calls
-        "blockchain_evm_get_transaction_by_hash" => {
-            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_transaction_by_hash)
-        }
-        "blockchain_evm_get_transaction_receipt" => {
-            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_transaction_receipt)
-        }
-        "blockchain_evm_send_raw_transaction" => {
-            Function::new_typed_with_env(&mut store, &env, blockchain_evm_send_raw_transaction)
-        }
-        "blockchain_evm_get_transaction_count" => {
-            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_transaction_count)
-        }
-        "blockchain_evm_get_balance" => {
-            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_balance)
-        }
-        "blockchain_evm_estimate_gas" => {
-            Function::new_typed_with_env(&mut store, &env, blockchain_evm_estimate_gas)
-        }
-        "blockchain_evm_eth_call" => {
-            Function::new_typed_with_env(&mut store, &env, blockchain_evm_eth_call)
-        }
-        "blockchain_evm_gas_price" => {
-            Function::new_typed_with_env(&mut store, &env, blockchain_evm_gas_price)
-        }
-        "blockchain_evm_get_logs" => {
-            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_logs)
-        }
-        "blockchain_evm_get_block" => {
-            Function::new_typed_with_env(&mut store, &env, blockchain_evm_get_block)
-        }
+        "blockchain_evm_get_transaction_by_hash" => blockchain_evm_get_transaction_by_hash,
+        "blockchain_evm_get_transaction_receipt" => blockchain_evm_get_transaction_receipt,
+        "blockchain_evm_send_raw_transaction"    => blockchain_evm_send_raw_transaction,
+        "blockchain_evm_get_transaction_count"   => blockchain_evm_get_transaction_count,
+        "blockchain_evm_get_balance"             => blockchain_evm_get_balance,
+        "blockchain_evm_estimate_gas"            => blockchain_evm_estimate_gas,
+        "blockchain_evm_eth_call"                => blockchain_evm_eth_call,
+        "blockchain_evm_gas_price"               => blockchain_evm_gas_price,
+        "blockchain_evm_get_logs"                => blockchain_evm_get_logs,
+        "blockchain_evm_get_block"               => blockchain_evm_get_block,
 
         // Bloomfilter calls
-        "bloom_filter_build_with_items" => {
-            Function::new_typed_with_env(&mut store, &env, bloom_filter_build_with_items)
-        }
-
-        // No match
-        _ => return None,
-    })
+        "bloom_filter_build_with_items" => bloom_filter_build_with_items,
+    ],
+    without_env: [
+        "get_time" => super::internal::get_time,
+    ],
 }

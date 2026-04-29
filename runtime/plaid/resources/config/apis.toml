@@ -144,11 +144,9 @@ root_certificate = """
 [apis."github".graphql_queries]
 
 # [apis."pagerduty"]
-# [apis."pagerduty".rest]
+# [apis."pagerduty".get_incident_alerts]
 # token = "{plaid-secret{pagerduty-rest-api-token}}"
-# [apis."pagerduty".rest.incident_alerts]
 # allowed_rules = ["example_rule.wasm"]
-# available_in_test_mode = false
 
 [apis."slack"]
 [apis."slack"."webhooks"]

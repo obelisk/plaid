@@ -77,9 +77,9 @@ pub fn trigger_incident_detailed(
     }
 }
 
-#[derive(Serialize)]
-struct GetIncidentAlertsRequest {
-    incident_id: String,
+#[derive(Serialize, Deserialize)]
+pub struct GetIncidentAlertsRequest {
+    pub incident_id: String,
 }
 
 #[derive(Serialize, Deserialize)]

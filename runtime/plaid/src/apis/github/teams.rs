@@ -218,4 +218,47 @@ impl Github {
             Err(e) => Err(e),
         }
     }
+
+    /// Get the teams that have access to a repository.
+    pub async fn get_repo_teams(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        // Parse out all the parameters
+        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
+        let repo =
+            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+
+        let per_page: u8 = request
+            .get("per_page")
+            .unwrap_or(&"30")
+            .parse::<u8>()
+            .map_err(|_| ApiError::BadRequest)?;
+        let page: u16 = request
+            .get("page")
+            .unwrap_or(&"1")
+            .parse::<u16>()
+            .map_err(|_| ApiError::BadRequest)?;
+
+        info!("Getting teams with access to repo [{repo}] on behalf of [{module}]");
+        let address = format!("/repos/{org}/{repo}/teams?per_page={per_page}&page={page}");
+
+        match self.make_generic_get_request(address, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
 }

@@ -15,9 +15,9 @@ pub struct PagerDutyConfig {
     /// same service
     #[serde(default)]
     services: HashMap<String, String>,
-    /// REST API configuration for read operations.
+    /// Configuration for the `pagerduty_get_incident_alerts` host call.
     #[serde(default)]
-    rest: Option<PagerDutyRestConfig>,
+    get_incident_alerts: Option<PagerDutyGetIncidentAlertsConfig>,
     /// The number of seconds until an external API request times out.
     /// If no value is provided, the result of `default_timeout_seconds()` will be used.
     #[serde(default = "default_timeout_seconds")]
@@ -25,16 +25,9 @@ pub struct PagerDutyConfig {
 }
 
 #[derive(Deserialize)]
-struct PagerDutyRestConfig {
+struct PagerDutyGetIncidentAlertsConfig {
     token: String,
-    incident_alerts: PagerDutyRestEndpointConfig,
-}
-
-#[derive(Deserialize)]
-struct PagerDutyRestEndpointConfig {
     allowed_rules: Vec<String>,
-    #[serde(default)]
-    available_in_test_mode: bool,
 }
 
 /// Object to interact with the PagerDuty API

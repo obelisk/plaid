@@ -376,7 +376,7 @@ pub enum ReviewPatAction {
     Deny,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 /// Set of user permissions, as returned by GitHub's API
 pub struct Permission {
     pub pull: bool,
@@ -468,4 +468,11 @@ pub struct CommentOnPullRequestRequest {
     pub number: String,
     /// Comment to leave
     pub comment: String,
+}
+
+/// A team that has access to a repository, along with the permission level it has on the repository.
+#[derive(Serialize, Deserialize)]
+pub struct GitHubRepoTeam {
+    pub slug: String,
+    pub permissions: Permission,
 }
