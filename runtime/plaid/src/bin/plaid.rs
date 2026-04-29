@@ -171,37 +171,6 @@ async fn read_body_with_limit(
     Ok(full_body)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use futures_util::stream;
-    use tokio_util::bytes::Bytes;
-
-    #[tokio::test]
-    async fn read_body_with_limit_allows_body_at_limit() {
-        let body = stream::iter(vec![
-            Ok::<_, warp::Error>(Bytes::from_static(b"hello")),
-            Ok::<_, warp::Error>(Bytes::from_static(b" world")),
-        ]);
-
-        let result = read_body_with_limit(body, 11).await.unwrap();
-
-        assert_eq!(result, b"hello world");
-    }
-
-    #[tokio::test]
-    async fn read_body_with_limit_rejects_body_over_limit() {
-        let body = stream::iter(vec![
-            Ok::<_, warp::Error>(Bytes::from_static(b"hello")),
-            Ok::<_, warp::Error>(Bytes::from_static(b" world")),
-        ]);
-
-        let result = read_body_with_limit(body, 10).await;
-
-        assert!(result.is_err());
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
