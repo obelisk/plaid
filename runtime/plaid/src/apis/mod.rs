@@ -129,6 +129,8 @@ pub enum ApiError {
     S3Error(aws::s3::S3Errors),
     #[cfg(feature = "gcp")]
     GoogleDocsError(gcp::google_docs::GoogleDocsError),
+    #[cfg(feature = "gcp")]
+    BigQueryError(gcp::bigquery::BigQueryError),
     #[cfg(feature = "aws")]
     KmsError(aws::kms::KmsErrors),
     NetworkError(reqwest::Error),
@@ -165,6 +167,13 @@ impl From<S3Errors> for ApiError {
 impl From<KmsErrors> for ApiError {
     fn from(e: KmsErrors) -> Self {
         Self::KmsError(e)
+    }
+}
+
+#[cfg(feature = "gcp")]
+impl From<gcp::bigquery::BigQueryError> for ApiError {
+    fn from(e: gcp::bigquery::BigQueryError) -> Self {
+        Self::BigQueryError(e)
     }
 }
 
