@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::PlaidFunctionError;
 
@@ -75,4 +75,67 @@ pub fn trigger_incident_detailed(
         3 => Ok(TriggerIncidentResult::TriggerFailed),
         n => Ok(TriggerIncidentResult::Unknown(n as u32)),
     }
+}
+
+#[derive(Serialize)]
+struct GetIncidentAlertsRequest {
+    incident_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct IncidentAlertsResponse {
+    #[serde(default)]
+    pub alerts: Vec<IncidentAlert>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct IncidentAlert {
+    pub body: Option<IncidentAlertBody>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct IncidentAlertBody {
+    pub details: Option<IncidentAlertDetails>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct IncidentAlertDetails {
+    pub firing: Option<serde_json::Value>,
+}
+
+/// Retrieve the alerts attached to a PagerDuty incident.
+pub fn get_incident_alerts(
+    incident_id: &str,
+) -> Result<IncidentAlertsResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(pagerduty, get_incident_alerts);
+    }
+
+    let request = GetIncidentAlertsRequest {
+        incident_id: incident_id.to_owned(),
+    };
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024;
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        pagerduty_get_incident_alerts(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    let res =
+        String::from_utf8(return_buffer).map_err(|_| PlaidFunctionError::ParametersNotUtf8)?;
+
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
 }
