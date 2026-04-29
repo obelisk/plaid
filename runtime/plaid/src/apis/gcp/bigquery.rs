@@ -462,6 +462,7 @@ fn push_value_param(
         }
         FilterValue::Boolean(b) => ("BOOL", Some(b.to_string())),
         FilterValue::Timestamp(t) => ("TIMESTAMP", Some(t.to_string())),
+        FilterValue::Null => ("STRING", None),
     };
 
     params.push(QueryParameter {
