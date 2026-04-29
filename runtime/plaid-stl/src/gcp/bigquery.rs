@@ -145,7 +145,7 @@ impl<'a> IntoIterator for &'a QueryTableResponse {
 pub fn query_table(
     dataset: impl Display,
     table: impl Display,
-    columns: &[impl Display],
+    columns: impl Iterator<Item = impl Display>,
     filter: Option<Filter>,
     return_buffer_size: usize,
 ) -> Result<QueryTableResponse, PlaidFunctionError> {
@@ -156,7 +156,7 @@ pub fn query_table(
     let params = QueryTableRequest {
         dataset: dataset.to_string(),
         table: table.to_string(),
-        columns: columns.iter().map(|c| c.to_string()).collect(),
+        columns: columns.map(|c| c.to_string()).collect(),
         filter,
     };
 
