@@ -530,7 +530,7 @@ impl_new_sub_module_function_with_error_buffer!(
     DISALLOW_IN_TEST_MODE
 );
 #[cfg(feature = "gcp")]
-impl_new_sub_module_function_with_error_buffer!(gcp, bigquery, query_table, DISALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(gcp, bigquery, query_table, ALLOW_IN_TEST_MODE);
 
 // Npm Functions
 impl_new_function_with_error_buffer!(npm, publish_empty_stub, DISALLOW_IN_TEST_MODE);

@@ -20,11 +20,11 @@ use log::error;
 const TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 
 /// Maximum `And`/`Or` nesting depth for a [`Filter`] tree.
-const MAX_FILTER_DEPTH: usize = 4;
+const MAX_FILTER_DEPTH: usize = 2;
 
 /// Maximum number of sibling conditions allowed inside a single `And`/`Or`
 /// node. Prevents unbounded SQL string growth from a flat list of conditions.
-const MAX_FILTER_CHILDREN: usize = 16;
+const MAX_FILTER_CHILDREN: usize = 8;
 
 #[derive(Error, Debug)]
 pub enum BigQueryError {
@@ -40,6 +40,14 @@ pub enum BigQueryError {
     RowError(#[from] google_cloud_bigquery::query::row::Error),
     #[error("Response too large: accumulated row data exceeded the configured max_response_size")]
     ResponseTooLarge,
+    #[error("Invalid identifer value: {0}")]
+    InvalidIdentifier(String),
+    #[error("No columns provided")]
+    NoColumnsProvided,
+    #[error("Invalid filter provided: {0}")]
+    InvalidFilter(String),
+    #[error("Module not permitted")]
+    ModuleNotPermitted,
 }
 
 /// The BigQuery type a column should be decoded into.
@@ -95,6 +103,11 @@ pub struct BigQueryConfig {
     max_response_size: usize,
 }
 
+/// The default timeout if none is provided.
+fn default_timeout_ms() -> i64 {
+    5000
+}
+
 fn default_max_response_size() -> usize {
     1024 * 1024 // 1 MiB
 }
@@ -116,14 +129,18 @@ impl io::Write for CountWriter {
     }
 }
 
-/// The default timeout if none is provided.
-fn default_timeout_ms() -> i64 {
-    5000
-}
-
+/// BigQuery API wrapper for Plaid modules.
+///
+/// Owns the BigQuery client plus the resolved project and
+/// runtime configuration needed to validate module access, build parameterized
+/// queries, and decode query results.
 pub struct BigQuery {
+    /// BigQuery client used to submit queries.
     client: Client,
+    /// GCP project ID used for BigQuery jobs.
     project_id: String,
+    /// Runtime configuration, including credentials, access rules, schema
+    /// hints, timeout, and response size limits.
     config: BigQueryConfig,
 }
 
@@ -177,13 +194,6 @@ impl BigQuery {
     ///    configured schema (defaulting to `String` when absent) and calls
     ///    [`decode_column`] to produce the correct `serde_json::Value` variant.
     /// 5. Wraps the rows in a [`QueryTableResponse`] and serializes to JSON.
-    ///
-    /// # Errors
-    ///
-    /// Returns `ApiError::BadRequest` if permissions or identifier validation
-    /// fails, `ApiError::BigQueryError(BigQueryError::ResponseTooLarge)` if the
-    /// accumulated decoded row data exceeds `max_response_size`, and
-    /// `ApiError::BigQueryError` for any other network or decoding error.
     pub async fn query_table(
         &self,
         params: &str,
@@ -253,20 +263,20 @@ impl BigQuery {
         module: &Arc<PlaidModule>,
         dataset: &str,
         table: &str,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), BigQueryError> {
         let Some(datasets) = self.config.r.get(&module.to_string()) else {
             error!("[{module}] attempted to read BigQuery table [{dataset}.{table}] but has no BigQuery permissions configured");
-            return Err(ApiError::BadRequest);
+            return Err(BigQueryError::ModuleNotPermitted);
         };
 
         let Some(tables) = datasets.get(dataset) else {
             error!("[{module}] attempted to read BigQuery table [{dataset}.{table}] but is not permitted to access dataset [{dataset}]");
-            return Err(ApiError::BadRequest);
+            return Err(BigQueryError::ModuleNotPermitted);
         };
 
         if !tables.iter().any(|t| t == table) {
             error!("[{module}] attempted to read BigQuery table [{dataset}.{table}] but [{table}] is not in the permitted tables for dataset [{dataset}]");
-            return Err(ApiError::BadRequest);
+            return Err(BigQueryError::ModuleNotPermitted);
         }
 
         Ok(())
@@ -283,19 +293,22 @@ impl BigQuery {
     /// 2. **Query construction** — delegates to [`build_query_string`], which
     ///    validates all identifiers against a strict allowlist and assembles the
     ///    `SELECT` statement.
-    ///
-    /// Returns `ApiError::BadRequest` if either check fails.
     fn build_query_request(
         &self,
         module: &Arc<PlaidModule>,
         params: &QueryTableRequest,
-    ) -> Result<QueryRequest, ApiError> {
+    ) -> Result<QueryRequest, BigQueryError> {
         // Validate dataset and table identifiers before the permission check so
         // that the names logged inside check_module_permission are guaranteed to
         // be safe ASCII identifiers
-        if !is_valid_identifier(&params.dataset) || !is_valid_identifier(&params.table) {
-            return Err(ApiError::BadRequest);
+        if !is_valid_identifier(&params.dataset) {
+            return Err(BigQueryError::InvalidIdentifier(params.dataset.to_string()));
         }
+
+        if !is_valid_identifier(&params.table) {
+            return Err(BigQueryError::InvalidIdentifier(params.table.to_string()));
+        }
+
         self.check_module_permission(module, &params.dataset, &params.table)?;
         let (query, query_parameters) = build_query_string(
             &params.dataset,
@@ -332,20 +345,24 @@ fn build_query_string(
     table: &str,
     columns: &[String],
     filter: Option<&Filter>,
-) -> Result<(String, Vec<QueryParameter>), ApiError> {
+) -> Result<(String, Vec<QueryParameter>), BigQueryError> {
     if columns.is_empty() {
-        return Err(ApiError::BadRequest);
+        return Err(BigQueryError::NoColumnsProvided);
     }
 
-    if columns.iter().any(|col| !is_valid_identifier(col)) {
-        return Err(ApiError::BadRequest);
+    if let Some(ident) = columns.iter().find(|col| !is_valid_identifier(col)) {
+        return Err(BigQueryError::InvalidIdentifier(ident.to_string()));
     }
 
-    let column_list = columns
-        .iter()
-        .map(|c| format!("`{c}`"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let mut column_list = String::new();
+    for (i, c) in columns.iter().enumerate() {
+        if i > 0 {
+            column_list.push_str(", ");
+        }
+        column_list.push('`');
+        column_list.push_str(c);
+        column_list.push('`');
+    }
 
     let mut sql = format!("SELECT {column_list} FROM `{dataset}`.`{table}`");
     let mut params: Vec<QueryParameter> = Vec::new();
@@ -363,7 +380,7 @@ fn build_query_string(
 /// Column names inside `Condition` nodes are validated with
 /// [`is_valid_identifier`] before use. `And` and `Or` nodes must contain at
 /// least one child and no more than [`MAX_FILTER_CHILDREN`]. Nesting depth is
-/// limited to [`MAX_FILTER_DEPTH`]; exceeding either limit returns `BadRequest`.
+/// limited to [`MAX_FILTER_DEPTH`]; exceeding either limit returns `InvalidFilter`.
 ///
 /// Leaf values are not inlined as SQL literals — they are appended to `params`
 /// as typed [`QueryParameter`] entries and referenced via `@pN` placeholders.
@@ -371,17 +388,19 @@ fn build_filter_sql(
     filter: &Filter,
     depth: usize,
     params: &mut Vec<QueryParameter>,
-) -> Result<String, ApiError> {
+) -> Result<String, BigQueryError> {
     if depth > MAX_FILTER_DEPTH {
-        return Err(ApiError::BadRequest);
+        return Err(BigQueryError::InvalidFilter(
+            "provided filter exceeds max depth".to_string(),
+        ));
     }
     match filter {
-        Filter::And(children) | Filter::Or(children) if children.is_empty() => {
-            Err(ApiError::BadRequest)
-        }
+        Filter::And(children) | Filter::Or(children) if children.is_empty() => Err(
+            BigQueryError::InvalidFilter("no children present".to_string()),
+        ),
         Filter::And(children) => {
             if children.len() > MAX_FILTER_CHILDREN {
-                return Err(ApiError::BadRequest);
+                return Err(BigQueryError::InvalidFilter(format!("provided AND filter has {} children, but only {MAX_FILTER_CHILDREN} are allowed", children.len())));
             }
             let parts = children
                 .iter()
@@ -391,7 +410,7 @@ fn build_filter_sql(
         }
         Filter::Or(children) => {
             if children.len() > MAX_FILTER_CHILDREN {
-                return Err(ApiError::BadRequest);
+                return Err(BigQueryError::InvalidFilter(format!("provided OR filter has {} children, but only {MAX_FILTER_CHILDREN} are allowed", children.len())));
             }
             let parts = children
                 .iter()
@@ -405,7 +424,7 @@ fn build_filter_sql(
             value,
         } => {
             if !is_valid_identifier(column) {
-                return Err(ApiError::BadRequest);
+                return Err(BigQueryError::InvalidIdentifier(column.to_string()));
             }
             build_condition_sql(column, operator, value, params)
         }
@@ -422,7 +441,7 @@ fn build_condition_sql(
     op: &Operator,
     value: &FilterValue,
     params: &mut Vec<QueryParameter>,
-) -> Result<String, ApiError> {
+) -> Result<String, BigQueryError> {
     let col = format!("`{column}`");
 
     let op_str = match op {
@@ -448,7 +467,7 @@ fn build_condition_sql(
 fn push_value_param(
     value: &FilterValue,
     params: &mut Vec<QueryParameter>,
-) -> Result<String, ApiError> {
+) -> Result<String, BigQueryError> {
     let name = format!("p{}", params.len());
 
     let (type_str, scalar_value) = match value {
@@ -456,7 +475,9 @@ fn push_value_param(
         FilterValue::Integer(n) => ("INT64", Some(n.to_string())),
         FilterValue::Float(f) => {
             if f.is_nan() || f.is_infinite() {
-                return Err(ApiError::BadRequest);
+                return Err(BigQueryError::InvalidIdentifier(
+                    "invalid float value provided in filter".to_string(),
+                ));
             }
             ("FLOAT64", Some(f.to_string()))
         }
