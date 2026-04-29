@@ -48,8 +48,6 @@ impl std::fmt::Display for Errors {
 
 impl std::error::Error for Errors {}
 
-const MAX_WEBHOOK_BODY_SIZE: usize = 1024 * 256; // 256KiB
-
 async fn post_handler(
     webhook: String,
     body: impl Stream<Item = Result<impl Buf, warp::Error>> + Unpin + Send + Sync,
@@ -68,7 +66,8 @@ async fn post_handler(
         let logbacks_allowed = webhook_configuration.logbacks_allowed.clone();
 
         // Read the body with size limit
-        let full_body = match read_body_with_limit(body, MAX_WEBHOOK_BODY_SIZE).await {
+        let full_body = match read_body_with_limit(body, webhook_configuration.max_body_size).await
+        {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("Error reading body for webhook: {webhook}: {e}");
@@ -452,7 +451,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let (response_send, response_recv) = tokio::sync::oneshot::channel();
 
                                 // Read the body with size limit
-                                let body_bytes = match read_body_with_limit(body, MAX_WEBHOOK_BODY_SIZE).await {
+                                let body_bytes = match read_body_with_limit(body, webhook_configuration.max_body_size).await {
                                     Ok(bytes) => bytes,
                                     Err(e) => {
                                         error!("Error reading body for get request to {webhook}: {e}");

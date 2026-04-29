@@ -2,7 +2,7 @@ use clap::{Arg, ArgAction, Command};
 
 use plaid_stl::messages::LogbacksAllowed;
 use ring::digest::{self, digest};
-use serde::{de, Deserialize};
+use serde::{de, Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -75,6 +75,13 @@ pub struct WebhookConfig {
     pub log_type: String,
     /// What headers do you want forwarded to the logging channel
     pub headers: Vec<String>,
+    /// The maximum size, in bytes, of a request body that will be processed.
+    /// Defaults to 256KiB if no value is provided.
+    #[serde(
+        default = "default_webhook_body_size",
+        deserialize_with = "validate_webhook_body_size"
+    )]
+    pub max_body_size: usize,
     /// See GetMode
     pub get_mode: Option<GetMode>,
     /// An optional label for the webhook. If this is populated, it will be
@@ -167,6 +174,24 @@ pub struct ConfigurationWithRoles {
 /// This function provides the default log queue size in the event that one isn't provided
 fn default_log_queue_size() -> usize {
     2048
+}
+
+fn default_webhook_body_size() -> usize {
+    1024 * 256
+}
+
+/// Validate that the webhook body size limit is not zero.
+fn validate_webhook_body_size<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(serde::de::Error::custom(
+            "Webhook body size limit must not be 0",
+        ));
+    }
+    Ok(value)
 }
 
 /// All errors that can be encountered while configuring Plaid
