@@ -399,6 +399,11 @@ impl_new_function!(
 );
 impl_new_function!(github, trigger_repo_dispatch, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, check_org_membership_of_user, ALLOW_IN_TEST_MODE);
+impl_new_function!(
+    github,
+    remove_outside_collaborator_from_org,
+    DISALLOW_IN_TEST_MODE
+);
 impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, require_signed_commits, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, add_repo_to_team, DISALLOW_IN_TEST_MODE);
@@ -771,6 +776,140 @@ define_api_functions! {
         "github_get_repo_id_from_repo_name"                => github_get_repo_id_from_repo_name,
         "github_get_repo_name_from_repo_id"                => github_get_repo_name_from_repo_id,
         "github_get_repo_teams"                            => github_get_repo_teams,
+        "github_remove_user_from_repo" => {
+            Function::new_typed_with_env(&mut store, &env, github_remove_user_from_repo)
+        }
+        "github_add_user_to_repo" => {
+            Function::new_typed_with_env(&mut store, &env, github_add_user_to_repo)
+        }
+        "github_add_user_to_team" => {
+            Function::new_typed_with_env(&mut store, &env, github_add_user_to_team)
+        }
+        "github_remove_user_from_team" => {
+            Function::new_typed_with_env(&mut store, &env, github_remove_user_from_team)
+        }
+        "github_make_graphql_query" => {
+            Function::new_typed_with_env(&mut store, &env, github_make_graphql_query)
+        }
+        "github_make_advanced_graphql_query" => {
+            Function::new_typed_with_env(&mut store, &env, github_make_advanced_graphql_query)
+        }
+        "github_fetch_commit" => {
+            Function::new_typed_with_env(&mut store, &env, github_fetch_commit)
+        }
+        "github_list_files" => Function::new_typed_with_env(&mut store, &env, github_list_files),
+        "github_fetch_file_with_custom_media_type" => {
+            Function::new_typed_with_env(&mut store, &env, github_fetch_file_with_custom_media_type)
+        }
+        "github_list_fpat_requests_for_org" => {
+            Function::new_typed_with_env(&mut store, &env, github_list_fpat_requests_for_org)
+        }
+        "github_review_fpat_requests_for_org" => {
+            Function::new_typed_with_env(&mut store, &env, github_review_fpat_requests_for_org)
+        }
+        "github_get_repos_for_fpat" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repos_for_fpat)
+        }
+        "github_get_branch_protection_rules" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_branch_protection_rules)
+        }
+        "github_get_branch_protection_ruleset" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_branch_protection_ruleset)
+        }
+        "github_get_repository_collaborators" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repository_collaborators)
+        }
+        "github_get_custom_properties_values" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_custom_properties_values)
+        }
+        "github_check_codeowners_file" => {
+            Function::new_typed_with_env(&mut store, &env, github_check_codeowners_file)
+        }
+        "github_update_branch_protection_rule" => {
+            Function::new_typed_with_env(&mut store, &env, github_update_branch_protection_rule)
+        }
+        "github_create_environment_for_repo" => {
+            Function::new_typed_with_env(&mut store, &env, github_create_environment_for_repo)
+        }
+        "github_configure_secret" => {
+            Function::new_typed_with_env(&mut store, &env, github_configure_secret)
+        }
+        "github_create_deployment_branch_protection_rule" => Function::new_typed_with_env(
+            &mut store,
+            &env,
+            github_create_deployment_branch_protection_rule,
+        ),
+        "github_search_code" => Function::new_typed_with_env(&mut store, &env, github_search_code),
+        "github_add_users_to_org_copilot" => {
+            Function::new_typed_with_env(&mut store, &env, github_add_users_to_org_copilot)
+        }
+        "github_remove_users_from_org_copilot" => {
+            Function::new_typed_with_env(&mut store, &env, github_remove_users_from_org_copilot)
+        }
+        "github_list_seats_in_org_copilot" => {
+            Function::new_typed_with_env(&mut store, &env, github_list_seats_in_org_copilot)
+        }
+        "github_trigger_repo_dispatch" => {
+            Function::new_typed_with_env(&mut store, &env, github_trigger_repo_dispatch)
+        }
+        "github_check_org_membership_of_user" => {
+            Function::new_typed_with_env(&mut store, &env, github_check_org_membership_of_user)
+        }
+        "github_remove_outside_collaborator_from_org" => Function::new_typed_with_env(
+            &mut store,
+            &env,
+            github_remove_outside_collaborator_from_org,
+        ),
+        "github_comment_on_pull_request" => {
+            Function::new_typed_with_env(&mut store, &env, github_comment_on_pull_request)
+        }
+        "github_delete_deploy_key" => {
+            Function::new_typed_with_env(&mut store, &env, github_delete_deploy_key)
+        }
+        "github_pull_request_request_reviewers" => {
+            Function::new_typed_with_env(&mut store, &env, github_pull_request_request_reviewers)
+        }
+        "github_require_signed_commits" => {
+            Function::new_typed_with_env(&mut store, &env, github_require_signed_commits)
+        }
+        "github_get_weekly_commit_count" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_weekly_commit_count)
+        }
+        "github_add_repo_to_team" => {
+            Function::new_typed_with_env(&mut store, &env, github_add_repo_to_team)
+        }
+        "github_remove_repo_from_team" => {
+            Function::new_typed_with_env(&mut store, &env, github_remove_repo_from_team)
+        }
+        "github_get_reference" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_reference)
+        }
+        "github_create_reference" => {
+            Function::new_typed_with_env(&mut store, &env, github_create_reference)
+        }
+        "github_get_pull_requests" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_pull_requests)
+        }
+        "github_create_pull_request" => {
+            Function::new_typed_with_env(&mut store, &env, github_create_pull_request)
+        }
+        "github_create_file" => Function::new_typed_with_env(&mut store, &env, github_create_file),
+        "github_get_repo_sbom" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repo_sbom)
+        }
+        "github_add_labels" => Function::new_typed_with_env(&mut store, &env, github_add_labels),
+        "github_get_user_id_from_username" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_user_id_from_username)
+        }
+        "github_get_username_from_user_id" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_username_from_user_id)
+        }
+        "github_get_repo_id_from_repo_name" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repo_id_from_repo_name)
+        }
+        "github_get_repo_name_from_repo_id" => {
+            Function::new_typed_with_env(&mut store, &env, github_get_repo_name_from_repo_id)
+        }
 
         // Slack Calls
         "slack_post_to_named_webhook"     => slack_post_to_named_webhook,

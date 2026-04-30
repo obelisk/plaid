@@ -28,3 +28,35 @@ pub fn check_org_membership_of_user(
     // configured.
     Ok(res != 0)
 }
+
+/// Remove an outside collaborator from an org
+/// ## Arguments
+///
+/// * `user` - The outside collaborator to remove from the org
+/// * `org` - The GitHub organization to remove the user from
+pub fn remove_outside_collaborator_from_org_detailed(
+    user: impl Display,
+    org: impl Display,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, remove_outside_collaborator_from_org);
+    }
+    let mut params: HashMap<&str, String> = HashMap::new();
+    params.insert("user", user.to_string());
+    params.insert("org", org.to_string());
+
+    let request = serde_json::to_string(&params).unwrap();
+
+    let res = unsafe {
+        github_remove_outside_collaborator_from_org(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}

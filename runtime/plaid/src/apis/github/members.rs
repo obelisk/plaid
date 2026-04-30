@@ -42,6 +42,39 @@ impl Github {
         }
     }
 
+    /// Remove an outside collaborator from an org.
+    /// See https://docs.github.com/en/rest/orgs/outside-collaborators?apiVersion=2022-11-28#remove-outside-collaborator-from-an-organization
+    pub async fn remove_outside_collaborator_from_org(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request: HashMap<&str, &str> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
+        let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
+
+        info!("Removing outside collaborator [{user}] from org [{org}] on behalf of {module}");
+        let address = format!("/orgs/{org}/outside_collaborators/{user}");
+
+        match self
+            .make_generic_delete_request::<&str>(address, None, module)
+            .await
+        {
+            Ok((status, _)) => {
+                if status == 204 {
+                    Ok(0)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Get a user's ID from their username
     /// See https://docs.github.com/en/rest/users/users?apiVersion=2022-11-28#get-a-user
     pub async fn get_user_id_from_username(
