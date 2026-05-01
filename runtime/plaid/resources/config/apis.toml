@@ -143,6 +143,11 @@ root_certificate = """
 # Nothing here means no authentication
 [apis."github".graphql_queries]
 
+# [apis."pagerduty"]
+# [apis."pagerduty".get_incident_alerts]
+# token = "{plaid-secret{pagerduty-rest-api-token}}"
+# allowed_rules = ["example_rule.wasm"]
+
 [apis."slack"]
 [apis."slack"."webhooks"]
 test_webhook = "{plaid-secret{test-webhook-secret}}"
