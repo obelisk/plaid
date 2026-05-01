@@ -34,7 +34,7 @@ pub fn check_org_membership_of_user(
 ///
 /// * `user` - The outside collaborator to remove from the org
 /// * `org` - The GitHub organization to remove the user from
-pub fn remove_outside_collaborator_from_org_detailed(
+pub fn remove_outside_collaborator_from_org(
     user: impl Display,
     org: impl Display,
 ) -> Result<(), PlaidFunctionError> {
@@ -54,6 +54,8 @@ pub fn remove_outside_collaborator_from_org_detailed(
         )
     };
 
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
     if res < 0 {
         return Err(res.into());
     }
