@@ -71,6 +71,7 @@ impl Github {
                     )))
                 }
             }
+            Ok((_, Err(e))) => Err(e),
             Err(e) => Err(e),
         }
     }
