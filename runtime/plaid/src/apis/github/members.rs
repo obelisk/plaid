@@ -62,7 +62,7 @@ impl Github {
             .make_generic_delete_request::<&str>(address, None, module)
             .await
         {
-            Ok((status, _)) => {
+            Ok((status, Ok(_))) => {
                 if status == 204 {
                     Ok(())
                 } else {

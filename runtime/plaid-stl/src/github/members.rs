@@ -79,7 +79,7 @@ pub fn get_username_from_user_id(user_id: impl Display) -> Result<String, PlaidF
 pub fn remove_outside_collaborator_from_org(
     user: impl Display,
     org: impl Display,
-) -> Result<(), PlaidFunctionError> {
+) -> Result<i32, PlaidFunctionError> {
     extern "C" {
         new_host_function!(github, remove_outside_collaborator_from_org);
     }
@@ -102,5 +102,5 @@ pub fn remove_outside_collaborator_from_org(
         return Err(res.into());
     }
 
-    Ok(())
+    Ok(res)
 }
