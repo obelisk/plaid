@@ -399,6 +399,11 @@ impl_new_function!(
 );
 impl_new_function!(github, trigger_repo_dispatch, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, check_org_membership_of_user, ALLOW_IN_TEST_MODE);
+impl_new_function!(
+    github,
+    remove_outside_collaborator_from_org,
+    DISALLOW_IN_TEST_MODE
+);
 impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, require_signed_commits, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, add_repo_to_team, DISALLOW_IN_TEST_MODE);
@@ -771,6 +776,7 @@ define_api_functions! {
         "github_get_repo_id_from_repo_name"                => github_get_repo_id_from_repo_name,
         "github_get_repo_name_from_repo_id"                => github_get_repo_name_from_repo_id,
         "github_get_repo_teams"                            => github_get_repo_teams,
+        "github_remove_outside_collaborator_from_org"      => github_remove_outside_collaborator_from_org,
 
         // Slack Calls
         "slack_post_to_named_webhook"     => slack_post_to_named_webhook,
