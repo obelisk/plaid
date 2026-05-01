@@ -48,7 +48,7 @@ impl Github {
         &self,
         params: &str,
         module: Arc<PlaidModule>,
-    ) -> Result<(), ApiError> {
+    ) -> Result<u32, ApiError> {
         let request: HashMap<&str, &str> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -64,7 +64,7 @@ impl Github {
         {
             Ok((status, Ok(_))) => {
                 if status == 204 {
-                    Ok(())
+                    Ok(0)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
