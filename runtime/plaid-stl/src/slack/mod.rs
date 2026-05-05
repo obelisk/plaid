@@ -18,6 +18,24 @@ pub struct SlackMessageWithBlocks {
     thread_ts: Option<String>,
 }
 
+#[derive(Serialize)]
+struct SlackMessageWithBlocksAndAttachments {
+    channel: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocks: Option<serde_json::Value>,
+    attachments: serde_json::Value,
+}
+
+fn optional_blocks(blocks: &str) -> Result<Option<serde_json::Value>, PlaidFunctionError> {
+    let blocks: serde_json::Value =
+        serde_json::from_str(blocks).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    match blocks {
+        serde_json::Value::Array(items) if items.is_empty() => Ok(None),
+        blocks => Ok(Some(blocks)),
+    }
+}
+
 #[inline]
 fn slack_format(msg: &str) -> String {
     #[derive(Serialize)]
@@ -191,6 +209,52 @@ pub fn post_message_with_blocks(
     text: &str,
 ) -> Result<(), PlaidFunctionError> {
     post_message_with_blocks_detailed(bot, channel, text).map(|_| ())
+}
+
+/// Post a Slack message with top-level Block Kit blocks and attachments.
+pub fn post_message_with_blocks_and_attachments(
+    bot: &str,
+    channel: &str,
+    blocks: &str,
+    attachments: &str,
+) -> Result<SlackMessageResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, post_message);
+    }
+
+    let message = SlackMessageWithBlocksAndAttachments {
+        channel: channel.to_owned(),
+        blocks: optional_blocks(blocks)?,
+        attachments: serde_json::from_str(attachments)
+            .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?,
+    };
+
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&PostMessage {
+        bot: bot.to_string(),
+        body: serde_json::to_string(&message).unwrap(),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_post_message(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
 }
 
 /// Slack API response for message operations (chat.postMessage, chat.update).
@@ -657,6 +721,15 @@ struct SlackUpdateMessageWithBlocks {
     blocks: String,
 }
 
+#[derive(Serialize)]
+struct SlackUpdateMessageWithBlocksAndAttachments {
+    channel: String,
+    ts: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocks: Option<serde_json::Value>,
+    attachments: serde_json::Value,
+}
+
 /// Data to be sent to the Plaid runtime for updating a message
 #[derive(Serialize, Deserialize)]
 pub struct UpdateMessage {
@@ -683,6 +756,54 @@ pub fn update_message_with_blocks(
         channel: channel.to_owned(),
         ts: ts.to_owned(),
         blocks: blocks.to_owned(),
+    };
+
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&UpdateMessage {
+        bot: bot.to_string(),
+        body: serde_json::to_string(&message).unwrap(),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_update_message(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
+}
+
+/// Update a Slack message with top-level Block Kit blocks and attachments.
+pub fn update_message_with_blocks_and_attachments(
+    bot: &str,
+    channel: &str,
+    ts: &str,
+    blocks: &str,
+    attachments: &str,
+) -> Result<SlackMessageResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, update_message);
+    }
+
+    let message = SlackUpdateMessageWithBlocksAndAttachments {
+        channel: channel.to_owned(),
+        ts: ts.to_owned(),
+        blocks: optional_blocks(blocks)?,
+        attachments: serde_json::from_str(attachments)
+            .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?,
     };
 
     const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB

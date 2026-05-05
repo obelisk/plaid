@@ -558,6 +558,7 @@ impl_new_function_with_error_buffer!(okta, get_user_data, ALLOW_IN_TEST_MODE);
 
 // PagerDuty Functions
 impl_new_function!(pagerduty, trigger_incident, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(pagerduty, get_incident_alerts, ALLOW_IN_TEST_MODE);
 
 // Rustica Functions
 impl_new_function_with_error_buffer!(rustica, new_mtls_cert, DISALLOW_IN_TEST_MODE);
@@ -829,6 +830,7 @@ define_api_functions! {
 
         // PagerDuty Calls
         "pagerduty_trigger_incident" => pagerduty_trigger_incident,
+        "pagerduty_get_incident_alerts" => pagerduty_get_incident_alerts,
 
         // Rustica Calls
         "rustica_new_mtls_cert" => rustica_new_mtls_cert,
