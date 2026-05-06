@@ -70,22 +70,27 @@ impl InfluxDBLogger {
         fields: HashMap<&str, &str>,
         timestamp: Option<u64>,
     ) -> Result<(), InfluxDbError> {
-        let line = format!(
-            "{},{} {} {}",
-            table,
-            tags.map(|t| t
-                .into_iter()
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect::<Vec<_>>()
-                .join(","))
-                .unwrap_or_default(),
-            fields
-                .into_iter()
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect::<Vec<_>>()
-                .join(","),
-            timestamp.map(|t| t.to_string()).unwrap_or_default()
-        );
+        let tags_str = tags
+            .map(|t| {
+                format!(
+                    ",{}",
+                    t.into_iter()
+                        .map(|(k, v)| format!("{}={}", k, v))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            })
+            .unwrap_or_default();
+
+        let fields_str = fields
+            .into_iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let timestamp_str = timestamp.map(|t| format!(" {}", t)).unwrap_or_default();
+
+        let line = format!("{}{} {}{}", table, tags_str, fields_str, timestamp_str);
 
         let response = self
             .client
