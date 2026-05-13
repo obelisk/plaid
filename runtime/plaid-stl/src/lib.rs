@@ -1,3 +1,5 @@
+use std::error::Error;
+
 macro_rules! new_host_function_with_error_buffer {
     ($api:ident, $function_name:ident) => {
         paste::item! {
@@ -32,6 +34,8 @@ pub enum PlaidFunctionError {
     TimeoutElapsed,
     Unknown,
 }
+
+impl Error for PlaidFunctionError {}
 
 impl core::fmt::Display for PlaidFunctionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
