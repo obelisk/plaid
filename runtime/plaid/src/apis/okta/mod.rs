@@ -190,7 +190,10 @@ impl Okta {
         let access_token = res
             .json::<AccessTokenResponse>()
             .await
-            .map_err(|_| OktaError::BadJsonResponse)?
+            .map_err(|e| {
+                error!("Error parsing JSON: {:?}", e);
+                OktaError::BadJsonResponse
+            })?
             .access_token;
         Ok(access_token)
     }

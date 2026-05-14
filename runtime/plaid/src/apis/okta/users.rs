@@ -33,13 +33,15 @@ impl Okta {
 
         let response = res.send().await.map_err(ApiError::NetworkError)?;
         let status = response.status();
+        let text = response.text().await.map_err(ApiError::NetworkError)?;
 
         if status != StatusCode::OK {
+            error!("Okta API Error fetchinguser data: {text}");
             return Err(ApiError::OktaError(OktaError::UnexpectedStatusCode(
                 status.as_u16(),
             )));
         }
 
-        response.text().await.map_err(ApiError::NetworkError)
+        Ok(text)
     }
 }
