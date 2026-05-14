@@ -1,14 +1,15 @@
 mod groups;
 mod users;
 
-use jwt_simple::{
-    claims::Claims,
-    prelude::{Duration as JwtDuration, RS256KeyPair, RSAKeyPairLike},
-};
-use reqwest::Client;
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+
+use reqwest::{Client, StatusCode};
 use serde::{de, Deserialize, Serialize};
 
-use std::{string::FromUtf8Error, time::Duration};
+use std::{
+    string::FromUtf8Error,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use super::default_timeout_seconds;
 
@@ -27,7 +28,7 @@ enum Authentication {
         client_id: String,
         /// Private key for the Okta app
         #[serde(deserialize_with = "private_key_deserializer")]
-        private_key: RS256KeyPair,
+        private_key: EncodingKey,
     },
 }
 
@@ -35,13 +36,13 @@ enum Authentication {
 /// The underlying string is parsed into a key object; if this is not possible, an error is returned.
 /// This ensures that our configuration is valid, and frees future calls from the burden of checking the key
 /// or the risk of handling an invalid key.
-fn private_key_deserializer<'de, D>(deserializer: D) -> Result<RS256KeyPair, D::Error>
+fn private_key_deserializer<'de, D>(deserializer: D) -> Result<EncodingKey, D::Error>
 where
     D: de::Deserializer<'de>,
 {
     let pem_key = String::deserialize(deserializer)?;
-    Ok(RS256KeyPair::from_pem(&pem_key)
-        .map_err(|_| de::Error::custom("Could not deserialize app's private key")))?
+    EncodingKey::from_rsa_pem(pem_key.as_bytes())
+        .map_err(|_| de::Error::custom("Could not deserialize app's private key"))
 }
 
 /// Configuration for Plaid's Okta API
@@ -70,8 +71,7 @@ pub struct Okta {
 pub enum OktaError {
     BadData(FromUtf8Error),
     UnexpectedStatusCode(u16),
-    AuthenticationFailure,
-    BadPrivateKey,
+    AuthenticationFailure(String),
     JwtSignatureFailure,
     BadJsonResponse,
 }
@@ -120,15 +120,31 @@ impl Okta {
     }
 
     /// Construct a JWT signed with Plaid's private key, to be later exchanged for an access token.
-    fn get_jwt(&self, client_id: &str, private_key: &RS256KeyPair) -> Result<String, OktaError> {
+    fn get_jwt(&self, client_id: &str, private_key: &EncodingKey) -> Result<String, OktaError> {
         // For more details, see https://developer.okta.com/docs/guides/implement-oauth-for-okta-serviceapp/main/#create-and-sign-the-jwt
-        let claims = Claims::create(JwtDuration::from_secs(30))
-            .with_issuer(client_id)
-            .with_audience(format!("https://{}/oauth2/v1/token", self.config.domain))
-            .with_subject(client_id);
-        Ok(private_key
-            .sign(claims)
-            .map_err(|_| OktaError::JwtSignatureFailure)?)
+        #[derive(Serialize)]
+        struct ClientAssertionClaims<'a> {
+            iss: &'a str,
+            sub: &'a str,
+            aud: String,
+            exp: i64,
+            iat: i64,
+        }
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| OktaError::JwtSignatureFailure)?
+            .as_secs() as i64;
+        let ttl_secs: i64 = 30;
+        let claims = ClientAssertionClaims {
+            iss: client_id,
+            sub: client_id,
+            aud: format!("https://{}/oauth2/v1/token", self.config.domain),
+            exp: now + ttl_secs,
+            iat: now,
+        };
+        let header = Header::new(Algorithm::RS256);
+        encode(&header, &claims, private_key).map_err(|_| OktaError::JwtSignatureFailure)
     }
 
     /// Obtain an access token from Okta, in exchange for a properly constructed JWT.
@@ -136,7 +152,7 @@ impl Okta {
         &self,
         op: &OktaOperation,
         client_id: &str,
-        private_key: &RS256KeyPair,
+        private_key: &EncodingKey,
     ) -> Result<String, OktaError> {
         // For more details, see https://developer.okta.com/docs/guides/implement-oauth-for-okta-serviceapp/main/#get-an-access-token
         #[derive(Serialize)]
@@ -170,11 +186,24 @@ impl Okta {
         let res = req
             .send()
             .await
-            .map_err(|_| OktaError::AuthenticationFailure)?;
+            .map_err(|e| OktaError::AuthenticationFailure(e.to_string()))?;
+        
+        let status = res.status();
+        if status != StatusCode::OK {
+            let text = res.text().await.map_err(|e| OktaError::AuthenticationFailure(e.to_string()))?;
+            error!("Okta API Error fetching access token: {text}");
+            return Err(OktaError::UnexpectedStatusCode(
+                status.as_u16(),
+            ));
+        }
+
         let access_token = res
             .json::<AccessTokenResponse>()
             .await
-            .map_err(|_| OktaError::BadJsonResponse)?
+            .map_err(|e| {
+                error!("Error parsing JSON: {:?}", e);
+                OktaError::BadJsonResponse
+            })?
             .access_token;
         Ok(access_token)
     }
