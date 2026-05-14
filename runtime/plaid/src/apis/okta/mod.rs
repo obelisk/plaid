@@ -41,8 +41,8 @@ where
     D: de::Deserializer<'de>,
 {
     let pem_key = String::deserialize(deserializer)?;
-    Ok(EncodingKey::from_rsa_pem(pem_key.as_bytes())
-        .map_err(|_| de::Error::custom("Could not deserialize app's private key")))?
+    EncodingKey::from_rsa_pem(pem_key.as_bytes())
+        .map_err(|_| de::Error::custom("Could not deserialize app's private key"))
 }
 
 /// Configuration for Plaid's Okta API
