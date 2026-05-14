@@ -3,7 +3,7 @@ mod users;
 
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::{de, Deserialize, Serialize};
 
 use std::{
@@ -71,7 +71,7 @@ pub struct Okta {
 pub enum OktaError {
     BadData(FromUtf8Error),
     UnexpectedStatusCode(u16),
-    AuthenticationFailure,
+    AuthenticationFailure(String),
     JwtSignatureFailure,
     BadJsonResponse,
 }
@@ -186,7 +186,17 @@ impl Okta {
         let res = req
             .send()
             .await
-            .map_err(|_| OktaError::AuthenticationFailure)?;
+            .map_err(|e| OktaError::AuthenticationFailure(e.to_string()))?;
+        
+        let status = res.status();
+        if status != StatusCode::OK {
+            let text = res.text().await.map_err(|e| OktaError::AuthenticationFailure(e.to_string()))?;
+            error!("Okta API Error fetching access token: {text}");
+            return Err(OktaError::UnexpectedStatusCode(
+                status.as_u16(),
+            ));
+        }
+
         let access_token = res
             .json::<AccessTokenResponse>()
             .await
