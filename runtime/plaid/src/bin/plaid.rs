@@ -319,6 +319,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         internal_storage.clone(),
         els.clone(),
         &roles,
+        cancellation_token.clone(),
     )
     .await?
     .ok_or(Errors::FailedToStartDataSystem)?;
