@@ -24,6 +24,8 @@ use crossbeam_channel::Sender;
 
 use serde::Deserialize;
 use time::OffsetDateTime;
+use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
 
 pub use self::internal::DelayedMessage;
 
@@ -130,25 +132,41 @@ impl Data {
         storage: Arc<Storage>,
         els: Logger,
         roles: &InstanceRoles,
+        cancellation_token: CancellationToken,
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
         let di = DataInternal::new(config, sender, storage.clone(), els).await?;
-        let handle = tokio::runtime::Handle::current();
+
+        let mut join_set = JoinSet::new();
 
         if roles.data_generators {
             // Start the Github Audit task if there is one
             if let Some(mut gh) = di.github {
                 let storage_clone = storage.clone();
+                let ct_clone = cancellation_token.clone();
                 // Update the DG's state from the storage: this recovers the last_seen and seen_logs_uuid from a previous run
                 update_dg_from_storage(&mut gh, Some(storage_clone.clone())).await;
-                handle.spawn(async move {
+
+                join_set.spawn(async move {
                     loop {
-                        if let Err(_) =
-                            get_and_process_dg_logs(&mut gh, Some(storage_clone.clone())).await
-                        {
-                            error!("GitHub Data Fetch Error")
+                        if ct_clone.is_cancelled() {
+                            return;
                         }
 
-                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        if let Err(err) =
+                            get_and_process_dg_logs(&mut gh, Some(storage_clone.clone())).await
+                        {
+                            error!("GitHub Data Fetch Error: {:?}", err);
+                        }
+
+                        // Allow shutdown to interrupt the sleep immediately instead of
+                        // waiting the full interval before exiting the task.
+                        tokio::select! {
+                            _ = ct_clone.cancelled() => {
+                                return;
+                            }
+
+                            _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                        }
                     }
                 });
             }
@@ -156,17 +174,31 @@ impl Data {
             // Start the Okta System Logs task if there is one
             if let Some(mut okta) = di.okta {
                 let storage_clone = storage.clone();
+                let ct_clone = cancellation_token.clone();
                 // Update the DG's state from the storage: this recovers the last_seen and seen_logs_uuid from a previous run
                 update_dg_from_storage(&mut okta, Some(storage_clone.clone())).await;
-                handle.spawn(async move {
+
+                join_set.spawn(async move {
                     loop {
+                        if ct_clone.is_cancelled() {
+                            return;
+                        }
+
                         if let Err(_) =
                             get_and_process_dg_logs(&mut okta, Some(storage_clone.clone())).await
                         {
                             error!("Okta Data Fetch Error")
                         }
 
-                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        // Allow shutdown to interrupt the sleep immediately instead of
+                        // waiting the full interval before exiting the task.
+                        tokio::select! {
+                            _ = ct_clone.cancelled() => {
+                                return;
+                            }
+
+                            _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                        }
                     }
                 });
             }
@@ -174,31 +206,69 @@ impl Data {
             // Start the SQS task if there is one
             #[cfg(feature = "aws")]
             if let Some(mut sqs) = di.sqs {
-                handle.spawn(async move {
+                let ct_clone = cancellation_token.clone();
+                join_set.spawn(async move {
                     loop {
+                        if ct_clone.is_cancelled() {
+                            return;
+                        }
+
                         if let Err(err) = sqs.drain_queue().await {
                             error!("{err}");
                         };
 
-                        tokio::time::sleep(sqs.config.sleep_duration).await;
+                        // Allow shutdown to interrupt the sleep immediately instead of
+                        // waiting the full interval before exiting the task.
+                        tokio::select! {
+                            _ = ct_clone.cancelled() => {
+                                return;
+                            }
+
+                            _ = tokio::time::sleep(sqs.config.sleep_duration) => {}
+                        }
                     }
                 });
             }
 
+            // TODO: check if websocket DG spawns tasks that will leak
             if let Some(websocket) = di.websocket_external {
-                handle.spawn(async move {
-                    websocket.start().await;
+                let ct_clone = cancellation_token.clone();
+                join_set.spawn(async move {
+                    tokio::select! {
+                        _ = ct_clone.cancelled() => {
+                            return;
+                        }
+
+                        _ = websocket.start() => {}
+                    }
                 });
             }
         }
 
         if roles.interval_jobs {
+            let ct_clone = cancellation_token.clone();
+
             // Start the interval job processor
             if let Some(mut interval) = di.interval {
-                handle.spawn(async move {
+                join_set.spawn(async move {
                     loop {
+                        if ct_clone.is_cancelled() {
+                            return;
+                        }
+
                         let time_until_next_execution = interval.fetch_interval_jobs().await;
-                        tokio::time::sleep(Duration::from_secs(time_until_next_execution)).await;
+
+                        tokio::select! {
+                            // Allow shutdown to interrupt the wait immediately
+                            // instead of waiting for the next interval.
+                            _ = ct_clone.cancelled() => {
+                                return;
+                            }
+
+                            _ = tokio::time::sleep(
+                                Duration::from_secs(time_until_next_execution)
+                            ) => {}
+                        }
                     }
                 });
             }
@@ -210,19 +280,33 @@ impl Data {
             None
         };
 
-        // Start the internal log processor. This doesn't need to be a tokio task,
-        // but we make it one incase we need the runtime in the future. Perhaps it
-        // will make sense to convert it to a standard thread but I don't see a benefit
-        // to that now. As long as we don't block.
+        // Start the internal log processor. This doesn't need to be a Tokio task,
+        // but we make it one in case we need runtime access in the future. It may
+        // make sense to convert this to a standard thread later, but there is no
+        // benefit right now as long as the work remains non-blocking.
         let running_logbacks = roles.logbacks;
+        let ct_clone = cancellation_token.clone();
+
         if let Some(mut internal) = di.internal {
-            handle.spawn(async move {
+            join_set.spawn(async move {
                 loop {
-                    if let Err(e) = internal.fetch_internal_logs(running_logbacks).await {
-                        error!("Internal Data Fetch Error: {:?}", e)
+                    if ct_clone.is_cancelled() {
+                        return;
                     }
 
-                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    if let Err(e) = internal.fetch_internal_logs(running_logbacks).await {
+                        error!("Internal Data Fetch Error: {:?}", e);
+                    }
+
+                    tokio::select! {
+                        // Allow shutdown to interrupt the sleep immediately
+                        // instead of waiting for the polling interval.
+                        _ = ct_clone.cancelled() => {
+                            return;
+                        }
+
+                        _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                    }
                 }
             });
         }
