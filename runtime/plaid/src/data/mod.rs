@@ -48,10 +48,8 @@ pub struct DataConfig {
 struct DataInternal {
     github: Option<github::Github>,
     okta: Option<okta::Okta>,
-    // Perhaps in the future there will be a reason to explicitly disallow
-    // sending logs from one rule to another but for now we keep it always
-    // enabled.
-    internal: Option<internal::Internal>,
+    /// Enables rules to send logs to one another
+    internal: internal::Internal,
     /// Interval manages tracking and execution of jobs that are executed on a defined interval
     interval: Option<interval::Interval>,
     /// SQS pulls messages from AWS SQS queue
@@ -96,7 +94,7 @@ impl DataInternal {
             .okta
             .map(|okta| okta::Okta::new(okta, logger.clone()));
 
-        let internal = internal::Internal::new(logger.clone(), storage.clone()).await;
+        let internal = internal::Internal::new(logger.clone(), storage.clone())?;
 
         let interval = config
             .interval
@@ -116,7 +114,7 @@ impl DataInternal {
         Ok(Self {
             github,
             okta,
-            internal: Some(internal?),
+            internal,
             interval,
             #[cfg(feature = "aws")]
             sqs,
@@ -133,8 +131,8 @@ impl Data {
         els: Logger,
         roles: &InstanceRoles,
         cancellation_token: CancellationToken,
-    ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
-        let di = DataInternal::new(config, sender, storage.clone(), els).await?;
+    ) -> Result<(Sender<DelayedMessage>, JoinSet<()>), DataError> {
+        let mut di = DataInternal::new(config, sender, storage.clone(), els).await?;
 
         let mut join_set = JoinSet::new();
 
@@ -274,45 +272,38 @@ impl Data {
             }
         }
 
-        let internal_sender = if let Some(internal) = &di.internal {
-            Some(internal.get_sender())
-        } else {
-            None
-        };
-
         // Start the internal log processor. This doesn't need to be a Tokio task,
         // but we make it one in case we need runtime access in the future. It may
         // make sense to convert this to a standard thread later, but there is no
         // benefit right now as long as the work remains non-blocking.
         let running_logbacks = roles.logbacks;
         let ct_clone = cancellation_token.clone();
+        let sender = di.internal.get_sender().clone();
 
-        if let Some(mut internal) = di.internal {
-            join_set.spawn(async move {
-                loop {
-                    if ct_clone.is_cancelled() {
+        join_set.spawn(async move {
+            loop {
+                if ct_clone.is_cancelled() {
+                    return;
+                }
+
+                if let Err(e) = di.internal.fetch_internal_logs(running_logbacks).await {
+                    error!("Internal Data Fetch Error: {e}");
+                }
+
+                tokio::select! {
+                    // Allow shutdown to interrupt the sleep immediately
+                    // instead of waiting for the polling interval.
+                    _ = ct_clone.cancelled() => {
                         return;
                     }
 
-                    if let Err(e) = internal.fetch_internal_logs(running_logbacks).await {
-                        error!("Internal Data Fetch Error: {:?}", e);
-                    }
-
-                    tokio::select! {
-                        // Allow shutdown to interrupt the sleep immediately
-                        // instead of waiting for the polling interval.
-                        _ = ct_clone.cancelled() => {
-                            return;
-                        }
-
-                        _ = tokio::time::sleep(Duration::from_secs(10)) => {}
-                    }
+                    _ = tokio::time::sleep(Duration::from_secs(10)) => {}
                 }
-            });
-        }
+            }
+        });
 
         info!("Started Data Generators");
-        Ok(internal_sender)
+        Ok((sender, join_set))
     }
 }
 
