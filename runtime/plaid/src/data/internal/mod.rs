@@ -90,10 +90,7 @@ async fn fill_heap_from_db(
 }
 
 impl Internal {
-    pub async fn new(
-        log_sender: Sender<Message>,
-        storage: Arc<Storage>,
-    ) -> Result<Self, DataError> {
+    pub fn new(log_sender: Sender<Message>, storage: Arc<Storage>) -> Result<Self, DataError> {
         let (internal_sender, receiver) = bounded(CHANNEL_CAPACITY);
 
         Ok(Self {
