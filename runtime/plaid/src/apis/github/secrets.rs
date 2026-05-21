@@ -24,6 +24,15 @@ enum RepoToOrgSecretAction {
     Remove,
 }
 
+impl Display for RepoToOrgSecretAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RepoToOrgSecretAction::Add => write!(f, "added"),
+            RepoToOrgSecretAction::Remove => write!(f, "removed"),
+        }
+    }
+}
+
 impl Github {
     /// Fetch the public key and key id from GitHub for encrypting a secret,
     /// given the API address to fetch the public key from (which differs based on the type of secret)
@@ -189,13 +198,10 @@ impl Github {
         // a different function and log a different message, but the rest of the logic is the same.
         // So we use a macro to avoid duplicating code and to keep the match DRY.
         macro_rules! org_secret_action {
-            ($method:ident, $msg:expr) => {
+            ($method:ident, $action:expr) => {
                 match self.$method(address, None::<&String>, module.clone()).await {
                     Ok((status, _)) if status == 204 => {
-                        info!(
-                            "[{module}] - [{repository}] {} list of repos that can access org secret [{secret_name}]",
-                            $msg
-                        );
+                        info!("[{module}] {action} organization secret [{secret_name}] on [{repository}]");
                         Ok(0)
                     }
                     Ok((status, _)) => Err(ApiError::GitHubError(
@@ -207,9 +213,9 @@ impl Github {
         }
 
         match action {
-            RepoToOrgSecretAction::Add => org_secret_action!(make_generic_put_request, "added to"),
+            RepoToOrgSecretAction::Add => org_secret_action!(make_generic_put_request, action),
             RepoToOrgSecretAction::Remove => {
-                org_secret_action!(make_generic_delete_request, "removed from")
+                org_secret_action!(make_generic_delete_request, action)
             }
         }
     }
