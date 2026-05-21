@@ -19,9 +19,34 @@ pub struct QueryTableRequest {
     /// Columns to select. Must be non-empty; the runtime does not support
     /// `SELECT *` so that callers are always explicit about what data they
     /// need and the runtime can return named results.
-    pub columns: Vec<String>,
+    pub columns: Vec<Column>,
     /// Optional WHERE clause. When `None` the query returns all rows.
     pub filter: Option<Filter>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct Column {
+    /// Name fo the column to select
+    pub identifier: String,
+    /// Optional aggregate function to apply to the column
+    pub function: Option<ColumnFunction>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub enum ColumnFunction {
+    Count,
+    Max,
+    Min,
+}
+
+impl Display for ColumnFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Count => write!(f, "COUNT"),
+            Self::Max => write!(f, "MAX"),
+            Self::Min => write!(f, "MIN"),
+        }
+    }
 }
 
 /// A node in a WHERE clause expression tree.
@@ -145,7 +170,7 @@ impl<'a> IntoIterator for &'a QueryTableResponse {
 pub fn query_table(
     dataset: impl Display,
     table: impl Display,
-    columns: impl Iterator<Item = impl Display>,
+    columns: Vec<Column>,
     filter: Option<Filter>,
     return_buffer_size: usize,
 ) -> Result<QueryTableResponse, PlaidFunctionError> {
@@ -156,7 +181,7 @@ pub fn query_table(
     let params = QueryTableRequest {
         dataset: dataset.to_string(),
         table: table.to_string(),
-        columns: columns.map(|c| c.to_string()).collect(),
+        columns,
         filter,
     };
 
