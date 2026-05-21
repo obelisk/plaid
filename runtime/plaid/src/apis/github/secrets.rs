@@ -192,7 +192,10 @@ impl Github {
             ($method:ident, $msg:expr) => {
                 match self.$method(address, None::<&String>, module.clone()).await {
                     Ok((status, _)) if status == 204 => {
-                        info!("{} Module: [{module}], Org: [{org}], Repo: [{repository}], Secret name: [{secret_name}]", $msg);
+                        info!(
+                            "[{module}] - [{repository}] {} list of repos that can access org secret [{secret_name}]",
+                            $msg
+                        );
                         Ok(0)
                     }
                     Ok((status, _)) => Err(ApiError::GitHubError(
@@ -204,14 +207,10 @@ impl Github {
         }
 
         match action {
-            RepoToOrgSecretAction::Add => org_secret_action!(
-                make_generic_put_request,
-                "Repo successfully added to organization secret."
-            ),
-            RepoToOrgSecretAction::Remove => org_secret_action!(
-                make_generic_delete_request,
-                "Repo successfully removed from organization secret."
-            ),
+            RepoToOrgSecretAction::Add => org_secret_action!(make_generic_put_request, "added to"),
+            RepoToOrgSecretAction::Remove => {
+                org_secret_action!(make_generic_delete_request, "removed from")
+            }
         }
     }
 
