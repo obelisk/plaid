@@ -178,17 +178,21 @@ impl Github {
         let secret_name = self.validate_secret_name(&request.secret_name)?;
         let repository = self.validate_repository_name(&request.repository)?;
 
-        let repo_id = plaid_stl::github::get_repo_id_from_repo_name(&org, &repository)
-            .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?
-            .to_string();
+        let repo_id = self
+            .get_repo_id_from_repo_name_internal(&org, &repository, module.clone())
+            .await?;
 
         let address = format!("/orgs/{org}/actions/secrets/{secret_name}/repositories/{repo_id}");
 
+        // Adding or removing a repo from an org secret uses the same endpoint, just with a different
+        // HTTP verb, so we can unify the logic for both actions. Depending on the action, we will call
+        // a different function and log a different message, but the rest of the logic is the same.
+        // So we use a macro to avoid duplicating code and to keep the match DRY.
         macro_rules! org_secret_action {
             ($method:ident, $msg:expr) => {
-                match self.$method(address, None::<&String>, module).await {
+                match self.$method(address, None::<&String>, module.clone()).await {
                     Ok((status, _)) if status == 204 => {
-                        info!($msg);
+                        info!("{} Module: [{module}], Org: [{org}], Repo: [{repository}], Secret name: [{secret_name}]", $msg);
                         Ok(0)
                     }
                     Ok((status, _)) => Err(ApiError::GitHubError(
@@ -202,11 +206,11 @@ impl Github {
         match action {
             RepoToOrgSecretAction::Add => org_secret_action!(
                 make_generic_put_request,
-                "Repo successfully added to organization secret"
+                "Repo successfully added to organization secret."
             ),
             RepoToOrgSecretAction::Remove => org_secret_action!(
                 make_generic_delete_request,
-                "Repo successfully removed from organization secret"
+                "Repo successfully removed from organization secret."
             ),
         }
     }

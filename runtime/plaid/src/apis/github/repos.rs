@@ -726,6 +726,17 @@ impl Github {
         let repo =
             self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
 
+        self.get_repo_id_from_repo_name_internal(&owner, &repo, module)
+            .await
+    }
+
+    /// Internal function to get a repo ID from its name, so that it can be called from different places in the runtime
+    pub async fn get_repo_id_from_repo_name_internal(
+        &self,
+        owner: &str,
+        repo: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
         info!("Getting repo ID for repo [{owner}/{repo}] on behalf of [{module}]");
         let address = format!("/repos/{owner}/{repo}");
 
