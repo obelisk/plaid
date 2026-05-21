@@ -446,6 +446,8 @@ impl_new_function_with_error_buffer!(github, get_user_id_from_username, ALLOW_IN
 impl_new_function_with_error_buffer!(github, get_username_from_user_id, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_repo_id_from_repo_name, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_repo_name_from_repo_id, ALLOW_IN_TEST_MODE);
+impl_new_function!(github, add_repo_to_org_secret, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, remove_repo_from_org_secret, DISALLOW_IN_TEST_MODE);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
@@ -778,6 +780,8 @@ define_api_functions! {
         "github_get_repo_name_from_repo_id"                => github_get_repo_name_from_repo_id,
         "github_get_repo_teams"                            => github_get_repo_teams,
         "github_remove_outside_collaborator_from_org"      => github_remove_outside_collaborator_from_org,
+        "github_add_repo_to_org_secret"                    => github_add_repo_to_org_secret,
+        "github_remove_repo_from_org_secret"               => github_remove_repo_from_org_secret,
 
         // Slack Calls
         "slack_post_to_named_webhook"     => slack_post_to_named_webhook,

@@ -5,9 +5,10 @@ use crate::{
 };
 
 use alkali::asymmetric::seal;
+use plaid_stl::github::AddOrRemoveRepoToOrgSecretParams;
 use serde::Serialize;
 use serde_json::Value;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 /// GitHub's maximum secret size limit in bytes (48KiB)
 const GITHUB_SECRET_MAX_BYTES: usize = 48 * 1024; // 49,152 bytes
@@ -18,7 +19,50 @@ struct UploadEnvironmentSecretPayload {
     key_id: String,
 }
 
+enum RepoToOrgSecretAction {
+    Add,
+    Remove,
+}
+
 impl Github {
+    /// Fetch the public key and key id from GitHub for encrypting a secret,
+    /// given the API address to fetch the public key from (which differs based on the type of secret)
+    async fn get_pub_key_for_secret_encryption(
+        &self,
+        address: impl Display,
+        module: Arc<PlaidModule>,
+    ) -> Result<(String, String), ApiError> {
+        let (status, body) = self
+            .make_generic_get_request(address.to_string(), module.clone())
+            .await?;
+        if status != 200 {
+            return Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                status,
+            )));
+        };
+        let res = serde_json::from_str::<Value>(&body?).map_err(|_| {
+            ApiError::GitHubError(GitHubError::InvalidInput(
+                "Could not deserialize public key from GitHub".to_string(),
+            ))
+        })?;
+        let pub_key = res
+            .get("key")
+            .ok_or(ApiError::GitHubError(GitHubError::InvalidInput(
+                "Invalid response while fetching public key from GitHub".to_string(),
+            )))?
+            .as_str()
+            .ok_or(ApiError::GitHubError(GitHubError::BadResponse))?;
+        let key_id = res
+            .get("key_id")
+            .ok_or(ApiError::GitHubError(GitHubError::InvalidInput(
+                "Invalid response while fetching public key from GitHub".to_string(),
+            )))?
+            .as_str()
+            .ok_or(ApiError::GitHubError(GitHubError::BadResponse))?;
+
+        Ok((pub_key.to_string(), key_id.to_string()))
+    }
+
     /// Configure a secret in a GitHub repository or deployment environment
     pub async fn configure_secret(
         &self,
@@ -65,33 +109,9 @@ impl Github {
                 format!("/repos/{owner}/{repo}/actions/secrets/public-key")
             }
         };
-        let (status, body) = self
-            .make_generic_get_request(address, module.clone())
+        let (pub_key, key_id) = self
+            .get_pub_key_for_secret_encryption(address, module.clone())
             .await?;
-        if status != 200 {
-            return Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
-                status,
-            )));
-        };
-        let res = serde_json::from_str::<Value>(&body?).map_err(|_| {
-            ApiError::GitHubError(GitHubError::InvalidInput(
-                "Could not deserialize public key from GitHub".to_string(),
-            ))
-        })?;
-        let pub_key = res
-            .get("key")
-            .ok_or(ApiError::GitHubError(GitHubError::InvalidInput(
-                "Invalid response while fetching public key from GitHub".to_string(),
-            )))?
-            .as_str()
-            .ok_or(ApiError::GitHubError(GitHubError::BadResponse))?;
-        let key_id = res
-            .get("key_id")
-            .ok_or(ApiError::GitHubError(GitHubError::InvalidInput(
-                "Invalid response while fetching public key from GitHub".to_string(),
-            )))?
-            .as_str()
-            .ok_or(ApiError::GitHubError(GitHubError::BadResponse))?;
 
         // 2. Encrypt the secret under the pub key
 
@@ -146,5 +166,76 @@ impl Github {
             }
             Err(e) => Err(e),
         }
+    }
+
+    async fn execute_org_secret_action(
+        &self,
+        request: &AddOrRemoveRepoToOrgSecretParams,
+        action: RepoToOrgSecretAction,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let org = self.validate_org(&request.org)?;
+        let secret_name = self.validate_secret_name(&request.secret_name)?;
+        let repository = self.validate_repository_name(&request.repository)?;
+
+        let repo_id = plaid_stl::github::get_repo_id_from_repo_name(&org, &repository)
+            .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?
+            .to_string();
+
+        let address = format!("/orgs/{org}/actions/secrets/{secret_name}/repositories/{repo_id}");
+
+        macro_rules! org_secret_action {
+            ($method:ident, $msg:expr) => {
+                match self.$method(address, None::<&String>, module).await {
+                    Ok((status, _)) if status == 204 => {
+                        info!($msg);
+                        Ok(0)
+                    }
+                    Ok((status, _)) => Err(ApiError::GitHubError(
+                        GitHubError::UnexpectedStatusCode(status),
+                    )),
+                    Err(e) => Err(e),
+                }
+            };
+        }
+
+        match action {
+            RepoToOrgSecretAction::Add => org_secret_action!(
+                make_generic_put_request,
+                "Repo successfully added to organization secret"
+            ),
+            RepoToOrgSecretAction::Remove => org_secret_action!(
+                make_generic_delete_request,
+                "Repo successfully removed from organization secret"
+            ),
+        }
+    }
+
+    /// Add a repository to the list of repositories that have access to an organization secret
+    /// https://docs.github.com/en/rest/actions/secrets?apiVersion=2026-03-10#add-selected-repository-to-an-organization-secret
+    pub async fn add_repo_to_org_secret(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request: AddOrRemoveRepoToOrgSecretParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        self.execute_org_secret_action(&request, RepoToOrgSecretAction::Add, module)
+            .await
+    }
+
+    /// Remove a repository from the list of repositories that have access to an organization secret
+    /// https://docs.github.com/en/rest/actions/secrets?apiVersion=2026-03-10#remove-selected-repository-from-an-organization-secret
+    pub async fn remove_repo_from_org_secret(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request: AddOrRemoveRepoToOrgSecretParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        self.execute_org_secret_action(&request, RepoToOrgSecretAction::Remove, module)
+            .await
     }
 }
