@@ -9,7 +9,7 @@ use google_cloud_bigquery::{
     query::row::Row,
 };
 use plaid_stl::gcp::bigquery::{
-    Filter, FilterValue, Operator, QueryTableRequest, QueryTableResponse,
+    Column, ColumnFunction, Filter, FilterValue, Operator, QueryTableRequest, QueryTableResponse,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -44,6 +44,8 @@ pub enum BigQueryError {
     InvalidIdentifier(String),
     #[error("No columns provided")]
     NoColumnsProvided,
+    #[error("Invalid column combination: {0}")]
+    InvalidColumnCombination(String),
     #[error("Invalid filter provided: {0}")]
     InvalidFilter(String),
     #[error("Module not permitted")]
@@ -235,13 +237,19 @@ impl BigQuery {
         let mut bytes_accumulated: usize = 0;
         while let Some(row) = iter.next().await.map_err(BigQueryError::from)? {
             let mut map = HashMap::new();
-            for (i, col_name) in params.columns.iter().enumerate() {
-                let col_type = table_schema
-                    .and_then(|s| s.get(col_name))
-                    .copied()
-                    .unwrap_or(ColumnType::String);
+            for (i, column) in params.columns.iter().enumerate() {
+                // COUNT always returns INTEGER regardless of the underlying
+                // column type. MAX/MIN and plain columns look up the schema by
+                // raw identifier, falling back to String when absent.
+                let col_type = match &column.function {
+                    Some(ColumnFunction::Count) => ColumnType::Integer,
+                    _ => table_schema
+                        .and_then(|s| s.get(&column.identifier))
+                        .copied()
+                        .unwrap_or(ColumnType::String),
+                };
                 let value = decode_column(&row, i, col_type).map_err(BigQueryError::from)?;
-                map.insert(col_name.clone(), value);
+                map.insert(column.identifier.clone(), value);
             }
             let mut counter = CountWriter(0);
             serde_json::to_writer(&mut counter, &map).map_err(|_| ApiError::ImpossibleError)?;
@@ -343,15 +351,28 @@ impl BigQuery {
 fn build_query_string(
     dataset: &str,
     table: &str,
-    columns: &[String],
+    columns: &[Column],
     filter: Option<&Filter>,
 ) -> Result<(String, Vec<QueryParameter>), BigQueryError> {
     if columns.is_empty() {
         return Err(BigQueryError::NoColumnsProvided);
     }
 
-    if let Some(ident) = columns.iter().find(|col| !is_valid_identifier(col)) {
-        return Err(BigQueryError::InvalidIdentifier(ident.to_string()));
+    if let Some(column) = columns
+        .iter()
+        .find(|col| !is_valid_identifier(&col.identifier))
+    {
+        return Err(BigQueryError::InvalidIdentifier(column.identifier.clone()));
+    }
+
+    // Without GROUP BY, mixing aggregate and raw columns produces invalid SQL.
+    // Enforce that aggregate queries select exactly one column.
+    let has_aggregate = columns.iter().any(|c| c.function.is_some());
+    if has_aggregate && columns.len() > 1 {
+        return Err(BigQueryError::InvalidColumnCombination(
+            "aggregate functions require exactly one column (GROUP BY is not supported)"
+                .to_string(),
+        ));
     }
 
     let mut column_list = String::new();
@@ -359,9 +380,20 @@ fn build_query_string(
         if i > 0 {
             column_list.push_str(", ");
         }
+
+        let function = c.function.as_ref().map(|c| c.to_string());
+        if let Some(ref f) = function {
+            column_list.push_str(f);
+            column_list.push('(');
+        }
+
         column_list.push('`');
-        column_list.push_str(c);
+        column_list.push_str(&c.identifier);
         column_list.push('`');
+
+        if function.is_some() {
+            column_list.push(')');
+        }
     }
 
     let mut sql = format!("SELECT {column_list} FROM `{dataset}`.`{table}`");
