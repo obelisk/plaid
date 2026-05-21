@@ -26,7 +26,7 @@ pub struct QueryTableRequest {
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct Column {
-    /// Name fo the column to select
+    /// Name of the column to select
     pub identifier: String,
     /// Optional aggregate function to apply to the column
     pub function: Option<ColumnFunction>,
