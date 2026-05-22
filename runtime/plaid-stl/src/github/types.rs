@@ -476,3 +476,14 @@ pub struct GitHubRepoTeam {
     pub slug: String,
     pub permissions: Permission,
 }
+
+/*******************************************************************************************
+   ORG SECRETS
+*******************************************************************************************/
+
+#[derive(Serialize, Deserialize)]
+pub struct AddOrRemoveRepoToOrgSecretParams {
+    pub org: String,
+    pub secret_name: String,
+    pub repository: String,
+}
