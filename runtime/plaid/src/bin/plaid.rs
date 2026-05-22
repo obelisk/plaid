@@ -4,6 +4,7 @@ extern crate log;
 use futures_util::{Stream, StreamExt};
 use performance::ModulePerformanceMetadata;
 use plaid::{
+    apis::ApiError,
     cache::Cache,
     config::{
         CachingMode, ConfigurationWithRoles, GetMode, ResponseMode, WebhookConfig,
@@ -37,12 +38,17 @@ use warp::{http::HeaderMap, path, Filter};
 #[derive(Debug)]
 enum Errors {
     FailedToStartDataSystem,
+    FailedToStartApiSystem(ApiError),
     FailedToLoadModules,
 }
 
 impl std::fmt::Display for Errors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Errors::FailedToStartDataSystem => write!(f, "Failed to start data system"),
+            Errors::FailedToStartApiSystem(e) => write!(f, "Failed to start API system: {:?}", e),
+            Errors::FailedToLoadModules => write!(f, "Failed to load modules"),
+        }
     }
 }
 
@@ -314,7 +320,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender).await;
+    let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender)
+        .await
+        .map_err(|e| Errors::FailedToStartApiSystem(e))?;
 
     // Create an Arc so all the handlers have access to our API object
     let api = Arc::new(api);

@@ -11,7 +11,7 @@ type Aes128Cbc = Cbc<Aes128, Pkcs7>;
 /// Returns base64(iv||ciphertext).
 pub fn encrypt(key: &[u8], plaintext: &str) -> Result<String, Errors> {
     let mut iv = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut iv);
+    rand::rng().fill_bytes(&mut iv);
     let cipher = Aes128Cbc::new_from_slices(key, &iv)
         .map_err(|_| Errors::AesEncryptionFailure("Failed to load key".to_string()))?;
     let ct = cipher.encrypt_vec(plaintext.as_bytes());

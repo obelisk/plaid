@@ -1,4 +1,5 @@
 use crate::apis::github::{build_github_client, Authentication};
+use crate::apis::ApiError;
 use crate::executor::Message;
 use crate::parse_duration;
 use crossbeam_channel::Sender;
@@ -171,17 +172,23 @@ pub struct Github {
 }
 
 impl Github {
-    pub fn new(config: GithubConfig, logger: Sender<Message>) -> Self {
-        let client = build_github_client(&config.authentication);
-        let lru_cache_size = config.lru_cache_size;
+    pub fn new(config: GithubConfig, logger: Sender<Message>) -> Result<Self, ApiError> {
+        let client = build_github_client(&config.authentication)?;
+        let lru_cache_size = match config.lru_cache_size {
+            0 => {
+                warn!("GitHub API: The LRU cache size must be greater than 0. Using default value of {}.", default_lru_cache_size());
+                NonZeroUsize::new(default_lru_cache_size()).unwrap()
+            }
+            size => NonZeroUsize::new(size).unwrap(),
+        };
 
-        Self {
+        Ok(Self {
             config,
             client,
             last_seen: OffsetDateTime::now_utc(),
-            seen_logs_uuid: LruCache::new(NonZeroUsize::new(lru_cache_size).unwrap()),
+            seen_logs_uuid: LruCache::new(lru_cache_size),
             logger,
-        }
+        })
     }
 }
 

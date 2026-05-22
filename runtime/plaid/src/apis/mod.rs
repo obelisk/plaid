@@ -148,6 +148,7 @@ pub enum ApiError {
     NetworkResponseTooLarge,
     TlsError(String),
     BloomFilterError(String),
+    CouldNotInstatiateRuntime(String),
 }
 
 impl From<evm::EvmCallError> for ApiError {
@@ -182,7 +183,7 @@ impl Api {
         config: ApiConfigs,
         log_sender: Sender<Message>,
         delayed_log_sender: Sender<DelayedMessage>,
-    ) -> Self {
+    ) -> Result<Self, ApiError> {
         let cryptography = match config.cryptography {
             Some(cryptography) => Some(Cryptography::new(cryptography)),
             _ => None,
@@ -216,7 +217,7 @@ impl Api {
         };
 
         let github = match config.github {
-            Some(gh) => Some(Github::new(gh)),
+            Some(gh) => Some(Github::new(gh)?),
             _ => None,
         };
 
@@ -277,8 +278,8 @@ impl Api {
             _ => None,
         };
 
-        Self {
-            runtime: Runtime::new().unwrap(),
+        Ok(Self {
+            runtime: Runtime::new().map_err(|e| ApiError::CouldNotInstatiateRuntime(format!("Failed to create runtime: {}", e)))?,
             #[cfg(feature = "aws")]
             aws,
             #[cfg(feature = "gcp")]
@@ -297,7 +298,7 @@ impl Api {
             splunk,
             yubikey,
             web,
-        }
+        })
     }
 }
 
