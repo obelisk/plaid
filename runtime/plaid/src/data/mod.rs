@@ -105,7 +105,7 @@ impl DataInternal {
 
         let websocket_external = config
             .websocket
-            .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
+            .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els.clone()));
 
         Ok(Self {
             github,
@@ -127,7 +127,7 @@ impl Data {
         els: Logger,
         roles: &InstanceRoles,
     ) -> Result<Option<Sender<DelayedMessage>>, DataError> {
-        let di = DataInternal::new(config, sender, storage.clone(), els).await?;
+        let di = DataInternal::new(config, sender, storage.clone(), els.clone()).await?;
         let handle = tokio::runtime::Handle::current();
 
         if roles.data_generators {
@@ -136,10 +136,15 @@ impl Data {
                 let storage_clone = storage.clone();
                 // Update the DG's state from the storage: this recovers the last_seen and seen_logs_uuid from a previous run
                 update_dg_from_storage(&mut gh, Some(storage_clone.clone())).await;
+                let els_clone = els.clone();
                 handle.spawn(async move {
                     loop {
-                        if let Err(_) =
-                            get_and_process_dg_logs(&mut gh, Some(storage_clone.clone())).await
+                        if let Err(_) = get_and_process_dg_logs(
+                            &mut gh,
+                            Some(storage_clone.clone()),
+                            Some(els_clone.clone()),
+                        )
+                        .await
                         {
                             error!("GitHub Data Fetch Error")
                         }
@@ -152,12 +157,17 @@ impl Data {
             // Start the Okta System Logs task if there is one
             if let Some(mut okta) = di.okta {
                 let storage_clone = storage.clone();
+                let els_clone = els.clone();
                 // Update the DG's state from the storage: this recovers the last_seen and seen_logs_uuid from a previous run
                 update_dg_from_storage(&mut okta, Some(storage_clone.clone())).await;
                 handle.spawn(async move {
                     loop {
-                        if let Err(_) =
-                            get_and_process_dg_logs(&mut okta, Some(storage_clone.clone())).await
+                        if let Err(_) = get_and_process_dg_logs(
+                            &mut okta,
+                            Some(storage_clone.clone()),
+                            Some(els_clone.clone()),
+                        )
+                        .await
                         {
                             error!("Okta Data Fetch Error")
                         }
@@ -446,6 +456,7 @@ async fn update_dg_from_storage<T: DataGenerator>(dg: &mut T, storage: Option<Ar
 pub async fn get_and_process_dg_logs(
     dg: &mut impl DataGenerator,
     storage: Option<Arc<Storage>>,
+    els: Option<Logger>,
 ) -> Result<(), ()> {
     let sleep_duration = dg.get_sleep_duration();
 
@@ -541,6 +552,7 @@ pub async fn get_and_process_dg_logs(
                 dg.set_last_seen(log.timestamp);
             }
         }
+
         // If there have been no new logs sent for processing, we exit.
         // Exiting here will result in a 10 second wait between restarts
         if sent_for_processing == 0 {
@@ -551,6 +563,7 @@ pub async fn get_and_process_dg_logs(
             );
             return Ok(());
         }
+
         // If we are here, then we sent something for processing: we update the DG's state in the storage so that,
         // in case of a reboot, we can continue from where we had left off.
         if let Some(ref storage) = storage {
@@ -593,6 +606,15 @@ pub async fn get_and_process_dg_logs(
             dg.get_name(),
             dg.get_last_seen()
         );
+
+        if let Some(ref els) = els {
+            let _ = els
+                .log_ts(
+                    format!("{}_dg_processed", dg.get_name()),
+                    sent_for_processing.into(),
+                )
+                .inspect_err(|e| error!("Could not log sent_for_processing to ELS: {e}"));
+        }
 
         // Wait for the specified period before making another request
         tokio::time::sleep(sleep_duration).await

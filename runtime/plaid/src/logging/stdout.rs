@@ -16,7 +16,7 @@ impl StdoutLogger {
 }
 
 impl PlaidLogger for StdoutLogger {
-    fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError> {
+    async fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError> {
         match &log.log {
             Log::InternalMessage { severity, message } => match severity {
                 Severity::Error => error!("{}", message),

@@ -20,16 +20,16 @@ pub struct Config {
 pub struct WebhookLogger {
     /// A tokio runtime to send logs on
     runtime: Handle,
-    /// A reqwest client configured with the Splunk endpoint and authentication
+    /// A reqwest client configured with the webhook endpoint and authentication
     client: reqwest::Client,
     /// The configuration struct
     config: Config,
 }
 
 impl WebhookLogger {
-    /// Implement the new function for the Splunk logger. This converts
+    /// Implement the new function for the Webhook logger. This converts
     /// the configuration struct into a type that can handle sending
-    /// logs directly to a Splunk HEC endpoint.
+    /// logs directly to a webhook endpoint.
     pub fn new(config: Config, handle: Handle) -> Self {
         // I don't think this can fail with our settings so we do an unwrap
         let client = reqwest::Client::builder()
@@ -50,7 +50,7 @@ impl PlaidLogger for WebhookLogger {
     /// will not block sending logs to other services (like stdout) but it
     /// does mean we cannot return a proper LoggingError to the caller since
     /// we cannot wait for it to complete.
-    fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError> {
+    async fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError> {
         let data = match serde_json::to_string(&log) {
             Ok(json) => json,
             Err(e) => return Err(LoggingError::SerializationError(e.to_string())),
