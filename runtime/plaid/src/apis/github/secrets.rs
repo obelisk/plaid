@@ -5,7 +5,7 @@ use crate::{
 };
 
 use alkali::asymmetric::seal;
-use plaid_stl::github::AddOrRemoveRepoToOrgSecretParams;
+use plaid_stl::github::{AddOrRemoveRepoToOrgSecretParams, ListOrgSecretsForRepoParams};
 use serde::Serialize;
 use serde_json::Value;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
@@ -246,5 +246,42 @@ impl Github {
 
         self.execute_org_secret_action(&request, RepoToOrgSecretAction::Remove, module)
             .await
+    }
+
+    /// List the organization secrets that a repository has access to
+    /// https://docs.github.com/en/rest/actions/secrets?apiVersion=2026-03-10#list-repository-organization-secrets
+    pub async fn list_org_secrets_for_repo(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: ListOrgSecretsForRepoParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let org = self.validate_org(&request.org)?;
+        let repository = self.validate_repository_name(&request.repository)?;
+
+        // Note: we do not validate these values because they come in encoded as u32, and that's all we need.
+        // Therefore, the validation is in the fact that they were able to be deserialized.
+        let per_page = request.per_page.unwrap_or(30);
+        let page = request.page.unwrap_or(1);
+
+        info!("Listing organization secrets that can be accessed by repository [{repository}] on behalf of [{module}]");
+
+        let url = format!("/repos/{org}/{repository}/actions/organization-secrets?per_page={per_page}&page={page}");
+
+        match self.make_generic_get_request(url, module).await {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
     }
 }

@@ -487,3 +487,11 @@ pub struct AddOrRemoveRepoToOrgSecretParams {
     pub secret_name: String,
     pub repository: String,
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct ListOrgSecretsForRepoParams {
+    pub org: String,
+    pub repository: String,
+    pub per_page: Option<u32>,
+    pub page: Option<u32>,
+}
