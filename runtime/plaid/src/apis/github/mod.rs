@@ -85,18 +85,18 @@ pub enum GitHubError {
 }
 
 impl Github {
-    pub fn new(config: GithubConfig) -> Self {
-        let client = build_github_client(&config.authentication);
+    pub fn new(config: GithubConfig) -> Result<Self, ApiError> {
+        let client = build_github_client(&config.authentication)?;
 
         // Create all the validators and compile all the regexes. If the module contains
         // any invalid regexes it will panic.
         let validators = validators::create_validators();
 
-        Self {
+        Ok(Self {
             config,
             client,
             validators,
-        }
+        })
     }
 
     /// Make a generic get request to the GitHub API using the GitHub app library. This exists
@@ -228,7 +228,7 @@ impl Github {
 }
 
 /// Builds an instance of a Github API client
-pub fn build_github_client(authentication: &Authentication) -> Octocrab {
+pub fn build_github_client(authentication: &Authentication) -> Result<Octocrab, ApiError> {
     let client_builder = match authentication {
         Authentication::NoAuth {} => {
             info!("Configuring GitHub client without authentication");
@@ -245,7 +245,7 @@ pub fn build_github_client(authentication: &Authentication) -> Octocrab {
         } => {
             info!("Configuring GitHub client with GitHub App");
             let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes())
-                .expect("Failed to create encoding key from private key for GitHub API");
+                .map_err(|_| ApiError::GitHubError(GitHubError::InvalidInput(format!("Failed to create encoding key from private key for GitHub API"))))?;
 
             Octocrab::builder().app((*app_id).into(), encoding_key)
         }
@@ -257,14 +257,17 @@ pub fn build_github_client(authentication: &Authentication) -> Octocrab {
 
     let mut client = client_builder
         .build()
-        .expect("Failed to create GitHub client");
+        .map_err(|e| ApiError::GitHubError(GitHubError::ClientError(e)))?;
 
     if let Authentication::App {
         installation_id, ..
     } = authentication
     {
-        client = client.installation((*installation_id).into());
+        match client.installation((*installation_id).into()) {
+            Ok(installation_client) => client = installation_client,
+            Err(e) => return Err(ApiError::GitHubError(GitHubError::ClientError(e))),
+        }
     }
 
-    client
+    Ok(client)
 }

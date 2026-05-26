@@ -1,0 +1,28 @@
+name: Dependency Minimum Age Check
+
+on:
+  pull_request:
+    paths:
+      - "runtime/Cargo.lock"
+      - ".github/workflows/DependencyCheck.yaml"
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Build and run the dependency check tool
+        run: cd runtime && cargo run --example=dependency-check -- Cargo.lock --min-age-days 14 --include-missing
+

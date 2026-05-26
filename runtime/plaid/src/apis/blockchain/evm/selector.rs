@@ -1,5 +1,5 @@
 use crate::apis::blockchain::evm::NodeConfig;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Selection strategy for choosing EVM nodes
@@ -43,7 +43,7 @@ impl NodeSelector {
                 let index = current_index.load(Ordering::Relaxed) % self.nodes.len();
                 self.nodes.get(index).cloned()
             }
-            SelectionStrategy::Random => self.nodes.choose(&mut rand::thread_rng()).cloned(),
+            SelectionStrategy::Random => self.nodes.choose(&mut rand::rng()).cloned(),
         }
     }
 

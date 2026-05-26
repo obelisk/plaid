@@ -7,6 +7,7 @@ mod sqs;
 mod websocket;
 
 use crate::{
+    apis::ApiError,
     executor::Message,
     logging::Logger,
     storage::{Storage, StorageError},
@@ -63,12 +64,14 @@ pub struct Data {}
 #[derive(Debug)]
 pub enum DataError {
     StorageError(StorageError),
+    ApiError(ApiError),
 }
 
 impl std::fmt::Display for DataError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::StorageError(e) => write!(f, "DataError | StorageError: {}", e),
+            Self::ApiError(e) => write!(f, "DataError | ApiError: {:?}", e),
         }
     }
 }
@@ -84,7 +87,8 @@ impl DataInternal {
     ) -> Result<Self, DataError> {
         let github = config
             .github
-            .map(|gh| github::Github::new(gh, logger.clone()));
+            .map(|gh| github::Github::new(gh, logger.clone()).map_err(DataError::ApiError))
+            .transpose()?;
 
         let okta = config
             .okta
