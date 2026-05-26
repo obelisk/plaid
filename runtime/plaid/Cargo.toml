@@ -15,7 +15,7 @@ aws = [
 ]
 cranelift = ["wasmer/cranelift"]
 llvm = ["wasmer/llvm"]
-gcp = ["gcloud-bigquery"]
+gcp = ["dep:gcloud-bigquery"]
 
 [dependencies]
 aes = "0.7"
