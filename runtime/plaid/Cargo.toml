@@ -59,11 +59,13 @@ redis = { version = "0.32", features = [
 ], optional = true }
 regex = "1"
 ring = "0.17"
-reqwest = { version = "0.13", default-features = false, features = [
+reqwest = { version = "0.13", features = [
     "json",
     "cookies",
     "multipart",
     "stream",
+    "query",
+    "form",
 ] }
 reqwest_cookie_store = "0.10"
 rustls = { version = "0.23", features = ["ring"] }
