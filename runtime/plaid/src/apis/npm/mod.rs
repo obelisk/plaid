@@ -36,7 +36,7 @@ pub struct Npm {
 
 impl Npm {
     pub fn new(config: NpmConfig) -> Result<Self, NpmError> {
-        let cookie_jar = CookieStore::new(None);
+        let cookie_jar = CookieStore::new();
         let cookie_jar = CookieStoreMutex::new(cookie_jar);
         let cookie_jar = Arc::new(cookie_jar);
         let client = Client::builder()
