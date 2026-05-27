@@ -25,5 +25,6 @@ jobs:
 
       - uses: timweri/cargo-oxidate@b57953d025609b3a2d4e4563ccb216b1f3ffe0fb # v0.1.5
         with:
+          cargo-lock-path: runtime/Cargo.lock
           min-age-days: 14
           suggest-fix: true
