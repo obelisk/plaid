@@ -93,19 +93,9 @@ thiserror = "2.0.17"
 pulldown-cmark = "0.13.0"
 gcloud-bigquery = { version = "1.6", optional = true }
 
-[dev-dependencies]
-anyhow = "1"
-cargo-lock = "10"
-
 [[example]]
 name = "github-tailer"
 path = "examples/tailers/github.rs"
-
-# This is not in examples because it's not one but I marked it as one
-# so it gets access to dev-dependencies
-[[example]]
-name = "dependency-check"
-path = "tools/dependency_check.rs"
 
 [[bin]]
 name = "plaid"
