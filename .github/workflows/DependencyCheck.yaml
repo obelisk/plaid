@@ -23,7 +23,7 @@ jobs:
           toolchain: stable
           override: true
 
-      - uses: timweri/cargo-oxidate@v0.1.5
+      - uses: timweri/cargo-oxidate@b57953d025609b3a2d4e4563ccb216b1f3ffe0fb # v0.1.5
         with:
           min-age-days: 14
           suggest-fix: true
