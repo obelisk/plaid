@@ -44,7 +44,7 @@ flate2 = "1.0"
 futures-util = "0.3.30"
 hex = "0.4.3"
 http = "1"
-jsonwebtoken = { version = "10" }
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 log = "0.4"
 lru = "0.16"
 octocrab = "0.50"
