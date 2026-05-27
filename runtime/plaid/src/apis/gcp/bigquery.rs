@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io, sync::Arc};
 
-use google_cloud_bigquery::{
+use gcloud_bigquery::{
     client::{google_cloud_auth, Client, ClientConfig},
     http::{
         job::query::QueryRequest,
@@ -33,11 +33,11 @@ pub enum BigQueryError {
     #[error("Client initialization error: {0}")]
     Client(String),
     #[error("Query error: {0}")]
-    QueryError(#[from] google_cloud_bigquery::client::QueryError),
+    QueryError(#[from] gcloud_bigquery::client::QueryError),
     #[error("Row iteration error: {0}")]
-    IterError(#[from] google_cloud_bigquery::query::Error),
+    IterError(#[from] gcloud_bigquery::query::Error),
     #[error("Row decode error: {0}")]
-    RowError(#[from] google_cloud_bigquery::query::row::Error),
+    RowError(#[from] gcloud_bigquery::query::row::Error),
     #[error("Response too large: accumulated row data exceeded the configured max_response_size")]
     ResponseTooLarge,
     #[error("Invalid identifer value: {0}")]
@@ -545,7 +545,7 @@ fn decode_column(
     row: &Row,
     index: usize,
     col_type: ColumnType,
-) -> Result<serde_json::Value, google_cloud_bigquery::query::row::Error> {
+) -> Result<serde_json::Value, gcloud_bigquery::query::row::Error> {
     Ok(match col_type {
         ColumnType::String => {
             let v: Option<String> = row.column(index)?;

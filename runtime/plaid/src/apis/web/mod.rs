@@ -139,11 +139,7 @@ impl std::fmt::Debug for JwtConfig {
             .field("allowlisted_extra_fields", &self.allowlisted_extra_fields)
             .field(
                 "enforced_claims",
-                &self
-                    .enforced_claims
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>(),
+                &self.enforced_claims.keys().cloned().collect::<Vec<_>>(),
             )
             // safe (no key material)
             .finish()
@@ -281,7 +277,7 @@ impl Web {
         if key_specs.enforce_accurate_iat.unwrap_or(false) {
             claims.insert("iat".to_string(), Value::Number(get_time().into()));
         } else if let Some(iat) = request.iat {
-                claims.insert("iat".to_string(), Value::Number(iat.into()));
+            claims.insert("iat".to_string(), Value::Number(iat.into()));
         }
 
         // aud (optional)
@@ -317,7 +313,6 @@ impl Web {
                 }
             };
         claims.insert("exp".to_string(), Value::Number(exp.into()));
-
 
         // Include extra fields, but only if they are allowlisted in the config
         if !request.extra_fields.is_empty() {

@@ -2,6 +2,7 @@
 extern crate log;
 
 use futures_util::{Stream, StreamExt};
+use jsonwebtoken::crypto::{self, CryptoProvider};
 use performance::ModulePerformanceMetadata;
 use plaid::{
     apis::ApiError,
@@ -183,6 +184,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install default rustls crypto provider");
+
+    // Manually specify we are going to use RustCrypto.
+    CryptoProvider::install_default(&crypto::rust_crypto::DEFAULT_PROVIDER)
+        .expect("Failed to install RustCrypto provider for JWT signing");
 
     info!("Plaid is booting up, please standby...");
 
