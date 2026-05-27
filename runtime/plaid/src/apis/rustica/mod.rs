@@ -1,4 +1,4 @@
-use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, KeyPair};
+use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use serde::{Deserialize, Serialize};
 
 use std::{collections::HashMap, sync::Arc};
@@ -100,17 +100,20 @@ impl Rustica {
         dn.push(DnType::CommonName, &environment.mtls_cn);
 
         let mut mtls_ca_params = CertificateParams::default();
-        mtls_ca_params.key_pair = Some(ca_key);
-        mtls_ca_params.alg = alg;
         mtls_ca_params.distinguished_name = dn;
 
-        let ca = Certificate::from_params(mtls_ca_params).map_err(|_| {
+        let ca = mtls_ca_params.self_signed(&ca_key).map_err(|_| {
             ApiError::ConfigurationError(format!(
                 "Rustica environment [{environment_name}] has bad certificate and private key pair"
             ))
         })?;
 
-        let mut certificate_params = CertificateParams::new(vec![user_identity.to_string()]);
+        let mut certificate_params = CertificateParams::new(vec![user_identity.to_string()])
+            .map_err(|_| {
+                ApiError::RusticaError(RusticaError::UnserializableCertificate(
+                    user_identity.to_string(),
+                ))
+            })?;
         certificate_params
             .distinguished_name
             .push(DnType::CommonName, user_identity.to_string());
@@ -123,21 +126,23 @@ impl Rustica {
             .not_before
             .saturating_add(Duration::seconds(60 * 60 * 24 * 90));
 
-        let new_certificate = Certificate::from_params(certificate_params).map_err(|_| {
+        let user_key_pair = KeyPair::generate_for(alg).map_err(|_| {
             ApiError::RusticaError(RusticaError::UnserializableCertificate(
                 user_identity.to_string(),
             ))
         })?;
 
-        let user_private_key = new_certificate.serialize_private_key_pem();
-
-        let user_certificate = new_certificate
-            .serialize_pem_with_signer(&ca)
+        let new_certificate = certificate_params
+            .signed_by(&user_key_pair, &ca, &ca_key)
             .map_err(|_| {
                 ApiError::RusticaError(RusticaError::UnserializableCertificate(
                     user_identity.to_string(),
                 ))
             })?;
+
+        let user_private_key = user_key_pair.serialize_pem();
+
+        let user_certificate = new_certificate.pem();
 
         let server_config = ServerConfiguration {
             address: environment.server.clone(),
