@@ -51,7 +51,7 @@ octocrab = "0.50"
 paste = "1.0"
 plaid_stl = { path = "../plaid-stl" }
 rand = "0.9"
-rcgen = { version = "0.10", features = ["x509-parser"] }
+rcgen = { version = "0.13", features = ["x509-parser"] }
 redis = { version = "0.32", features = [
     "aio",
     "tokio-comp",
