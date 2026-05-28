@@ -15,14 +15,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
         with:
           toolchain: stable
           override: true
 
-      - name: Build and run the dependency check tool
-        run: cd runtime && cargo run --example=dependency-check -- Cargo.lock --min-age-days 14 --include-missing
-
+      - uses: timweri/cargo-oxidate@b57953d025609b3a2d4e4563ccb216b1f3ffe0fb # v0.1.5
+        with:
+          cargo-lock-path: runtime/Cargo.lock
+          min-age-days: 14
+          suggest-fix: true
