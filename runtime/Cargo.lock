@@ -4042,7 +4042,6 @@ dependencies = [
  "reqwest",
  "reqwest_cookie_store",
  "ring",
- "rustls 0.23.40",
  "serde",
  "serde_json",
  "serde_with",

@@ -181,7 +181,7 @@ async fn read_body_with_limit(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    rustls::crypto::ring::default_provider()
+    tokio_rustls::rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install default rustls crypto provider");
 
