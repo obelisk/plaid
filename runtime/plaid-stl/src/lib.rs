@@ -90,7 +90,6 @@ impl From<PlaidFunctionError> for i32 {
 
 pub mod aws;
 pub mod blockchain;
-pub mod bloom_filter;
 pub mod cryptography;
 pub mod gcp;
 pub mod github;

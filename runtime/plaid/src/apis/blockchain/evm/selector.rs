@@ -1,13 +1,13 @@
 use crate::apis::blockchain::evm::NodeConfig;
-use rand::seq::IndexedRandom;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use ring::rand::{SystemRandom, SecureRandom};
 
 /// Selection strategy for choosing EVM nodes
 pub enum SelectionStrategy {
     /// Select nodes in a round-robin fashion
     RoundRobin { current_index: AtomicUsize },
     /// Select nodes randomly
-    Random,
+    Random {rng: SystemRandom},
 }
 
 /// Selector for EVM nodes based on a selection strategy
@@ -43,7 +43,12 @@ impl NodeSelector {
                 let index = current_index.load(Ordering::Relaxed) % self.nodes.len();
                 self.nodes.get(index).cloned()
             }
-            SelectionStrategy::Random => self.nodes.choose(&mut rand::rng()).cloned(),
+            SelectionStrategy::Random { rng } => {
+                let mut number_bytes = [0u8; 2];
+                rng.fill(&mut number_bytes).ok()?;
+                let random_index = u16::from_le_bytes(number_bytes) as usize % self.nodes.len();
+                self.nodes.get(random_index).cloned()
+            },
         }
     }
 
@@ -64,7 +69,7 @@ impl NodeSelector {
                     current_index.fetch_add(1, Ordering::Relaxed);
                 }
             }
-            SelectionStrategy::Random => {
+            SelectionStrategy::Random { .. } => {
                 // Random strategy doesn't need special failure handling
                 // as each selection is independent
             }
