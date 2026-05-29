@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
@@ -51,22 +51,30 @@ impl Github {
     /// Execute a GraphQL query by calling the GitHub API.
     async fn make_gql_request<T: Serialize>(
         &self,
+        client_id: impl Display,
         query: T,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request = self.client._post(GITHUB_GQL_API, Some(&query)).await;
+        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+            ApiError::GitHubError(GitHubError::InvalidInput(format!(
+                "Client ID not found: {}",
+                client_id
+            )))
+        })?;
+
+        let request = client._post(GITHUB_GQL_API, Some(&query)).await;
 
         match request {
             Ok(r) => {
                 if r.status() == 200 {
-                    let body = self.client.body_to_string(r).await.map_err(|e| {
+                    let body = client.body_to_string(r).await.map_err(|e| {
                         ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
                     })?;
 
                     Ok(body)
                 } else {
                     let status = r.status();
-                    let body = self.client.body_to_string(r).await.map_err(|e| {
+                    let body = client.body_to_string(r).await.map_err(|e| {
                         ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
                     })?;
 
@@ -83,6 +91,7 @@ impl Github {
     /// Execute a GraphQL query specified by `request`, on behalf of `module`.
     pub async fn make_graphql_query(
         &self,
+        client_id: impl Display,
         request: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
@@ -102,12 +111,13 @@ impl Github {
             variables: request.variables,
         };
 
-        self.make_gql_request(query, module).await
+        self.make_gql_request(client_id, query, module).await
     }
 
     /// Execute an advanced GraphQL query specified by `request`, on behalf of `module`.
     pub async fn make_advanced_graphql_query(
         &self,
+        client_id: impl Display,
         request: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
@@ -128,6 +138,6 @@ impl Github {
             variables: request.variables,
         };
 
-        self.make_gql_request(query, module).await
+        self.make_gql_request(client_id, query, module).await
     }
 }

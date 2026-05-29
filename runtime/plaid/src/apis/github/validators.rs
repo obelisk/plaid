@@ -80,6 +80,8 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     // Matches if .. is present in a file path
     define_regex_validator!(validators, "contains_parent_directory_component", r"\.\.");
 
+    define_regex_validator!(validators, "client_id", r"^[\w\-]+$");
+
     validators
 }
 

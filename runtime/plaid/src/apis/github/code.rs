@@ -1,4 +1,6 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
+
+use plaid_stl::github::{GithubApiWrapper, SearchCodeParams};
 
 use super::Github;
 use crate::{
@@ -14,7 +16,7 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<SearchCodeParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         /*
@@ -28,34 +30,31 @@ impl Github {
         We simply validate individual parameters if present.
         */
 
-        let file_content = match request.get("file_content") {
+        let file_content = request.params.file_content.clone().unwrap_or_default();
+
+        let filename = match request.params.filename {
             None => String::new(),
-            Some(content) => content.to_string(),
+            Some(filename) => format!("filename:{}", self.validate_filename(&filename)?),
         };
 
-        let filename = match request.get("filename") {
+        let extension = match request.params.extension {
             None => String::new(),
-            Some(filename) => format!("filename:{}", self.validate_filename(filename)?),
+            Some(extension) => format!("extension:{}", self.validate_extension(&extension)?),
         };
 
-        let extension = match request.get("extension") {
+        let path = match request.params.path {
             None => String::new(),
-            Some(extension) => format!("extension:{}", self.validate_extension(extension)?),
-        };
-
-        let path = match request.get("path") {
-            None => String::new(),
-            Some(path) => format!("path:{}", self.validate_path(path)?),
+            Some(path) => format!("path:{}", self.validate_path(&path)?),
         };
 
         // See if we were told to search only in a specific organization or repository
-        let org = match request.get("org") {
+        let org = match request.params.org {
             None => None,
-            Some(org) => Some(self.validate_org(org)?),
+            Some(org) => Some(self.validate_org(&org)?.to_string()),
         };
-        let repo = match request.get("repo") {
+        let repo = match request.params.repo {
             None => None,
-            Some(repo) => Some(self.validate_repository_name(repo)?),
+            Some(repo) => Some(self.validate_repository_name(&repo)?.to_string()),
         };
 
         // Assemble org and repo depending on what we received.
@@ -67,21 +66,13 @@ impl Github {
             (_, Some(repo)) => format!("repo:{repo}"),
         };
 
-        let per_page: u8 = request
-            .get("per_page")
-            .unwrap_or(&"100")
-            .parse::<u8>()
-            .map_err(|_| ApiError::BadRequest)?;
+        let per_page: u8 = request.params.per_page.unwrap_or(100);
         if per_page > 100 {
             // GitHub supports up to 100 results per page
             return Err(ApiError::BadRequest);
         }
 
-        let page: u16 = request
-            .get("page")
-            .unwrap_or(&"1")
-            .parse::<u16>()
-            .map_err(|_| ApiError::BadRequest)?;
+        let page: u16 = request.params.page.unwrap_or(1);
 
         // Construct the query with the piece we have. Multiple spaces, if present, do not cause problems.
         let query = format!("{file_content} {filename} {extension} {path} {org_and_repo}");
@@ -95,7 +86,10 @@ impl Github {
         // https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#rate-limit
         let address = format!("/search/code?q={query}&per_page={per_page}&page={page}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)

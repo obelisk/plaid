@@ -1,7 +1,9 @@
 use std::{collections::HashMap, fmt::Display};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
-    github::{CheckCodeownersParams, CodeownersStatus},
+    github::{CheckCodeownersParams, CodeownersStatus, ConfigureSecretParams, GithubApiWrapper},
     PlaidFunctionError,
 };
 
@@ -128,6 +130,13 @@ pub fn update_branch_protection_rule(
     Ok(())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct CreateEnvironmentForRepoParams {
+    pub owner: String,
+    pub repo: String,
+    pub env_name: String,
+}
+
 /// Create a GitHub deployment environment for a given repository.
 ///
 /// Arguments:
@@ -135,6 +144,7 @@ pub fn update_branch_protection_rule(
 /// * `repo` - The name of the repository
 /// * `env_name` - The name of the environment to be created
 pub fn create_environment_for_repo(
+    client_id: impl Display,
     owner: &str,
     repo: &str,
     env_name: &str,
@@ -143,13 +153,19 @@ pub fn create_environment_for_repo(
         new_host_function!(github, create_environment_for_repo);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    params.insert("env_name", env_name.to_string());
+    let params = CreateEnvironmentForRepoParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        env_name: env_name.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
 
     let request =
-        serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+        serde_json::to_string(&wrapper).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
 
     let res = unsafe {
         github_create_environment_for_repo(request.as_bytes().as_ptr(), request.as_bytes().len())
@@ -161,6 +177,14 @@ pub fn create_environment_for_repo(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct CreateDeploymentBranchProtectionRuleParams {
+    pub owner: String,
+    pub repo: String,
+    pub env_name: String,
+    pub branch: String,
+}
+
 /// Create a deployment branch protection rule for a GitHub environment.
 ///
 /// Arguments:
@@ -169,6 +193,7 @@ pub fn create_environment_for_repo(
 /// * `env_name` - The name of the environment to be created
 /// * `branch` - The branch from which a deployment can be triggered. This will be set in the deployment protection rules
 pub fn create_deployment_branch_protection_rule(
+    client_id: impl Display,
     owner: &str,
     repo: &str,
     env_name: &str,
@@ -178,14 +203,20 @@ pub fn create_deployment_branch_protection_rule(
         new_host_function!(github, create_deployment_branch_protection_rule);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    params.insert("env_name", env_name.to_string());
-    params.insert("branch", branch.to_string());
+    let params = CreateDeploymentBranchProtectionRuleParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        env_name: env_name.to_string(),
+        branch: branch.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
 
     let request =
-        serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+        serde_json::to_string(&wrapper).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
 
     let res = unsafe {
         github_create_deployment_branch_protection_rule(
@@ -248,6 +279,7 @@ pub fn require_signed_commits(
 /// * `secret_name` - The name of the secret to set
 /// * `secret` - The plaintext secret to be set
 pub fn configure_secret(
+    client_id: impl Display,
     owner: &str,
     repo: &str,
     env_name: Option<&str>,
@@ -258,17 +290,21 @@ pub fn configure_secret(
         new_host_function!(github, configure_secret);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    if let Some(env_name) = env_name {
-        params.insert("env_name", env_name.to_string());
-    }
-    params.insert("secret_name", secret_name.to_string());
-    params.insert("secret", secret.to_string());
+    let params = ConfigureSecretParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        env_name: env_name.map(|s| s.to_string()),
+        secret_name: secret_name.to_string(),
+        secret: secret.to_string(),
+    };
+
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
 
     let request =
-        serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+        serde_json::to_string(&wrapped).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
 
     let res =
         unsafe { github_configure_secret(request.as_bytes().as_ptr(), request.as_bytes().len()) };

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use plaid_stl::github::DeleteDeployKeyParams;
+use plaid_stl::github::{DeleteDeployKeyParams, GithubApiWrapper};
 
 use crate::{
     apis::{github::GitHubError, ApiError},
@@ -17,18 +17,18 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: DeleteDeployKeyParams =
+        let request: GithubApiWrapper<DeleteDeployKeyParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
-        let owner = self.validate_username(&request.owner)?;
-        let repo = self.validate_repository_name(&request.repo)?;
-        let key_id = request.key_id; // this is implicitly validated because it's a u64
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let key_id = request.params.key_id; // this is implicitly validated because it's a u64
 
         info!("Removing deploy key with ID {key_id} from repo {owner}/{repo}");
 
         let address = format!("/repos/{owner}/{repo}/keys/{key_id}");
 
         match self
-            .make_generic_delete_request(address, None::<&String>, module)
+            .make_generic_delete_request(request.client_id, address, None::<&String>, module)
             .await
         {
             Ok((status, Ok(_))) => {

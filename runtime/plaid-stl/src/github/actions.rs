@@ -1,12 +1,18 @@
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 
-use crate::{github::RepositoryDispatchParams, PlaidFunctionError};
+use crate::{
+    github::{GithubApiWrapper, RepositoryDispatchParams},
+    PlaidFunctionError,
+};
 
 /// Trigger a GHA workflow via repository_dispatch.
 /// For more details, see
 /// * https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#create-a-repository-dispatch-event
 /// * https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#repository_dispatch
 pub fn trigger_repo_dispatch<T>(
+    client_id: impl Display,
     owner: &str,
     repo: &str,
     event_type: &str,
@@ -26,7 +32,12 @@ where
         client_payload,
     };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapped).unwrap();
     let res = unsafe {
         github_trigger_repo_dispatch(params.as_bytes().as_ptr(), params.as_bytes().len())
     };

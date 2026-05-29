@@ -1,12 +1,15 @@
 use std::fmt::Display;
-use std::collections::HashMap;
 
+use crate::github::GithubApiWrapper;
 use crate::PlaidFunctionError;
 
 /// Get a user's ID from their username
 /// ## Arguments
 /// * `username` - The GitHub username.
-pub fn get_user_id_from_username(username: impl Display) -> Result<String, PlaidFunctionError> {
+pub fn get_user_id_from_username(
+    client_id: impl Display,
+    username: impl Display,
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, get_user_id_from_username);
     }
@@ -14,12 +17,16 @@ pub fn get_user_id_from_username(username: impl Display) -> Result<String, Plaid
     const RETURN_BUFFER_SIZE: usize = 64 * 1024; // 64 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let username = username.to_string();
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: username.to_string(),
+    };
+    let params = serde_json::to_string(&wrapped).unwrap();
 
     let res = unsafe {
         github_get_user_id_from_username(
-            username.as_bytes().as_ptr(),
-            username.as_bytes().len(),
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
             return_buffer.as_mut_ptr(),
             RETURN_BUFFER_SIZE,
         )
@@ -40,7 +47,10 @@ pub fn get_user_id_from_username(username: impl Display) -> Result<String, Plaid
 /// Get a username from a user ID
 /// ## Arguments
 /// * `user_id` - The GitHub user ID.
-pub fn get_username_from_user_id(user_id: impl Display) -> Result<String, PlaidFunctionError> {
+pub fn get_username_from_user_id(
+    client_id: impl Display,
+    user_id: impl Display,
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, get_username_from_user_id);
     }
@@ -50,10 +60,16 @@ pub fn get_username_from_user_id(user_id: impl Display) -> Result<String, PlaidF
 
     let user_id = user_id.to_string();
 
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: user_id,
+    };
+    let params = serde_json::to_string(&wrapped).unwrap();
+
     let res = unsafe {
         github_get_username_from_user_id(
-            user_id.as_bytes().as_ptr(),
-            user_id.as_bytes().len(),
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
             return_buffer.as_mut_ptr(),
             RETURN_BUFFER_SIZE,
         )
@@ -71,23 +87,36 @@ pub fn get_username_from_user_id(user_id: impl Display) -> Result<String, PlaidF
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct RemoveOutsideCollaboratorParams {
+    pub user: String,
+    pub org: String,
+}
+
 /// Remove an outside collaborator from an org
 /// ## Arguments
 ///
 /// * `user` - The outside collaborator to remove from the org
 /// * `org` - The GitHub organization to remove the user from
 pub fn remove_outside_collaborator_from_org(
+    client_id: impl Display,
     user: impl Display,
     org: impl Display,
 ) -> Result<i32, PlaidFunctionError> {
     extern "C" {
         new_host_function!(github, remove_outside_collaborator_from_org);
     }
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("user", user.to_string());
-    params.insert("org", org.to_string());
 
-    let request = serde_json::to_string(&params).unwrap();
+    let params = RemoveOutsideCollaboratorParams {
+        user: user.to_string(),
+        org: org.to_string(),
+    };
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapped).unwrap();
 
     let res = unsafe {
         github_remove_outside_collaborator_from_org(
