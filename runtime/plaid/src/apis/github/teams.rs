@@ -233,12 +233,7 @@ impl Github {
         let org = self.validate_org(&request.params.org)?;
         let repo = self.validate_repository_name(&request.params.repo)?;
 
-        let per_page: u8 = request
-            .params
-            .per_page
-            .unwrap_or(30)
-            .parse::<u8>()
-            .map_err(|_| ApiError::BadRequest)?;
+        let per_page: u8 = request.params.per_page.unwrap_or(30);
         let page: u16 = request.params.page.unwrap_or(1);
 
         info!("Getting teams with access to repo [{repo}] on behalf of [{module}]");
