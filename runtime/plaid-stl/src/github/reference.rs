@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    github::{GetOrCreateBranchReferenceParams, GitApiRef, GitRef},
+    github::{GetOrCreateBranchReferenceParams, GitApiRef, GitRef, GithubApiWrapper},
     PlaidFunctionError,
 };
 
@@ -27,6 +27,7 @@ use crate::{
 /// - `Ok(None)` if the reference does not exist.
 /// - `Err(PlaidFunctionError)` if the request fails.
 pub fn get_reference(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     reference: GitRef,
@@ -42,7 +43,12 @@ pub fn get_reference(
         sha: None,
     };
 
-    let request = serde_json::to_string(&request).unwrap();
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+
+    let request = serde_json::to_string(&wrapped).unwrap();
     const RETURN_BUFFER_SIZE: usize = 1024 * 10; // 10 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -100,6 +106,7 @@ pub fn get_reference(
 /// - `Ok(())` if the reference was created successfully.
 /// - `Err(PlaidFunctionError)` if the request fails.
 pub fn create_reference(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     reference: GitRef,
@@ -116,7 +123,12 @@ pub fn create_reference(
         sha: Some(sha.to_string()),
     };
 
-    let params = serde_json::to_string(&request).unwrap();
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+
+    let params = serde_json::to_string(&wrapped).unwrap();
     let res =
         unsafe { github_create_reference(params.as_bytes().as_ptr(), params.as_bytes().len()) };
 

@@ -361,6 +361,21 @@ impl Display for FetchFileCustomMediaType {
    MISCELLANEA
 *******************************************************************************************/
 
+#[derive(Serialize, Deserialize)]
+pub struct GithubApiWrapper<T> {
+    pub client_id: String,
+    pub params: T,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ConfigureSecretParams {
+    pub owner: String,
+    pub repo: String,
+    pub env_name: Option<String>,
+    pub secret_name: String,
+    pub secret: String,
+}
+
 /// A GitHub user.
 /// Note - We only deserialize the fields we care about.
 #[derive(Debug, Serialize, Deserialize)]

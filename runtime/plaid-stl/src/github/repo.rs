@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::{
     github::{
         CreateFileRequest, DeleteDeployKeyParams, FetchFileCustomMediaType, FetchFileRequest,
-        RepositoryCollaborator, RepositoryCustomProperty, SbomResponse,
+        GithubApiWrapper, RepositoryCollaborator, RepositoryCustomProperty, SbomResponse,
     },
     PlaidFunctionError,
 };
@@ -407,6 +407,7 @@ pub fn fetch_commit(user: &str, repo: &str, commit: &str) -> Result<String, Plai
 /// Delete a deploy key with given ID from a given repository.
 /// For more details, see https://docs.github.com/en/rest/deploy-keys/deploy-keys?apiVersion=2022-11-28#delete-a-deploy-key
 pub fn delete_deploy_key(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     key_id: u64,
@@ -421,7 +422,12 @@ pub fn delete_deploy_key(
         key_id,
     };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapped).unwrap();
     let res =
         unsafe { github_delete_deploy_key(params.as_bytes().as_ptr(), params.as_bytes().len()) };
 

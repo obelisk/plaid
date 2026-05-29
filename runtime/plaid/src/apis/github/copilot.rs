@@ -3,9 +3,12 @@ use crate::{
     apis::{github::GitHubError, ApiError},
     loader::PlaidModule,
 };
-use serde::{Deserialize, Serialize};
+use plaid_stl::github::{
+    AddUsersToOrgCopilotParams, GithubApiWrapper, ListSeatsInOrgCopilotParams,
+    RemoveUsersFromOrgCopilotParams,
+};
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 impl Github {
     /// List all seats in the Copilot subscription for an organization
@@ -15,27 +18,22 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<ListSeatsInOrgCopilotParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let organization = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
-        let per_page: u8 = request
-            .get("per_page")
-            .unwrap_or(&"50")
-            .parse::<u8>()
-            .map_err(|_| ApiError::BadRequest)?;
-        let page: u16 = request
-            .get("page")
-            .unwrap_or(&"1")
-            .parse::<u16>()
-            .map_err(|_| ApiError::BadRequest)?;
+        let organization = self.validate_org(&request.params.org)?;
+        let per_page: u8 = request.params.per_page.unwrap_or(50);
+        let page: u16 = request.params.page.unwrap_or(1);
 
         info!("List seats in Copilot subscription for org {organization}");
 
         let address =
             format!("/orgs/{organization}/copilot/billing/seats?page={page}&per_page={per_page}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -57,28 +55,23 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        #[derive(Deserialize, Serialize)]
-        struct Request {
-            #[serde(skip_serializing)]
-            org: String,
-            selected_usernames: Vec<String>,
-        }
-        let request: Request = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let request: GithubApiWrapper<AddUsersToOrgCopilotParams> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let organization = self.validate_org(&request.org)?;
-        for username in &request.selected_usernames {
+        let organization = self.validate_org(&request.params.org)?;
+        for username in &request.params.selected_usernames {
             self.validate_username(&username)?;
         }
 
         info!(
             "Adding users {:?} to Copilot subscription for org {organization} as module {module}",
-            request.selected_usernames
+            request.params.selected_usernames
         );
 
         let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
         match self
-            .make_generic_post_request(address, &request, module)
+            .make_generic_post_request(&request.client_id, address, &request, module)
             .await
         {
             Ok((status, Ok(body))) => {
@@ -102,28 +95,23 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        #[derive(Deserialize, Serialize)]
-        struct Request {
-            #[serde(skip_serializing)]
-            org: String,
-            selected_usernames: Vec<String>,
-        }
-        let request: Request = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let request: GithubApiWrapper<RemoveUsersFromOrgCopilotParams> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let organization = self.validate_org(&request.org)?;
-        for username in request.selected_usernames.iter() {
+        let organization = self.validate_org(&request.params.org)?;
+        for username in request.params.selected_usernames.iter() {
             self.validate_username(&username)?;
         }
 
         info!(
-            "Remove users {:?} from Copilot subscription for org {organization}",
-            request.selected_usernames
+            "Remove users {:?} from Copilot subscription for org {organization} as module {module}",
+            request.params.selected_usernames
         );
 
         let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
         match self
-            .make_generic_delete_request(address, Some(&request), module)
+            .make_generic_delete_request(&request.client_id, address, Some(&request), module)
             .await
         {
             Ok((status, Ok(body))) => {

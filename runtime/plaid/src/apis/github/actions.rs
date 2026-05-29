@@ -5,7 +5,7 @@ use crate::{
     apis::{github::GitHubError, ApiError},
     loader::PlaidModule,
 };
-use plaid_stl::github::RepositoryDispatchParams;
+use plaid_stl::github::{GithubApiWrapper, RepositoryDispatchParams};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -29,12 +29,14 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: RepositoryDispatchParams<Value> =
+        let request: GithubApiWrapper<RepositoryDispatchParams<Value>> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(&request.owner)?;
-        let repo = self.validate_repository_name(&request.repo)?;
-        let event_type = self.validate_event_type(&request.event_type)?;
+        let params = request.params;
+
+        let owner = self.validate_username(&params.owner)?;
+        let repo = self.validate_repository_name(&params.repo)?;
+        let event_type = self.validate_event_type(&params.event_type)?;
         // Since client_payload can be an arbitrary JSON, we "validate" it alredy when deserializing it to a Value.
         // However, we have no control over the content.
 
@@ -44,10 +46,13 @@ impl Github {
 
         let body = RepositoryDispatchPayload {
             event_type,
-            client_payload: &request.client_payload,
+            client_payload: &params.client_payload,
         };
 
-        match self.make_generic_post_request(address, &body, module).await {
+        match self
+            .make_generic_post_request(request.client_id, address, &body, module)
+            .await
+        {
             Ok((status, Ok(_))) => {
                 if status == 204 {
                     Ok(0)

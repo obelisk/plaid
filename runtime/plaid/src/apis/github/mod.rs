@@ -19,13 +19,13 @@ use octocrab::{NoAuth, Octocrab};
 
 use serde::{Deserialize, Serialize};
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use crate::loader::PlaidModule;
 
 use super::ApiError;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(untagged)]
 pub enum Authentication {
     /// If you provide a token then we will initialize the client using that
@@ -54,7 +54,9 @@ pub struct GithubConfig {
     /// The authentication method used when configuring the GitHub API module. More
     /// methods may be added here in the future but one variant of the enum must be defined.
     /// See the Authentication enum structure above for more details.
-    authentication: Authentication,
+    /// This is a map from a string identifier to the authentication method, since Plaid supports
+    /// multiple GitHub connections in the same runtime.
+    authentication: HashMap<String, Authentication>,
     /// This is a map of GraphQL queries you are allowing rules to execute. These are
     /// manually specified to reduce the risk of abuse by rules as they are very powerful
     /// and hard to reason about in a generic way, especially at runtime.
@@ -65,8 +67,8 @@ pub struct GithubConfig {
 pub struct Github {
     /// Configuration for Plaid's GitHub API
     config: GithubConfig,
-    /// Client to make requests with
-    client: Octocrab,
+    /// Clients to make requests with, keyed by their identifier
+    clients: HashMap<String, Octocrab>,
     /// Validators used to check parameters passed by modules
     validators: HashMap<&'static str, regex::Regex>,
 }
@@ -86,7 +88,7 @@ pub enum GitHubError {
 
 impl Github {
     pub fn new(config: GithubConfig) -> Result<Self, ApiError> {
-        let client = build_github_client(&config.authentication)?;
+        let clients = build_github_clients(&config.authentication)?;
 
         // Create all the validators and compile all the regexes. If the module contains
         // any invalid regexes it will panic.
@@ -94,7 +96,7 @@ impl Github {
 
         Ok(Self {
             config,
-            client,
+            clients,
             validators,
         })
     }
@@ -105,10 +107,12 @@ impl Github {
     /// (at least currently).
     async fn make_generic_get_request(
         &self,
+        client_id: impl Display,
         uri: String,
         module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
-        self.make_get_request_with_headers(uri, None, module).await
+        self.make_get_request_with_headers(client_id, uri, None, module)
+            .await
     }
 
     /// Make a GET request with custom headers to the GitHub API using the GitHub app library.
@@ -117,6 +121,7 @@ impl Github {
     /// we assume that all necessary validation has already been performed by the calling function.
     async fn make_get_request_with_headers(
         &self,
+        client_id: impl Display,
         uri: String,
         headers: Option<HeaderMap>,
         module: Arc<PlaidModule>,
@@ -134,12 +139,19 @@ impl Github {
             }
         );
 
-        let request = self.client._get_with_headers(uri, headers).await;
+        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+            ApiError::GitHubError(GitHubError::InvalidInput(format!(
+                "Client ID not found: {}",
+                client_id
+            )))
+        })?;
+
+        let request = client._get_with_headers(uri, headers).await;
 
         match request {
             Ok(r) => {
                 let status = r.status().as_u16();
-                let body = self.client.body_to_string(r).await.map_err(|e| {
+                let body = client.body_to_string(r).await.map_err(|e| {
                     ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
                 });
                 Ok((status, body))
@@ -154,18 +166,26 @@ impl Github {
     /// (at least currently).
     async fn make_generic_post_request<T: Serialize>(
         &self,
+        client_id: impl Display,
         uri: String,
         body: T,
         module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a post request to {uri} on behalf of {module}");
 
-        let request = self.client._post(uri, Some(&body)).await;
+        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+            ApiError::GitHubError(GitHubError::InvalidInput(format!(
+                "Client ID not found: {}",
+                client_id
+            )))
+        })?;
+
+        let request = client._post(uri, Some(&body)).await;
 
         match request {
             Ok(r) => {
                 let status = r.status().as_u16();
-                let body = self.client.body_to_string(r).await.map_err(|e| {
+                let body = client.body_to_string(r).await.map_err(|e| {
                     ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
                 });
                 Ok((status, body))
@@ -180,18 +200,26 @@ impl Github {
     /// (at least currently).
     async fn make_generic_put_request<T: Serialize>(
         &self,
+        client_id: impl Display,
         uri: String,
         body: Option<&T>,
         module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a put request to {uri} on behalf of {module}");
 
-        let request = self.client._put(uri, body).await;
+        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+            ApiError::GitHubError(GitHubError::InvalidInput(format!(
+                "Client ID not found: {}",
+                client_id
+            )))
+        })?;
+
+        let request = client._put(uri, body).await;
 
         match request {
             Ok(r) => {
                 let status = r.status().as_u16();
-                let body = self.client.body_to_string(r).await.map_err(|e| {
+                let body = client.body_to_string(r).await.map_err(|e| {
                     ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
                 });
                 Ok((status, body))
@@ -206,18 +234,26 @@ impl Github {
     /// (at least currently).
     async fn make_generic_delete_request<T: Serialize>(
         &self,
+        client_id: impl Display,
         uri: String,
         body: Option<&T>,
         module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a delete request to {uri} on behalf of {module}");
 
-        let request = self.client._delete(uri, body).await;
+        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+            ApiError::GitHubError(GitHubError::InvalidInput(format!(
+                "Client ID not found: {}",
+                client_id
+            )))
+        })?;
+
+        let request = client._delete(uri, body).await;
 
         match request {
             Ok(r) => {
                 let status = r.status().as_u16();
-                let body = self.client.body_to_string(r).await.map_err(|e| {
+                let body = client.body_to_string(r).await.map_err(|e| {
                     ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
                 });
                 Ok((status, body))
@@ -228,46 +264,45 @@ impl Github {
 }
 
 /// Builds an instance of a Github API client
-pub fn build_github_client(authentication: &Authentication) -> Result<Octocrab, ApiError> {
-    let client_builder = match authentication {
-        Authentication::NoAuth {} => {
-            info!("Configuring GitHub client without authentication");
-            Octocrab::builder().with_auth(NoAuth {})
-        }
-        Authentication::Token { token } => {
-            info!("Configuring GitHub client with GitHub PAT");
-            Octocrab::builder().personal_token(token.clone())
-        }
-        Authentication::App {
-            app_id,
-            private_key,
-            ..
-        } => {
-            info!("Configuring GitHub client with GitHub App");
-            let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes())
-                .map_err(|_| ApiError::GitHubError(GitHubError::InvalidInput(format!("Failed to create encoding key from private key for GitHub API"))))?;
+pub fn build_github_clients(
+    authentication: &HashMap<String, Authentication>,
+) -> Result<HashMap<String, Octocrab>, ApiError> {
+    authentication
+        .iter()
+        .map(|(key, auth)| {
+            let client = match auth {
+                Authentication::NoAuth {} => {
+                    info!("Configuring GitHub client without authentication for [{key}]");
+                    Octocrab::builder().with_auth(NoAuth {})
+                }
+                Authentication::Token { token } => {
+                    info!("Configuring GitHub client with GitHub PAT for [{key}]");
+                    Octocrab::builder().personal_token(token.clone())
+                }
+                Authentication::App {
+                    app_id,
+                    private_key,
+                    ..
+                } => {
+                    info!("Configuring GitHub client with GitHub App for [{key}]");
+                    let encoding_key =
+                        EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|_| {
+                            ApiError::GitHubError(GitHubError::InvalidInput(format!(
+                        "Failed to create encoding key from private key for GitHub API for [{key}]"
+                    )))
+                        })?;
 
-            Octocrab::builder().app((*app_id).into(), encoding_key)
-        }
-    }
-    .add_header(
-        USER_AGENT,
-        format!("Rust/Plaid{}", env!("CARGO_PKG_VERSION")),
-    );
+                    Octocrab::builder().app((*app_id).into(), encoding_key)
+                }
+            }
+            .add_header(
+                USER_AGENT,
+                format!("Rust/Plaid{}", env!("CARGO_PKG_VERSION")),
+            )
+            .build()
+            .map_err(|e| ApiError::GitHubError(GitHubError::ClientError(e)))?;
 
-    let mut client = client_builder
-        .build()
-        .map_err(|e| ApiError::GitHubError(GitHubError::ClientError(e)))?;
-
-    if let Authentication::App {
-        installation_id, ..
-    } = authentication
-    {
-        match client.installation((*installation_id).into()) {
-            Ok(installation_client) => client = installation_client,
-            Err(e) => return Err(ApiError::GitHubError(GitHubError::ClientError(e))),
-        }
-    }
-
-    Ok(client)
+            Ok((key.clone(), client))
+        })
+        .collect()
 }
