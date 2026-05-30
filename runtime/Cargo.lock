@@ -1208,18 +1208,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cargo-lock"
-version = "10.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c06acb4f71407ba205a07cb453211e0e6a67b21904e47f6ba1f9589e38f2e454"
-dependencies = [
- "semver",
- "serde",
- "toml 0.8.23",
- "url",
-]
-
-[[package]]
 name = "cargo-platform"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1661,7 +1649,7 @@ checksum = "5877d3fbf742507b66bc2a1945106bd30dd8504019d596901ddd012a4dd01740"
 dependencies = [
  "chrono",
  "once_cell",
- "winnow 0.6.26",
+ "winnow",
 ]
 
 [[package]]
@@ -4022,7 +4010,6 @@ version = "0.40.0"
 dependencies = [
  "aes",
  "alkali",
- "anyhow",
  "async-trait",
  "aws-config",
  "aws-sdk-dynamodb",
@@ -4032,7 +4019,6 @@ dependencies = [
  "aws-sdk-sqs",
  "base64 0.13.1",
  "block-modes",
- "cargo-lock",
  "chrono",
  "clap",
  "cron",
@@ -4068,7 +4054,7 @@ dependencies = [
  "tokio-rustls 0.26.4",
  "tokio-tungstenite 0.24.0",
  "tokio-util",
- "toml 0.5.11",
+ "toml",
  "totp-rs",
  "url",
  "urlencoding",
@@ -5122,15 +5108,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_spanned"
-version = "0.6.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5798,6 +5775,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
+
 name = "tonic"
 version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
