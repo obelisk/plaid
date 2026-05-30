@@ -3,7 +3,7 @@ use aes::Aes128;
 use base64::{decode_config, encode_config};
 use block_modes::block_padding::Pkcs7;
 use block_modes::{BlockMode, Cbc};
-use rand::RngCore;
+use ring::rand::{SecureRandom, SystemRandom};
 
 type Aes128Cbc = Cbc<Aes128, Pkcs7>;
 
@@ -11,7 +11,9 @@ type Aes128Cbc = Cbc<Aes128, Pkcs7>;
 /// Returns base64(iv||ciphertext).
 pub fn encrypt(key: &[u8], plaintext: &str) -> Result<String, Errors> {
     let mut iv = [0u8; 16];
-    rand::rng().fill_bytes(&mut iv);
+    SystemRandom::new().fill(&mut iv).map_err(|_| {
+        Errors::AesEncryptionFailure("Failed to generate random IV".to_string())
+    })?;
     let cipher = Aes128Cbc::new_from_slices(key, &iv)
         .map_err(|_| Errors::AesEncryptionFailure("Failed to load key".to_string()))?;
     let ct = cipher.encrypt_vec(plaintext.as_bytes());

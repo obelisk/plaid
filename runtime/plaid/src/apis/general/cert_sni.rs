@@ -1,6 +1,6 @@
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
+use tokio_rustls::rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use tokio_rustls::rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
@@ -19,7 +19,7 @@ impl ServerCertVerifier for NoVerifier {
         _server_name: &ServerName<'_>,
         _ocsp: &[u8],
         _now: UnixTime,
-    ) -> std::result::Result<ServerCertVerified, rustls::Error> {
+    ) -> std::result::Result<ServerCertVerified, tokio_rustls::rustls::Error> {
         Ok(ServerCertVerified::assertion())
     }
 
@@ -28,7 +28,7 @@ impl ServerCertVerifier for NoVerifier {
         _message: &[u8],
         _cert: &CertificateDer<'_>,
         _dss: &DigitallySignedStruct,
-    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+    ) -> std::result::Result<HandshakeSignatureValid, tokio_rustls::rustls::Error> {
         Ok(HandshakeSignatureValid::assertion())
     }
 
@@ -37,7 +37,7 @@ impl ServerCertVerifier for NoVerifier {
         _message: &[u8],
         _cert: &CertificateDer<'_>,
         _dss: &DigitallySignedStruct,
-    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+    ) -> std::result::Result<HandshakeSignatureValid, tokio_rustls::rustls::Error> {
         Ok(HandshakeSignatureValid::assertion())
     }
 
