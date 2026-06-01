@@ -115,7 +115,8 @@ fn main(_: String, source: LogSource) -> Result<Option<String>, Errors> {
         ]
         .into();
 
-        match github::make_graphql_query(GITHUB_GRAPHQL_QUERY, variables) {
+        match github::make_graphql_query("PROVIDE YOUR CLIENT ID", GITHUB_GRAPHQL_QUERY, variables)
+        {
             Ok(result) => {
                 let result: Value = serde_json::from_str(&result).unwrap();
 
