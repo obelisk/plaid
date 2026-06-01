@@ -1,10 +1,22 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
-use crate::{github::WeeklyCommits, PlaidFunctionError};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    github::{GithubApiWrapper, WeeklyCommits},
+    PlaidFunctionError,
+};
+
+#[derive(Serialize, Deserialize)]
+pub struct GetWeeklyCommitCountParams {
+    pub owner: String,
+    pub repo: String,
+}
 
 /// Get the weekly commit count on a given repo.
 /// For more details, see https://docs.github.com/en/rest/metrics/statistics?apiVersion=2022-11-28#get-the-weekly-commit-count
 pub fn get_weekly_commit_count(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
 ) -> Result<WeeklyCommits, PlaidFunctionError> {
@@ -15,10 +27,16 @@ pub fn get_weekly_commit_count(
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let mut params: HashMap<&'static str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    let params = serde_json::to_string(&params).unwrap();
+    let params = GetWeeklyCommitCountParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+    };
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapper).unwrap();
 
     let res = unsafe {
         github_get_weekly_commit_count(

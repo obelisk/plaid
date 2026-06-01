@@ -1,4 +1,4 @@
-use crate::apis::github::{build_github_client, Authentication};
+use crate::apis::github::{build_github_clients, Authentication};
 use crate::apis::ApiError;
 use crate::executor::Message;
 use crate::parse_duration;
@@ -9,6 +9,7 @@ use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use serde::Deserialize;
 use serde_json::Value;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 use time::OffsetDateTime;
@@ -173,7 +174,13 @@ pub struct Github {
 
 impl Github {
     pub fn new(config: GithubConfig, logger: Sender<Message>) -> Result<Self, ApiError> {
-        let client = build_github_client(&config.authentication)?;
+        let default_client_auth: HashMap<String, Authentication> = [(
+            "gh_data_generator".to_string(),
+            config.authentication.clone(),
+        )]
+        .into();
+        let clients = build_github_clients(&default_client_auth)?;
+        let client = clients.into_iter().next().unwrap().1; // we know there is at least one client because we just built it with one entry
         let lru_cache_size = match config.lru_cache_size {
             0 => {
                 warn!("GitHub API: The LRU cache size must be greater than 0. Using default value of {}.", default_lru_cache_size());

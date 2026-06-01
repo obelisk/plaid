@@ -1,22 +1,39 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::{github::ReviewPatAction, PlaidFunctionError};
+use crate::{
+    github::{GithubApiWrapper, ReviewPatAction},
+    PlaidFunctionError,
+};
+
+#[derive(Deserialize, Serialize)]
+pub struct ListFpatRequestsForOrgParams {
+    pub org: String,
+}
 
 /// Lists approved fine-grained personal access tokens owned by organization members that can access organization resources
 /// ## Arguments
 ///
 /// * `org` - The organization name. The name is not case sensitive.
-pub fn list_fpat_requests_for_org(org: &str) -> Result<String, PlaidFunctionError> {
+pub fn list_fpat_requests_for_org(
+    client_id: impl Display,
+    org: &str,
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, list_fpat_requests_for_org);
     }
 
-    let mut params: HashMap<&'static str, &str> = HashMap::new();
-    params.insert("org", org);
+    let params = ListFpatRequestsForOrgParams {
+        org: org.to_string(),
+    };
 
-    let request = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -42,6 +59,14 @@ pub fn list_fpat_requests_for_org(org: &str) -> Result<String, PlaidFunctionErro
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ReviewFpatRequestsForOrgParams {
+    pub org: String,
+    pub pat_request_ids: Vec<u64>,
+    pub action: String,
+    pub reason: String,
+}
+
 /// Approves or denies multiple pending requests to access organization resources via a fine-grained personal access token
 /// ## Arguments
 ///
@@ -50,6 +75,7 @@ pub fn list_fpat_requests_for_org(org: &str) -> Result<String, PlaidFunctionErro
 /// * `action` - Action to apply to the requests.
 /// * `reason` - Reason for approving or denying the requests. Max 1024 characters.
 pub fn review_fpat_requests_for_org(
+    client_id: impl Display,
     org: String,
     pat_request_ids: &[u64],
     action: ReviewPatAction,
@@ -58,15 +84,8 @@ pub fn review_fpat_requests_for_org(
     extern "C" {
         new_host_function!(github, review_fpat_requests_for_org);
     }
-    #[derive(Serialize)]
-    struct Request {
-        org: String,
-        pat_request_ids: Vec<u64>,
-        action: String,
-        reason: String,
-    }
 
-    let request = Request {
+    let request = ReviewFpatRequestsForOrgParams {
         org,
         pat_request_ids: pat_request_ids.to_vec(),
         action: match action {
@@ -76,7 +95,12 @@ pub fn review_fpat_requests_for_org(
         reason,
     };
 
-    let request = serde_json::to_string(&request).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     let res = unsafe {
         github_review_fpat_requests_for_org(request.as_bytes().as_ptr(), request.as_bytes().len())
@@ -90,6 +114,16 @@ pub fn review_fpat_requests_for_org(
     }
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct GetReposForFpatParams {
+    pub org: String,
+    pub request_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_page: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<u64>,
+}
+
 /// Lists the repositories a fine-grained personal access token request is requesting access to
 /// ## Arguments
 ///
@@ -97,8 +131,9 @@ pub fn review_fpat_requests_for_org(
 /// * `request_id` - Unique identifier of the request for access via fine-grained personal access token.
 /// * `per_page` - The number of results per page (max 100)
 /// * `page` - The page number of the results to fetch.
-pub fn get_repos_for_fpat<T: Display>(
-    org: T,
+pub fn get_repos_for_fpat(
+    client_id: impl Display,
+    org: impl Display,
     request_id: u64,
     per_page: Option<u64>,
     page: Option<u64>,
@@ -106,17 +141,20 @@ pub fn get_repos_for_fpat<T: Display>(
     extern "C" {
         new_host_function_with_error_buffer!(github, get_repos_for_fpat);
     }
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("org", org.to_string());
-    params.insert("request_id", request_id.to_string());
-    if let Some(per_page) = per_page {
-        params.insert("per_page", per_page.to_string());
-    }
-    if let Some(page) = page {
-        params.insert("page", page.to_string());
-    }
 
-    let request = serde_json::to_string(&params).unwrap();
+    let params = GetReposForFpatParams {
+        org: org.to_string(),
+        request_id,
+        per_page,
+        page,
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];

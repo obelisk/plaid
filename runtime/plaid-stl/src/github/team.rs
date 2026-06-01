@@ -1,10 +1,29 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
-use crate::{github::GitHubRepoTeam, PlaidFunctionError};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    github::{GitHubRepoTeam, GithubApiWrapper},
+    PlaidFunctionError,
+};
+
+#[derive(Serialize, Deserialize)]
+pub struct AddUserToTeamParams {
+    pub org: String,
+    pub team_slug: String,
+    pub user: String,
+    pub role: String,
+}
 
 // TODO: Do not use this function, it is deprecated and will be removed soon
-pub fn add_user_to_team(team: &str, user: &str, org: &str, role: &str) -> Result<(), i32> {
-    add_user_to_team_detailed(team, user, org, role).map_err(|_| -4)
+pub fn add_user_to_team(
+    client_id: impl Display,
+    team: &str,
+    user: &str,
+    org: &str,
+    role: &str,
+) -> Result<(), i32> {
+    add_user_to_team_detailed(client_id, team, user, org, role).map_err(|_| -4)
 }
 
 /// Add a user to a team
@@ -15,6 +34,7 @@ pub fn add_user_to_team(team: &str, user: &str, org: &str, role: &str) -> Result
 /// * `org` - Github organization that `team` exists in
 /// * `role` - Role to grant `user` on `team`
 pub fn add_user_to_team_detailed(
+    client_id: impl Display,
     team: &str,
     user: &str,
     org: &str,
@@ -24,13 +44,19 @@ pub fn add_user_to_team_detailed(
         new_host_function!(github, add_user_to_team);
     }
 
-    let mut params: HashMap<&'static str, &str> = HashMap::new();
-    params.insert("user", user);
-    params.insert("team_slug", team);
-    params.insert("org", org);
-    params.insert("role", role);
+    let params = AddUserToTeamParams {
+        org: org.to_string(),
+        team_slug: team.to_string(),
+        user: user.to_string(),
+        role: role.to_string(),
+    };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res =
         unsafe { github_add_user_to_team(params.as_bytes().as_ptr(), params.as_bytes().len()) };
 
@@ -43,9 +69,21 @@ pub fn add_user_to_team_detailed(
     Ok(())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RemoveUserFromTeamParams {
+    pub org: String,
+    pub team_slug: String,
+    pub user: String,
+}
+
 // TODO: Do not use this function, it is deprecated and will be removed soon
-pub fn remove_user_from_team(team: &str, user: &str, org: &str) -> Result<(), i32> {
-    remove_user_from_team_detailed(team, user, org).map_err(|_| -4)
+pub fn remove_user_from_team(
+    client_id: impl Display,
+    team: &str,
+    user: &str,
+    org: &str,
+) -> Result<(), i32> {
+    remove_user_from_team_detailed(client_id, team, user, org).map_err(|_| -4)
 }
 
 /// Remove a user from a team
@@ -55,6 +93,7 @@ pub fn remove_user_from_team(team: &str, user: &str, org: &str) -> Result<(), i3
 /// * `user` - The user to remove from `team`
 /// * `org` - Github organization that `team` exists in
 pub fn remove_user_from_team_detailed(
+    client_id: impl Display,
     team: &str,
     user: &str,
     org: &str,
@@ -63,12 +102,18 @@ pub fn remove_user_from_team_detailed(
         new_host_function!(github, remove_user_from_team);
     }
 
-    let mut params: HashMap<&'static str, &str> = HashMap::new();
-    params.insert("user", user);
-    params.insert("team_slug", team);
-    params.insert("org", org);
+    let params = RemoveUserFromTeamParams {
+        org: org.to_string(),
+        team_slug: team.to_string(),
+        user: user.to_string(),
+    };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res = unsafe {
         github_remove_user_from_team(params.as_bytes().as_ptr(), params.as_bytes().len())
     };
@@ -82,9 +127,18 @@ pub fn remove_user_from_team_detailed(
     Ok(())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct AddRepoToTeamParams {
+    pub org: String,
+    pub team_slug: String,
+    pub repo: String,
+    pub permission: String,
+}
+
 /// Add a repo to a GH team, with a given permission.
 /// For more details, see https://docs.github.com/en/rest/teams/teams?apiVersion=2022-11-28#add-or-update-team-repository-permissions
 pub fn add_repo_to_team(
+    client_id: impl Display,
     org: impl Display,
     repo: impl Display,
     team_slug: impl Display,
@@ -94,13 +148,19 @@ pub fn add_repo_to_team(
         new_host_function!(github, add_repo_to_team);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("org", org.to_string());
-    params.insert("team_slug", team_slug.to_string());
-    params.insert("repo", repo.to_string());
-    params.insert("permission", permission.to_string());
+    let params = AddRepoToTeamParams {
+        org: org.to_string(),
+        team_slug: team_slug.to_string(),
+        repo: repo.to_string(),
+        permission: permission.to_string(),
+    };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res =
         unsafe { github_add_repo_to_team(params.as_bytes().as_ptr(), params.as_bytes().len()) };
 
@@ -113,9 +173,17 @@ pub fn add_repo_to_team(
     Ok(())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RemoveRepoFromTeamParams {
+    pub org: String,
+    pub team_slug: String,
+    pub repo: String,
+}
+
 /// Remove a repo from a GH team.
 /// For more details, see https://docs.github.com/en/rest/teams/teams?apiVersion=2022-11-28#remove-a-repository-from-a-team
 pub fn remove_repo_from_team(
+    client_id: impl Display,
     org: impl Display,
     repo: impl Display,
     team_slug: impl Display,
@@ -124,12 +192,18 @@ pub fn remove_repo_from_team(
         new_host_function!(github, remove_repo_from_team);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("org", org.to_string());
-    params.insert("team_slug", team_slug.to_string());
-    params.insert("repo", repo.to_string());
+    let params = RemoveRepoFromTeamParams {
+        org: org.to_string(),
+        team_slug: team_slug.to_string(),
+        repo: repo.to_string(),
+    };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res = unsafe {
         github_remove_repo_from_team(params.as_bytes().as_ptr(), params.as_bytes().len())
     };
@@ -143,8 +217,17 @@ pub fn remove_repo_from_team(
     Ok(())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct GetRepoTeamsParams {
+    pub org: String,
+    pub repo: String,
+    pub per_page: Option<u8>,
+    pub page: Option<u16>,
+}
+
 /// Get the teams that have access to a repository.
 pub fn get_repo_teams(
+    client_id: impl Display,
     org: impl Display,
     repo: impl Display,
 ) -> Result<Vec<GitHubRepoTeam>, PlaidFunctionError> {
@@ -152,19 +235,26 @@ pub fn get_repo_teams(
         new_host_function_with_error_buffer!(github, get_repo_teams);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("org", org.to_string());
-    params.insert("repo", repo.to_string());
-
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
     let mut teams = Vec::<GitHubRepoTeam>::new();
     let mut page = 0;
     loop {
         page += 1;
-        params.insert("page", page.to_string());
 
-        let request = serde_json::to_string(&params).unwrap();
+        let params = GetRepoTeamsParams {
+            org: org.to_string(),
+            repo: repo.to_string(),
+            per_page: None,
+            page: Some(page),
+        };
+
+        let wrapper = GithubApiWrapper {
+            client_id: client_id.to_string(),
+            params,
+        };
+
+        let request = serde_json::to_string(&wrapper).unwrap();
 
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 

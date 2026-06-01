@@ -1,6 +1,6 @@
 use plaid_stl::github::{
     AddLabelsRequest, CreatePullRequestRequest, GetPullRequestOptions, GetPullRequestRequest,
-    PullRequestRequestReviewers,
+    GithubApiWrapper, PullRequestRequestReviewers,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -25,39 +25,42 @@ impl Github {
             reviewers: Vec<String>,
             team_reviewers: Vec<String>,
         }
-        let request: PullRequestRequestReviewers =
+        let request: GithubApiWrapper<PullRequestRequestReviewers> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Parse out all the parameters from our parameter string
-        let owner = self.validate_org(&request.owner)?;
-        let repo = self.validate_repository_name(&request.repo)?;
-        let pull_number = request.pull_number;
+        let owner = self.validate_org(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let pull_number = request.params.pull_number;
 
-        for reviewer in &request.reviewers {
+        for reviewer in &request.params.reviewers {
             self.validate_username(&reviewer)?;
         }
 
-        for team in &request.team_reviewers {
+        for team in &request.params.team_reviewers {
             self.validate_team_slug(&team)?;
         }
 
-        info!("Requesting reviews from users: [{}] and teams: [{}] on [{owner}/{repo}/{pull_number}] org on behalf of {module}", request.reviewers.join(", "), request.team_reviewers.join(", "));
+        info!("Requesting reviews from users: [{}] and teams: [{}] on [{owner}/{repo}/{pull_number}] org on behalf of {module}", request.params.reviewers.join(", "), request.params.team_reviewers.join(", "));
 
         let address = format!("/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers");
 
         let body = RequestReviewers {
-            reviewers: request.reviewers.clone(),
-            team_reviewers: request.team_reviewers.clone(),
+            reviewers: request.params.reviewers.clone(),
+            team_reviewers: request.params.team_reviewers.clone(),
         };
 
-        match self.make_generic_post_request(address, body, module).await {
+        match self
+            .make_generic_post_request(&request.client_id, address, body, module)
+            .await
+        {
             Ok((status, Ok(_))) => {
                 if status == 201 {
                     Ok(true)
                 } else if status == 404 {
                     Ok(false)
                 } else if status == 422 {
-                    warn!("Some of the reviewers or teams are not collaborators on this repository. Context: [{owner}/{repo}/{pull_number}]. Users: [{}] and teams: [{}]", request.reviewers.join(", "), request.team_reviewers.join(", "));
+                    warn!("Some of the reviewers or teams are not collaborators on this repository. Context: [{owner}/{repo}/{pull_number}]. Users: [{}] and teams: [{}]", request.params.reviewers.join(", "), request.params.team_reviewers.join(", "));
                     Ok(false)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
@@ -76,22 +79,22 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: CreatePullRequestRequest =
+        let request: GithubApiWrapper<CreatePullRequestRequest> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_org(&request.owner)?;
-        let repo = self.validate_repository_name(&request.repo)?;
+        let owner = self.validate_org(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
         // Build the request body, omitting optional fields if they are not set.
         let mut request_body = json!({
-            "title": request.title,
-            "head": request.head,
-            "base": request.base,
-            "draft": request.draft,
+            "title": request.params.title,
+            "head": request.params.head,
+            "base": request.params.base,
+            "draft": request.params.draft,
         });
 
         // Add the body if it exists
-        if let Some(body) = request.body {
+        if let Some(body) = request.params.body {
             request_body["body"] = json!(body);
         }
 
@@ -100,7 +103,7 @@ impl Github {
         info!("Creating pull request in [{owner}/{repo}] org on behalf of {module}");
 
         match self
-            .make_generic_post_request(address, request_body, module)
+            .make_generic_post_request(&request.client_id, address, request_body, module)
             .await
         {
             Ok((status, Ok(body))) => {
@@ -123,24 +126,28 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: GetPullRequestRequest =
+        let request: GithubApiWrapper<GetPullRequestRequest> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_org(&request.owner)?;
-        let repo = self.validate_repository_name(&request.repo)?;
+        let owner = self.validate_org(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
-        if request.per_page > 100 {
+        if request.params.per_page > 100 {
             return Err(ApiError::BadRequest);
         }
 
         let options = request
+            .params
             .options
             .map_or(Default::default(), query_string_from_options);
 
         info!("Listing pull requests in [{owner}/{repo}] org on behalf of {module}",);
         let address = format!("/repos/{owner}/{repo}/pulls?{options}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -161,21 +168,27 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request =
-            serde_json::from_str::<AddLabelsRequest>(params).map_err(|_| ApiError::BadRequest)?;
+        let request: GithubApiWrapper<AddLabelsRequest> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_org(&request.owner)?;
-        let repo = self.validate_repository_name(&request.repo)?;
+        let owner = self.validate_org(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
         info!(
             "Adding labels to issue/PR #{} in [{owner}/{repo}] org on behalf of {module}",
-            request.number
+            request.params.number
         );
 
-        let address = format!("/repos/{owner}/{repo}/issues/{}/labels", request.number);
-        let body = json!({"labels": request.labels});
+        let address = format!(
+            "/repos/{owner}/{repo}/issues/{}/labels",
+            request.params.number
+        );
+        let body = json!({"labels": request.params.labels});
 
-        match self.make_generic_post_request(address, body, module).await {
+        match self
+            .make_generic_post_request(&request.client_id, address, body, module)
+            .await
+        {
             Ok((status, Ok(_))) => {
                 if status == 200 {
                     Ok(0)

@@ -3,12 +3,13 @@ use std::fmt::Display;
 use serde::Deserialize;
 
 use crate::{
-    github::{AddOrRemoveRepoToOrgSecretParams, ListOrgSecretsForRepoParams},
+    github::{AddOrRemoveRepoToOrgSecretParams, GithubApiWrapper, ListOrgSecretsForRepoParams},
     PlaidFunctionError,
 };
 
 /// Add a repo to the list of repos that have access to an organization secret
 pub fn add_repo_to_org_secret(
+    client_id: impl Display,
     org: impl Display,
     repository: impl Display,
     secret_name: impl Display,
@@ -22,7 +23,13 @@ pub fn add_repo_to_org_secret(
         repository: repository.to_string(),
         secret_name: secret_name.to_string(),
     };
-    let params = serde_json::to_string(&params).unwrap();
+
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapped).unwrap();
     let res = unsafe {
         github_add_repo_to_org_secret(params.as_bytes().as_ptr(), params.as_bytes().len())
     };
@@ -38,6 +45,7 @@ pub fn add_repo_to_org_secret(
 
 /// Remove a repo from the list of repos that have access to an organization secret
 pub fn remove_repo_from_org_secret(
+    client_id: impl Display,
     org: impl Display,
     repository: impl Display,
     secret_name: impl Display,
@@ -51,7 +59,12 @@ pub fn remove_repo_from_org_secret(
         repository: repository.to_string(),
         secret_name: secret_name.to_string(),
     };
-    let params = serde_json::to_string(&params).unwrap();
+
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+    let params = serde_json::to_string(&wrapped).unwrap();
     let res = unsafe {
         github_remove_repo_from_org_secret(params.as_bytes().as_ptr(), params.as_bytes().len())
     };
@@ -67,6 +80,7 @@ pub fn remove_repo_from_org_secret(
 
 /// List the organization secrets that a repository has access to
 pub fn list_org_secrets_for_repo(
+    client_id: impl Display,
     org: impl Display,
     repository: impl Display,
 ) -> Result<Vec<String>, PlaidFunctionError> {
@@ -99,7 +113,12 @@ pub fn list_org_secrets_for_repo(
             per_page: None,
             page: Some(page),
         };
-        let params = serde_json::to_string(&params).unwrap();
+
+        let wrapped = GithubApiWrapper {
+            client_id: client_id.to_string(),
+            params,
+        };
+        let params = serde_json::to_string(&wrapped).unwrap();
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
         let res = unsafe {
             github_list_org_secrets_for_repo(

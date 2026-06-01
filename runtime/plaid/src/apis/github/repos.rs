@@ -1,9 +1,14 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use http::{HeaderMap, HeaderValue};
 use plaid_stl::github::{
-    CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus, CommentOnPullRequestRequest,
-    CreateFileRequest, FetchFileCustomMediaType, FetchFileRequest, GithubRepository,
+    AddUserToRepoParams, CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus,
+    CommentOnPullRequestRequest, CreateFileRequest, FetchCommitParams, FetchFileCustomMediaType,
+    FetchFileRequest, GetBranchProtectionRulesParams, GetBranchProtectionRulesetParams,
+    GetCustomPropertiesValuesParams, GetRepoCollaboratorsParams, GetRepoIdFromRepoNameParams,
+    GetRepoNameFromRepoIdParams, GetRepoSbomParams, GetWeeklyCommitCountParams, GithubApiWrapper,
+    GithubRepository, ListFilesParams, RemoveUserFromRepoParams, RequireSignedCommitsParams,
+    UpdateBranchProtectionRuleParams,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -24,20 +29,19 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<RemoveUserFromRepoParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // GitHub says this is only valid on Organization repositories. Not sure if it's ignored
         // on others? This may not work on standard accounts. Also, pull is the lowest permission level
-        let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let user = self.validate_username(&request.params.user)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
         let address = format!("/repos/{repo}/collaborators/{user}");
         info!("Removing user [{user}] from [{repo}] on behalf of {module}");
 
         match self
-            .make_generic_delete_request::<&str>(address, None, module)
+            .make_generic_delete_request::<&str>(&request.client_id, address, None, module)
             .await
         {
             Ok((status, _)) => {
@@ -60,15 +64,14 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<AddUserToRepoParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // GitHub says this is only valid on Organization repositories. Not sure if it's ignored
         // on others? This may not work on standard accounts. Also, pull is the lowest permission level
-        let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let permission = request.get("permission").unwrap_or(&"pull");
+        let user = self.validate_username(&request.params.user)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let permission = request.params.permission.as_deref().unwrap_or("pull");
 
         info!(
             "Adding user [{user}] to [{repo}] with permission [{permission}] on behalf of {module}"
@@ -85,7 +88,7 @@ impl Github {
         };
 
         match self
-            .make_generic_put_request(address, Some(&permission), module)
+            .make_generic_put_request(&request.client_id, address, Some(&permission), module)
             .await
         {
             Ok((status, _)) => {
@@ -110,19 +113,20 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<FetchCommitParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let commit =
-            self.validate_commit_hash(request.get("commit").ok_or(ApiError::BadRequest)?)?;
+        let user = self.validate_username(&request.params.user)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let commit = self.validate_commit_hash(&request.params.commit)?;
 
         info!("Fetching commit [{commit}] from [{repo}] by [{user}] on behalf of {module}");
         let address = format!("/repos/{user}/{repo}/commits/{commit}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -144,24 +148,23 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<ListFilesParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let organization =
-            self.validate_org(request.get("organization").ok_or(ApiError::BadRequest)?)?;
-        let repository_name = self.validate_repository_name(
-            request.get("repository_name").ok_or(ApiError::BadRequest)?,
-        )?;
-        let pull_request =
-            self.validate_pint(request.get("pull_request").ok_or(ApiError::BadRequest)?)?;
-        let page = self.validate_pint(request.get("page").ok_or(ApiError::BadRequest)?)?;
+        let organization = self.validate_org(&request.params.owner)?;
+        let repository_name = self.validate_repository_name(&request.params.repo)?;
+        let pull_request = self.validate_pint(&request.params.pull_request)?;
+        let page = self.validate_pint(&request.params.page)?;
 
         info!("Fetching files for Pull Request Nr {pull_request} from [{organization}/{repository_name}] on behalf of {module}");
         let address = format!(
             "/repos/{organization}/{repository_name}/pulls/{pull_request}/files?page={page}"
         );
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -183,12 +186,12 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: FetchFileRequest =
+        let request: GithubApiWrapper<FetchFileRequest> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let organization = self.validate_org(&request.organization)?;
-        let repository_name = self.validate_repository_name(&request.repository_name)?;
-        let file_path = &request.file_path;
+        let organization = self.validate_org(&request.params.organization)?;
+        let repository_name = self.validate_repository_name(&request.params.repository_name)?;
+        let file_path = &request.params.file_path;
 
         // If this call return Ok(_), it means the provided file path contains ".." which we do
         // not want to allow
@@ -199,7 +202,7 @@ impl Github {
             return Err(ApiError::BadRequest);
         }
 
-        let reference = request.reference;
+        let reference = &request.params.reference;
 
         // Reference can be commit hash OR a branch name.
         // To validate that the provided ref is valid, we must check that it is either a
@@ -210,7 +213,7 @@ impl Github {
             return Err(ApiError::BadRequest);
         }
 
-        let custom_media_type = request.media_type;
+        let custom_media_type = request.params.media_type;
 
         info!("Fetching contents of file in repository [{organization}/{repository_name}] at {file_path} and reference {reference} with encoding [{custom_media_type}]");
         let address =
@@ -228,7 +231,7 @@ impl Github {
         );
 
         match self
-            .make_get_request_with_headers(address, Some(headers), module)
+            .make_get_request_with_headers(&request.client_id, address, Some(headers), module)
             .await
         {
             Ok((status, Ok(body))) => {
@@ -252,19 +255,21 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<GetBranchProtectionRulesParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let branch =
-            self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
+        let owner = self.validate_username(&request.params.owner)?;
+
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let branch = self.validate_branch_name(&request.params.branch)?;
 
         info!("Fetching branch protection rules for branch [{branch}] in repo [{repo}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/branches/{branch}/protection");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -286,19 +291,20 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<GetBranchProtectionRulesetParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let branch =
-            self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let branch = self.validate_branch_name(&request.params.branch)?;
 
         info!("Fetching branch protection rules (as in rulesets) for branch [{branch}] in repo [{repo}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/rules/branches/{branch}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -322,26 +328,17 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<GetRepoCollaboratorsParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let per_page: u8 = request
-            .get("per_page")
-            .unwrap_or(&"30")
-            .parse::<u8>()
-            .map_err(|_| ApiError::BadRequest)?;
-        let page: u16 = request
-            .get("page")
-            .unwrap_or(&"1")
-            .parse::<u16>()
-            .map_err(|_| ApiError::BadRequest)?;
-        let affiliation = request.get("affiliation").unwrap_or(&"all");
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let per_page: u8 = request.params.per_page.unwrap_or(30);
+        let page: u16 = request.params.page.unwrap_or(1);
+        let affiliation = request.params.affiliation.as_deref().unwrap_or("all");
         // See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#list-repository-collaborators
         // for more details on the possible values for affiliation
-        if !["outside", "direct", "all"].contains(affiliation) {
+        if !["outside", "direct", "all"].contains(&affiliation) {
             return Err(ApiError::BadRequest);
         }
 
@@ -354,7 +351,10 @@ impl Github {
         let address =
             format!("/repos/{owner}/{repo}/collaborators?per_page={per_page}&affiliation={affiliation}&page={page}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -376,15 +376,13 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<String, String> =
+        let request: GithubApiWrapper<UpdateBranchProtectionRuleParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let branch =
-            self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
-        let body = request.get("body").ok_or(ApiError::BadRequest)?;
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let branch = self.validate_branch_name(&request.params.branch)?;
+        let body = &request.params.body;
         // We deserialize to a Value. This has two effects: (1) it checks that we received valid JSON,
         // and (2) it prepares the body that will be sent later with the request.
         let body =
@@ -394,7 +392,7 @@ impl Github {
         let address = format!("/repos/{owner}/{repo}/branches/{branch}/protection");
 
         match self
-            .make_generic_put_request(address, Some(&body), module)
+            .make_generic_put_request(&request.client_id, address, Some(&body), module)
             .await
         {
             Ok((status, _)) => {
@@ -417,24 +415,13 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<RequireSignedCommitsParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let branch =
-            self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
-        let activated = match request
-            .get("activated")
-            .ok_or(ApiError::BadRequest)?
-            .to_string()
-            .as_str()
-        {
-            "true" => true,
-            "false" => false,
-            _ => return Err(ApiError::BadRequest),
-        };
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let branch = self.validate_branch_name(&request.params.branch)?;
+        let activated = request.params.activated;
 
         let address =
             format!("/repos/{owner}/{repo}/branches/{branch}/protection/required_signatures");
@@ -444,7 +431,7 @@ impl Github {
             info!("Enabling signed commits requirement for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
 
             match self
-                .make_generic_post_request(address, None::<String>, module)
+                .make_generic_post_request(&request.client_id, address, None::<String>, module)
                 .await
             {
                 Ok((status, _)) => {
@@ -462,7 +449,7 @@ impl Github {
             info!("Disabling signed commits requirement for branch [{branch}] in repo [{owner}/{repo}] on behalf of {module}");
 
             match self
-                .make_generic_delete_request(address, None::<&String>, module)
+                .make_generic_delete_request(&request.client_id, address, None::<&String>, module)
                 .await
             {
                 Ok((status, _)) => {
@@ -486,17 +473,19 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<GetWeeklyCommitCountParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
         info!("Fetching weekly commit count for repo [{owner}/{repo}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/stats/participation");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -518,13 +507,13 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: CommentOnPullRequestRequest =
+        let request: GithubApiWrapper<CommentOnPullRequestRequest> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let username = self.validate_username(&request.owner)?;
-        let repository_name = self.validate_repository_name(&request.repository)?;
-        let pull_request = self.validate_pint(&request.number)?;
-        let comment = &request.comment;
+        let username = self.validate_username(&request.params.owner)?;
+        let repository_name = self.validate_repository_name(&request.params.repository)?;
+        let pull_request = self.validate_pint(&request.params.number)?;
+        let comment = &request.params.comment;
 
         info!("Commenting on Pull Request [{pull_request}] in repo [{repository_name}] on behalf of {module}");
         let address = format!("/repos/{username}/{repository_name}/issues/{pull_request}/comments");
@@ -535,7 +524,7 @@ impl Github {
         }
 
         match self
-            .make_generic_post_request(address, Body { body: comment }, module)
+            .make_generic_post_request(&request.client_id, address, Body { body: comment }, module)
             .await
         {
             Ok((status, _)) => {
@@ -558,17 +547,19 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<GetCustomPropertiesValuesParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
         info!("Getting custom properties of repo [{repo}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/properties/values");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -590,16 +581,19 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: CheckCodeownersParams =
+        let request: GithubApiWrapper<CheckCodeownersParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(&request.owner)?;
-        let repo = self.validate_repository_name(&request.repo)?;
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
         info!("Checking CODEOWNERS for repo [{owner}/{repo}] on behalf of [{module}]");
         let address = format!("/repos/{owner}/{repo}/codeowners/errors");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     // Deserialize the body and see if we had errors
@@ -643,27 +637,27 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: CreateFileRequest =
+        let request: GithubApiWrapper<CreateFileRequest> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_org(&request.owner)?;
-        let repo = self.validate_repository_name(&request.repo)?;
-        let path = self.validate_path(&request.path)?;
-        let file_hash = sha256_hex(&request.content);
+        let owner = self.validate_org(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let path = self.validate_path(&request.params.path)?;
+        let file_hash = sha256_hex(&request.params.content);
 
         info!("Creating file with hash [{file_hash}] at [{path}] in repository [{owner}/{repo}] on behalf of [{module}]");
         let address = format!("/repos/{owner}/{repo}/contents/{path}");
 
         let mut body = json!({
-            "message": request.message,
-            "content": base64::encode(&request.content),
+            "message": request.params.message,
+            "content": base64::encode(&request.params.content),
         });
-        if let Some(branch) = request.branch {
+        if let Some(branch) = request.params.branch {
             body["branch"] = json!(branch);
         }
 
         match self
-            .make_generic_put_request(address, Some(&body), module)
+            .make_generic_put_request(&request.client_id, address, Some(&body), module)
             .await
         {
             Ok((status, Ok(_))) => {
@@ -687,17 +681,19 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<GetRepoSbomParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
         info!("Fetching SBOM for repo [{owner}/{repo}] on behalf of [{module}]");
         let address = format!("/repos/{owner}/{repo}/dependency-graph/sbom");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
@@ -719,20 +715,20 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<GetRepoIdFromRepoNameParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
-        self.get_repo_id_from_repo_name_internal(&owner, &repo, module)
+        self.get_repo_id_from_repo_name_internal(&request.client_id, &owner, &repo, module)
             .await
     }
 
     /// Internal function to get a repo ID from its name, so that it can be called from different places in the runtime
     pub async fn get_repo_id_from_repo_name_internal(
         &self,
+        client_id: &str,
         owner: &str,
         repo: &str,
         module: Arc<PlaidModule>,
@@ -740,7 +736,10 @@ impl Github {
         info!("Getting repo ID for repo [{owner}/{repo}] on behalf of [{module}]");
         let address = format!("/repos/{owner}/{repo}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     let repo_info: GithubRepository = serde_json::from_str(&body)
@@ -762,15 +761,21 @@ impl Github {
     /// Related to https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#get-a-repository
     pub async fn get_repo_name_from_repo_id(
         &self,
-        repo_id: &str,
+        params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let repo_id = self.validate_repo_id(repo_id)?;
+        let request: GithubApiWrapper<GetRepoNameFromRepoIdParams> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let repo_id = self.validate_repo_id(&request.params.repo_id)?;
 
         info!("Getting repo name for repo ID [{repo_id}] on behalf of [{module}]");
         let address = format!("/repositories/{repo_id}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     let repo_info: GithubRepository = serde_json::from_str(&body)

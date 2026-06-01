@@ -3,11 +3,20 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    github::{CommentOnPullRequestRequest, PullRequestRequestReviewers},
+    github::{CommentOnPullRequestRequest, GithubApiWrapper, PullRequestRequestReviewers},
     PlaidFunctionError,
 };
 
+#[derive(Serialize, Deserialize)]
+pub struct ListFilesParams {
+    pub owner: String,
+    pub repo: String,
+    pub pull_request: String,
+    pub page: String,
+}
+
 pub fn list_files(
+    client_id: impl Display,
     organization: &str,
     repository_name: &str,
     pull_request: &str,
@@ -18,22 +27,18 @@ pub fn list_files(
     }
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
-    #[derive(Serialize)]
-    struct Request<'a> {
-        organization: &'a str,
-        repository_name: &'a str,
-        pull_request: &'a str,
-        page: &'a str,
-    }
-
-    let request = Request {
-        organization,
-        repository_name,
-        pull_request,
-        page,
+    let request = ListFilesParams {
+        owner: organization.to_string(),
+        repo: repository_name.to_string(),
+        pull_request: pull_request.to_string(),
+        page: page.to_string(),
+    };
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
     };
 
-    let request = serde_json::to_string(&request).unwrap();
+    let request = serde_json::to_string(&wrapped).unwrap();
 
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -59,6 +64,7 @@ pub fn list_files(
 }
 
 pub fn comment_on_pull_request(
+    client_id: impl Display,
     username: impl Display,
     repository_name: impl Display,
     pull_request: impl Display,
@@ -75,7 +81,12 @@ pub fn comment_on_pull_request(
         comment: comment.to_string(),
     };
 
-    let request = serde_json::to_string(&request).unwrap();
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+
+    let request = serde_json::to_string(&wrapped).unwrap();
 
     let res = unsafe {
         github_comment_on_pull_request(request.as_bytes().as_ptr(), request.as_bytes().len())
@@ -91,6 +102,7 @@ pub fn comment_on_pull_request(
 /// Request a reviewer on a PR
 /// For more details, see https://docs.github.com/en/rest/pulls/review-requests?apiVersion=2022-11-28#request-reviewers-for-a-pull-request
 pub fn pull_request_request_reviewers(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     pull_request: u64,
@@ -109,7 +121,12 @@ pub fn pull_request_request_reviewers(
         team_reviewers: team_reviewers.iter().map(|s| s.to_string()).collect(),
     };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapped).unwrap();
     let res = unsafe {
         github_pull_request_request_reviewers(params.as_bytes().as_ptr(), params.as_bytes().len())
     };
@@ -128,7 +145,7 @@ pub fn pull_request_request_reviewers(
 /// Represents the top-level parameters needed to query pull requests
 /// for a given repository, including the repository owner, name, and
 /// optional filter options.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct GetPullRequestRequest {
     /// Owner of the repository (e.g., GitHub username or org).
     pub owner: String,
@@ -146,7 +163,7 @@ pub struct GetPullRequestRequest {
 ///
 /// Each field is optional; if none are provided, the request will
 /// return all pull requests for the repository.
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct GetPullRequestOptions {
     /// Filter pull requests by state (`open`, `closed`, or `all`).
     ///
@@ -241,7 +258,7 @@ impl GetPullRequestOptionsBuilder {
 }
 
 /// Possible states of a pull request.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum PullRequestState {
     /// Only open pull requests.
     Open,
@@ -368,6 +385,7 @@ pub struct CreatePullRequestRequest {
 /// - `Ok(Vec<PullRequest>)` with all matching pull requests, or
 /// - `Err(PlaidFunctionError)` if the request fails.
 pub fn get_pull_requests(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     options: Option<GetPullRequestOptions>,
@@ -389,7 +407,11 @@ pub fn get_pull_requests(
     let mut prs = Vec::<PullRequest>::new();
 
     loop {
-        let request = serde_json::to_string(&request_base).unwrap();
+        let wrapped = GithubApiWrapper {
+            client_id: client_id.to_string(),
+            params: request_base.clone(),
+        };
+        let request = serde_json::to_string(&wrapped).unwrap();
 
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
         let res = unsafe {
@@ -452,6 +474,7 @@ pub fn get_pull_requests(
 /// - `Err(PlaidFunctionError)` if the request fails (e.g., invalid branches,
 ///   missing permissions, or Plaid system misconfiguration).
 pub fn create_pull_request(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     title: impl Display,
@@ -474,7 +497,12 @@ pub fn create_pull_request(
         draft,
     };
 
-    let request = serde_json::to_string(&request).unwrap();
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+
+    let request = serde_json::to_string(&wrapped).unwrap();
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 5; // 5 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -530,6 +558,7 @@ pub struct AddLabelsRequest {
 /// - `Ok(())` if the labels were successfully added, or
 /// - `Err(PlaidFunctionError)` if the request fails.
 pub fn add_labels(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     number: u32,
@@ -546,7 +575,12 @@ pub fn add_labels(
         labels: labels.into_iter().map(|s| s.to_string()).collect(),
     };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapped).unwrap();
     let res = unsafe { github_add_labels(params.as_bytes().as_ptr(), params.as_bytes().len()) };
 
     // There was an error with the Plaid system. Maybe the API is not

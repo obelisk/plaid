@@ -1,10 +1,11 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use serde::Serialize;
 
-use crate::PlaidFunctionError;
+use crate::{github::GithubApiWrapper, PlaidFunctionError};
 
 pub fn make_graphql_query(
+    client_id: impl Display,
     query_name: &str,
     variables: HashMap<String, String>,
 ) -> Result<String, PlaidFunctionError> {
@@ -24,7 +25,12 @@ pub fn make_graphql_query(
         variables,
     };
 
-    let query = serde_json::to_string(&request).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+
+    let query = serde_json::to_string(&wrapper).unwrap();
 
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -50,6 +56,7 @@ pub fn make_graphql_query(
 }
 
 pub fn make_advanced_graphql_query(
+    client_id: impl Display,
     query_name: &str,
     variables: HashMap<String, serde_json::Value>,
 ) -> Result<String, PlaidFunctionError> {
@@ -69,7 +76,12 @@ pub fn make_advanced_graphql_query(
         variables,
     };
 
-    let query = serde_json::to_string(&request).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+
+    let query = serde_json::to_string(&wrapper).unwrap();
 
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
