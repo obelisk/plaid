@@ -267,10 +267,16 @@ impl Github {
 pub fn build_github_clients(
     authentication: &HashMap<String, Authentication>,
 ) -> Result<HashMap<String, Octocrab>, ApiError> {
+    if authentication.is_empty() {
+        return Err(ApiError::GitHubError(GitHubError::InvalidInput(
+            "At least one GitHub client must be configured".to_string(),
+        )));
+    }
+
     authentication
         .iter()
         .map(|(key, auth)| {
-            let client = match auth {
+            let mut client = match auth {
                 Authentication::NoAuth {} => {
                     info!("Configuring GitHub client without authentication for [{key}]");
                     Octocrab::builder().with_auth(NoAuth {})
@@ -291,7 +297,6 @@ pub fn build_github_clients(
                         "Failed to create encoding key from private key for GitHub API for [{key}]"
                     )))
                         })?;
-
                     Octocrab::builder().app((*app_id).into(), encoding_key)
                 }
             }
@@ -301,6 +306,16 @@ pub fn build_github_clients(
             )
             .build()
             .map_err(|e| ApiError::GitHubError(GitHubError::ClientError(e)))?;
+
+            if let Authentication::App {
+                installation_id, ..
+            } = auth
+            {
+                match client.installation((*installation_id).into()) {
+                    Ok(installation_client) => client = installation_client,
+                    Err(e) => return Err(ApiError::GitHubError(GitHubError::ClientError(e))),
+                }
+            }
 
             Ok((key.clone(), client))
         })

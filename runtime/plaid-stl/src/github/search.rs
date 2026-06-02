@@ -67,6 +67,7 @@ pub fn search_code(
             // * Those that have to be (or are better) evaluated module-side. These are not passed to the API and
             // are processed later here.
             repo: search_criteria.and_then(|c| {
+                c.only_from_org.as_ref()?;
                 if let Some(RepoFilter::OnlyFromRepos { repos }) = &c.repo_filter {
                     if repos.len() == 1 {
                         return Some(repos[0].clone());

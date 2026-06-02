@@ -85,11 +85,11 @@ impl Github {
     /// See https://docs.github.com/en/rest/users/users?apiVersion=2022-11-28#get-a-user
     pub async fn get_user_id_from_username(
         &self,
-        username: &str,
+        params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request: GithubApiWrapper<String> =
-            serde_json::from_str(username).map_err(|_| ApiError::BadRequest)?;
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let username = self.validate_username(&request.params)?;
 
         info!("Getting user ID for username [{username}] on behalf of [{module}]");
@@ -119,11 +119,11 @@ impl Github {
     /// See https://docs.github.com/en/rest/users/users?apiVersion=2022-11-28#get-a-user-using-their-id
     pub async fn get_username_from_user_id(
         &self,
-        user_id: &str,
+        params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request: GithubApiWrapper<String> =
-            serde_json::from_str(user_id).map_err(|_| ApiError::BadRequest)?;
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let user_id = self.validate_user_id(&request.params)?;
 
         info!("Getting username for user ID [{user_id}] on behalf of [{module}]");

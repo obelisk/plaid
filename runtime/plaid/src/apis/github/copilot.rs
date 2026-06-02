@@ -71,7 +71,7 @@ impl Github {
         let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
         match self
-            .make_generic_post_request(&request.client_id, address, &request, module)
+            .make_generic_post_request(&request.client_id, address, &request.params, module)
             .await
         {
             Ok((status, Ok(body))) => {
@@ -111,7 +111,7 @@ impl Github {
         let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
         match self
-            .make_generic_delete_request(&request.client_id, address, Some(&request), module)
+            .make_generic_delete_request(&request.client_id, address, Some(&request.params), module)
             .await
         {
             Ok((status, Ok(body))) => {

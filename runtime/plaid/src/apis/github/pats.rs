@@ -4,6 +4,7 @@ use plaid_stl::github::{
     GetReposForFpatParams, GithubApiWrapper, ListFpatRequestsForOrgParams,
     ReviewFpatRequestsForOrgParams,
 };
+use serde::Serialize;
 
 use crate::{
     apis::{github::GitHubError, ApiError},
@@ -114,8 +115,21 @@ impl Github {
         }
         let address = format!("/orgs/{org}/personal-access-token-requests");
 
+        #[derive(Serialize)]
+        struct RequestBody {
+            pat_request_ids: Vec<u64>,
+            action: String,
+            reason: String,
+        }
+
+        let body = RequestBody {
+            pat_request_ids: request.params.pat_request_ids,
+            action: request.params.action,
+            reason: request.params.reason,
+        };
+
         match self
-            .make_generic_post_request(&request.client_id, address, &request, module.clone())
+            .make_generic_post_request(&request.client_id, address, &body, module.clone())
             .await
         {
             Ok((status, Ok(body))) => {
