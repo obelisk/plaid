@@ -138,7 +138,6 @@ pub fn list_all_copilot_subscription_seats(
 
 #[derive(Deserialize, Serialize)]
 pub struct AddUsersToOrgCopilotParams {
-    #[serde(skip_serializing)]
     pub org: String,
     pub selected_usernames: Vec<String>,
 }
@@ -199,7 +198,6 @@ pub fn add_user_to_copilot_subscription(
 
 #[derive(Deserialize, Serialize)]
 pub struct RemoveUsersFromOrgCopilotParams {
-    #[serde(skip_serializing)]
     pub org: String,
     pub selected_usernames: Vec<String>,
 }

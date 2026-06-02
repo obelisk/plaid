@@ -7,6 +7,7 @@ use plaid_stl::github::{
     AddUsersToOrgCopilotParams, GithubApiWrapper, ListSeatsInOrgCopilotParams,
     RemoveUsersFromOrgCopilotParams,
 };
+use serde::Serialize;
 
 use std::sync::Arc;
 
@@ -70,8 +71,17 @@ impl Github {
 
         let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
+        #[derive(Serialize)]
+        struct RequestBody {
+            selected_usernames: Vec<String>,
+        }
+
+        let body = RequestBody {
+            selected_usernames: request.params.selected_usernames.clone(),
+        };
+
         match self
-            .make_generic_post_request(&request.client_id, address, &request.params, module)
+            .make_generic_post_request(&request.client_id, address, &body, module)
             .await
         {
             Ok((status, Ok(body))) => {
@@ -110,8 +120,17 @@ impl Github {
 
         let address = format!("/orgs/{organization}/copilot/billing/selected_users");
 
+        #[derive(Serialize)]
+        struct RequestBody {
+            selected_usernames: Vec<String>,
+        }
+
+        let body = RequestBody {
+            selected_usernames: request.params.selected_usernames.clone(),
+        };
+
         match self
-            .make_generic_delete_request(&request.client_id, address, Some(&request.params), module)
+            .make_generic_delete_request(&request.client_id, address, Some(&body), module)
             .await
         {
             Ok((status, Ok(body))) => {
