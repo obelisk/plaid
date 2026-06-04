@@ -32,6 +32,11 @@ impl Github {
 
         let file_content = request.params.file_content.clone().unwrap_or_default();
 
+        if file_content.contains([':', '"', '\'', '(', ')', '&', '|', '\n', '\r', '\t']) {
+            // These characters have special meaning in GitHub's search syntax and could be used for injection attacks, so we reject them outright.
+            return Err(ApiError::BadRequest);
+        }
+
         let filename = match request.params.filename {
             None => String::new(),
             Some(filename) => format!("filename:{}", self.validate_filename(&filename)?),
