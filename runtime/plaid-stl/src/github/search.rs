@@ -1,9 +1,25 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
+
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    github::{CodeSearchCriteria, FileSearchResult, FileSearchResultItem, RepoFilter},
+    github::{
+        CodeSearchCriteria, FileSearchResult, FileSearchResultItem, GithubApiWrapper, RepoFilter,
+    },
     PlaidFunctionError,
 };
+
+#[derive(Serialize, Deserialize)]
+pub struct SearchCodeParams {
+    pub file_content: Option<String>,
+    pub filename: Option<String>,
+    pub extension: Option<String>,
+    pub path: Option<String>,
+    pub org: Option<String>,
+    pub repo: Option<String>,
+    pub per_page: Option<u8>,
+    pub page: Option<u16>,
+}
 
 /// Search for code in GitHub.
 /// If additional selection criteria are given, these are used to decide whether
@@ -15,6 +31,7 @@ use crate::{
 /// - `path`: The path under which files are searched, e.g., "src"
 /// - `search_criteria`: An optional `CodeSearchCriteria` object with additional search criteria
 pub fn search_code(
+    client_id: impl Display,
     filename: Option<impl Display>,
     extension: Option<impl Display>,
     path: Option<impl Display>,
@@ -25,56 +42,49 @@ pub fn search_code(
         new_host_function_with_error_buffer!(github, search_code);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    if let Some(filename) = filename {
-        params.insert("filename", filename.to_string());
-    }
-    if let Some(extension) = extension {
-        params.insert("extension", extension.to_string());
-    }
-    if let Some(path) = path {
-        params.insert("path", path.to_string());
-    }
-    if let Some(content) = file_content {
-        params.insert("file_content", content.to_string());
-    }
-
-    // If we are given selection criteria, then we divide them between
-    //
-    // * Those that can be baked directly into the GitHub search query, thus making the overall search more
-    // efficient (because less results are returned). These are passed to the API.
-    //
-    // * Those that have to be (or are better) evaluated module-side. These are not passed to the API and
-    // are processed later here.
-
-    if let Some(criteria) = search_criteria {
-        if let Some(org) = &criteria.only_from_org {
-            // Search only inside an organization
-            params.insert("org", org.clone());
-
-            if let Some(RepoFilter::OnlyFromRepos { repos }) = &criteria.repo_filter {
-                if repos.len() == 1 {
-                    // Special case: search only in a repository
-                    params.insert("repo", repos[0].clone());
-                }
-            }
-        }
-    }
-
     let mut search_results = Vec::<FileSearchResultItem>::new();
     let mut page = 0;
 
-    // Use a larger page size to make less requests and reduce chances of hitting the rate limit
+    // Use a larger page size to make fewer requests and reduce chances of hitting the rate limit
     let per_page = 100;
-    params.insert("per_page", per_page.to_string());
 
     const RETURN_BUFFER_SIZE: usize = 1 * 1024 * 1024; // 1 MiB
 
     loop {
         page += 1;
-        params.insert("page", page.to_string());
 
-        let request = serde_json::to_string(&params).unwrap(); // safe unwrap
+        let params = SearchCodeParams {
+            filename: filename.as_ref().map(|f| f.to_string()),
+            extension: extension.as_ref().map(|e| e.to_string()),
+            path: path.as_ref().map(|p| p.to_string()),
+            file_content: file_content.as_ref().map(|c| c.to_string()),
+            org: search_criteria.and_then(|c| c.only_from_org.clone()),
+            // If we are given selection criteria, then we divide them between
+            //
+            // * Those that can be baked directly into the GitHub search query, thus making the overall search more
+            // efficient (because less results are returned). These are passed to the API.
+            //
+            // * Those that have to be (or are better) evaluated module-side. These are not passed to the API and
+            // are processed later here.
+            repo: search_criteria.and_then(|c| {
+                c.only_from_org.as_ref()?;
+                if let Some(RepoFilter::OnlyFromRepos { repos }) = &c.repo_filter {
+                    if repos.len() == 1 {
+                        return Some(repos[0].clone());
+                    }
+                }
+                None
+            }),
+            per_page: Some(per_page),
+            page: Some(page),
+        };
+
+        let wrapper = GithubApiWrapper {
+            client_id: client_id.to_string(),
+            params,
+        };
+
+        let request = serde_json::to_string(&wrapper).unwrap(); // safe unwrap
 
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -110,7 +120,7 @@ pub fn search_code(
 
         // If we did not fill this page, we know there won't be a next one.
         // So we can stop here and save one API call.
-        if received_page_size < per_page {
+        if received_page_size < per_page as usize {
             break;
         }
     }

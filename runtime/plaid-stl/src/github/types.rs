@@ -158,7 +158,10 @@ pub struct GithubFileContent {
 
 impl FileSearchResultItem {
     /// Retrieve the content of the search result
-    pub fn retrieve_raw_content(&self) -> Result<String, PlaidFunctionError> {
+    pub fn retrieve_raw_content(
+        &self,
+        client_id: impl Display,
+    ) -> Result<String, PlaidFunctionError> {
         let reference_regex = regex::Regex::new(r"^.*?ref=([a-f0-9]{40})$").unwrap(); // TODO improve
         let reference = reference_regex
             .captures(&self.url)
@@ -167,6 +170,7 @@ impl FileSearchResultItem {
             .ok_or(PlaidFunctionError::InternalApiError)?
             .as_str();
         let content = super::fetch_file(
+            client_id,
             &self.repository.owner.login,
             &self.repository.name,
             &self.path,
@@ -360,6 +364,21 @@ impl Display for FetchFileCustomMediaType {
 /*******************************************************************************************
    MISCELLANEA
 *******************************************************************************************/
+
+#[derive(Serialize, Deserialize)]
+pub struct GithubApiWrapper<T> {
+    pub client_id: String,
+    pub params: T,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ConfigureSecretParams {
+    pub owner: String,
+    pub repo: String,
+    pub env_name: Option<String>,
+    pub secret_name: String,
+    pub secret: String,
+}
 
 /// A GitHub user.
 /// Note - We only deserialize the fields we care about.

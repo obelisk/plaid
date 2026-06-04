@@ -139,7 +139,7 @@ root_certificate = """
 # "User-Agent" = "Plaid/0.10"
 
 [apis."github"]
-[apis."github".authentication]
+[apis."github".authentication.noauth]
 # Nothing here means no authentication
 [apis."github".graphql_queries]
 
@@ -366,4 +366,3 @@ rules_and_actions = { "some_rule.wasm"  = ["Encrypt", "Decrypt"] }
 # [apis.gcp.bigquery.schemas."<some-dataset>"."table1"]
 # column1 = "string"
 # colum2 = "float"
-

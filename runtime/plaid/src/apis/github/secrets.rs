@@ -5,10 +5,13 @@ use crate::{
 };
 
 use alkali::asymmetric::seal;
-use plaid_stl::github::{AddOrRemoveRepoToOrgSecretParams, ListOrgSecretsForRepoParams};
+use plaid_stl::github::{
+    AddOrRemoveRepoToOrgSecretParams, ConfigureSecretParams, GithubApiWrapper,
+    ListOrgSecretsForRepoParams,
+};
 use serde::Serialize;
 use serde_json::Value;
-use std::{collections::HashMap, fmt::Display, sync::Arc};
+use std::{fmt::Display, sync::Arc};
 
 /// GitHub's maximum secret size limit in bytes (48KiB)
 const GITHUB_SECRET_MAX_BYTES: usize = 48 * 1024; // 49,152 bytes
@@ -38,11 +41,12 @@ impl Github {
     /// given the API address to fetch the public key from (which differs based on the type of secret)
     async fn get_pub_key_for_secret_encryption(
         &self,
+        client_id: impl Display,
         address: impl Display,
         module: Arc<PlaidModule>,
     ) -> Result<(String, String), ApiError> {
         let (status, body) = self
-            .make_generic_get_request(address.to_string(), module.clone())
+            .make_generic_get_request(client_id, address.to_string(), module.clone())
             .await?;
         if status != 200 {
             return Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
@@ -78,20 +82,18 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<ConfigureSecretParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
         // Validate an env name if present
-        let env_name = match request.get("env_name") {
+        let env_name = match &request.params.env_name {
             Some(name) => Some(self.validate_environment_name(name)?),
             None => None,
         };
-        let secret_name =
-            self.validate_secret_name(request.get("secret_name").ok_or(ApiError::BadRequest)?)?;
-        let secret = request.get("secret").ok_or(ApiError::BadRequest)?;
+        let secret_name = self.validate_secret_name(&request.params.secret_name)?;
+        let secret = &request.params.secret;
 
         // Validate secret length against GitHub's 48KiB limit
         if secret.len() > GITHUB_SECRET_MAX_BYTES {
@@ -119,7 +121,7 @@ impl Github {
             }
         };
         let (pub_key, key_id) = self
-            .get_pub_key_for_secret_encryption(address, module.clone())
+            .get_pub_key_for_secret_encryption(&request.client_id, address, module.clone())
             .await?;
 
         // 2. Encrypt the secret under the pub key
@@ -159,7 +161,7 @@ impl Github {
         };
 
         match self
-            .make_generic_put_request(address, Some(&body), module)
+            .make_generic_put_request(&request.client_id, address, Some(&body), module)
             .await
         {
             Ok((status, _)) => {
@@ -179,6 +181,7 @@ impl Github {
 
     async fn execute_org_secret_action(
         &self,
+        client_id: impl Display,
         request: &AddOrRemoveRepoToOrgSecretParams,
         action: RepoToOrgSecretAction,
         module: Arc<PlaidModule>,
@@ -188,7 +191,12 @@ impl Github {
         let repository = self.validate_repository_name(&request.repository)?;
 
         let repo_id = self
-            .get_repo_id_from_repo_name_internal(&org, &repository, module.clone())
+            .get_repo_id_from_repo_name_internal(
+                &client_id.to_string(),
+                &org,
+                &repository,
+                module.clone(),
+            )
             .await?;
 
         let address = format!("/orgs/{org}/actions/secrets/{secret_name}/repositories/{repo_id}");
@@ -199,7 +207,7 @@ impl Github {
         // So we use a macro to avoid duplicating code and to keep the match DRY.
         macro_rules! org_secret_action {
             ($method:ident, $action:expr) => {
-                match self.$method(address, None::<&String>, module.clone()).await {
+                match self.$method(client_id, address, None::<&String>, module.clone()).await {
                     Ok((status, _)) if status == 204 => {
                         info!("[{module}] {action} organization secret [{secret_name}] on [{repository}]");
                         Ok(0)
@@ -227,11 +235,16 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: AddOrRemoveRepoToOrgSecretParams =
+        let request: GithubApiWrapper<AddOrRemoveRepoToOrgSecretParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        self.execute_org_secret_action(&request, RepoToOrgSecretAction::Add, module)
-            .await
+        self.execute_org_secret_action(
+            request.client_id,
+            &request.params,
+            RepoToOrgSecretAction::Add,
+            module,
+        )
+        .await
     }
 
     /// Remove a repository from the list of repositories that have access to an organization secret
@@ -241,11 +254,16 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: AddOrRemoveRepoToOrgSecretParams =
+        let request: GithubApiWrapper<AddOrRemoveRepoToOrgSecretParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        self.execute_org_secret_action(&request, RepoToOrgSecretAction::Remove, module)
-            .await
+        self.execute_org_secret_action(
+            request.client_id,
+            &request.params,
+            RepoToOrgSecretAction::Remove,
+            module,
+        )
+        .await
     }
 
     /// List the organization secrets that a repository has access to
@@ -255,22 +273,25 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: ListOrgSecretsForRepoParams =
+        let request: GithubApiWrapper<ListOrgSecretsForRepoParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let org = self.validate_org(&request.org)?;
-        let repository = self.validate_repository_name(&request.repository)?;
+        let org = self.validate_org(&request.params.org)?;
+        let repository = self.validate_repository_name(&request.params.repository)?;
 
         // Note: we do not validate these values because they come in encoded as u32, and that's all we need.
         // Therefore, the validation is in the fact that they were able to be deserialized.
-        let per_page = request.per_page.unwrap_or(30);
-        let page = request.page.unwrap_or(1);
+        let per_page = request.params.per_page.unwrap_or(30);
+        let page = request.params.page.unwrap_or(1);
 
         info!("Listing organization secrets that can be accessed by repository [{repository}] on behalf of [{module}]");
 
         let url = format!("/repos/{org}/{repository}/actions/organization-secrets?per_page={per_page}&page={page}");
 
-        match self.make_generic_get_request(url, module).await {
+        match self
+            .make_generic_get_request(request.client_id, url, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)

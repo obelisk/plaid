@@ -1,11 +1,13 @@
-use plaid_stl::github::GitHubUser;
+use plaid_stl::github::{
+    CheckOrgMembershipParams, GitHubUser, GithubApiWrapper, RemoveOutsideCollaboratorParams,
+};
 
 use super::Github;
 use crate::{
     apis::{github::GitHubError, ApiError},
     loader::PlaidModule,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 impl Github {
     /// Check if a user belongs to an org
@@ -15,17 +17,20 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<bool, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<CheckOrgMembershipParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Parse out all the parameters from our parameter string
-        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
-        let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
+        let org = self.validate_org(&request.params.org)?;
+        let user = self.validate_username(&request.params.user)?;
 
         info!("Checking if user [{user}] is part the [{org}] org on behalf of {module}");
         let address = format!("/orgs/{org}/members/{user}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(_))) => {
                 if status == 204 {
                     Ok(true)
@@ -49,17 +54,17 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<RemoveOutsideCollaboratorParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
-        let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
+        let org = self.validate_org(&request.params.org)?;
+        let user = self.validate_username(&request.params.user)?;
 
         info!("Removing outside collaborator [{user}] from org [{org}] on behalf of {module}");
         let address = format!("/orgs/{org}/outside_collaborators/{user}");
 
         match self
-            .make_generic_delete_request::<&str>(address, None, module)
+            .make_generic_delete_request::<&str>(&request.client_id, address, None, module)
             .await
         {
             Ok((status, Ok(_))) => {
@@ -80,15 +85,20 @@ impl Github {
     /// See https://docs.github.com/en/rest/users/users?apiVersion=2022-11-28#get-a-user
     pub async fn get_user_id_from_username(
         &self,
-        username: &str,
+        params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let username = self.validate_username(username)?;
+        let request: GithubApiWrapper<String> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let username = self.validate_username(&request.params)?;
 
         info!("Getting user ID for username [{username}] on behalf of [{module}]");
         let address = format!("/users/{username}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     let user_info: GitHubUser = serde_json::from_str(&body)
@@ -109,15 +119,20 @@ impl Github {
     /// See https://docs.github.com/en/rest/users/users?apiVersion=2022-11-28#get-a-user-using-their-id
     pub async fn get_username_from_user_id(
         &self,
-        user_id: &str,
+        params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let user_id = self.validate_user_id(user_id)?;
+        let request: GithubApiWrapper<String> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let user_id = self.validate_user_id(&request.params)?;
 
         info!("Getting username for user ID [{user_id}] on behalf of [{module}]");
         let address = format!("/user/{user_id}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     let user_info: GitHubUser = serde_json::from_str(&body)

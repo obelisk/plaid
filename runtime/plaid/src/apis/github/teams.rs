@@ -1,5 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
+use plaid_stl::github::{
+    AddRepoToTeamParams, AddUserToTeamParams, GetRepoTeamsParams, GithubApiWrapper,
+    RemoveRepoFromTeamParams, RemoveUserFromTeamParams,
+};
 use serde::Serialize;
 
 use super::Github;
@@ -66,20 +70,19 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<RemoveUserFromTeamParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Parse out all the parameters from our parameter string
-        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
-        let team_slug =
-            self.validate_team_slug(request.get("team_slug").ok_or(ApiError::BadRequest)?)?;
-        let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
+        let org = self.validate_org(&request.params.org)?;
+        let team_slug = self.validate_team_slug(&request.params.team_slug)?;
+        let user = self.validate_username(&request.params.user)?;
 
         info!("Removing user [{user}] from [{team_slug}] in [{org}] on behalf of {module}");
         let address = format!("/orgs/{org}/teams/{team_slug}/memberships/{user}");
 
         match self
-            .make_generic_delete_request::<&str>(address, None, module)
+            .make_generic_delete_request::<&str>(&request.client_id, address, None, module)
             .await
         {
             Ok((status, _)) => {
@@ -101,16 +104,15 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<AddUserToTeamParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Parse out all the parameters from our parameter string
-        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
-        let team_slug =
-            self.validate_team_slug(request.get("team_slug").ok_or(ApiError::BadRequest)?)?;
-        let user = self.validate_username(request.get("user").ok_or(ApiError::BadRequest)?)?;
+        let org = self.validate_org(&request.params.org)?;
+        let team_slug = self.validate_team_slug(&request.params.team_slug)?;
+        let user = self.validate_username(&request.params.user)?;
 
-        let role = request.get("role").ok_or(ApiError::BadRequest)?;
+        let role = &request.params.role;
 
         info!("Adding user [{user}] to [{team_slug}] in [{org}] as [{role}] on behalf of {module}");
         #[derive(Serialize)]
@@ -125,7 +127,7 @@ impl Github {
         let address = format!("/orgs/{org}/teams/{team_slug}/memberships/{user}");
 
         match self
-            .make_generic_put_request(address, Some(&role), module)
+            .make_generic_put_request(&request.client_id, address, Some(&role), module)
             .await
         {
             Ok((status, _)) => {
@@ -147,19 +149,15 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<AddRepoToTeamParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Parse out all the parameters
-        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
-        let team_slug =
-            self.validate_team_slug(request.get("team_slug").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let permission = request
-            .get("permission")
-            .and_then(|p| Permission::from_str(*p).ok())
-            .ok_or(ApiError::BadRequest)?;
+        let org = self.validate_org(&request.params.org)?;
+        let team_slug = self.validate_team_slug(&request.params.team_slug)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let permission =
+            Permission::from_str(&request.params.permission).map_err(|_| ApiError::BadRequest)?;
 
         info!("Adding team [{team_slug}] to repo [{repo}] with permission [{permission}] on behalf of [{module}]");
         let address = format!("/orgs/{org}/teams/{team_slug}/repos/{org}/{repo}");
@@ -167,7 +165,12 @@ impl Github {
         let permission_payload = PermissionPayload::from(&permission);
 
         match self
-            .make_generic_put_request(address, Some(&permission_payload), module)
+            .make_generic_put_request(
+                &request.client_id,
+                address,
+                Some(&permission_payload),
+                module,
+            )
             .await
         {
             Ok((status, _)) => {
@@ -189,21 +192,19 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<RemoveRepoFromTeamParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Parse out all the parameters
-        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
-        let team_slug =
-            self.validate_team_slug(request.get("team_slug").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let org = self.validate_org(&request.params.org)?;
+        let team_slug = self.validate_team_slug(&request.params.team_slug)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
         info!("Removing team [{team_slug}] from repo [{repo}] on behalf of [{module}]");
         let address = format!("/orgs/{org}/teams/{team_slug}/repos/{org}/{repo}");
 
         match self
-            .make_generic_delete_request::<&str>(address, None, module)
+            .make_generic_delete_request::<&str>(&request.client_id, address, None, module)
             .await
         {
             Ok((status, _)) => {
@@ -225,29 +226,23 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<GetRepoTeamsParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         // Parse out all the parameters
-        let org = self.validate_org(request.get("org").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
+        let org = self.validate_org(&request.params.org)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
 
-        let per_page: u8 = request
-            .get("per_page")
-            .unwrap_or(&"30")
-            .parse::<u8>()
-            .map_err(|_| ApiError::BadRequest)?;
-        let page: u16 = request
-            .get("page")
-            .unwrap_or(&"1")
-            .parse::<u16>()
-            .map_err(|_| ApiError::BadRequest)?;
+        let per_page: u8 = request.params.per_page.unwrap_or(30);
+        let page: u16 = request.params.page.unwrap_or(1);
 
         info!("Getting teams with access to repo [{repo}] on behalf of [{module}]");
         let address = format!("/repos/{org}/{repo}/teams?per_page={per_page}&page={page}");
 
-        match self.make_generic_get_request(address, module).await {
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)

@@ -1,5 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
+use plaid_stl::github::{
+    CreateDeploymentBranchProtectionRuleParams, CreateEnvironmentForRepoParams, GithubApiWrapper,
+};
 use serde::Serialize;
 
 use crate::{
@@ -61,14 +64,12 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<CreateEnvironmentForRepoParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let env_name =
-            self.validate_environment_name(request.get("env_name").ok_or(ApiError::BadRequest)?)?;
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let env_name = self.validate_environment_name(&request.params.env_name)?;
 
         info!(
             "Creating and configuring environment [{env_name}] in repo [{owner}/{repo}] on behalf of [{module}]"
@@ -87,7 +88,7 @@ impl Github {
         };
 
         match self
-            .make_generic_put_request(address, Some(&body), module)
+            .make_generic_put_request(&request.client_id, address, Some(&body), module)
             .await
         {
             Ok((status, _)) => {
@@ -110,16 +111,13 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<u32, ApiError> {
-        let request: HashMap<&str, &str> =
+        let request: GithubApiWrapper<CreateDeploymentBranchProtectionRuleParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let owner = self.validate_username(request.get("owner").ok_or(ApiError::BadRequest)?)?;
-        let repo =
-            self.validate_repository_name(request.get("repo").ok_or(ApiError::BadRequest)?)?;
-        let env_name =
-            self.validate_environment_name(request.get("env_name").ok_or(ApiError::BadRequest)?)?;
-        let branch: &str =
-            self.validate_branch_name(request.get("branch").ok_or(ApiError::BadRequest)?)?;
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let env_name = self.validate_environment_name(&request.params.env_name)?;
+        let branch = self.validate_branch_name(&request.params.branch)?;
 
         info!(
             "Creating deployment branch protection rule for branch [{branch}] and environment [{env_name}] in repo [{owner}/{repo}] on behalf of [{module}]"
@@ -134,7 +132,7 @@ impl Github {
         };
 
         match self
-            .make_generic_post_request(address, Some(&body), module)
+            .make_generic_post_request(request.client_id, address, Some(&body), module)
             .await
         {
             Ok((status, _)) => {

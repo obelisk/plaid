@@ -1,18 +1,26 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     github::{
         CreateFileRequest, DeleteDeployKeyParams, FetchFileCustomMediaType, FetchFileRequest,
-        RepositoryCollaborator, RepositoryCustomProperty, SbomResponse,
+        GithubApiWrapper, RepositoryCollaborator, RepositoryCustomProperty, SbomResponse,
     },
     PlaidFunctionError,
 };
 
-// TODO: Do not use this function, it is deprecated and will be removed soon
-pub fn remove_user_from_repo(repo: &str, user: &str) -> Result<(), i32> {
-    remove_user_from_repo_detailed(repo, user).map_err(|_| -4)
+#[derive(Deserialize, Serialize)]
+pub struct RemoveUserFromRepoParams {
+    pub user: String,
+    pub repo: String,
+}
+
+#[deprecated(
+    note = "This function is deprecated and will be removed soon. Please use remove_user_from_repo_detailed instead."
+)]
+pub fn remove_user_from_repo(client_id: impl Display, repo: &str, user: &str) -> Result<(), i32> {
+    remove_user_from_repo_detailed(client_id, repo, user).map_err(|_| -4)
 }
 
 /// Remove a user from a repo
@@ -20,16 +28,26 @@ pub fn remove_user_from_repo(repo: &str, user: &str) -> Result<(), i32> {
 ///
 /// * `repo` - The repo to remove the user from
 /// * `user` - The user to remove from `repo`
-pub fn remove_user_from_repo_detailed(repo: &str, user: &str) -> Result<(), PlaidFunctionError> {
+pub fn remove_user_from_repo_detailed(
+    client_id: impl Display,
+    repo: &str,
+    user: &str,
+) -> Result<(), PlaidFunctionError> {
     extern "C" {
         new_host_function!(github, remove_user_from_repo);
     }
 
-    let mut params: HashMap<&'static str, &str> = HashMap::new();
-    params.insert("user", user);
-    params.insert("repo", repo);
+    let params = RemoveUserFromRepoParams {
+        user: user.to_string(),
+        repo: repo.to_string(),
+    };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res = unsafe {
         github_remove_user_from_repo(params.as_bytes().as_ptr(), params.as_bytes().len())
     };
@@ -43,9 +61,23 @@ pub fn remove_user_from_repo_detailed(repo: &str, user: &str) -> Result<(), Plai
     Ok(())
 }
 
-/// TODO: Do not use this function, it is deprecated and will be removed soon
-pub fn add_user_to_repo(repo: &str, user: &str, permission: Option<&str>) -> Result<(), i32> {
-    add_user_to_repo_detailed(repo, user, permission).map_err(|_| -4)
+#[derive(Deserialize, Serialize)]
+pub struct AddUserToRepoParams {
+    pub user: String,
+    pub repo: String,
+    pub permission: Option<String>,
+}
+
+#[deprecated(
+    note = "This function is deprecated and will be removed soon. Please use add_user_to_repo_detailed instead."
+)]
+pub fn add_user_to_repo(
+    client_id: impl Display,
+    repo: &str,
+    user: &str,
+    permission: Option<&str>,
+) -> Result<(), i32> {
+    add_user_to_repo_detailed(client_id, repo, user, permission).map_err(|_| -4)
 }
 
 /// Add a user to a repo
@@ -54,6 +86,7 @@ pub fn add_user_to_repo(repo: &str, user: &str, permission: Option<&str>) -> Res
 /// * `repo` - The repo to add the user to
 /// * `user` - The user to add to `repo`
 pub fn add_user_to_repo_detailed(
+    client_id: impl Display,
     repo: &str,
     user: &str,
     permission: Option<&str>,
@@ -62,14 +95,18 @@ pub fn add_user_to_repo_detailed(
         new_host_function!(github, add_user_to_repo);
     }
 
-    let mut params: HashMap<&'static str, &str> = HashMap::new();
-    params.insert("user", user);
-    params.insert("repo", repo);
-    if let Some(permission) = permission {
-        params.insert("permission", permission);
-    }
+    let params = AddUserToRepoParams {
+        user: user.to_string(),
+        repo: repo.to_string(),
+        permission: permission.map(|p| p.to_string()),
+    };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res =
         unsafe { github_add_user_to_repo(params.as_bytes().as_ptr(), params.as_bytes().len()) };
 
@@ -82,24 +119,46 @@ pub fn add_user_to_repo_detailed(
     Ok(())
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct GetRepoCollaboratorsParams {
+    pub owner: String,
+    pub repo: String,
+    pub per_page: Option<u8>,
+    pub page: Option<u16>,
+    pub affiliation: Option<String>,
+}
+
 /// DEPRECATED - DO NOT USE. Instead, use get_all_repository_collaborators
 /// Get first 30 collaborators on a repository
 /// ## Arguments
 ///
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+#[deprecated(
+    note = "This function is deprecated and will be removed soon. Please use get_all_repository_collaborators instead."
+)]
 pub fn get_repository_collaborators(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
 ) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, get_repository_collaborators);
     }
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
+    let params = GetRepoCollaboratorsParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        per_page: None,
+        page: None,
+        affiliation: None,
+    };
 
-    let request = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -129,34 +188,31 @@ pub fn get_repository_collaborators(
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 pub fn get_all_repository_collaborators(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
 ) -> Result<Vec<RepositoryCollaborator>, PlaidFunctionError> {
-    get_all_repository_collaborators_detailed(owner, repo, None)
+    get_all_repository_collaborators_detailed(client_id, owner, repo, None)
 }
 
 /// Get all collaborators on a repository with direct access.
 pub fn get_all_repository_collaborators_direct_access(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
 ) -> Result<Vec<RepositoryCollaborator>, PlaidFunctionError> {
-    get_all_repository_collaborators_detailed(owner, repo, Some("direct"))
+    get_all_repository_collaborators_detailed(client_id, owner, repo, Some("direct"))
 }
 
 /// Get all collaborators on a repository with affiliation filter.
 pub fn get_all_repository_collaborators_detailed(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     affiliation: Option<&str>,
 ) -> Result<Vec<RepositoryCollaborator>, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, get_repository_collaborators);
-    }
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    if let Some(affiliation) = affiliation {
-        params.insert("affiliation", affiliation.to_string());
     }
 
     let mut collaborators = Vec::<RepositoryCollaborator>::new();
@@ -166,10 +222,21 @@ pub fn get_all_repository_collaborators_detailed(
 
     loop {
         page += 1;
-        params.insert("page", page.to_string());
-        // params.insert("per_page", "30".to_owned()"); // Default: 30 items per page
 
-        let request = serde_json::to_string(&params).unwrap();
+        let params = GetRepoCollaboratorsParams {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            per_page: None,
+            page: Some(page),
+            affiliation: affiliation.map(|a| a.to_string()),
+        };
+
+        let wrapper = GithubApiWrapper {
+            client_id: client_id.to_string(),
+            params,
+        };
+
+        let request = serde_json::to_string(&wrapper).unwrap();
 
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -202,23 +269,35 @@ pub fn get_all_repository_collaborators_detailed(
     Ok(collaborators)
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct GetCustomPropertiesValuesParams {
+    pub owner: String,
+    pub repo: String,
+}
+
 /// Get custom properties for a repository
 /// ## Arguments
 ///
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 pub fn get_custom_properties_values(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
 ) -> Result<Vec<RepositoryCustomProperty>, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, get_custom_properties_values);
     }
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
 
-    let request = serde_json::to_string(&params).unwrap();
+    let params = GetCustomPropertiesValuesParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+    };
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -247,19 +326,32 @@ pub fn get_custom_properties_values(
     Ok(response_body)
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct GetRepoSbomParams {
+    pub owner: String,
+    pub repo: String,
+}
+
 /// Get the software bill of materials (SBOM) for a repository in SPDX JSON format.
 pub fn get_repo_sbom(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
 ) -> Result<SbomResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, get_repo_sbom);
     }
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
 
-    let request = serde_json::to_string(&params).unwrap();
+    let params = GetRepoSbomParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -292,12 +384,14 @@ pub fn get_repo_sbom(
 /// * `file_path`: Path of the file or directory to read
 /// * `reference`: The name of the commit/branch/tag
 pub fn fetch_file(
+    client_id: impl Display,
     organization: &str,
     repository_name: &str,
     file_path: &str,
     reference: &str,
 ) -> Result<String, PlaidFunctionError> {
     fetch_file_with_custom_media_type(
+        client_id,
         organization,
         repository_name,
         file_path,
@@ -315,6 +409,7 @@ pub fn fetch_file(
 /// * `reference`: The name of the commit/branch/tag
 /// * `media_type`: The media type to fetch
 pub fn fetch_file_with_custom_media_type(
+    client_id: impl Display,
     organization: &str,
     repository_name: &str,
     file_path: &str,
@@ -333,7 +428,11 @@ pub fn fetch_file_with_custom_media_type(
         reference: reference.to_string(),
         media_type,
     };
-    let request = serde_json::to_string(&request).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -358,28 +457,40 @@ pub fn fetch_file_with_custom_media_type(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct FetchCommitParams {
+    pub user: String,
+    pub repo: String,
+    pub commit: String,
+}
+
 /// Returns the contents of a single commit reference
 /// ## Arguments
 ///
 /// * `user` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 /// * `commit` - The commit reference. Can be a commit SHA, branch name (heads/BRANCH_NAME), or tag name (tags/TAG_NAME)
-pub fn fetch_commit(user: &str, repo: &str, commit: &str) -> Result<String, PlaidFunctionError> {
+pub fn fetch_commit(
+    client_id: impl Display,
+    user: &str,
+    repo: &str,
+    commit: &str,
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, fetch_commit);
     }
     const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
 
-    #[derive(Serialize)]
-    struct Request<'a> {
-        user: &'a str,
-        repo: &'a str,
-        commit: &'a str,
-    }
-
-    let request = Request { user, repo, commit };
-
-    let request = serde_json::to_string(&request).unwrap();
+    let params = FetchCommitParams {
+        user: user.to_string(),
+        repo: repo.to_string(),
+        commit: commit.to_string(),
+    };
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -407,6 +518,7 @@ pub fn fetch_commit(user: &str, repo: &str, commit: &str) -> Result<String, Plai
 /// Delete a deploy key with given ID from a given repository.
 /// For more details, see https://docs.github.com/en/rest/deploy-keys/deploy-keys?apiVersion=2022-11-28#delete-a-deploy-key
 pub fn delete_deploy_key(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     key_id: u64,
@@ -421,7 +533,12 @@ pub fn delete_deploy_key(
         key_id,
     };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapped).unwrap();
     let res =
         unsafe { github_delete_deploy_key(params.as_bytes().as_ptr(), params.as_bytes().len()) };
 
@@ -461,6 +578,7 @@ pub fn delete_deploy_key(
 /// - `Err(PlaidFunctionError)` if the request fails (e.g., file already exists,
 ///   branch protection, missing configuration).
 pub fn create_file(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     path: impl Display,
@@ -481,7 +599,12 @@ pub fn create_file(
         branch: branch.map(|b| b.to_string()),
     };
 
-    let request = serde_json::to_string(&request).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap();
     const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -510,11 +633,18 @@ pub fn create_file(
     Ok(response_body)
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct GetRepoIdFromRepoNameParams {
+    pub owner: String,
+    pub repo: String,
+}
+
 /// Get a repo ID from its name
 /// ## Arguments
 /// * `owner` - The owner of the repo.
 /// * `repo` - The name of the repo without the owner.
 pub fn get_repo_id_from_repo_name(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
 ) -> Result<i64, PlaidFunctionError> {
@@ -525,12 +655,17 @@ pub fn get_repo_id_from_repo_name(
     const RETURN_BUFFER_SIZE: usize = 32;
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let mut params: HashMap<&'static str, &str> = HashMap::new();
-    let owner = owner.to_string();
-    let repo = repo.to_string();
-    params.insert("owner", &owner);
-    params.insert("repo", &repo);
-    let params = serde_json::to_string(&params).unwrap();
+    let params = GetRepoIdFromRepoNameParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapper).unwrap();
 
     let res = unsafe {
         github_get_repo_id_from_repo_name(
@@ -555,10 +690,18 @@ pub fn get_repo_id_from_repo_name(
     Ok(response)
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct GetRepoNameFromRepoIdParams {
+    pub repo_id: String,
+}
+
 /// Get a repo_name from a repo ID
 /// ## Arguments
 /// * `repo_id` - The GitHub repo ID.
-pub fn get_repo_name_from_repo_id(repo_id: impl Display) -> Result<String, PlaidFunctionError> {
+pub fn get_repo_name_from_repo_id(
+    client_id: impl Display,
+    repo_id: impl Display,
+) -> Result<String, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, get_repo_name_from_repo_id);
     }
@@ -566,12 +709,21 @@ pub fn get_repo_name_from_repo_id(repo_id: impl Display) -> Result<String, Plaid
     const RETURN_BUFFER_SIZE: usize = 64 * 1024; // 64 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let repo_id = repo_id.to_string();
+    let params = GetRepoNameFromRepoIdParams {
+        repo_id: repo_id.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapper).unwrap();
 
     let res = unsafe {
         github_get_repo_name_from_repo_id(
-            repo_id.as_bytes().as_ptr(),
-            repo_id.as_bytes().len(),
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
             return_buffer.as_mut_ptr(),
             RETURN_BUFFER_SIZE,
         )

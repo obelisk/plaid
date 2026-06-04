@@ -1,13 +1,23 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     github::{
         CopilotAddUsersResponse, CopilotRemoveUsersResponse, CopilotSeat, CopilotSeatsResult,
+        GithubApiWrapper,
     },
     PlaidFunctionError,
 };
+
+#[derive(Deserialize, Serialize)]
+pub struct ListSeatsInOrgCopilotParams {
+    pub org: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_page: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<u16>,
+}
 
 /// List seats in org's Copilot subscription, paginated
 /// ## Arguments
@@ -16,24 +26,27 @@ use crate::{
 /// * `per_page` - The number of results per page (max 100)
 /// * `page` - The page number of the results to fetch.
 pub fn list_copilot_subscription_seats_by_page(
+    client_id: impl Display,
     org: &str,
-    per_page: Option<u64>,
-    page: Option<u64>,
+    per_page: Option<u8>,
+    page: Option<u16>,
 ) -> Result<Vec<CopilotSeat>, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, list_seats_in_org_copilot);
     }
 
-    let mut params: HashMap<&'static str, String> = HashMap::new();
-    params.insert("org", org.to_string());
-    if let Some(per_page) = per_page {
-        params.insert("per_page", per_page.to_string());
-    }
-    if let Some(page) = page {
-        params.insert("page", page.to_string());
-    }
+    let params = ListSeatsInOrgCopilotParams {
+        org: org.to_string(),
+        per_page,
+        page,
+    };
 
-    let request = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -123,32 +136,39 @@ pub fn list_all_copilot_subscription_seats(
     Ok(seats)
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct AddUsersToOrgCopilotParams {
+    pub org: String,
+    pub selected_usernames: Vec<String>,
+}
+
 /// Add a user to the org's Copilot subscription
 /// ## Arguments
 ///
 /// * `org` - The org owning the subscription
 /// * `user` - The user to add to Copilot subscription
 pub fn add_user_to_copilot_subscription(
+    client_id: impl Display,
     org: &str,
     user: &str,
 ) -> Result<CopilotAddUsersResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(github, add_users_to_org_copilot);
     }
-    #[derive(Serialize)]
-    struct Params<'a> {
-        org: &'a str,
-        selected_usernames: Vec<&'a str>,
-    }
-    let params = Params {
-        org,
-        selected_usernames: vec![user],
+    let params = AddUsersToOrgCopilotParams {
+        org: org.to_string(),
+        selected_usernames: vec![user.to_string()],
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
     };
 
     const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let params = serde_json::to_string(&params).unwrap();
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res = unsafe {
         github_add_users_to_org_copilot(
             params.as_bytes().as_ptr(),
@@ -176,12 +196,19 @@ pub fn add_user_to_copilot_subscription(
     Ok(response_body)
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct RemoveUsersFromOrgCopilotParams {
+    pub org: String,
+    pub selected_usernames: Vec<String>,
+}
+
 /// Remove a user from the org's Copilot subscription
 /// ## Arguments
 ///
 /// * `org` - The org owning the subscription
 /// * `user` - The user to remove from Copilot subscription
 pub fn remove_user_from_copilot_subscription(
+    client_id: impl Display,
     org: &str,
     user: &str,
 ) -> Result<CopilotRemoveUsersResponse, PlaidFunctionError> {
@@ -189,20 +216,20 @@ pub fn remove_user_from_copilot_subscription(
         new_host_function_with_error_buffer!(github, remove_users_from_org_copilot);
     }
 
-    #[derive(Serialize)]
-    struct Params<'a> {
-        org: &'a str,
-        selected_usernames: Vec<&'a str>,
-    }
-    let params = Params {
-        org,
-        selected_usernames: vec![user],
+    let params = RemoveUsersFromOrgCopilotParams {
+        org: org.to_string(),
+        selected_usernames: vec![user.to_string()],
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
     };
 
     const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let params = serde_json::to_string(&params).unwrap();
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res = unsafe {
         github_remove_users_from_org_copilot(
             params.as_bytes().as_ptr(),
@@ -236,6 +263,7 @@ pub fn remove_user_from_copilot_subscription(
 /// * `org` - The org owning the subscription
 /// * `users` - The list of users to remove from Copilot subscription
 pub fn remove_users_from_copilot_subscription(
+    client_id: impl Display,
     org: &str,
     users: Vec<&str>,
 ) -> Result<CopilotRemoveUsersResponse, PlaidFunctionError> {
@@ -243,20 +271,20 @@ pub fn remove_users_from_copilot_subscription(
         new_host_function_with_error_buffer!(github, remove_users_from_org_copilot);
     }
 
-    #[derive(Serialize)]
-    struct Params<'a> {
-        org: &'a str,
-        selected_usernames: Vec<&'a str>,
-    }
-    let params = Params {
-        org,
-        selected_usernames: users,
+    let params = RemoveUsersFromOrgCopilotParams {
+        org: org.to_string(),
+        selected_usernames: users.into_iter().map(|u| u.to_string()).collect(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
     };
 
     const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let params = serde_json::to_string(&params).unwrap();
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res = unsafe {
         github_remove_users_from_org_copilot(
             params.as_bytes().as_ptr(),

@@ -1,9 +1,18 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
+
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    github::{CheckCodeownersParams, CodeownersStatus},
+    github::{CheckCodeownersParams, CodeownersStatus, ConfigureSecretParams, GithubApiWrapper},
     PlaidFunctionError,
 };
+
+#[derive(Serialize, Deserialize)]
+pub struct GetBranchProtectionRulesParams {
+    pub owner: String,
+    pub repo: String,
+    pub branch: String,
+}
 
 /// Get protection rules for a branch
 /// ## Arguments
@@ -12,6 +21,7 @@ use crate::{
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 /// * `branch` - The name of the branch. Cannot contain wildcard characters.
 pub fn get_branch_protection_rules(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     branch: impl Display,
@@ -19,12 +29,18 @@ pub fn get_branch_protection_rules(
     extern "C" {
         new_host_function_with_error_buffer!(github, get_branch_protection_rules);
     }
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    params.insert("branch", branch.to_string());
+    let params = GetBranchProtectionRulesParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        branch: branch.to_string(),
+    };
 
-    let request = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -48,6 +64,13 @@ pub fn get_branch_protection_rules(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct GetBranchProtectionRulesetParams {
+    pub owner: String,
+    pub repo: String,
+    pub branch: String,
+}
+
 /// Get protection rules (as in ruleset) for a branch
 /// ## Arguments
 ///
@@ -55,6 +78,7 @@ pub fn get_branch_protection_rules(
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 /// * `branch` - The name of the branch. Cannot contain wildcard characters.
 pub fn get_branch_protection_ruleset(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     branch: impl Display,
@@ -62,12 +86,19 @@ pub fn get_branch_protection_ruleset(
     extern "C" {
         new_host_function_with_error_buffer!(github, get_branch_protection_ruleset);
     }
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    params.insert("branch", branch.to_string());
 
-    let request = serde_json::to_string(&params).unwrap();
+    let params = GetBranchProtectionRulesetParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        branch: branch.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -91,6 +122,14 @@ pub fn get_branch_protection_ruleset(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct UpdateBranchProtectionRuleParams {
+    pub owner: String,
+    pub repo: String,
+    pub branch: String,
+    pub body: String,
+}
+
 /// Update branch protection rule for a single branch
 /// ## Arguments
 ///
@@ -99,6 +138,7 @@ pub fn get_branch_protection_ruleset(
 /// * `branch` - The name of the branch. Cannot contain wildcard characters.
 /// * `body` - Body of the PUT request. See https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28#update-branch-protection
 pub fn update_branch_protection_rule(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     branch: impl Display,
@@ -107,13 +147,20 @@ pub fn update_branch_protection_rule(
     extern "C" {
         new_host_function!(github, update_branch_protection_rule);
     }
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    params.insert("branch", branch.to_string());
-    params.insert("body", body.to_string());
 
-    let request = serde_json::to_string(&params).unwrap();
+    let params = UpdateBranchProtectionRuleParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        branch: branch.to_string(),
+        body: body.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap();
 
     let res = unsafe {
         github_update_branch_protection_rule(request.as_bytes().as_ptr(), request.as_bytes().len())
@@ -128,6 +175,13 @@ pub fn update_branch_protection_rule(
     Ok(())
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct CreateEnvironmentForRepoParams {
+    pub owner: String,
+    pub repo: String,
+    pub env_name: String,
+}
+
 /// Create a GitHub deployment environment for a given repository.
 ///
 /// Arguments:
@@ -135,6 +189,7 @@ pub fn update_branch_protection_rule(
 /// * `repo` - The name of the repository
 /// * `env_name` - The name of the environment to be created
 pub fn create_environment_for_repo(
+    client_id: impl Display,
     owner: &str,
     repo: &str,
     env_name: &str,
@@ -143,13 +198,19 @@ pub fn create_environment_for_repo(
         new_host_function!(github, create_environment_for_repo);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    params.insert("env_name", env_name.to_string());
+    let params = CreateEnvironmentForRepoParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        env_name: env_name.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
 
     let request =
-        serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+        serde_json::to_string(&wrapper).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
 
     let res = unsafe {
         github_create_environment_for_repo(request.as_bytes().as_ptr(), request.as_bytes().len())
@@ -161,6 +222,14 @@ pub fn create_environment_for_repo(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct CreateDeploymentBranchProtectionRuleParams {
+    pub owner: String,
+    pub repo: String,
+    pub env_name: String,
+    pub branch: String,
+}
+
 /// Create a deployment branch protection rule for a GitHub environment.
 ///
 /// Arguments:
@@ -169,6 +238,7 @@ pub fn create_environment_for_repo(
 /// * `env_name` - The name of the environment to be created
 /// * `branch` - The branch from which a deployment can be triggered. This will be set in the deployment protection rules
 pub fn create_deployment_branch_protection_rule(
+    client_id: impl Display,
     owner: &str,
     repo: &str,
     env_name: &str,
@@ -178,14 +248,20 @@ pub fn create_deployment_branch_protection_rule(
         new_host_function!(github, create_deployment_branch_protection_rule);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    params.insert("env_name", env_name.to_string());
-    params.insert("branch", branch.to_string());
+    let params = CreateDeploymentBranchProtectionRuleParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        env_name: env_name.to_string(),
+        branch: branch.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
 
     let request =
-        serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+        serde_json::to_string(&wrapper).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
 
     let res = unsafe {
         github_create_deployment_branch_protection_rule(
@@ -200,9 +276,18 @@ pub fn create_deployment_branch_protection_rule(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RequireSignedCommitsParams {
+    pub owner: String,
+    pub repo: String,
+    pub branch: String,
+    pub activated: bool,
+}
+
 /// Enforce signed commits (if `activated` is true) or turn it off (if `activated` is false) on a given branch of a given repo.
 /// For more details, see https://docs.github.com/en/enterprise-cloud@latest/rest/branches/branch-protection?apiVersion=2022-11-28#create-commit-signature-protection
 pub fn require_signed_commits(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
     branch: impl Display,
@@ -212,20 +297,19 @@ pub fn require_signed_commits(
         new_host_function!(github, require_signed_commits);
     }
 
-    let mut params: HashMap<&'static str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    params.insert("branch", branch.to_string());
-    params.insert(
-        "activated",
-        if activated {
-            "true".to_string()
-        } else {
-            "false".to_string()
-        },
-    );
+    let params = RequireSignedCommitsParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        branch: branch.to_string(),
+        activated,
+    };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res = unsafe {
         github_require_signed_commits(params.as_bytes().as_ptr(), params.as_bytes().len())
     };
@@ -248,6 +332,7 @@ pub fn require_signed_commits(
 /// * `secret_name` - The name of the secret to set
 /// * `secret` - The plaintext secret to be set
 pub fn configure_secret(
+    client_id: impl Display,
     owner: &str,
     repo: &str,
     env_name: Option<&str>,
@@ -258,17 +343,21 @@ pub fn configure_secret(
         new_host_function!(github, configure_secret);
     }
 
-    let mut params: HashMap<&str, String> = HashMap::new();
-    params.insert("owner", owner.to_string());
-    params.insert("repo", repo.to_string());
-    if let Some(env_name) = env_name {
-        params.insert("env_name", env_name.to_string());
-    }
-    params.insert("secret_name", secret_name.to_string());
-    params.insert("secret", secret.to_string());
+    let params = ConfigureSecretParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        env_name: env_name.map(|s| s.to_string()),
+        secret_name: secret_name.to_string(),
+        secret: secret.to_string(),
+    };
+
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
 
     let request =
-        serde_json::to_string(&params).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+        serde_json::to_string(&wrapped).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
 
     let res =
         unsafe { github_configure_secret(request.as_bytes().as_ptr(), request.as_bytes().len()) };
@@ -282,6 +371,7 @@ pub fn configure_secret(
 /// Check a repo's CODEOWNERS file
 /// For more details, see https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-codeowners-errors
 pub fn check_codeowners_file(
+    client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
 ) -> Result<CodeownersStatus, PlaidFunctionError> {
@@ -296,8 +386,12 @@ pub fn check_codeowners_file(
         owner: owner.to_string(),
         repo: repo.to_string(),
     };
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
 
-    let params = serde_json::to_string(&params).unwrap();
+    let params = serde_json::to_string(&wrapper).unwrap();
     let res = unsafe {
         github_check_codeowners_file(
             params.as_bytes().as_ptr(),
