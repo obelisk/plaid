@@ -16,7 +16,9 @@ pub struct RemoveUserFromRepoParams {
     pub repo: String,
 }
 
-// TODO: Do not use this function, it is deprecated and will be removed soon
+#[deprecated(
+    note = "This function is deprecated and will be removed soon. Please use remove_user_from_repo_detailed instead."
+)]
 pub fn remove_user_from_repo(client_id: impl Display, repo: &str, user: &str) -> Result<(), i32> {
     remove_user_from_repo_detailed(client_id, repo, user).map_err(|_| -4)
 }
@@ -66,7 +68,9 @@ pub struct AddUserToRepoParams {
     pub permission: Option<String>,
 }
 
-/// TODO: Do not use this function, it is deprecated and will be removed soon
+#[deprecated(
+    note = "This function is deprecated and will be removed soon. Please use add_user_to_repo_detailed instead."
+)]
 pub fn add_user_to_repo(
     client_id: impl Display,
     repo: &str,
@@ -130,6 +134,9 @@ pub struct GetRepoCollaboratorsParams {
 ///
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+#[deprecated(
+    note = "This function is deprecated and will be removed soon. Please use get_all_repository_collaborators instead."
+)]
 pub fn get_repository_collaborators(
     client_id: impl Display,
     owner: impl Display,

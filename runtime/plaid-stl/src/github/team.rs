@@ -15,7 +15,9 @@ pub struct AddUserToTeamParams {
     pub role: String,
 }
 
-// TODO: Do not use this function, it is deprecated and will be removed soon
+#[deprecated(
+    note = "This function is deprecated and will be removed soon. Please use add_user_to_team_detailed instead."
+)]
 pub fn add_user_to_team(
     client_id: impl Display,
     team: &str,
@@ -76,7 +78,9 @@ pub struct RemoveUserFromTeamParams {
     pub user: String,
 }
 
-// TODO: Do not use this function, it is deprecated and will be removed soon
+#[deprecated(
+    note = "This function is deprecated and will be removed soon. Please use remove_user_from_team_detailed instead."
+)]
 pub fn remove_user_from_team(
     client_id: impl Display,
     team: &str,
