@@ -455,7 +455,8 @@ RUST_LOG=plaid=debug cargo run --bin=plaid \
 |--------|------|-------------|
 | POST | `/webhook/hello` | Triggers `hello_world` rule |
 | POST | `/webhook/default` | Triggers any rule with `log_type = "default"` |
-| GET  | `/webhook/health` | Returns `ok` (healthcheck) |
+| GET  | `:8081/live` | Returns `live` while the process is alive |
+| GET  | `:8081/ready` | Returns `ready` once boot completes, then 503 during shutdown |
 
 Add more endpoints in `config/webhooks.toml`.
 
