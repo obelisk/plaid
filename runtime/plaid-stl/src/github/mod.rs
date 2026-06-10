@@ -1,5 +1,6 @@
 mod actions;
 mod copilot;
+mod enterprise;
 mod fpat;
 mod graphql;
 mod members;
@@ -16,6 +17,7 @@ mod types;
 
 pub use actions::*;
 pub use copilot::*;
+pub use enterprise::*;
 pub use fpat::*;
 pub use graphql::*;
 pub use members::*;
