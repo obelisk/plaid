@@ -21,24 +21,32 @@ use data::Data;
 use executor::*;
 use plaid_stl::messages::LogSource;
 use storage::Storage;
-use tokio::{signal, sync::RwLock, task::JoinSet};
+use tokio::signal::{
+    self,
+    unix::{signal, SignalKind},
+};
+use tokio::{sync::RwLock, task::JoinSet};
 use tokio_util::{bytes::Buf, sync::CancellationToken};
 
 use std::{
     collections::HashMap,
     convert::Infallible,
     net::SocketAddr,
-    pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use crossbeam_channel::TrySendError;
-use warp::{http::HeaderMap, path, Filter};
+use warp::{
+    http::{HeaderMap, StatusCode},
+    path, Filter,
+};
 
 #[derive(Debug)]
 enum Errors {
-    FailedToStartDataSystem,
     FailedToStartApiSystem(ApiError),
     FailedToLoadModules,
 }
@@ -46,7 +54,6 @@ enum Errors {
 impl std::fmt::Display for Errors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Errors::FailedToStartDataSystem => write!(f, "Failed to start data system"),
             Errors::FailedToStartApiSystem(e) => write!(f, "Failed to start API system: {:?}", e),
             Errors::FailedToLoadModules => write!(f, "Failed to load modules"),
         }
@@ -178,6 +185,44 @@ async fn read_body_with_limit(
     Ok(full_body)
 }
 
+fn probe_routes(
+    is_ready: Arc<AtomicBool>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let ready = warp::path!("ready").and(warp::get()).map(move || {
+        if is_ready.load(Ordering::SeqCst) {
+            warp::reply::with_status("ready", StatusCode::OK)
+        } else {
+            warp::reply::with_status("not ready", StatusCode::SERVICE_UNAVAILABLE)
+        }
+    });
+
+    let live = warp::path!("live")
+        .and(warp::get())
+        .map(|| warp::reply::with_status("live", StatusCode::OK));
+
+    ready.or(live).unify()
+}
+
+async fn wait_for_shutdown_signal() {
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+
+    tokio::select! {
+        _ = signal::ctrl_c() => {
+            info!("SIGINT received");
+        }
+
+        _ = sigterm.recv() => {
+            info!("SIGTERM received");
+        }
+    }
+}
+
+fn log_join_result(task_type: &str, result: Result<(), tokio::task::JoinError>) {
+    if let Err(e) = result {
+        error!("{task_type} task failed during shutdown: {e}");
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -198,11 +243,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create thread pools for log execution
     let exec_thread_pools = thread_pools::ExecutionThreadPools::new(&config.executor);
 
-    // For convenience, keep a reference to the log_sender for the general channel, so that we can quickly clone it around
-    let log_sender = &exec_thread_pools.general_pool.sender;
+    // For convenience, keep a sender for the general channel, so that we can quickly clone it around
+    let log_sender = exec_thread_pools.general_pool.sender.clone();
 
     info!("Starting logging subsystem");
-    let (els, _logging_handler) = Logger::start(config.logging);
+    let (els, logging_handler) = Logger::start(config.logging);
     info!("Logging subsystem started");
 
     // Create the storage system if one is configured
@@ -254,21 +299,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Graceful shutdown handling
     let cancellation_token = CancellationToken::new();
-    let ct = cancellation_token.clone();
-    tokio::spawn(async move {
-        signal::ctrl_c()
-            .await
-            .expect("Failed to listen for shutdown signal");
-        info!("Shutdown signal received, sending cancellation notice to all listening tasks.");
-        ct.cancel();
-    });
+    let performance_cancellation_token = CancellationToken::new();
+    let is_ready = Arc::new(AtomicBool::new(false));
+    let mut server_tasks = JoinSet::new();
+
+    if let Some(probe_listen_address) = config.loading.probe_listen_address.clone() {
+        let probe_address: SocketAddr = probe_listen_address
+            .parse()
+            .expect("Probe listen address was invalid");
+        let routes = probe_routes(is_ready.clone());
+        let token = cancellation_token.clone();
+
+        info!("Started probe server at: {probe_address}");
+        server_tasks.spawn(async move {
+            let (_, server) =
+                warp::serve(routes).bind_with_graceful_shutdown(probe_address, async move {
+                    token.cancelled().await;
+                });
+
+            server.await;
+            info!("Probe server [{probe_address}] shut down");
+        });
+    } else {
+        warn!("No probe_listen_address configured; readiness and liveness endpoints are disabled");
+    }
 
     let (performance_sender, performance_handle) = match config.performance_monitoring {
         Some(perf) => {
             warn!("Plaid is running with performance monitoring enabled - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a channel that aggregates and reports metrics.");
             let (sender, rx) = crossbeam_channel::bounded::<ModulePerformanceMetadata>(4096);
 
-            let token = cancellation_token.clone();
+            let token = performance_cancellation_token.clone();
             let handle = tokio::task::spawn(async move {
                 perf.start(rx, token).await;
             });
@@ -310,10 +371,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         info!("Starting {} {thread_or_threads} dedicated to log type [{log_type}]. Log queue size = {}", tp.num_threads, tp.sender.capacity().unwrap_or_default());
     }
-
     // This sender provides an internal route to sending logs. This is what
     // powers the logback functions.
-    let delayed_log_sender = Data::start(
+    let (delayed_log_sender, dg_tasks) = Data::start(
         config.data,
         log_sender.clone(),
         internal_storage.clone(),
@@ -321,9 +381,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &roles,
         cancellation_token.clone(),
     )
-    .await?
-    .ok_or(Errors::FailedToStartDataSystem)?;
-
+    .await?;
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
     let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender)
@@ -335,7 +393,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create the executor that will handle all the logs that come in and immediate
     // requests for handling some configured get requests.
-    let executor = Executor::new(
+    let (executor, executor_threads) = Executor::new(
         exec_thread_pools.clone(),
         modules.get_channels(),
         api,
@@ -349,10 +407,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if roles.webhooks {
         info!("Configured Webhook Servers");
-        let webhook_servers: Vec<Box<Pin<Box<_>>>> = config
-        .webhooks
-        .into_iter()
-        .map(|(server_name, config)| {
+        for (server_name, config) in config.webhooks {
             let server_address: SocketAddr = config
                 .listen_address
                 .parse()
@@ -370,7 +425,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // This is a cache for get requests that are configured to be cached
             // Webhook -> (timestamp, response)
-            let get_cache: Arc<RwLock<HashMap<String, (u64, String)>>> = Arc::new(RwLock::new(HashMap::new()));
+            let get_cache: Arc<RwLock<HashMap<String, (u64, String)>>> =
+                Arc::new(RwLock::new(HashMap::new()));
             let webhook_server_get_log_sender = log_sender.clone();
             let webhook_config = Arc::new(config);
             let get_route = warp::get()
@@ -536,52 +592,83 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let routes = post_route.or(get_route);
 
             info!("Web Server [{server_name}]: {server_address}");
-            Box::<Pin<Box<_>>>::new(Box::pin(
-                warp::serve(routes).run(server_address),
-            ))
-        })
-        .collect();
+            let token = cancellation_token.clone();
+            server_tasks.spawn(async move {
+                let (_, server) =
+                    warp::serve(routes).bind_with_graceful_shutdown(server_address, async move {
+                        token.cancelled().await;
+                    });
 
-        info!("Starting servers, boot up complete");
-
-        if let Some(readiness_check_path) = config.loading.readiness_check_file {
-            match std::fs::write(&readiness_check_path, "READY") {
-                Ok(_) => {}
-                Err(e) => {
-                    // We did not manage to signal that we are ready. Therefore, whichever system
-                    // is monitoring Plaid's readiness will possibly keep waiting forever.
-                    // There is not much we can do here, so we log an error and continue.
-                    error!("Failed to signal readiness by writing to file [{readiness_check_path}]. Error: [{e}]")
-                }
-            }
-        }
-
-        let mut join_set = JoinSet::from_iter(webhook_servers);
-
-        // Listen for a shutdown signal or if any task in join_set finishes
-        tokio::select! {
-            _ = join_set.join_next() => {
-                info!("A webserver task finished unexpectedly, triggering shutdown.");
-                // Send a shutdown signal
-                cancellation_token.cancel()
-            },
-            _ = cancellation_token.cancelled() => {
-                info!("Shutdown signal received.");
-            }
+                server.await;
+                info!("Web server [{server_name}] shut down");
+            });
         }
     } else {
         info!("This instance is NOT running webhooks");
     }
 
-    // Ensure that the performance monitoring loop exits before finishing shutdown.
-    // We do this to guarantee that rule performance data data gets written to a file.
-    if let Some(handle) = performance_handle {
-        info!("Waiting for performance monitoring system to shutdown...");
-        let _ = handle.await;
+    info!("Starting servers, boot up complete");
+    is_ready.store(true, Ordering::SeqCst);
+
+    // Block until SIGINT/SIGTERM, or until a server task exits unexpectedly.
+    tokio::select! {
+        _ = wait_for_shutdown_signal() => {}
+
+        server_result = server_tasks.join_next(), if !server_tasks.is_empty() => {
+            warn!("A server task exited before a shutdown signal was received");
+            if let Some(result) = server_result {
+                log_join_result("webhook server", result);
+            }
+        }
     }
 
-    // We can also trigger shutdown of the execution loop here and guarantee that no logs get dropped
-    // on shutdown by waiting for the queue to empty.
+    // Tell the orchestrator to stop routing traffic before we tear down producers.
+    is_ready.store(false, Ordering::SeqCst);
+    info!("Sending cancellation notice to all listening tasks.");
+    // Stops data generators and triggers graceful shutdown on webhook/probe servers.
+    cancellation_token.cancel();
+
+    // Data generators are the main source of new logs; wait for them to exit first.
+    info!("Waiting for data generators to shutdown...");
+    let mut dg_tasks = dg_tasks;
+    while let Some(result) = dg_tasks.join_next().await {
+        log_join_result("data generator", result);
+    }
+
+    // Webhook/probe servers stop accepting new requests once cancelled; join any in-flight work.
+    info!("Waiting for server tasks to shutdown...");
+    while let Some(result) = server_tasks.join_next().await {
+        log_join_result("webhook server", result);
+    }
+
+    // Drop external sender clones. Worker threads still hold more via Arc<Api> (logback),
+    // so they cannot exit on channel disconnect alone.
+    drop(delayed_log_sender);
+    drop(log_sender);
+    drop(exec_thread_pools);
+
+    info!("Waiting for executor threads to drain...");
+    drop(executor);
+    // Shutdown channel lets threads finish queued work, then exit even while Api senders live.
+    executor_threads.shutdown();
+
+    // Performance loop exits when cancelled and its sender disconnects.
+    drop(performance_sender);
+    performance_cancellation_token.cancel();
+
+    if let Some(handle) = performance_handle {
+        info!("Waiting for performance monitoring system to shutdown...");
+        // Await here so the metrics report is written before we exit.
+        if let Err(e) = handle.await {
+            error!("Performance monitoring task failed during shutdown: {e}");
+        }
+    }
+
+    // Executor threads hold Logger clones; drop ours so the logging channel can disconnect.
+    drop(els);
+    if let Err(e) = logging_handler.join() {
+        error!("Logging thread panicked during shutdown: {e:?}");
+    }
 
     info!("Plaid shutdown complete.");
     Ok(())
