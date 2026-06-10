@@ -14,7 +14,7 @@ use crate::{
 use super::Github;
 
 impl Github {
-    /// Grant a GitHub organization installation access to a repository
+    /// Grant a GitHub organization installation access to one or more repositories
     /// See https://docs.github.com/en/enterprise-cloud@latest/rest/enterprise-admin/organization-installations?apiVersion=2026-03-10#grant-repository-access-to-an-organization-installation for more detail
     pub async fn grant_repo_access_to_org_installation(
         &self,
@@ -61,7 +61,7 @@ impl Github {
         }
     }
 
-    /// Removes a GitHub organization installation's access to a repository
+    /// Removes a GitHub organization installation's access to one or more repositories
     /// See https://docs.github.com/en/enterprise-cloud@latest/rest/enterprise-admin/organization-installations?apiVersion=2026-03-10#remove-repository-access-from-an-organization-installation for more detail
     pub async fn remove_repo_access_from_org_installation(
         &self,
