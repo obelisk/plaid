@@ -178,19 +178,23 @@ fi
 RUST_LOG=plaid=debug,aws_config=debug,aws_sdk_dynamodb=debug cargo run --bin=plaid --release --no-default-features --features $FEATURES -- --config ${CONFIG_WORKING_PATH} --secrets $SECRET_WORKING_PATH &
 PLAID_PID=$!
 
-# Wait for Plaid to boot. When it's ready, a file called "plaid_ready" will be created.
+# Wait for Plaid to boot. When it's ready, /ready will return HTTP 200.
 # If Plaid is not ready within 120 seconds, give up and return an error.
-file="plaid_ready"
+
+url="http://localhost:8081/ready"
 timeout=120
 interval=5
 deadline=$((SECONDS + timeout))
 
-until cat "$file" >/dev/null 2>&1; do
-  (( SECONDS >= deadline )) && { echo "Error: '$file' not found within ${timeout}s." >&2; exit 1; }
+until curl -fsS "$url" >/dev/null 2>&1; do
+  (( SECONDS >= deadline )) && {
+    echo "Error: '$url' did not return HTTP 200 within ${timeout}s." >&2
+    exit 1
+  }
   sleep "$interval"
 done
 
-# If we are here, then the file was found, meaning Plaid is fully ready. We can now proceed with our tests.
+# If we are here, the readiness endpoint returned 200 OK. We can now proceed with our tests.
 cd ..
 
 # Set the variables the test harnesses will need
