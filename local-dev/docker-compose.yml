@@ -5,6 +5,7 @@ services:
       dockerfile: local-dev/Dockerfile
     ports:
       - "8080:8080"
+      - "8081:8081"
     volumes:
       # Config files — edit these to configure APIs, webhooks, etc.
       - ./config:/config:ro
@@ -18,7 +19,7 @@ services:
     stop_grace_period: 5s
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/webhook/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/live"]
       interval: 10s
       timeout: 5s
       retries: 3
