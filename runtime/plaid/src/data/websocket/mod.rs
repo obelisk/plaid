@@ -210,36 +210,55 @@ impl WebsocketGenerator {
     /// This function initializes the WebSocket clients, logs the number of clients being initialized,
     /// and then spawns an asynchronous task for each client. Each task runs in a loop, attempting to
     /// start the client and reopening the connection with a new URI if an error occurs.
-    pub async fn start(self) {
+    pub fn start(self) -> Vec<JoinHandle<()>> {
         info!(
             "Initializing {} WebSocket data generators...",
             self.clients.len()
         );
 
-        for mut client in self.clients {
-            info!("Starting [{}]", client.name);
-            let logger = self.logger.clone();
-            tokio::spawn(async move {
-                loop {
-                    // This will only return if an error occurred - indicating that we need to reopen the connection with a new URI
-                    let Some(uri_entry) = client.start().await else {
-                        // If this ever returns None - it means that there are no remaining URIs in the heap. In this case, we can exit as there is no point in
-                        // trying to reconnect.
-                        return;
-                    };
+        self.clients
+            .into_iter()
+            .map(|mut client| {
+                info!("Starting [{}]", client.name);
+                let logger = self.logger.clone();
+                tokio::spawn(async move {
+                    loop {
+                        // This will only return if an error occurred - indicating that we need to reopen the connection with a new URI
+                        let Some(uri_entry) = client.start().await else {
+                            // If this ever returns None - it means that there are no remaining URIs in the heap. In this case, we can exit as there is no point in
+                            // trying to reconnect.
+                            return;
+                        };
 
-                    let socket_name = uri_entry.name().to_string();
+                        let socket_name = uri_entry.name().to_string();
 
-                    if let Err(e) = logger.log_websocket_dropped(socket_name.clone()) {
-                        error!(
-                            "Failed to log WebSocket drop for socket [{socket_name}]. Error: {e}",
-                        );
-                    };
+                        if let Err(e) = logger.log_websocket_dropped(socket_name.clone()) {
+                            error!(
+                                "Failed to log WebSocket drop for socket [{socket_name}]. Error: {e}",
+                            );
+                        };
 
-                    // Mark the URI as failed since the connection dropped after being established
-                    client.uri_selector.mark_failed(uri_entry);
-                }
-            });
+                        // Mark the URI as failed since the connection dropped after being established
+                        client.uri_selector.mark_failed(uri_entry);
+                    }
+                })
+            })
+            .collect()
+    }
+}
+
+/// Stops WebSocket tasks immediately. These generators do not persist state, so shutdown does
+/// not need to wait for socket reconnect/read/write loops to finish naturally.
+pub async fn abort_websocket_tasks(handles: Vec<JoinHandle<()>>) {
+    for handle in &handles {
+        handle.abort();
+    }
+
+    for handle in handles {
+        if let Err(e) = handle.await {
+            if !e.is_cancelled() {
+                error!("WebSocket data generator task failed during shutdown: {e}");
+            }
         }
     }
 }
@@ -326,15 +345,8 @@ impl WebSocketClient {
         {
             let (write, read) = socket.split();
 
-            let write_handle = self
-                .spawn_write_task(write, uri.clone(), uri_name.clone())
+            self.run_connection(write, read, uri.clone(), uri_name.clone())
                 .await;
-
-            let read_handle = self
-                .spawn_read_task(read, self.sender.clone(), uri.clone(), uri_name.clone())
-                .await;
-
-            self.await_tasks(write_handle, read_handle, &uri_name).await;
 
             // We only reach this point if the connection dropped. Since the connection was successful, we reset its failure state first.
             // Then we return it so the caller can mark it as failed. This prevents the scenario where a URI that was previously marked as
@@ -347,142 +359,75 @@ impl WebSocketClient {
         }
     }
 
-    /// Spawns a task to periodically send a predefined message to the WebSocket.
-    ///
-    /// This function creates a task that periodically sends a message to the
-    /// WebSocket. The message to be sent and the interval between sends are defined in the
-    /// configuration of the current instance. If an error occurs while sending the message, the task
-    /// logs the error and terminates.
-    ///
-    /// # Parameters
-    /// - `self`: A reference to the current instance.
-    /// - `write`: The write half of the split WebSocket stream.
-    /// - `uri`: The URI of the WebSocket.
-    ///
-    /// # Returns
-    /// An optional `JoinHandle` for the spawned task. If no message is configured, it returns `None`.
-    ///
-    /// # Errors
-    /// If an error occurs while sending a message to the WebSocket, the task logs the error and
-    /// terminates.
-    async fn spawn_write_task(
+    /// Runs one connected socket until the read or write side fails.
+    async fn run_connection(
         &self,
         mut write: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WSMessage>,
+        mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
         uri: Uri,
         uri_name: String,
-    ) -> Option<JoinHandle<()>> {
-        if let Some(message_config) = &self.configuration.message_config {
-            let socket_msg = message_config.message.clone();
-            let sleep_duration = message_config.sleep_duration;
+    ) {
+        match &self.configuration.message_config {
+            Some(message_config) => {
+                let socket_msg = message_config.message.clone();
+                let mut write_interval =
+                    tokio::time::interval(Duration::from_millis(message_config.sleep_duration));
 
-            Some(tokio::spawn(async move {
                 loop {
-                    if let Err(e) = write.send(WSMessage::Text(socket_msg.clone())).await {
-                        error!("Failed to send message to WS: [{uri_name}] at [{uri}]. Error: {e}",);
-                        return;
+                    tokio::select! {
+                        _ = write_interval.tick() => {
+                            if let Err(e) = write.send(WSMessage::Text(socket_msg.clone())).await {
+                                error!("Failed to send message to WS: [{uri_name}] at [{uri}]. Error: {e}");
+                                return;
+                            }
+                        }
+
+                        message = read.next() => {
+                            if !self.handle_read_message(message, &uri_name) {
+                                return;
+                            }
+                        }
                     }
-                    tokio::time::sleep(Duration::from_millis(sleep_duration)).await;
                 }
-            }))
-        } else {
-            None
+            }
+            None => while self.handle_read_message(read.next().await, &uri_name) {},
         }
     }
 
-    /// Spawns a task to read messages from the WebSocket and process them.
-    ///
-    /// This function creates an asynchronous task that reads messages from the WebSocket. For each
-    /// message read, it creates a log message and sends it to a specified channel. If an error occurs
-    /// while reading from the WebSocket, the task logs the error and terminates.
-    ///
-    /// # Parameters
-    /// - `self`: A reference to the current instance.
-    /// - `read`: The read half of the split WebSocket stream.
-    /// - `sender`: A channel sender to which log messages are sent.
-    /// - `uri`: The URI of the WebSocket.
-    ///
-    /// # Returns
-    /// A `JoinHandle` for the spawned task.
-    ///
-    /// # Errors
-    /// If an error occurs while reading a message from the WebSocket or sending a log message to the
-    /// channel, the task logs the error and terminates.
-    async fn spawn_read_task(
+    /// Returns false when the socket read loop should stop and reconnect.
+    fn handle_read_message(
         &self,
-        mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-        sender: Sender<Message>,
-        uri: Uri,
-        uri_name: String,
-    ) -> JoinHandle<()> {
-        let generator_name = self.name.clone();
-        let log_type = self.configuration.log_type.clone();
-        let log_source = LogSource::Generator(Generator::WebSocketExternal(generator_name.clone()));
-        let logbacks_allowed = self.configuration.logbacks_allowed.clone();
-
-        tokio::spawn(async move {
-            while let Some(message) = read.next().await {
-                match message {
-                    Ok(msg) => {
-                        let log_message = Message::new(
-                            log_type.clone(),
-                            msg.into_data(),
-                            log_source.clone(),
-                            logbacks_allowed.clone(),
-                        );
-
-                        if let Err(e) = sender.send(log_message) {
-                            error!("Failed to send log to executor: {e}");
-                        }
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to read from WebSocket: [{uri_name}] at [{uri}]. Error: {e}"
-                        );
-                        return;
-                    }
-                }
-            }
-        })
-    }
-
-    /// Waits for the read and write tasks to complete, handling any unexpected terminations.
-    ///
-    /// This function waits for the completion of the read and write tasks. If either task terminates
-    /// unexpectedly, it logs an error message. If no write task is spawned, it only waits for the
-    /// read task.
-    ///
-    /// # Parameters
-    /// - `self`: A reference to the current instance.
-    /// - `write_handle`: An optional `JoinHandle` for the write task.
-    /// - `read_handle`: A `JoinHandle` for the read task.
-    ///
-    /// # Behavior
-    /// - If both write and read tasks are provided, it waits for both tasks to complete.
-    /// - If only the read task is provided, it waits for the read task to complete.
-    /// - Logs an error message if either task finishes unexpectedly.
-    async fn await_tasks(
-        &self,
-        write_handle: Option<JoinHandle<()>>,
-        read_handle: JoinHandle<()>,
+        message: Option<Result<WSMessage, tokio_tungstenite::tungstenite::Error>>,
         uri_name: &str,
-    ) {
-        match write_handle {
-            Some(write_handle) => {
-                tokio::select! {
-                    _ = write_handle => {
-                        error!("Write task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
-                    },
-                    _ = read_handle => {
-                        error!("Read task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
-                    },
+    ) -> bool {
+        match message {
+            Some(Ok(msg)) => {
+                let log_message = Message::new(
+                    self.configuration.log_type.clone(),
+                    msg.into_data(),
+                    LogSource::Generator(Generator::WebSocketExternal(self.name.clone())),
+                    self.configuration.logbacks_allowed.clone(),
+                );
+
+                if let Err(e) = self.sender.send(log_message) {
+                    error!(
+                        "Failed to send log generated from WebSocket {} ({uri_name}) to executor: {e}",
+                        self.name
+                    );
                 }
+
+                true
+            }
+            Some(Err(e)) => {
+                error!("Failed to read from WebSocket: [{uri_name}]. Error: {e}");
+                false
             }
             None => {
-                tokio::select! {
-                    _ = read_handle => {
-                        error!("Read task for WebSocket: [{}] using socket [{uri_name}] finished unexpectedly", &self.name);
-                    },
-                }
+                error!(
+                    "WebSocket: [{}] using socket [{uri_name}] closed",
+                    &self.name
+                );
+                false
             }
         }
     }

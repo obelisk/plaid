@@ -228,17 +228,12 @@ impl Data {
                 });
             }
 
-            // TODO: check if websocket DG spawns tasks that will leak
             if let Some(websocket) = di.websocket_external {
                 let ct_clone = cancellation_token.clone();
                 join_set.spawn(async move {
-                    tokio::select! {
-                        _ = ct_clone.cancelled() => {
-                            return;
-                        }
-
-                        _ = websocket.start() => {}
-                    }
+                    let websocket_tasks = websocket.start();
+                    ct_clone.cancelled().await;
+                    websocket::abort_websocket_tasks(websocket_tasks).await;
                 });
             }
         }
