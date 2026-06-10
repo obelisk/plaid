@@ -23,8 +23,8 @@ use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 /// When a rule is used to generate a response to a GET request, this structure
 /// is what is passed from the executor to the async webhook runtime.
@@ -213,10 +213,32 @@ pub struct Executor {
     thread_pools: ExecutionThreadPools,
 }
 
+/// Join handles for executor worker threads.
+pub struct ExecutorThreads {
+    thread_handles: Vec<JoinHandle<()>>,
+    shutdown: Sender<()>,
+}
+
+impl ExecutorThreads {
+    /// Drain queued messages, then stop worker threads.
+    ///
+    /// Threads cannot rely on channel disconnect alone: each one holds an `Arc<Api>` with
+    /// `log_sender` clones for logback support, which keeps senders alive while blocked on
+    /// `recv()`.
+    pub fn shutdown(self) {
+        drop(self.shutdown);
+
+        for handle in self.thread_handles {
+            if let Err(e) = handle.join() {
+                error!("Execution thread panicked during shutdown: {e:?}");
+            }
+        }
+    }
+}
+
 /// Errors encountered by the executor while trying to execute a module
 pub enum ExecutorError {
     ExternalLoggingError(LoggingError),
-    IncomingLogError,
     LinkError(LinkError),
     InstantiationError(String),
     MemoryError(String),
@@ -229,7 +251,6 @@ impl std::fmt::Display for ExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ExecutorError::ExternalLoggingError(e) => write!(f, "External Logging Error: {e}"),
-            ExecutorError::IncomingLogError => write!(f, "Incoming Log Error"),
             ExecutorError::LinkError(e) => write!(f, "Link Error: {e}"),
             ExecutorError::InstantiationError(e) => write!(f, "Instantiation Error: {e}"),
             ExecutorError::MemoryError(e) => write!(f, "Memory Error: {e}"),
@@ -598,9 +619,25 @@ fn execution_loop(
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
+    shutdown: Receiver<()>,
 ) -> Result<(), ExecutorError> {
-    // Wait on our receiver for logs to come in
-    while let Ok(message) = receiver.recv() {
+    loop {
+        let message = crossbeam_channel::select! {
+            recv(receiver) -> message => {
+                match message {
+                    Ok(message) => message,
+                    _ => return Ok(()),
+                }
+            }
+
+            recv(shutdown) -> _ => {
+                match receiver.try_recv() {
+                    Ok(message) => message,
+                    _ => return Ok(())
+                }
+            }
+        };
+
         // Check that we know what modules to send this new log to
         match (&message.module, modules.get(&message.type_)) {
             // If this message has a response sender, we only
@@ -641,7 +678,6 @@ fn execution_loop(
             }
         };
     }
-    Err(ExecutorError::IncomingLogError)
 }
 
 fn determine_error(
@@ -675,7 +711,10 @@ impl Executor {
         cache: Option<Arc<Cache>>,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
-    ) -> Self {
+    ) -> (Self, ExecutorThreads) {
+        let mut thread_handles = Vec::new();
+        let (shutdown_sender, shutdown_receiver) = crossbeam_channel::bounded::<()>(0);
+
         // General processing
         for i in 0..thread_pools.general_pool.num_threads {
             info!("Starting Execution Thread {i} Dedicated to General Processing");
@@ -686,7 +725,8 @@ impl Executor {
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
-            thread::spawn(move || loop {
+            let shutdown = shutdown_receiver.clone();
+            let handle = thread::spawn(move || {
                 if let Err(e) = execution_loop(
                     receiver.clone(),
                     modules.clone(),
@@ -695,11 +735,12 @@ impl Executor {
                     cache.clone(),
                     els.clone(),
                     performance_sender.clone(),
+                    shutdown.clone(),
                 ) {
-                    error!("Execution thread exited with error: {e}");
+                    error!("General execution thread {i} exited with error: {e}");
                 }
-                thread::sleep(Duration::from_secs(10));
             });
+            thread_handles.push(handle);
         }
 
         // Dedicated processing
@@ -713,7 +754,9 @@ impl Executor {
                 let modules = modules.clone();
                 let els = els.clone();
                 let performance_sender = performance_monitoring_mode.clone();
-                thread::spawn(move || loop {
+                let log_type = log_type.clone();
+                let shutdown = shutdown_receiver.clone();
+                let handle = thread::spawn(move || {
                     if let Err(e) = execution_loop(
                         receiver.clone(),
                         modules.clone(),
@@ -722,14 +765,21 @@ impl Executor {
                         cache.clone(),
                         els.clone(),
                         performance_sender.clone(),
+                        shutdown.clone(),
                     ) {
-                        error!("Execution thread exited with error: {e}");
+                        error!("{log_type} dedicated execution thread {i} exited with error: {e}");
                     }
-                    thread::sleep(Duration::from_secs(10));
                 });
+                thread_handles.push(handle);
             }
         }
-        Self { thread_pools }
+        (
+            Self { thread_pools },
+            ExecutorThreads {
+                thread_handles,
+                shutdown: shutdown_sender,
+            },
+        )
     }
 
     /// Execute a message coming from a webhook, by sending it to the appropriate thread pool.
