@@ -5,7 +5,7 @@
 [loading]
 module_dir = "../compiled_modules/"
 compiler_backend = "cranelift"
-readiness_check_file = "./plaid_ready"
+probe_listen_address = "0.0.0.0:8081"
 
 test_mode = true
 test_mode_exemptions = []
