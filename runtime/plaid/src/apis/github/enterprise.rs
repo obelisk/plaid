@@ -29,7 +29,9 @@ impl Github {
         let org = self.validate_org(&request.params.org)?;
         let installation_id = request.params.installation_id;
 
-        // We do not validate the repositories because those are in the body and we rely on the API to validate them.
+        for repo in &request.params.repositories {
+            self.validate_repository_name(repo)?;
+        }
 
         info!(
             "Granting repository access to organization installation [{installation_id}] for enterprise [{enterprise}] and organization [{org}] on behalf of [{module}]. Involved repos: {:?}",
@@ -74,7 +76,9 @@ impl Github {
         let org = self.validate_org(&request.params.org)?;
         let installation_id = request.params.installation_id;
 
-        // We do not validate the repositories because those are in the body and we rely on the API to validate them.
+        for repo in &request.params.repositories {
+            self.validate_repository_name(repo)?;
+        }
 
         info!(
             "Removing repository access from organization installation [{installation_id}] for enterprise [{enterprise}] and organization [{org}] on behalf of [{module}]. Involved repos: {:?}",
