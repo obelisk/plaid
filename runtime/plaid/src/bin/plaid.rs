@@ -618,7 +618,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         dg_result = dg_tasks.join_next(), if !dg_tasks.is_empty() => {
             warn!("A data generator task exited before a shutdown signal was received");
             if let Some(result) = dg_result {
-                log_join_result("webhook server", result);
+                log_join_result("data generator", result);
             }
         }
     }
