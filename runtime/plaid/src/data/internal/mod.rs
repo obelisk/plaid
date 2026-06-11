@@ -1,6 +1,6 @@
 use crate::{executor::Message, storage::Storage};
 
-use crossbeam_channel::{bounded, Receiver, Sender};
+use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +49,7 @@ impl std::cmp::Ord for DelayedMessage {
     }
 }
 
+#[derive(Clone)]
 pub struct Internal {
     sender: Sender<Message>,
     receiver: Receiver<DelayedMessage>,
@@ -105,88 +106,94 @@ impl Internal {
         self.internal_sender.clone()
     }
 
-    pub async fn fetch_internal_logs(&mut self, running_logbacks: bool) -> Result<(), String> {
-        let start = SystemTime::now();
-        let current_time = start
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_secs();
-
-        // First, receive everything from the channel and write to DB
+    pub async fn listen_for_incoming_logs(&self) {
         while let Ok(mut log) = self.receiver.try_recv() {
+            let current_time = get_time();
             log.delay += current_time;
 
             // Prepare what will be stored in the DB by serializing the DelayedMessage
-            if let Ok(db_item) = serde_json::to_vec(&log) {
-                if let Err(e) = self
-                    .storage
-                    .insert(LOGBACK_NS.to_string(), log.message.id.clone(), db_item)
-                    .await
-                {
-                    error!("Storage system could not persist a message: {e}");
+            let db_item = match serde_json::to_vec(&log) {
+                Ok(db_item) => db_item,
+                Err(e) => {
+                    error!(
+                        "Failed to serialize DelayedMessage from {}. Error: {e}",
+                        log.message.source
+                    );
+                    continue;
                 }
-            } else {
-                error!("Failed to serialize a DelayedMessage");
+            };
+
+            if let Err(e) = self
+                .storage
+                .insert(LOGBACK_NS.to_string(), log.message.id.clone(), db_item)
+                .await
+            {
+                error!(
+                    "Storage system could not persist delayed log from {}. Error: {e}",
+                    log.message.source
+                );
             }
         }
+    }
 
-        // If we are _not_ running logbacks, then we are done: we have sent the logbacks to the DB
-        // and someone else will pick them up.
-        // Instead, if we are running logbacks, then we continue by pulling from the DB and processing.
+    pub async fn fetch_internal_logs(&mut self) -> Result<(), String> {
+        let current_time = get_time();
 
-        if running_logbacks {
-            // Fill the heap with the content read from the DB.
-            // This ensures that modifications which are made out-of-band to the DB are
-            // reflected in the heap's content.
-            let mut log_heap = fill_heap_from_db(self.storage.clone())
-                .await
-                .map_err(|e| format!("{e:?}"))?;
+        // Fill the heap with the content read from the DB.
+        // This ensures that modifications which are made out-of-band to the DB are
+        // reflected in the heap's content.
+        let mut log_heap = fill_heap_from_db(self.storage.clone())
+            .await
+            .map_err(|e| format!("{e:?}"))?;
 
-            // Now the heap is reflecting the content of the DB: we can look at it
-            // and see if something should be executed.
+        // Now the heap is reflecting the content of the DB: we can look at it
+        // and see if something should be executed.
 
-            while let Some(heap_top) = log_heap.peek() {
-                let heap_top = &heap_top.0;
+        while let Some(heap_top) = log_heap.peek() {
+            let heap_top = &heap_top.0;
 
-                if current_time < heap_top.delay {
-                    info!(
+            if current_time < heap_top.delay {
+                info!(
                     "There are no logs that have elapsed their delay. Next log is in: {} seconds",
                     heap_top.delay - current_time
                 );
+                break;
+            }
+
+            // safe unwrap because if the log_heap was empty, the call to `peek()` above would have returned None
+            let log = log_heap.pop().unwrap();
+            let log_id = log.0.message.id.clone();
+            match self.sender.try_send(log.0.message) {
+                Ok(_) => {
+                    // The log has been sent: now we can remove it from the storage
+                    match self.storage.delete(LOGBACK_NS, &log_id).await {
+                        Ok(None) => {
+                            error!("We tried to delete a log back message with ID {log_id} that wasn't persisted")
+                        }
+                        Ok(Some(_)) => (),
+                        Err(e) => error!("Error removing persisted log with ID {log_id}: {e}"),
+                    }
+                }
+                Err(TrySendError::Full(_)) => {
+                    // Executor queue is full; leave the log in storage and retry next poll.
                     break;
                 }
-
-                // safe unwrap because if the log_heap was empty, the call to `peek()` above would have returned None
-                let log = log_heap.pop().unwrap();
-                let log_id = log.0.message.id.clone();
-                match self.sender.send(log.0.message) {
-                    Ok(_) => {
-                        // The log has been sent: now we can remove it from the storage
-                        match self.storage.delete(LOGBACK_NS, &log_id).await {
-                            Ok(None) => {
-                                error!(
-                                    "We tried to delete a log back message that wasn't persisted"
-                                )
-                            }
-                            Ok(Some(_)) => (),
-                            Err(e) => error!("Error removing persisted log: {e}"),
-                        }
-                    }
-                    Err(e) => {
-                        // Something went wrong while sending the log, so we do this:
-                        // - We log an error
-                        // - We don't delete it from the storage
-                        // - We break the while loop
-                        // It's not necessary to re-add the log to the heap, because this will be
-                        // re-filled on the next iteration by reading from the storage.
-                        error!("Error while sending a logback for processing: {e}");
-                        break;
-                    }
+                Err(TrySendError::Disconnected(_)) => {
+                    error!("Error while sending a logback with ID {log_id} for processing: channel disconnected");
+                    break;
                 }
             }
-            debug!("Heap Size: {}", log_heap.len());
         }
+        debug!("Heap Size: {}", log_heap.len());
 
         Ok(())
     }
+}
+
+fn get_time() -> u64 {
+    let start = SystemTime::now();
+    start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs()
 }
