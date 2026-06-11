@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::storage::StorageError;
+use crate::{loader::security::SecurityError, storage::StorageError};
 
 #[derive(Debug)]
 pub enum Errors {
@@ -11,6 +11,7 @@ pub enum Errors {
     FileError(std::io::Error),
     MissingFunction(String),
     StorageError(StorageError),
+    SecurityError(SecurityError),
 }
 
 impl Display for Errors {
@@ -34,6 +35,7 @@ impl Display for Errors {
                 f,
                 "Plaid encountered a storage error during module load: {e}"
             ),
+            Self::SecurityError(e) => write!(f, "Module security could not be verified: {e}"),
         }
     }
 }

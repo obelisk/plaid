@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-use plaid_stl::{entrypoint_with_source, messages::LogSource, network, plaid};
+use plaid_stl::{entrypoint_with_source, embed_plaid_profile, messages::LogSource, network, plaid};
 
+
+embed_plaid_profile!(SECURITY, "../security-profiles/permissive.json");
 entrypoint_with_source!();
 
 fn main(data: String, _: LogSource) -> Result<(), i32> {

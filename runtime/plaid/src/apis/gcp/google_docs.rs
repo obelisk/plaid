@@ -501,6 +501,7 @@ mod tests {
             secrets: Default::default(),
             persistent_response: Default::default(),
             test_mode,
+            security_profile: None,
         })
     }
 
