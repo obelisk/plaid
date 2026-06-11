@@ -622,11 +622,17 @@ fn execution_loop(
     shutdown: Receiver<()>,
 ) -> Result<(), ExecutorError> {
     loop {
+        // Uses the `shutdown` channel to transition from a blocking receive to a non-blocking
+        // `try_recv()`. Post-shutdown, the closed shutdown channel is always "ready". Because
+        // `select!` pseudo-randomly chooses between ready channels, both branches cooperate
+        // to drain pending messages. The `recv(shutdown)` branch is guaranteed to be hit at
+        // least once. The loop ultimately exits if the log channel disconnects or
+        // when `try_recv()` confirms the queue is fully drained.
         let message = crossbeam_channel::select! {
             recv(receiver) -> message => {
                 match message {
                     Ok(message) => message,
-                    _ => return Ok(()),
+                    _ => return Ok(())
                 }
             }
 
