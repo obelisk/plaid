@@ -262,9 +262,6 @@ done
 
 echo "Sending SIGTERM to Plaid..."
 kill "$PLAID_PID"
-
-sleep 2
-
 wait "$PLAID_PID"
 
 # Validate all expected outputs were written.
