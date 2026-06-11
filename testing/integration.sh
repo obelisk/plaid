@@ -268,6 +268,8 @@ wait "$PLAID_PID"
 actual=$(wc -l < "$FILE")
 if [ "$actual" -ne "$LOG_COUNT" ]; then
   echo "Expected $LOG_COUNT processed logs, got $actual"
+  kill "$RH_PID" 2>/dev/null || true
+  rm -f "$FILE"
   exit 1
 fi
 
