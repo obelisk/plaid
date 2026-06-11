@@ -367,7 +367,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // This sender provides an internal route to sending logs. This is what
     // powers the logback functions.
-    let (delayed_log_sender, dg_tasks) = Data::start(
+    let (delayed_log_sender, mut dg_tasks) = Data::start(
         config.data,
         log_sender.clone(),
         internal_storage.clone(),
@@ -604,13 +604,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting servers, boot up complete");
     is_ready.store(true, Ordering::SeqCst);
 
-    // Block until SIGINT/SIGTERM, or until a server task exits unexpectedly.
+    // Block until SIGINT/SIGTERM, or until a server/data generator task exits unexpectedly.
     tokio::select! {
         _ = wait_for_shutdown_signal() => {}
 
         server_result = server_tasks.join_next(), if !server_tasks.is_empty() => {
             warn!("A server task exited before a shutdown signal was received");
             if let Some(result) = server_result {
+                log_join_result("webhook server", result);
+            }
+        }
+
+        dg_result = dg_tasks.join_next(), if !dg_tasks.is_empty() => {
+            warn!("A data generator task exited before a shutdown signal was received");
+            if let Some(result) = dg_result {
                 log_join_result("webhook server", result);
             }
         }
