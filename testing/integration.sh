@@ -202,7 +202,12 @@ export PLAID_LOCATION="localhost:4554"
 
 # Loop through all test modules in the test_modules directory
 for module in modules/tests/*; do
-  # If the cache backend is not redis, skip modules whose path/name contains "redis"
+  # Skip tests that are handled separately
+  if [[ "$module" == "modules/tests/graceful_shutdown.wasm" ]]; then
+    continue
+  fi
+
+  # Skip Redis tests when not using Redis
   if [[ "$CACHE_BACKEND" != redis* && "$module" == *redis* ]]; then
     echo "Skipping integration test for module $module"
     continue
@@ -227,6 +232,47 @@ for module in modules/tests/*; do
   fi
 done
 
-echo "Tests complete. Killing Plaid"
-# Kill the Plaid process
-kill $PLAID_PID
+# TODO: Move this logic into a dedicated script. It remains here temporarily
+# because refactoring the test framework is outside the scope of the runtime
+# graceful shutdown changes.
+echo "Running graceful shutdown test..."
+
+URL="test_graceful_shutdown"
+FILE="received_data.$URL.txt"
+LOG_COUNT=100
+
+rm -f "$FILE"
+
+# Start the webhook handler
+$REQUEST_HANDLER > "$FILE" &
+if [ $? -ne 0 ]; then
+  echo "Failed to start request handler"
+  rm $FILE
+  exit 1
+fi
+RH_PID=$!
+
+sleep 2
+
+# Flood Plaid with logs then immediately send the SIGTERM
+echo "Submitting $LOG_COUNT logs..."
+for i in $(seq 1 "$LOG_COUNT"); do
+  curl -d "{}" http://$PLAID_LOCATION/webhook/$URL
+done
+
+echo "Sending SIGTERM to Plaid..."
+kill "$PLAID_PID"
+
+sleep 2
+
+wait "$PLAID_PID"
+
+# Validate all expected outputs were written.
+actual=$(wc -l < "$FILE")
+if [ "$actual" -ne "$LOG_COUNT" ]; then
+  echo "Expected $LOG_COUNT processed logs, got $actual"
+  exit 1
+fi
+
+kill "$RH_PID"
+rm "$FILE"
