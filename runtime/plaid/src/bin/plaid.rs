@@ -21,9 +21,12 @@ use data::Data;
 use executor::*;
 use plaid_stl::messages::LogSource;
 use storage::Storage;
-use tokio::signal::{
-    self,
-    unix::{signal, SignalKind},
+use tokio::{
+    signal::{
+        self,
+        unix::{signal, SignalKind},
+    },
+    spawn,
 };
 use tokio::{sync::RwLock, task::JoinSet};
 use tokio_util::{bytes::Buf, sync::CancellationToken};
@@ -304,21 +307,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut server_tasks = JoinSet::new();
 
     if let Some(probe_listen_address) = config.loading.probe_listen_address.clone() {
-        let probe_address: SocketAddr = probe_listen_address
-            .parse()
-            .expect("Probe listen address was invalid");
         let routes = probe_routes(is_ready.clone());
-        let token = cancellation_token.clone();
 
-        info!("Started probe server at: {probe_address}");
-        server_tasks.spawn(async move {
-            let (_, server) =
-                warp::serve(routes).bind_with_graceful_shutdown(probe_address, async move {
-                    token.cancelled().await;
-                });
-
-            server.await;
-            info!("Probe server [{probe_address}] shut down");
+        info!("Started probe server at: {probe_listen_address}");
+        spawn(async move {
+            warp::serve(routes).bind(probe_listen_address).await;
+            error!("Probe server running at [{probe_listen_address}] shut down");
         });
     } else {
         warn!("No probe_listen_address configured; readiness and liveness endpoints are disabled");
@@ -625,7 +619,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Tell the orchestrator to stop routing traffic before we tear down producers.
     is_ready.store(false, Ordering::SeqCst);
     info!("Sending cancellation notice to all listening tasks.");
-    // Stops data generators and triggers graceful shutdown on webhook/probe servers.
     cancellation_token.cancel();
 
     // Data generators are the main source of new logs; wait for them to exit first.
@@ -641,15 +634,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         log_join_result("webhook server", result);
     }
 
-    // Drop external sender clones. Worker threads still hold more via Arc<Api> (logback),
-    // so they cannot exit on channel disconnect alone.
-    drop(delayed_log_sender);
-    drop(log_sender);
-    drop(exec_thread_pools);
+    // Shutdown channel lets threads finish queued work, then exit even while Api senders live.
 
     info!("Waiting for executor threads to drain...");
-    drop(executor);
-    // Shutdown channel lets threads finish queued work, then exit even while Api senders live.
     executor_threads.shutdown();
 
     // Performance loop exits when cancelled and its sender disconnects.
