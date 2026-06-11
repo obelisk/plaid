@@ -24,7 +24,7 @@ use crossbeam_channel::Sender;
 
 use serde::Deserialize;
 use time::OffsetDateTime;
-use tokio::task::JoinSet;
+use tokio::task::{self, JoinSet};
 use tokio_util::sync::CancellationToken;
 
 pub use self::internal::DelayedMessage;
@@ -267,35 +267,48 @@ impl Data {
             }
         }
 
-        // Start the internal log processor. This doesn't need to be a Tokio task,
-        // but we make it one in case we need runtime access in the future. It may
-        // make sense to convert this to a standard thread later, but there is no
-        // benefit right now as long as the work remains non-blocking.
-        let running_logbacks = roles.logbacks;
-        let ct_clone = cancellation_token.clone();
+        // Spawns a perpetual, untracked listener for delayed logbacks. This task is
+        // intentionally left out of the JoinSet: rules may still send delayed logbacks
+        // while executor threads drain in-flight work, and terminating the listener
+        // early would leave those sends with no receiver.
+        //
+        // This can be improved upon with an async delayed message channel, but this
+        // models the current implementation so we will leave it for now and can revisit
+        // in a separate PR.
         let sender = di.internal.get_sender().clone();
-
-        join_set.spawn(async move {
+        let internal_clone = di.internal.clone();
+        task::spawn(async move {
             loop {
-                if ct_clone.is_cancelled() {
-                    return;
-                }
+                internal_clone.listen_for_incoming_logs().await;
+                tokio::time::sleep(Duration::from_secs(10)).await
+            }
+        });
 
-                if let Err(e) = di.internal.fetch_internal_logs(running_logbacks).await {
-                    error!("Internal Data Fetch Error: {e}");
-                }
-
-                tokio::select! {
-                    // Allow shutdown to interrupt the sleep immediately
-                    // instead of waiting for the polling interval.
-                    _ = ct_clone.cancelled() => {
+        // If running logbacks, start the internal processor.
+        if roles.logbacks {
+            let ct_clone = cancellation_token.clone();
+            join_set.spawn(async move {
+                loop {
+                    if ct_clone.is_cancelled() {
                         return;
                     }
 
-                    _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                    if let Err(e) = di.internal.fetch_internal_logs().await {
+                        error!("Internal Data Fetch Error: {e}");
+                    }
+
+                    tokio::select! {
+                        // Allow shutdown to interrupt the sleep immediately
+                        // instead of waiting for the polling interval.
+                        _ = ct_clone.cancelled() => {
+                            return;
+                        }
+
+                        _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                    }
                 }
-            }
-        });
+            });
+        }
 
         info!("Started Data Generators");
         Ok((sender, join_set))
