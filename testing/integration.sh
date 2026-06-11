@@ -203,7 +203,7 @@ export PLAID_LOCATION="localhost:4554"
 # Loop through all test modules in the test_modules directory
 for module in modules/tests/*; do
   # Skip tests that are handled separately
-  if [[ "$module" == "modules/tests/graceful_shutdown.wasm" ]]; then
+  if [[ "$module" == "modules/tests/test_graceful_shutdown" ]]; then
     continue
   fi
 
