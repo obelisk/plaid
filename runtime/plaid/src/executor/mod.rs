@@ -11,7 +11,7 @@ use crate::logging::{Logger, LoggingError, Severity};
 use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
 
-use crossbeam_channel::{Receiver, Sender, TrySendError};
+use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
 use thread_pools::ExecutionThreadPools;
 use tokio::sync::oneshot::Sender as OneShotSender;
 
@@ -245,6 +245,7 @@ pub enum ExecutorError {
     NoEntrypoint,
     InvalidEntrypoint,
     ModuleExecutionError(ModuleExecutionError),
+    IncomingLogError(RecvError),
 }
 
 impl std::fmt::Display for ExecutorError {
@@ -260,6 +261,7 @@ impl std::fmt::Display for ExecutorError {
                 "Entrypoint is not a function or not the correct prototype"
             ),
             ExecutorError::ModuleExecutionError(e) => write!(f, "Module Execution Error: {e}"),
+            ExecutorError::IncomingLogError(e) => write!(f, "Error reading log from channel: {e}"),
         }
     }
 }
@@ -632,7 +634,7 @@ fn execution_loop(
             recv(receiver) -> message => {
                 match message {
                     Ok(message) => message,
-                    _ => return Ok(())
+                    Err(e) => return Err(ExecutorError::IncomingLogError(e))
                 }
             }
 
