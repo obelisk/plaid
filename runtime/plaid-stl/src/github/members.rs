@@ -5,6 +5,7 @@ use crate::PlaidFunctionError;
 
 /// Get a user's ID from their username
 /// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `username` - The GitHub username.
 pub fn get_user_id_from_username(
     client_id: impl Display,
@@ -46,6 +47,7 @@ pub fn get_user_id_from_username(
 
 /// Get a username from a user ID
 /// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `user_id` - The GitHub user ID.
 pub fn get_username_from_user_id(
     client_id: impl Display,
@@ -96,6 +98,7 @@ pub struct RemoveOutsideCollaboratorParams {
 /// Remove an outside collaborator from an org
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `user` - The outside collaborator to remove from the org
 /// * `org` - The GitHub organization to remove the user from
 pub fn remove_outside_collaborator_from_org(

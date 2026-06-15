@@ -15,6 +15,13 @@ pub struct ListFilesParams {
     pub page: String,
 }
 
+/// List files changed in a pull request.
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `organization` - The organization or user that owns the repository.
+/// * `repository_name` - The name of the repository.
+/// * `pull_request` - The pull request number.
+/// * `page` - The page number for pagination.
 pub fn list_files(
     client_id: impl Display,
     organization: &str,
@@ -63,6 +70,13 @@ pub fn list_files(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+/// Comment on a pull request.
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `username` - The owner of the repository.
+/// * `repository_name` - The name of the repository.
+/// * `pull_request` - The pull request number.
+/// * `comment` - The comment text.
 pub fn comment_on_pull_request(
     client_id: impl Display,
     username: impl Display,
@@ -100,6 +114,13 @@ pub fn comment_on_pull_request(
 }
 
 /// Request a reviewer on a PR
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account or organization that owns the repository.
+/// * `repo` - The name of the repository.
+/// * `pull_request` - The pull request number.
+/// * `reviewers` - A list of users to request as reviewers.
+/// * `team_reviewers` - A list of teams to request as reviewers.
 /// For more details, see https://docs.github.com/en/rest/pulls/review-requests?apiVersion=2022-11-28#request-reviewers-for-a-pull-request
 pub fn pull_request_request_reviewers(
     client_id: impl Display,
@@ -376,14 +397,15 @@ pub struct CreatePullRequestRequest {
 /// See the [GitHub API docs](https://docs.github.com/en/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests)
 /// for more details.
 ///
-/// # Arguments
-/// - `owner`: The account or organization that owns the repository.
-/// - `repo`: The name of the repository.
-/// - `options`: Optional filters to narrow the set of returned pull requests.
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account or organization that owns the repository.
+/// * `repo` - The name of the repository.
+/// * `options` - Optional filters to narrow the set of returned pull requests.
 ///
-/// # Returns
-/// - `Ok(Vec<PullRequest>)` with all matching pull requests, or
-/// - `Err(PlaidFunctionError)` if the request fails.
+/// ## Returns
+/// * `Ok(Vec<PullRequest>)` with all matching pull requests, or
+/// * `Err(PlaidFunctionError)` if the request fails.
 pub fn get_pull_requests(
     client_id: impl Display,
     owner: impl Display,
@@ -460,18 +482,19 @@ pub fn get_pull_requests(
 /// See the [GitHub API docs](https://docs.github.com/en/rest/pulls/pulls?apiVersion=2022-11-28#create-a-pull-request)
 /// for more details.
 ///
-/// # Arguments
-/// - `owner`: The account or organization that owns the repository.
-/// - `repo`: The name of the repository.
-/// - `title`: The title of the pull request.
-/// - `head`: The name of the branch where changes are implemented (the source branch).
-/// - `base`: The name of the branch you want the changes pulled into (the target branch).
-/// - `body`: Optional text providing a description of the pull request.
-/// - `draft`: Whether to create the pull request as a draft (`true`) or a normal PR (`false`).
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account or organization that owns the repository.
+/// * `repo` - The name of the repository.
+/// * `title` - The title of the new pull request.
+/// * `head` - The name of the branch where your changes are implemented.
+/// * `base` - The name of the branch you want the changes pulled into.
+/// * `body` - Optional description for the pull request.
+/// * `draft` - Whether to open the PR as a draft.
 ///
-/// # Returns
-/// - `Ok(PullRequest)` if the pull request was successfully created, or
-/// - `Err(PlaidFunctionError)` if the request fails (e.g., invalid branches,
+/// ## Returns
+/// * `Ok(PullRequest)` if the pull request was successfully created, or
+/// * `Err(PlaidFunctionError)` if the request fails (e.g., invalid branches,
 ///   missing permissions, or Plaid system misconfiguration).
 pub fn create_pull_request(
     client_id: impl Display,
@@ -548,15 +571,16 @@ pub struct AddLabelsRequest {
 /// See the [GitHub API docs](https://docs.github.com/en/rest/issues/labels?apiVersion=2022-11-28#add-labels-to-an-issue)
 /// for more details.
 ///
-/// # Arguments
-/// - `owner`: The account or organization that owns the repository.
-/// - `repo`: The name of the repository.
-/// - `number`: The pull request or issue number.
-/// - `labels`: A vector of label names to add to the issue or pull request.
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account or organization that owns the repository.
+/// * `repo` - The name of the repository.
+/// * `number` - The pull request or issue number.
+/// * `labels` - A vector of label names to add to the issue or pull request.
 ///
-/// # Returns
-/// - `Ok(())` if the labels were successfully added, or
-/// - `Err(PlaidFunctionError)` if the request fails.
+/// ## Returns
+/// * `Ok(())` if the labels were successfully added, or
+/// * `Err(PlaidFunctionError)` if the request fails.
 pub fn add_labels(
     client_id: impl Display,
     owner: impl Display,

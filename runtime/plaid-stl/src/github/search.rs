@@ -25,11 +25,13 @@ pub struct SearchCodeParams {
 /// If additional selection criteria are given, these are used to decide whether
 /// results are selected or discarded.
 ///
-/// **Arguments:**
-/// - `filename`: The name of the files to search, e.g., "README"
-/// - `extension`: The extension of the files to search, e.g., "yml"
-/// - `path`: The path under which files are searched, e.g., "src"
-/// - `search_criteria`: An optional `CodeSearchCriteria` object with additional search criteria
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `filename` - The name of the files to search, e.g., "README".
+/// * `extension` - The extension of the files to search, e.g., "yml".
+/// * `path` - The path under which files are searched, e.g., "src".
+/// * `file_content` - Substring to look for in file contents.
+/// * `search_criteria` - An optional `CodeSearchCriteria` with additional search criteria.
 pub fn search_code(
     client_id: impl Display,
     filename: Option<impl Display>,

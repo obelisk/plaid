@@ -22,6 +22,7 @@ pub struct ListSeatsInOrgCopilotParams {
 /// List seats in org's Copilot subscription, paginated
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `org` - The org owning the subscription
 /// * `per_page` - The number of results per page (max 100)
 /// * `page` - The page number of the results to fetch.
@@ -78,6 +79,7 @@ pub fn list_copilot_subscription_seats_by_page(
 /// List all seats in org's Copilot subscription
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `org` - The org owning the subscription
 pub fn list_all_copilot_subscription_seats(
     client_id: impl Display,
@@ -111,6 +113,7 @@ pub struct AddUsersToOrgCopilotParams {
 /// Add a user to the org's Copilot subscription
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `org` - The org owning the subscription
 /// * `user` - The user to add to Copilot subscription
 pub fn add_user_to_copilot_subscription(
@@ -171,6 +174,7 @@ pub struct RemoveUsersFromOrgCopilotParams {
 /// Remove a user from the org's Copilot subscription
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `org` - The org owning the subscription
 /// * `user` - The user to remove from Copilot subscription
 pub fn remove_user_from_copilot_subscription(
@@ -226,6 +230,7 @@ pub fn remove_user_from_copilot_subscription(
 /// Remove multiple users from the org's Copilot subscription
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `org` - The org owning the subscription
 /// * `users` - The list of users to remove from Copilot subscription
 pub fn remove_users_from_copilot_subscription(
