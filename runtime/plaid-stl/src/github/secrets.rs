@@ -8,6 +8,11 @@ use crate::{
 };
 
 /// Add a repo to the list of repos that have access to an organization secret
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `org` - The organization name.
+/// * `repository` - The repository name.
+/// * `secret_name` - The name of the secret.
 pub fn add_repo_to_org_secret(
     client_id: impl Display,
     org: impl Display,
@@ -44,6 +49,11 @@ pub fn add_repo_to_org_secret(
 }
 
 /// Remove a repo from the list of repos that have access to an organization secret
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `org` - The organization name.
+/// * `repository` - The repository name.
+/// * `secret_name` - The name of the secret.
 pub fn remove_repo_from_org_secret(
     client_id: impl Display,
     org: impl Display,
@@ -79,6 +89,10 @@ pub fn remove_repo_from_org_secret(
 }
 
 /// List the organization secrets that a repository has access to
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `org` - The organization name.
+/// * `repository` - The repository name.
 pub fn list_org_secrets_for_repo(
     client_id: impl Display,
     org: impl Display,

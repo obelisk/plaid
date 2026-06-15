@@ -23,6 +23,7 @@ pub struct RemoveRepoAccessFromOrgInstallationParams {
 /// Grants a GitHub organization installation access to one or more repositories
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `enterprise` - The enterprise name. The name is not case sensitive.
 /// * `org` - The organization name. The name is not case sensitive.
 /// * `installation_id` - The ID of the installation to grant access to.
@@ -78,6 +79,7 @@ pub fn grant_repo_access_to_org_installation(
 /// Removes a GitHub organization installation's access to one or more repositories
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `enterprise` - The enterprise name. The name is not case sensitive.
 /// * `org` - The organization name. The name is not case sensitive.
 /// * `installation_id` - The ID of the installation to remove access from.

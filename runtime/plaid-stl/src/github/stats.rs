@@ -14,6 +14,10 @@ pub struct GetWeeklyCommitCountParams {
 }
 
 /// Get the weekly commit count on a given repo.
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account owner of the repository.
+/// * `repo` - The name of the repository.
 /// For more details, see https://docs.github.com/en/rest/metrics/statistics?apiVersion=2022-11-28#get-the-weekly-commit-count
 pub fn get_weekly_commit_count(
     client_id: impl Display,

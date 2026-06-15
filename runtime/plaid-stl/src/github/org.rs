@@ -11,6 +11,7 @@ pub struct CheckOrgMembershipParams {
 /// Check whether a user belongs to an org
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `user` - The account to check org membership of
 /// * `org` - The org to check if `user` is part of
 pub fn check_org_membership_of_user(

@@ -158,6 +158,9 @@ pub struct GithubFileContent {
 
 impl FileSearchResultItem {
     /// Retrieve the content of the search result
+    /// ## Arguments
+    ///
+    /// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
     pub fn retrieve_raw_content(
         &self,
         client_id: impl Display,

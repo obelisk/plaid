@@ -31,6 +31,7 @@ pub fn add_user_to_team(
 /// Add a user to a team
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `team` - The team to add the user to
 /// * `user` - The user to add to `team`
 /// * `org` - Github organization that `team` exists in
@@ -93,6 +94,7 @@ pub fn remove_user_from_team(
 /// Remove a user from a team
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `team` - The team to remove the user from
 /// * `user` - The user to remove from `team`
 /// * `org` - Github organization that `team` exists in
@@ -140,6 +142,13 @@ pub struct AddRepoToTeamParams {
 }
 
 /// Add a repo to a GH team, with a given permission.
+/// ## Arguments
+///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `org` - The organization name.
+/// * `repo` - The repository name.
+/// * `team_slug` - The team slug.
+/// * `permission` - The permission to grant (e.g., "pull", "push", "admin").
 /// For more details, see https://docs.github.com/en/rest/teams/teams?apiVersion=2022-11-28#add-or-update-team-repository-permissions
 pub fn add_repo_to_team(
     client_id: impl Display,
@@ -185,6 +194,12 @@ pub struct RemoveRepoFromTeamParams {
 }
 
 /// Remove a repo from a GH team.
+/// ## Arguments
+///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `org` - The organization name.
+/// * `repo` - The repository name.
+/// * `team_slug` - The team slug.
 /// For more details, see https://docs.github.com/en/rest/teams/teams?apiVersion=2022-11-28#remove-a-repository-from-a-team
 pub fn remove_repo_from_team(
     client_id: impl Display,
@@ -230,6 +245,11 @@ pub struct GetRepoTeamsParams {
 }
 
 /// Get the teams that have access to a repository.
+/// ## Arguments
+///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `org` - The organization name.
+/// * `repo` - The repository name.
 pub fn get_repo_teams(
     client_id: impl Display,
     org: impl Display,
