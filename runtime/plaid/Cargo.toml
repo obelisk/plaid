@@ -1,6 +1,6 @@
 [package]
 name = "plaid"
-version = "0.42.1"
+version = "0.43.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -140,3 +140,12 @@ path = "src/bin/blocksmith.rs"
 name = "module_checker"
 path = "src/bin/module_checker.rs"
 required-features = ["cranelift"]
+
+[dev-dependencies]
+# Embedded Surfpool (drop-in solana-test-validator) for exercising the Solana
+# RPC client against a real local JSON-RPC endpoint. Pins the Solana 3.x crate
+# line; the tx-building crates below must match so types unify.
+surfpool-sdk = "1.3"
+solana-transaction = { version = "3", features = ["bincode"] }
+solana-system-interface = { version = "2", features = ["bincode"] }
+bincode = "1"

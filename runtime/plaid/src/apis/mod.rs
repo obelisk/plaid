@@ -19,7 +19,7 @@ pub mod yubikey;
 
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
-use crate::apis::blockchain::{evm, Blockchain, BlockchainConfig};
+use crate::apis::blockchain::{Blockchain, BlockchainConfig, BlockchainError};
 use crate::apis::bloom_filter::BloomFilter;
 #[cfg(feature = "gcp")]
 use crate::apis::gcp::{Gcp, GcpConfig};
@@ -151,9 +151,9 @@ pub enum ApiError {
     CouldNotInstatiateRuntime(String),
 }
 
-impl From<evm::EvmCallError> for ApiError {
-    fn from(e: evm::EvmCallError) -> Self {
-        ApiError::BlockchainError(blockchain::BlockchainError::EvmError(e))
+impl From<BlockchainError> for ApiError {
+    fn from(e: BlockchainError) -> Self {
+        ApiError::BlockchainError(e)
     }
 }
 

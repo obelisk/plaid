@@ -1,154 +1,39 @@
-mod selector;
 mod utils;
 
 use crate::{
     apis::{
-        blockchain::evm::{
-            selector::{NodeSelector, SelectionStrategy},
-            utils::{JsonRpcRequest, RpcMethods},
+        blockchain::{
+            common::{
+                rpc::JsonRpcRequest, BlockchainClient, BlockchainError, ChainFamily, NoOptions,
+            },
+            evm::utils::RpcMethods,
         },
         ApiError,
     },
     loader::PlaidModule,
-    parse_duration,
 };
-use http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
 use plaid_stl::blockchain::evm::types::{
     ChainId, EstimateGasRequest, EthCallRequest, GetAddressMetadataRequest, GetBlockRequest,
     GetGasPriceRequest, GetLogsRequest, GetTransactionRequest, SendRawTransactionRequest,
 };
-use reqwest::Client;
-use serde::{de, Deserialize};
 use serde_json::{json, Value};
-use serde_with::{serde_as, DisplayFromStr};
-use std::{
-    collections::HashMap,
-    sync::{atomic::AtomicUsize, Arc},
-    time::Duration,
-};
+use std::sync::Arc;
 
+pub struct Evm;
+
+impl ChainFamily for Evm {
+    type Identifier = ChainId;
+    type Options = NoOptions;
+}
+
+/// EVM-specific error conditions, carried by [`BlockchainError::Evm`].
+///
+/// Currently a placeholder: every failure mode the EVM client hits today is
+/// common to all supported chains and lives on `BlockchainError` directly.
 #[derive(Debug)]
-pub enum EvmCallError {
-    SerdeError(serde_json::Error),
-    NetworkError(reqwest::Error),
-    CallFailed { status: StatusCode, message: String },
-    NoNodesForChain { id: u64 },
-    BadRequest(serde_json::Error),
-    AllNodesFailed,
-    HttpError { status: u16, message: String },
-    JsonRpcError { code: i64, message: String },
-    InvalidResponse(String),
-}
+pub enum EvmError {}
 
-impl EvmCallError {
-    fn is_retryable(&self) -> bool {
-        match self {
-            Self::CallFailed { status, .. } => {
-                status.is_server_error() || *status == StatusCode::TOO_MANY_REQUESTS
-            }
-            Self::NetworkError(_) => true,
-            _ => false,
-        }
-    }
-}
-
-#[serde_as]
-#[derive(Deserialize)]
-pub struct EvmConfig {
-    // Keys are strings in TOML, parsed to ChainId via DisplayFromStr
-    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
-    chains: HashMap<ChainId, ChainConfig>,
-    /// Timeout duration for EVM client requests in milliseconds
-    #[serde(default = "default_timeout")]
-    #[serde(deserialize_with = "parse_duration")]
-    timeout_millis: Duration,
-    /// The maximum number of retries for EVM client requests
-    #[serde(default = "default_max_retries")]
-    max_retries: u8,
-}
-
-#[derive(Deserialize)]
-pub struct ChainConfig {
-    /// The list of nodes for this chain
-    pub nodes: Vec<NodeConfig>,
-    /// The selection strategy for this chain
-    #[serde(deserialize_with = "selection_strategy_deserializer")]
-    pub selection_strategy: SelectionStrategy,
-}
-
-/// Deserializes a selection strategy for blockchain nodes from a string
-fn selection_strategy_deserializer<'de, D>(deserializer: D) -> Result<SelectionStrategy, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let strategy = String::deserialize(deserializer)?;
-    match strategy.to_lowercase().as_str() {
-        "roundrobin" => Ok(SelectionStrategy::RoundRobin {
-            current_index: AtomicUsize::new(0),
-        }),
-        "random" => Ok(SelectionStrategy::Random),
-        _ => Err(de::Error::custom(format!(
-            "Unknown selection strategy: {strategy}",
-        ))),
-    }
-}
-
-#[derive(Deserialize, Clone)]
-pub struct NodeConfig {
-    /// The URIs of the RPC nodes to connect to
-    pub uri: String,
-    /// A human-readable name for the node
-    pub name: String,
-    /// Optional tags for the node
-    pub tags: Option<Vec<String>>,
-}
-
-/// Default timeout duration for EVM client requests
-fn default_timeout() -> Duration {
-    Duration::from_millis(3000)
-}
-
-/// Default maximum number of retries for EVM client requests
-fn default_max_retries() -> u8 {
-    3
-}
-
-pub struct EvmClient {
-    node_selector: HashMap<ChainId, NodeSelector>,
-    client: Client,
-    max_retries: u8,
-}
-
-impl EvmClient {
-    pub fn new(config: EvmConfig) -> Self {
-        let mut default_headers = HeaderMap::new();
-
-        let content_type_value = HeaderValue::from_static("application/json");
-        default_headers.insert(CONTENT_TYPE, content_type_value);
-
-        let client = reqwest::Client::builder()
-            .default_headers(default_headers)
-            .timeout(config.timeout_millis)
-            .build()
-            .expect("Failed to build EVM reqwest client");
-
-        let node_selector = config
-            .chains
-            .into_iter()
-            .map(|(chain_id, config)| {
-                let selector =
-                    NodeSelector::new(chain_id.get(), config.nodes, config.selection_strategy);
-                (chain_id, selector)
-            })
-            .collect();
-
-        Self {
-            client,
-            node_selector,
-            max_retries: config.max_retries,
-        }
-    }
-
+impl BlockchainClient<Evm> {
     /// Returns the information about a transaction requested by transaction hash.
     pub async fn get_transaction_by_hash(
         &self,
@@ -156,14 +41,16 @@ impl EvmClient {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request = serde_json::from_str::<GetTransactionRequest>(params)
-            .map_err(EvmCallError::SerdeError)?;
+            .map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(request.chain_id)?;
+        let node_selector = self.get_node_selector(chain_id)?;
 
         let params = Value::Array(vec![Value::String(request.hash)]);
         let request = JsonRpcRequest::new(RpcMethods::GetTransactionByHash, Some(params));
 
-        self.execute_rpc_call(node_selector, request, module).await
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
     }
 
     /// Returns the receipt of a transaction by transaction hash.
@@ -175,14 +62,16 @@ impl EvmClient {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request = serde_json::from_str::<GetTransactionRequest>(params)
-            .map_err(EvmCallError::SerdeError)?;
+            .map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(request.chain_id)?;
+        let node_selector = self.get_node_selector(chain_id)?;
 
         let params = Value::Array(vec![Value::String(request.hash)]);
         let request = JsonRpcRequest::new(RpcMethods::GetTransactionReceipt, Some(params));
 
-        self.execute_rpc_call(node_selector, request, module).await
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
     }
 
     /// Creates new message call transaction or a contract creation for signed transactions.
@@ -192,14 +81,16 @@ impl EvmClient {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request = serde_json::from_str::<SendRawTransactionRequest>(params)
-            .map_err(EvmCallError::SerdeError)?;
+            .map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(request.chain_id)?;
+        let node_selector = self.get_node_selector(chain_id)?;
 
         let params = Value::Array(vec![Value::String(request.signed_tx)]);
         let request = JsonRpcRequest::new(RpcMethods::SendRawTransaction, Some(params));
 
-        self.execute_rpc_call(node_selector, request, module).await
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
     }
 
     /// Returns the number of transactions sent from an address.
@@ -209,9 +100,10 @@ impl EvmClient {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request = serde_json::from_str::<GetAddressMetadataRequest>(params)
-            .map_err(EvmCallError::SerdeError)?;
+            .map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(request.chain_id)?;
+        let node_selector = self.get_node_selector(chain_id)?;
 
         let params = Value::Array(vec![
             Value::String(request.address),
@@ -219,7 +111,8 @@ impl EvmClient {
         ]);
         let request = JsonRpcRequest::new(RpcMethods::GetTransactionCount, Some(params));
 
-        self.execute_rpc_call(node_selector, request, module).await
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
     }
 
     /// Returns the balance of the account at a given address.
@@ -229,9 +122,10 @@ impl EvmClient {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request = serde_json::from_str::<GetAddressMetadataRequest>(params)
-            .map_err(EvmCallError::SerdeError)?;
+            .map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(request.chain_id)?;
+        let node_selector = self.get_node_selector(chain_id)?;
 
         let params = Value::Array(vec![
             Value::String(request.address),
@@ -239,7 +133,8 @@ impl EvmClient {
         ]);
         let request = JsonRpcRequest::new(RpcMethods::GetBalance, Some(params));
 
-        self.execute_rpc_call(node_selector, request, module).await
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
     }
 
     /// Generates and returns an estimate of how much gas is necessary to allow the transaction to complete.
@@ -248,10 +143,11 @@ impl EvmClient {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request =
-            serde_json::from_str::<EstimateGasRequest>(params).map_err(EvmCallError::SerdeError)?;
+        let request = serde_json::from_str::<EstimateGasRequest>(params)
+            .map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(request.chain_id)?;
+        let node_selector = self.get_node_selector(chain_id)?;
 
         let mut object = serde_json::Map::new();
         if let Some(from) = request.from {
@@ -273,7 +169,8 @@ impl EvmClient {
         ]);
         let request = JsonRpcRequest::new(RpcMethods::EstimateGas, Some(params));
 
-        self.execute_rpc_call(node_selector, request, module).await
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
     }
 
     /// Executes a new message call immediately without creating a transaction on the blockchain.
@@ -284,15 +181,17 @@ impl EvmClient {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request =
-            serde_json::from_str::<EthCallRequest>(params).map_err(EvmCallError::SerdeError)?;
+            serde_json::from_str::<EthCallRequest>(params).map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(request.chain_id)?;
+        let node_selector = self.get_node_selector(chain_id)?;
 
         let object = json!({ "to": request.to, "data": request.data });
         let params = Value::Array(vec![object, Value::String(request.block_tag.to_string())]);
         let request = JsonRpcRequest::new(RpcMethods::Call, Some(params));
 
-        self.execute_rpc_call(node_selector, request, module).await
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
     }
 
     /// Returns an estimate of the current price per gas in wei. For example, the Besu client examines the last 100 blocks and returns the median gas unit price by default.
@@ -301,14 +200,16 @@ impl EvmClient {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request =
-            serde_json::from_str::<GetGasPriceRequest>(params).map_err(EvmCallError::SerdeError)?;
+        let request = serde_json::from_str::<GetGasPriceRequest>(params)
+            .map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(request.chain_id)?;
+        let node_selector = self.get_node_selector(chain_id)?;
 
         let request = JsonRpcRequest::new(RpcMethods::GasPrice, None);
 
-        self.execute_rpc_call(node_selector, request, module).await
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
     }
 
     /// Returns an array of all logs matching a given filter object.
@@ -318,9 +219,10 @@ impl EvmClient {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request =
-            serde_json::from_str::<GetLogsRequest>(params).map_err(EvmCallError::SerdeError)?;
+            serde_json::from_str::<GetLogsRequest>(params).map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(request.chain_id)?;
+        let node_selector = self.get_node_selector(chain_id)?;
 
         let mut object = serde_json::Map::new();
         object.insert(
@@ -359,7 +261,8 @@ impl EvmClient {
 
         let request = JsonRpcRequest::new(RpcMethods::GetLogs, Some(params));
 
-        self.execute_rpc_call(node_selector, request, module).await
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
     }
 
     /// Returns information about a block by block number or tag.
@@ -369,9 +272,10 @@ impl EvmClient {
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let request =
-            serde_json::from_str::<GetBlockRequest>(params).map_err(EvmCallError::SerdeError)?;
+            serde_json::from_str::<GetBlockRequest>(params).map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(request.chain_id)?;
+        let node_selector = self.get_node_selector(chain_id)?;
 
         let params = serde_json::Value::Array(vec![
             Value::String(request.block_tag.to_string()),
@@ -379,65 +283,7 @@ impl EvmClient {
         ]);
         let request = JsonRpcRequest::new(RpcMethods::GetBlock, Some(params));
 
-        self.execute_rpc_call(node_selector, request, module).await
-    }
-
-    fn get_node_selector(&self, chain_id: ChainId) -> Result<&NodeSelector, ApiError> {
-        self.node_selector
-            .get(&chain_id)
-            .ok_or(EvmCallError::NoNodesForChain { id: chain_id.get() }.into())
-    }
-
-    /// Execute an EVM RPC call with automatic retry and failure handling
-    ///
-    /// This method handles:
-    /// - Node selection from the configured selector
-    /// - Retry logic up to max_retries attempts
-    /// - Automatic failure marking to deprioritize bad nodes
-    /// - Uses existing JsonRpcRequest utilities
-    async fn execute_rpc_call<'a>(
-        &self,
-        selector: &NodeSelector,
-        json_rpc_request: JsonRpcRequest<'a>,
-        module: Arc<PlaidModule>,
-    ) -> Result<String, ApiError> {
-        let mut last_error = EvmCallError::AllNodesFailed;
-
-        debug!(
-            "Module [{module}] is attempting to call [{}] on chain with ID [{}]",
-            json_rpc_request.method, selector.id,
-        );
-        for attempt in 1..=self.max_retries {
-            // Get the next node to try
-            let Some(node) = selector.select_node() else {
-                return Err(EvmCallError::NoNodesForChain { id: selector.id }.into());
-            };
-
-            trace!(
-                "Attempt {attempt}/{} for RPC call [{}] using node [{}] on behalf of module [{module}]",
-                self.max_retries,
-                json_rpc_request.method,
-                node.name
-            );
-
-            // Make the RPC call using the existing utility
-            match json_rpc_request.execute(&self.client, &node.uri).await {
-                Ok(response) => {
-                    return Ok(response);
-                }
-                Err(e) => {
-                    // If the error is not retryable, return immediately
-                    if !e.is_retryable() {
-                        return Err(e.into());
-                    }
-
-                    // Call failed, mark node as failed and try next
-                    selector.mark_current_node_failed();
-                    last_error = e;
-                }
-            }
-        }
-
-        Err(last_error.into())
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
     }
 }
