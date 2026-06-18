@@ -599,6 +599,13 @@ impl BlockchainClient<Solana> {
     }
 }
 
+// NOTE: These Solana integration tests are temporarily commented out, together with
+// their dev-dependencies in Cargo.toml (surfpool-sdk, solana-transaction,
+// solana-system-interface, bincode). surfpool-sdk pulls in the entire Solana validator
+// dependency tree, which bloated runtime/Cargo.lock by ~14k lines. They are excluded for
+// now to keep Cargo.lock small; restore this module and the dev-dependencies together to
+// re-enable them.
+/*
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1285,3 +1292,4 @@ mod tests {
         );
     }
 }
+*/
