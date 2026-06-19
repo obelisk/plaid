@@ -437,6 +437,16 @@ pub struct DeleteDeployKeyParams {
     pub key_id: u64,
 }
 
+/// Parameters sent to the runtime when creating a GH deploy key
+#[derive(Serialize, Deserialize)]
+pub struct CreateDeployKeyParams {
+    pub owner: String,
+    pub repo: String,
+    pub title: String,
+    pub key: String,
+    pub read_only: bool,
+}
+
 /// A custom property of a repo
 /// See https://docs.github.com/en/organizations/managing-organization-settings/managing-custom-properties-for-repositories-in-your-organization for more details
 #[derive(Debug, Deserialize)]
