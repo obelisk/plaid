@@ -636,9 +636,6 @@ impl_new_sub_module_function_with_error_buffer!(blockchain, evm, gas_price, ALLO
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_logs, ALLOW_IN_TEST_MODE);
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_block, ALLOW_IN_TEST_MODE);
 
-// Bloom filter functions
-impl_new_function_with_error_buffer!(bloom_filter, build_with_items, ALLOW_IN_TEST_MODE);
-
 /// Generates `to_api_function` and `is_known_api_function` from a single source-of-truth list.
 ///
 /// `with_env` entries produce `Function::new_typed_with_env`
@@ -879,9 +876,6 @@ define_api_functions! {
         "blockchain_evm_gas_price"               => blockchain_evm_gas_price,
         "blockchain_evm_get_logs"                => blockchain_evm_get_logs,
         "blockchain_evm_get_block"               => blockchain_evm_get_block,
-
-        // Bloomfilter calls
-        "bloom_filter_build_with_items" => bloom_filter_build_with_items,
     ],
     without_env: [
         "get_time" => super::internal::get_time,
