@@ -46,7 +46,7 @@ pub fn delete_deploy_key(
     Ok(())
 }
 
-/// Create a deploy key with given ID for a given repository.
+/// Create a deploy key for a given repository.
 /// ## Arguments
 /// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account owner of the repository.

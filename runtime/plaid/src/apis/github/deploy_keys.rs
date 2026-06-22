@@ -63,9 +63,9 @@ impl Github {
         let key = &request.params.key;
         let read_only = request.params.read_only;
 
-        let final_part = match read_only {
-            true => "",
-            false => "Warning: this deploy key will have write access to the repository.",
+        let perm = match read_only {
+            true => "-only",
+            false => "/write",
         };
 
         #[derive(Serialize)]
@@ -81,7 +81,7 @@ impl Github {
             read_only,
         };
 
-        info!("Creating deploy key with title [{title}] for repo {owner}/{repo}. {final_part}");
+        info!("Creating read{perm} deploy key with title [{title}] for repo {owner}/{repo}");
 
         let address = format!("/repos/{owner}/{repo}/keys");
 
