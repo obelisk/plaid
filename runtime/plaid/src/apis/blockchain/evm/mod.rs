@@ -206,7 +206,7 @@ impl BlockchainClient<Evm> {
 
         let node_selector = self.get_node_selector(chain_id)?;
 
-        let request = JsonRpcRequest::new(RpcMethods::GasPrice, None);
+        let request = JsonRpcRequest::<_, ()>::new(RpcMethods::GasPrice, None);
 
         self.execute_rpc_call(node_selector, chain_id, request, module)
             .await

@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum Cluster {
     Mainnet,
     Devnet,
@@ -38,9 +38,9 @@ impl FromStr for Cluster {
 /// responsibility to encode as 32 byte b58).
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct Pubkey(String);
+pub struct UnvalidatedPubkey(String);
 
-impl Pubkey {
+impl UnvalidatedPubkey {
     pub fn new(s: impl Into<String>) -> Self {
         Self(s.into())
     }
@@ -50,32 +50,32 @@ impl Pubkey {
     }
 }
 
-impl From<String> for Pubkey {
+impl From<String> for UnvalidatedPubkey {
     fn from(s: String) -> Self {
         Self(s)
     }
 }
 
-impl From<&str> for Pubkey {
+impl From<&str> for UnvalidatedPubkey {
     fn from(s: &str) -> Self {
         Self(s.to_string())
     }
 }
 
-impl Display for Pubkey {
+impl Display for UnvalidatedPubkey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl AsRef<str> for Pubkey {
+impl AsRef<str> for UnvalidatedPubkey {
     fn as_ref(&self) -> &str {
         &self.0
     }
 }
 
-impl From<Pubkey> for String {
-    fn from(p: Pubkey) -> String {
+impl From<UnvalidatedPubkey> for String {
+    fn from(p: UnvalidatedPubkey) -> String {
         p.0
     }
 }
@@ -86,9 +86,9 @@ impl From<Pubkey> for String {
 /// **no validation**. See [`Pubkey`] for the rationale.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct Signature(String);
+pub struct UnvalidatedSignature(String);
 
-impl Signature {
+impl UnvalidatedSignature {
     pub fn new(s: impl Into<String>) -> Self {
         Self(s.into())
     }
@@ -98,32 +98,32 @@ impl Signature {
     }
 }
 
-impl From<String> for Signature {
+impl From<String> for UnvalidatedSignature {
     fn from(s: String) -> Self {
         Self(s)
     }
 }
 
-impl From<&str> for Signature {
+impl From<&str> for UnvalidatedSignature {
     fn from(s: &str) -> Self {
         Self(s.to_string())
     }
 }
 
-impl Display for Signature {
+impl Display for UnvalidatedSignature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl AsRef<str> for Signature {
+impl AsRef<str> for UnvalidatedSignature {
     fn as_ref(&self) -> &str {
         &self.0
     }
 }
 
-impl From<Signature> for String {
-    fn from(s: Signature) -> String {
+impl From<UnvalidatedSignature> for String {
+    fn from(s: UnvalidatedSignature) -> String {
         s.0
     }
 }
@@ -157,11 +157,11 @@ pub struct SolanaRpcResponse {
 /// building, signing, and encoding the transaction; the host simply relays it
 /// to the node's `sendTransaction` RPC method.
 #[derive(Serialize, Deserialize)]
-pub struct SendTransactionRequest {
+pub struct SendTransactionRequest<'a> {
     /// Target cluster.
     pub cluster: Cluster,
     /// Base64-encoded, fully-signed transaction.
-    pub transaction: String,
+    pub transaction: Cow<'a, str>,
 }
 
 /// A request that only needs to select a cluster (no further parameters).
@@ -178,26 +178,26 @@ pub struct ClusterRequest {
 /// Shared by `getBalance` and `getAccountInfo` (mirrors EVM's
 /// `GetAddressMetadataRequest`).
 #[derive(Serialize, Deserialize)]
-pub struct PubkeyRequest {
+pub struct PubkeyRequest<'a> {
     pub cluster: Cluster,
     /// Account (or mint) address.
-    pub pubkey: Pubkey,
+    pub pubkey: Cow<'a, UnvalidatedPubkey>,
 }
 
 /// Looks up a confirmed transaction by its signature.
 #[derive(Serialize, Deserialize)]
-pub struct GetTransactionRequest {
+pub struct GetTransactionRequest<'a> {
     pub cluster: Cluster,
     /// Transaction signature.
-    pub signature: Signature,
+    pub signature: Cow<'a, UnvalidatedSignature>,
 }
 
 /// Looks up the processing status of a batch of transaction signatures.
 #[derive(Serialize, Deserialize)]
-pub struct GetSignatureStatusesRequest {
+pub struct GetSignatureStatusesRequest<'a> {
     pub cluster: Cluster,
     /// Transaction signatures.
-    pub signatures: Vec<Signature>,
+    pub signatures: Cow<'a, [UnvalidatedSignature]>,
     /// Search the full transaction history rather than only the recent status
     /// cache. The history scan is expensive; leave `false` (the default) for the
     /// common "is this recent signature confirmed?" check, and set `true` only
@@ -215,10 +215,10 @@ pub struct GetBlockRequest {
 
 /// Reads multiple accounts in a single call (batched `getAccountInfo`).
 #[derive(Serialize, Deserialize)]
-pub struct GetMultipleAccountsRequest {
+pub struct GetMultipleAccountsRequest<'a> {
     pub cluster: Cluster,
     /// Account addresses.
-    pub pubkeys: Vec<Pubkey>,
+    pub pubkeys: Cow<'a, [UnvalidatedPubkey]>,
 }
 
 /// A `memcmp` filter for `getProgramAccounts`: keeps only accounts whose data,
@@ -265,10 +265,10 @@ pub struct ProgramAccountsFilters {
 ///
 /// The fundamental Solana state query; has no EVM equivalent (EVM uses events/logs).
 #[derive(Serialize, Deserialize)]
-pub struct GetProgramAccountsRequest {
+pub struct GetProgramAccountsRequest<'a> {
     pub cluster: Cluster,
     /// Program id whose accounts to enumerate.
-    pub program_id: Pubkey,
+    pub program_id: Cow<'a, UnvalidatedPubkey>,
     /// Filters/projection narrowing the scan. Defaults to an unfiltered scan.
     #[serde(default)]
     pub filters: ProgramAccountsFilters,
@@ -279,14 +279,14 @@ pub struct GetProgramAccountsRequest {
 /// Exactly one of `mint` or `program_id` selects the filter; if neither is set,
 /// the host defaults to the SPL Token program.
 #[derive(Serialize, Deserialize)]
-pub struct GetTokenAccountsByOwnerRequest {
+pub struct GetTokenAccountsByOwnerRequest<'a> {
     pub cluster: Cluster,
     /// Owner wallet address.
-    pub owner: Pubkey,
+    pub owner: Cow<'a, UnvalidatedPubkey>,
     /// Filter to a specific mint.
-    pub mint: Option<Pubkey>,
+    pub mint: Option<Cow<'a, UnvalidatedPubkey>>,
     /// Filter to a specific token program.
-    pub program_id: Option<Pubkey>,
+    pub program_id: Option<Cow<'a, UnvalidatedPubkey>>,
 }
 
 /// Returns the lamports required for an account of `data_length` bytes to be rent-exempt.
@@ -300,29 +300,29 @@ pub struct GetMinimumBalanceForRentExemptionRequest {
 
 /// Returns the fee the cluster would charge for a serialized message.
 #[derive(Serialize, Deserialize)]
-pub struct GetFeeForMessageRequest {
+pub struct GetFeeForMessageRequest<'a> {
     pub cluster: Cluster,
     /// Base64-encoded transaction message.
-    pub message: String,
+    pub message: Cow<'a, str>,
 }
 
 /// Returns a list of recent prioritization fees, optionally scoped to accounts.
 #[derive(Serialize, Deserialize)]
-pub struct GetRecentPrioritizationFeesRequest {
+pub struct GetRecentPrioritizationFeesRequest<'a> {
     pub cluster: Cluster,
     /// Account addresses to scope the query (may be empty).
     #[serde(default)]
-    pub addresses: Vec<Pubkey>,
+    pub addresses: Cow<'a, [UnvalidatedPubkey]>,
 }
 
 /// Returns signatures for transactions involving an address, most recent first.
 ///
 /// The per-address transaction history Solana offers in place of EVM log-scraping.
 #[derive(Serialize, Deserialize)]
-pub struct GetSignaturesForAddressRequest {
+pub struct GetSignaturesForAddressRequest<'a> {
     pub cluster: Cluster,
     /// Account address.
-    pub address: Pubkey,
+    pub address: Cow<'a, UnvalidatedPubkey>,
     /// Maximum number of signatures to return (RPC default is 1000).
     pub limit: Option<u64>,
 }

@@ -6,8 +6,8 @@ use plaid_stl::blockchain::solana::types::{
     Cluster, ClusterRequest, GetBlockRequest, GetFeeForMessageRequest,
     GetMinimumBalanceForRentExemptionRequest, GetMultipleAccountsRequest,
     GetProgramAccountsRequest, GetRecentPrioritizationFeesRequest, GetSignatureStatusesRequest,
-    GetSignaturesForAddressRequest, GetTokenAccountsByOwnerRequest, GetTransactionRequest, Pubkey,
-    PubkeyRequest, SendTransactionRequest,
+    GetSignaturesForAddressRequest, GetTokenAccountsByOwnerRequest, GetTransactionRequest,
+    PubkeyRequest, SendTransactionRequest, UnvalidatedPubkey,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -87,10 +87,10 @@ impl BlockchainClient<Solana> {
         let node_selector = self.get_node_selector(cluster)?;
 
         // [base64Tx, { "encoding": "base64", "preflightCommitment": <configured> }]
-        let params = Value::Array(vec![
-            Value::String(request.transaction),
+        let params = (
+            request.transaction,
             json!({ "encoding": "base64", "preflightCommitment": self.options.commitment }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::SendTransaction, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -109,10 +109,10 @@ impl BlockchainClient<Solana> {
 
         let node_selector = self.get_node_selector(cluster)?;
 
-        let params = Value::Array(vec![
-            Value::String(request.pubkey.into()),
+        let params = (
+            request.pubkey,
             json!({ "commitment": self.options.commitment }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::GetBalance, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -135,10 +135,10 @@ impl BlockchainClient<Solana> {
         let node_selector = self.get_node_selector(cluster)?;
 
         // base64 encoding handles account data of any size (base58, the default, caps out).
-        let params = Value::Array(vec![
-            Value::String(request.pubkey.into()),
+        let params = (
+            request.pubkey,
             json!({ "encoding": "base64", "commitment": self.options.commitment }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::GetAccountInfo, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -221,10 +221,10 @@ impl BlockchainClient<Solana> {
 
         let node_selector = self.get_node_selector(cluster)?;
 
-        let params = Value::Array(vec![
-            Value::String(request.signature.into()),
+        let params = (
+            request.signature,
             json!({ "commitment": self.options.commitment, "maxSupportedTransactionVersion": 0 }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::GetTransaction, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -246,17 +246,10 @@ impl BlockchainClient<Solana> {
 
         let node_selector = self.get_node_selector(cluster)?;
 
-        let signatures = Value::Array(
-            request
-                .signatures
-                .into_iter()
-                .map(|s| Value::String(s.into()))
-                .collect(),
-        );
-        let params = Value::Array(vec![
-            signatures,
+        let params = (
+            request.signatures,
             json!({ "searchTransactionHistory": request.search_transaction_history }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::GetSignatureStatuses, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -277,7 +270,7 @@ impl BlockchainClient<Solana> {
 
         let node_selector = self.get_node_selector(cluster)?;
 
-        let params = Value::Array(vec![
+        let params = (
             json!(request.slot),
             json!({
                 "encoding": "json",
@@ -286,7 +279,7 @@ impl BlockchainClient<Solana> {
                 "rewards": false,
                 "commitment": self.options.commitment.block_safe(),
             }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::GetBlock, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -307,18 +300,10 @@ impl BlockchainClient<Solana> {
         let cluster = request.cluster;
 
         let node_selector = self.get_node_selector(cluster)?;
-
-        let pubkeys = Value::Array(
-            request
-                .pubkeys
-                .into_iter()
-                .map(|p| Value::String(p.into()))
-                .collect(),
-        );
-        let params = Value::Array(vec![
-            pubkeys,
+        let params = (
+            request.pubkeys,
             json!({ "encoding": "base64", "commitment": self.options.commitment }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::GetMultipleAccounts, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -370,10 +355,7 @@ impl BlockchainClient<Solana> {
             );
         }
 
-        let params = Value::Array(vec![
-            Value::String(request.program_id.into()),
-            Value::Object(config),
-        ]);
+        let params = (request.program_id, Value::Object(config));
         let request = JsonRpcRequest::new(RpcMethods::GetProgramAccounts, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -400,15 +382,15 @@ impl BlockchainClient<Solana> {
                 "programId": request
                     .program_id
                     .as_ref()
-                    .map(Pubkey::as_str)
+                    .map(UnvalidatedPubkey::as_str)
                     .unwrap_or(SPL_TOKEN_PROGRAM_ID),
             }),
         };
-        let params = Value::Array(vec![
-            Value::String(request.owner.into()),
+        let params = (
+            request.owner,
             filter,
             json!({ "encoding": "base64", "commitment": self.options.commitment }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::GetTokenAccountsByOwner, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -427,10 +409,10 @@ impl BlockchainClient<Solana> {
 
         let node_selector = self.get_node_selector(cluster)?;
 
-        let params = Value::Array(vec![
-            Value::String(request.pubkey.into()),
+        let params = (
+            request.pubkey,
             json!({ "commitment": self.options.commitment }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::GetTokenAccountBalance, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -449,10 +431,10 @@ impl BlockchainClient<Solana> {
 
         let node_selector = self.get_node_selector(cluster)?;
 
-        let params = Value::Array(vec![
-            Value::String(request.pubkey.into()),
+        let params = (
+            request.pubkey,
             json!({ "commitment": self.options.commitment }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::GetTokenSupply, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -473,10 +455,10 @@ impl BlockchainClient<Solana> {
 
         let node_selector = self.get_node_selector(cluster)?;
 
-        let params = Value::Array(vec![
+        let params = (
             json!(request.data_length),
             json!({ "commitment": self.options.commitment }),
-        ]);
+        );
         let request =
             JsonRpcRequest::new(RpcMethods::GetMinimumBalanceForRentExemption, Some(params));
 
@@ -498,10 +480,10 @@ impl BlockchainClient<Solana> {
 
         let node_selector = self.get_node_selector(cluster)?;
 
-        let params = Value::Array(vec![
-            Value::String(request.message),
+        let params = (
+            request.message,
             json!({ "commitment": self.options.commitment }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::GetFeeForMessage, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -522,19 +504,7 @@ impl BlockchainClient<Solana> {
 
         let node_selector = self.get_node_selector(cluster)?;
 
-        // The address list is optional; omit the param entirely when empty.
-        let params = if request.addresses.is_empty() {
-            None
-        } else {
-            let addresses = Value::Array(
-                request
-                    .addresses
-                    .into_iter()
-                    .map(|p| Value::String(p.into()))
-                    .collect(),
-            );
-            Some(Value::Array(vec![addresses]))
-        };
+        let params = (!request.addresses.is_empty()).then_some(request.addresses);
         let request = JsonRpcRequest::new(RpcMethods::GetRecentPrioritizationFees, params);
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -556,10 +526,10 @@ impl BlockchainClient<Solana> {
 
         let node_selector = self.get_node_selector(cluster)?;
 
-        let params = Value::Array(vec![
-            Value::String(request.transaction),
+        let params = (
+            request.transaction,
             json!({ "encoding": "base64", "commitment": self.options.commitment }),
-        ]);
+        );
         let request = JsonRpcRequest::new(RpcMethods::SimulateTransaction, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)
@@ -588,10 +558,7 @@ impl BlockchainClient<Solana> {
         if let Some(limit) = request.limit {
             config.insert("limit".to_string(), json!(limit));
         }
-        let params = Value::Array(vec![
-            Value::String(request.address.into()),
-            Value::Object(config),
-        ]);
+        let params = (request.address, Value::Object(config));
         let request = JsonRpcRequest::new(RpcMethods::GetSignaturesForAddress, Some(params));
 
         self.execute_rpc_call(node_selector, cluster, request, module)

@@ -1,6 +1,5 @@
 use reqwest::Client;
 use serde::Serialize;
-use serde_json::Value;
 
 use crate::apis::blockchain::common::BlockchainError;
 
@@ -10,17 +9,15 @@ use crate::apis::blockchain::common::BlockchainError;
 /// names differs. Each chain family supplies its own `method` enum (which must
 /// be `Serialize` for the wire format and `Display` for logging).
 #[derive(Serialize)]
-pub struct JsonRpcRequest<'a, M: Serialize> {
+pub struct JsonRpcRequest<'a, M: Serialize, P: Serialize> {
     pub jsonrpc: &'a str,
     pub method: M,
-    pub params: Value,
+    pub params: Option<P>,
     pub id: u8,
 }
 
-impl<'a, M: Serialize> JsonRpcRequest<'a, M> {
-    pub fn new(method: M, params: Option<Value>) -> Self {
-        let params = params.unwrap_or(Value::Array(vec![]));
-
+impl<'a, M: Serialize, P: Serialize> JsonRpcRequest<'a, M, P> {
+    pub fn new(method: M, params: Option<P>) -> Self {
         Self {
             jsonrpc: "2.0",
             method,

@@ -1,6 +1,8 @@
 pub mod types;
 mod utils;
 
+use std::borrow::Cow;
+
 pub use utils::{parse_rpc_response, SolanaError};
 
 use crate::blockchain::solana::types::{
@@ -8,8 +10,8 @@ use crate::blockchain::solana::types::{
     GetMinimumBalanceForRentExemptionRequest, GetMultipleAccountsRequest,
     GetProgramAccountsRequest, GetRecentPrioritizationFeesRequest, GetSignatureStatusesRequest,
     GetSignaturesForAddressRequest, GetTokenAccountsByOwnerRequest, GetTransactionRequest,
-    ProgramAccountsFilters, Pubkey, PubkeyRequest, SendTransactionRequest, Signature,
-    SolanaRpcResponse,
+    ProgramAccountsFilters, PubkeyRequest, SendTransactionRequest, SolanaRpcResponse,
+    UnvalidatedPubkey, UnvalidatedSignature,
 };
 use crate::PlaidFunctionError;
 use serde::Serialize;
@@ -22,7 +24,7 @@ const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
 /// Submits a fully-signed, base64-encoded transaction (`sendTransaction`).
 pub fn send_signed_transaction(
-    transaction: String,
+    transaction: impl AsRef<str>,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
@@ -30,7 +32,7 @@ pub fn send_signed_transaction(
     }
     let request = serialize_request(&SendTransactionRequest {
         cluster,
-        transaction,
+        transaction: Cow::Borrowed(transaction.as_ref()),
     })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
@@ -46,13 +48,16 @@ pub fn send_signed_transaction(
 
 /// Returns the lamport balance of an account (`getBalance`).
 pub fn get_balance(
-    pubkey: Pubkey,
+    pubkey: &UnvalidatedPubkey,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(blockchain_solana, get_balance);
     }
-    let request = serialize_request(&PubkeyRequest { cluster, pubkey })?;
+    let request = serialize_request(&PubkeyRequest {
+        cluster,
+        pubkey: Cow::Borrowed(pubkey),
+    })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
         blockchain_solana_get_balance(
@@ -67,13 +72,16 @@ pub fn get_balance(
 
 /// Returns all information associated with an account (`getAccountInfo`).
 pub fn get_account_info(
-    pubkey: Pubkey,
+    pubkey: &UnvalidatedPubkey,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(blockchain_solana, get_account_info);
     }
-    let request = serialize_request(&PubkeyRequest { cluster, pubkey })?;
+    let request = serialize_request(&PubkeyRequest {
+        cluster,
+        pubkey: Cow::Borrowed(pubkey),
+    })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
         blockchain_solana_get_account_info(
@@ -142,13 +150,16 @@ pub fn get_transaction_count(cluster: Cluster) -> Result<SolanaRpcResponse, Plai
 
 /// Returns details for a confirmed transaction by signature (`getTransaction`).
 pub fn get_transaction(
-    signature: Signature,
+    signature: &UnvalidatedSignature,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(blockchain_solana, get_transaction);
     }
-    let request = serialize_request(&GetTransactionRequest { cluster, signature })?;
+    let request = serialize_request(&GetTransactionRequest {
+        cluster,
+        signature: Cow::Borrowed(signature),
+    })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
         blockchain_solana_get_transaction(
@@ -167,7 +178,7 @@ pub fn get_transaction(
 /// that have left the recent status cache; this is expensive, so leave it
 /// `false` for the common "is this recent signature confirmed?" check.
 pub fn get_signature_statuses(
-    signatures: Vec<Signature>,
+    signatures: &[UnvalidatedSignature],
     search_transaction_history: bool,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
@@ -176,7 +187,7 @@ pub fn get_signature_statuses(
     }
     let request = serialize_request(&GetSignatureStatusesRequest {
         cluster,
-        signatures,
+        signatures: Cow::Borrowed(signatures),
         search_transaction_history,
     })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -211,13 +222,16 @@ pub fn get_block(slot: u64, cluster: Cluster) -> Result<SolanaRpcResponse, Plaid
 
 /// Reads multiple accounts in one call (`getMultipleAccounts`).
 pub fn get_multiple_accounts(
-    pubkeys: Vec<Pubkey>,
+    pubkeys: &[UnvalidatedPubkey],
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(blockchain_solana, get_multiple_accounts);
     }
-    let request = serialize_request(&GetMultipleAccountsRequest { cluster, pubkeys })?;
+    let request = serialize_request(&GetMultipleAccountsRequest {
+        cluster,
+        pubkeys: Cow::Borrowed(pubkeys),
+    })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
         blockchain_solana_get_multiple_accounts(
@@ -236,7 +250,7 @@ pub fn get_multiple_accounts(
 /// project a slice of each account's data. An empty (default) filter set performs an
 /// unfiltered scan, which can return a large payload — see [`RETURN_BUFFER_SIZE`].
 pub fn get_program_accounts(
-    program_id: Pubkey,
+    program_id: &UnvalidatedPubkey,
     filters: ProgramAccountsFilters,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
@@ -245,7 +259,7 @@ pub fn get_program_accounts(
     }
     let request = serialize_request(&GetProgramAccountsRequest {
         cluster,
-        program_id,
+        program_id: Cow::Borrowed(program_id),
         filters,
     })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
@@ -265,9 +279,9 @@ pub fn get_program_accounts(
 /// Provide `mint` to filter to a single mint, or `program_id` to scope to a token
 /// program; if both are `None`, the host defaults to the SPL Token program.
 pub fn get_token_accounts_by_owner(
-    owner: Pubkey,
-    mint: Option<Pubkey>,
-    program_id: Option<Pubkey>,
+    owner: &UnvalidatedPubkey,
+    mint: Option<&UnvalidatedPubkey>,
+    program_id: Option<&UnvalidatedPubkey>,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
@@ -275,9 +289,9 @@ pub fn get_token_accounts_by_owner(
     }
     let request = serialize_request(&GetTokenAccountsByOwnerRequest {
         cluster,
-        owner,
-        mint,
-        program_id,
+        owner: Cow::Borrowed(owner),
+        mint: mint.map(Cow::Borrowed),
+        program_id: program_id.map(Cow::Borrowed),
     })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
@@ -293,13 +307,16 @@ pub fn get_token_accounts_by_owner(
 
 /// Returns the token balance of an SPL token account (`getTokenAccountBalance`).
 pub fn get_token_account_balance(
-    pubkey: Pubkey,
+    pubkey: &UnvalidatedPubkey,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(blockchain_solana, get_token_account_balance);
     }
-    let request = serialize_request(&PubkeyRequest { cluster, pubkey })?;
+    let request = serialize_request(&PubkeyRequest {
+        cluster,
+        pubkey: Cow::Borrowed(pubkey),
+    })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
         blockchain_solana_get_token_account_balance(
@@ -314,7 +331,7 @@ pub fn get_token_account_balance(
 
 /// Returns the total supply of an SPL mint (`getTokenSupply`).
 pub fn get_token_supply(
-    mint: Pubkey,
+    mint: &UnvalidatedPubkey,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
@@ -322,7 +339,7 @@ pub fn get_token_supply(
     }
     let request = serialize_request(&PubkeyRequest {
         cluster,
-        pubkey: mint,
+        pubkey: Cow::Borrowed(mint),
     })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
@@ -366,13 +383,16 @@ pub fn get_minimum_balance_for_rent_exemption(
 
 /// Returns the fee the cluster would charge for a serialized message (`getFeeForMessage`).
 pub fn get_fee_for_message(
-    message: String,
+    message: impl AsRef<str>,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(blockchain_solana, get_fee_for_message);
     }
-    let request = serialize_request(&GetFeeForMessageRequest { cluster, message })?;
+    let request = serialize_request(&GetFeeForMessageRequest {
+        cluster,
+        message: Cow::Borrowed(message.as_ref()),
+    })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
         blockchain_solana_get_fee_for_message(
@@ -388,13 +408,16 @@ pub fn get_fee_for_message(
 /// Returns recent prioritization fees, optionally scoped to `addresses`
 /// (`getRecentPrioritizationFees`).
 pub fn get_recent_prioritization_fees(
-    addresses: Vec<Pubkey>,
+    addresses: &[UnvalidatedPubkey],
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(blockchain_solana, get_recent_prioritization_fees);
     }
-    let request = serialize_request(&GetRecentPrioritizationFeesRequest { cluster, addresses })?;
+    let request = serialize_request(&GetRecentPrioritizationFeesRequest {
+        cluster,
+        addresses: Cow::Borrowed(addresses),
+    })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
         blockchain_solana_get_recent_prioritization_fees(
@@ -409,7 +432,7 @@ pub fn get_recent_prioritization_fees(
 
 /// Simulates a signed transaction without submitting it (`simulateTransaction`).
 pub fn simulate_transaction(
-    transaction: String,
+    transaction: impl AsRef<str>,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
@@ -417,7 +440,7 @@ pub fn simulate_transaction(
     }
     let request = serialize_request(&SendTransactionRequest {
         cluster,
-        transaction,
+        transaction: Cow::Borrowed(transaction.as_ref()),
     })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
@@ -433,7 +456,7 @@ pub fn simulate_transaction(
 
 /// Returns signatures for transactions involving an address (`getSignaturesForAddress`).
 pub fn get_signatures_for_address(
-    address: Pubkey,
+    address: &UnvalidatedPubkey,
     limit: Option<u64>,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
@@ -442,7 +465,7 @@ pub fn get_signatures_for_address(
     }
     let request = serialize_request(&GetSignaturesForAddressRequest {
         cluster,
-        address,
+        address: Cow::Borrowed(address),
         limit,
     })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];

@@ -191,11 +191,11 @@ impl<C: ChainFamily> BlockchainClient<C> {
     ///
     /// It is generic over the method type `M`, so each chain family reuses this
     /// loop with its own set of RPC method names.
-    pub(crate) async fn execute_rpc_call<M: Serialize + Display>(
+    pub(crate) async fn execute_rpc_call<M: Serialize + Display, P: Serialize>(
         &self,
         selector: &NodeSelector,
         identifier: C::Identifier,
-        json_rpc_request: JsonRpcRequest<'_, M>,
+        json_rpc_request: JsonRpcRequest<'_, M, P>,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
         let mut last_error = BlockchainError::AllNodesFailed;
