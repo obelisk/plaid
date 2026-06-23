@@ -405,6 +405,7 @@ impl_new_function!(
     DISALLOW_IN_TEST_MODE
 );
 impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, create_deploy_key, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, require_signed_commits, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, add_repo_to_team, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, remove_repo_from_team, DISALLOW_IN_TEST_MODE);
@@ -773,6 +774,7 @@ define_api_functions! {
         "github_check_org_membership_of_user"              => github_check_org_membership_of_user,
         "github_comment_on_pull_request"                   => github_comment_on_pull_request,
         "github_delete_deploy_key"                         => github_delete_deploy_key,
+        "github_create_deploy_key"                         => github_create_deploy_key,
         "github_pull_request_request_reviewers"            => github_pull_request_request_reviewers,
         "github_require_signed_commits"                    => github_require_signed_commits,
         "github_get_weekly_commit_count"                   => github_get_weekly_commit_count,
