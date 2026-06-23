@@ -27,7 +27,7 @@ use time::OffsetDateTime;
 use tokio::task::{self, JoinSet};
 use tokio_util::sync::CancellationToken;
 
-pub use self::internal::DelayedMessage;
+pub use self::internal::{DelayedLogPersister, DelayedMessage};
 
 const DATA_GENERATOR_STORAGE_PREFIX: &str = "__DATA_GENERATOR";
 const LAST_SEEN_KEY: &str = "last_seen";
@@ -84,7 +84,7 @@ impl DataInternal {
         logger: Sender<Message>,
         storage: Arc<Storage>,
         els: Logger,
-    ) -> Result<Self, DataError> {
+    ) -> Result<(Self, internal::DelayedLogPersister), DataError> {
         let github = config
             .github
             .map(|gh| github::Github::new(gh, logger.clone()).map_err(DataError::ApiError))
@@ -94,7 +94,7 @@ impl DataInternal {
             .okta
             .map(|okta| okta::Okta::new(okta, logger.clone()));
 
-        let internal = internal::Internal::new(logger.clone(), storage.clone())?;
+        let (internal, persister) = internal::Internal::new(logger.clone(), storage.clone())?;
 
         let interval = config
             .interval
@@ -111,15 +111,18 @@ impl DataInternal {
             .websocket
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
-        Ok(Self {
-            github,
-            okta,
-            internal,
-            interval,
-            #[cfg(feature = "aws")]
-            sqs,
-            websocket_external,
-        })
+        Ok((
+            Self {
+                github,
+                okta,
+                internal,
+                interval,
+                #[cfg(feature = "aws")]
+                sqs,
+                websocket_external,
+            },
+            persister,
+        ))
     }
 }
 
@@ -131,8 +134,9 @@ impl Data {
         els: Logger,
         roles: &InstanceRoles,
         cancellation_token: CancellationToken,
-    ) -> Result<(Sender<DelayedMessage>, JoinSet<()>), DataError> {
-        let mut di = DataInternal::new(config, sender, storage.clone(), els).await?;
+    ) -> Result<(Sender<DelayedMessage>, DelayedLogPersister, JoinSet<()>), DataError> {
+        let (mut di, delayed_log_persister) =
+            DataInternal::new(config, sender, storage.clone(), els).await?;
 
         let mut join_set = JoinSet::new();
 
@@ -275,12 +279,13 @@ impl Data {
         // This can be improved upon with an async delayed message channel, but this
         // models the current implementation so we will leave it for now and can revisit
         // in a separate PR.
-        let sender = di.internal.get_sender().clone();
-        let internal_clone = di.internal.clone();
+        let delayed_log_sender = di.internal.get_sender();
+        let persister = delayed_log_persister.clone();
         task::spawn(async move {
+            let sleep_duration = Duration::from_secs(10);
             loop {
-                internal_clone.listen_for_incoming_logs().await;
-                tokio::time::sleep(Duration::from_secs(10)).await
+                persister.listen_for_incoming_logs().await;
+                tokio::time::sleep(sleep_duration).await
             }
         });
 
@@ -311,7 +316,7 @@ impl Data {
         }
 
         info!("Started Data Generators");
-        Ok((sender, join_set))
+        Ok((delayed_log_sender, delayed_log_persister, join_set))
     }
 }
 

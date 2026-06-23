@@ -1,10 +1,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use plaid_stl::messages::LogbacksAllowed;
+use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use wasmer::{AsStoreRef, FunctionEnvMut, WasmPtr};
 
 use crate::{
-    executor::Env,
+    data::DelayedMessage,
+    executor::{Env, Message},
     functions::{get_memory, safely_get_string},
 };
 
@@ -180,6 +181,8 @@ pub fn log_back_detailed(
         }
     };
 
+    let max_buffer_size = calculate_max_buffer_size(env.data().module.page_limit);
+
     let store = env.as_store_ref();
     let env_data = env.data();
 
@@ -202,8 +205,6 @@ pub fn log_back_detailed(
         }
     };
 
-    // Safely get the data from the guest's memory
-    let max_buffer_size = calculate_max_buffer_size(env_data.module.page_limit);
     let log = match safely_get_memory(&memory_view, log_buf, log_buf_len, max_buffer_size) {
         Ok(d) => d,
         Err(e) => {
@@ -212,25 +213,36 @@ pub fn log_back_detailed(
         }
     };
 
-    let api = env_data.api.clone();
-    api.clone().runtime.block_on(async move {
-        match api.general.as_ref() {
-            Some(general) => {
-                if general.log_back(
-                    &type_,
-                    &log,
-                    &env_data.module.name,
-                    delay as u64,
-                    assigned_budget,
-                ) {
-                    0
-                } else {
-                    1
-                }
-            }
-            _ => 1,
+    let msg = Message::new(type_, log, LogSource::Logback(name), assigned_budget);
+    dispatch_logback(env.data(), delay, msg)
+}
+
+/// Route a logback to the executor queue or the delayed persistence path.
+fn dispatch_logback(env: &Env, delay: u32, msg: Message) -> u32 {
+    let success = match (
+        env.cancellation_token.is_cancelled(),
+        delay,
+        &env.immediate_sender,
+    ) {
+        // Happy path: Not cancelled, zero delay, and an immediate sender exists
+        (false, 0, Some(sender)) => sender.send(msg).is_ok(),
+
+        // All other cases route to the delayed queue with a minimum delay of 1
+        _ => {
+            // Coerce immediate messages (delay 0) to 1 in delayed paths.
+            let actual_delay = std::cmp::max(delay as u64, 1);
+
+            env.delayed_log_sender
+                .send(DelayedMessage::new(actual_delay, msg))
+                .is_ok()
         }
-    })
+    };
+
+    if success {
+        0
+    } else {
+        1
+    }
 }
 
 /// Implement a way for randomness to get into the module

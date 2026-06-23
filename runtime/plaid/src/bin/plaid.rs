@@ -367,7 +367,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // This sender provides an internal route to sending logs. This is what
     // powers the logback functions.
-    let (delayed_log_sender, mut dg_tasks) = Data::start(
+    let (delayed_log_sender, delayed_log_persister, mut dg_tasks) = Data::start(
         config.data,
         log_sender.clone(),
         internal_storage.clone(),
@@ -378,12 +378,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender)
+    let api = Api::new(config.apis)
         .await
         .map_err(|e| Errors::FailedToStartApiSystem(e))?;
 
     // Create an Arc so all the handlers have access to our API object
     let api = Arc::new(api);
+
+    // Workers upgrade this weak ref per message so idle threads hold no Message senders.
+    let immediate_dispatch = Arc::new(exec_thread_pools.general_pool.sender.clone());
 
     // Create the executor that will handle all the logs that come in and immediate
     // requests for handling some configured get requests.
@@ -395,6 +398,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(cache),
         els.clone(),
         performance_sender.clone(),
+        Arc::downgrade(&immediate_dispatch),
+        delayed_log_sender.clone(),
+        cancellation_token.clone(),
     );
 
     let executor = Arc::new(executor);
@@ -641,10 +647,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         log_join_result("webhook server", result);
     }
 
-    // Shutdown channel lets threads finish queued work, then exit even while Api senders live.
-
+    // Drop every Sender<Message> so worker threads exit once the queues drain.
     info!("Waiting for executor threads to drain...");
-    executor_threads.shutdown();
+    drop(log_sender);
+    drop(exec_thread_pools);
+    drop(immediate_dispatch);
+    drop(executor);
+    executor_threads.join();
+
+    // Persist any delayed logbacks still in the in-memory channel.
+    info!("Flushing delayed logbacks to storage...");
+    delayed_log_persister.flush_pending().await;
+    drop(delayed_log_sender);
 
     // Performance loop exits when cancelled and its sender disconnects.
     drop(performance_sender);

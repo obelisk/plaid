@@ -3,6 +3,7 @@ pub mod thread_pools;
 use crate::apis::Api;
 
 use crate::cache::Cache;
+use crate::data::DelayedMessage;
 use crate::functions::{
     create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
 };
@@ -14,6 +15,7 @@ use crate::storage::Storage;
 use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
 use thread_pools::ExecutionThreadPools;
 use tokio::sync::oneshot::Sender as OneShotSender;
+use tokio_util::sync::CancellationToken;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -22,7 +24,7 @@ use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedF
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
@@ -206,6 +208,14 @@ pub struct Env {
     pub response: Option<String>,
     // Context about error encountered by the module during its execution
     pub execution_error_context: Option<String>,
+    /// Available for immediate logback during normal operation; `None` during shutdown drain.
+    pub immediate_sender: Option<Sender<Message>>,
+    /// Sender for delayed logbacks (`delay > 0`), and for immediate logbacks coerced
+    /// during shutdown. Messages are persisted by the internal logback listener and
+    /// injected into the executor queue once their delay elapses.
+    pub delayed_log_sender: Sender<DelayedMessage>,
+    /// Shared with async tasks; set when shutdown begins.
+    pub cancellation_token: CancellationToken,
 }
 
 /// The executor that processes messages
@@ -216,18 +226,11 @@ pub struct Executor {
 /// Join handles for executor worker threads.
 pub struct ExecutorThreads {
     thread_handles: Vec<JoinHandle<()>>,
-    shutdown: Sender<()>,
 }
 
 impl ExecutorThreads {
-    /// Drain queued messages, then stop worker threads.
-    ///
-    /// Threads cannot rely on channel disconnect alone: each one holds an `Arc<Api>` with
-    /// `log_sender` clones for logback support, which keeps senders alive while blocked on
-    /// `recv()`.
-    pub fn shutdown(self) {
-        drop(self.shutdown);
-
+    /// Wait for worker threads to exit after all executor ingress senders have been dropped.
+    pub fn join(self) {
         for handle in self.thread_handles {
             if let Err(e) = handle.join() {
                 error!("Execution thread panicked during shutdown: {e:?}");
@@ -332,6 +335,9 @@ fn prepare_for_execution(
     cache: Option<Arc<Cache>>,
     els: Logger,
     response: Option<String>,
+    immediate_sender: Option<Sender<Message>>,
+    delayed_log_sender: Sender<DelayedMessage>,
+    cancellation_token: CancellationToken,
 ) -> Result<(Store, Instance, TypedFunction<(), i32>, FunctionEnv<Env>), ExecutorError> {
     // Prepare the structure for functions the module will use
     // AKA: Host Functions
@@ -351,6 +357,9 @@ fn prepare_for_execution(
         memory: None,
         response,
         execution_error_context: None,
+        immediate_sender,
+        delayed_log_sender,
+        cancellation_token,
     };
 
     let env = FunctionEnv::new(&mut store, env);
@@ -499,6 +508,9 @@ fn process_message_with_module(
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
+    immediate_sender: Option<Sender<Message>>,
+    delayed_log_sender: Sender<DelayedMessage>,
+    cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
     // TODO @obelisk: This will quietly swallow locking errors on the persistent response
     // This will eventually be caught if something tries to update the response but I don't
@@ -514,6 +526,9 @@ fn process_message_with_module(
         cache.clone(),
         els.clone(),
         persistent_response,
+        immediate_sender,
+        delayed_log_sender,
+        cancellation_token,
     ) {
         Ok((store, instance, ep, env)) => (store, instance, ep, env),
         Err(e) => {
@@ -621,29 +636,20 @@ fn execution_loop(
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
-    shutdown: Receiver<()>,
+    immediate_sender: Weak<Sender<Message>>,
+    delayed_log_sender: Sender<DelayedMessage>,
+    cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
     loop {
-        // Uses the `shutdown` channel to transition from a blocking receive to a non-blocking
-        // `try_recv()`. Post-shutdown, the closed shutdown channel is always "ready". Because
-        // `select!` pseudo-randomly chooses between ready channels, both branches cooperate
-        // to drain pending messages. The `recv(shutdown)` branch is guaranteed to be hit at
-        // least once. The loop ultimately exits if the log channel disconnects or
-        // when `try_recv()` confirms the queue is fully drained.
-        let message = crossbeam_channel::select! {
-            recv(receiver) -> message => {
-                match message {
-                    Ok(message) => message,
-                    Err(e) => return Err(ExecutorError::IncomingLogError(e))
-                }
-            }
+        let message = match receiver.recv() {
+            Ok(message) => message,
+            Err(RecvError) => return Ok(()),
+        };
 
-            recv(shutdown) -> _ => {
-                match receiver.try_recv() {
-                    Ok(message) => message,
-                    _ => return Ok(())
-                }
-            }
+        let immediate_sender = if cancellation_token.is_cancelled() {
+            None
+        } else {
+            immediate_sender.upgrade().map(|sender| (*sender).clone())
         };
 
         // Check that we know what modules to send this new log to
@@ -661,6 +667,9 @@ fn execution_loop(
                     cache.clone(),
                     els.clone(),
                     performance_monitoring_mode.clone(),
+                    immediate_sender.clone(),
+                    delayed_log_sender.clone(),
+                    cancellation_token.clone(),
                 )?;
             }
             (None, Some(modules)) => {
@@ -674,6 +683,9 @@ fn execution_loop(
                         cache.clone(),
                         els.clone(),
                         performance_monitoring_mode.clone(),
+                        immediate_sender.clone(),
+                        delayed_log_sender.clone(),
+                        cancellation_token.clone(),
                     )?;
                 }
             }
@@ -719,9 +731,11 @@ impl Executor {
         cache: Option<Arc<Cache>>,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
+        immediate_sender: Weak<Sender<Message>>,
+        delayed_log_sender: Sender<DelayedMessage>,
+        cancellation_token: CancellationToken,
     ) -> (Self, ExecutorThreads) {
         let mut thread_handles = Vec::new();
-        let (shutdown_sender, shutdown_receiver) = crossbeam_channel::bounded::<()>(0);
 
         // General processing
         for i in 0..thread_pools.general_pool.num_threads {
@@ -733,7 +747,9 @@ impl Executor {
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
-            let shutdown = shutdown_receiver.clone();
+            let immediate_sender = immediate_sender.clone();
+            let delayed_log_sender = delayed_log_sender.clone();
+            let cancellation_token = cancellation_token.clone();
             let handle = thread::spawn(move || {
                 if let Err(e) = execution_loop(
                     receiver.clone(),
@@ -743,7 +759,9 @@ impl Executor {
                     cache.clone(),
                     els.clone(),
                     performance_sender.clone(),
-                    shutdown.clone(),
+                    immediate_sender.clone(),
+                    delayed_log_sender.clone(),
+                    cancellation_token.clone(),
                 ) {
                     error!("General execution thread {i} exited with error: {e}");
                 }
@@ -763,7 +781,9 @@ impl Executor {
                 let els = els.clone();
                 let performance_sender = performance_monitoring_mode.clone();
                 let log_type = log_type.clone();
-                let shutdown = shutdown_receiver.clone();
+                let immediate_sender = immediate_sender.clone();
+                let delayed_log_sender = delayed_log_sender.clone();
+                let cancellation_token = cancellation_token.clone();
                 let handle = thread::spawn(move || {
                     if let Err(e) = execution_loop(
                         receiver.clone(),
@@ -773,7 +793,9 @@ impl Executor {
                         cache.clone(),
                         els.clone(),
                         performance_sender.clone(),
-                        shutdown.clone(),
+                        immediate_sender.clone(),
+                        delayed_log_sender.clone(),
+                        cancellation_token.clone(),
                     ) {
                         error!("{log_type} dedicated execution thread {i} exited with error: {e}");
                     }
@@ -781,13 +803,7 @@ impl Executor {
                 thread_handles.push(handle);
             }
         }
-        (
-            Self { thread_pools },
-            ExecutorThreads {
-                thread_handles,
-                shutdown: shutdown_sender,
-            },
-        )
+        (Self { thread_pools }, ExecutorThreads { thread_handles })
     }
 
     /// Execute a message coming from a webhook, by sending it to the appropriate thread pool.
