@@ -49,91 +49,52 @@ impl std::cmp::Ord for DelayedMessage {
     }
 }
 
+/// Persists incoming delayed logbacks to storage. Holds no `Sender<Message>` so the
+/// perpetual listener task cannot keep executor ingress channels alive.
 #[derive(Clone)]
+pub struct DelayedLogPersister {
+    receiver: Receiver<DelayedMessage>,
+    storage: Arc<Storage>,
+}
+
+impl DelayedLogPersister {
+    pub async fn listen_for_incoming_logs(&self) {
+        while let Ok(log) = self.receiver.try_recv() {
+            persist_delayed_log(&self.storage, log).await;
+        }
+    }
+
+    /// Drain any delayed logbacks still in the in-memory channel into storage.
+    pub async fn flush_pending(&self) {
+        self.listen_for_incoming_logs().await;
+    }
+}
+
 pub struct Internal {
     sender: Sender<Message>,
-    receiver: Receiver<DelayedMessage>,
     internal_sender: Sender<DelayedMessage>,
     storage: Arc<Storage>,
 }
 
-/// Fill the log heap with the content read from the DB
-async fn fill_heap_from_db(
-    storage: Arc<Storage>,
-) -> Result<BinaryHeap<Reverse<DelayedMessage>>, DataError> {
-    let mut log_heap = BinaryHeap::new();
-
-    let previous_logs = storage
-        .fetch_all(LOGBACK_NS, None)
-        .await
-        .map_err(|e| DataError::StorageError(e))?;
-
-    for (key, value) in previous_logs {
-        if let Some(value) = value {
-            // We want to extract from the DB a message and a delay.
-            let (message, delay) = match serde_json::from_slice::<DelayedMessage>(&value) {
-                Ok(item) => (item.message, item.delay),
-                Err(e) => {
-                    warn!(
-                        "Skipping log in storage system which could not be deserialized [{e}]: {:X?}",
-                        key
-                    );
-                    continue;
-                }
-            };
-            log_heap.push(Reverse(DelayedMessage { delay, message }));
-        } else {
-            warn!("Empty value for logback with key {key}, skipping it.");
-        }
-    }
-
-    Ok(log_heap)
-}
-
 impl Internal {
-    pub fn new(log_sender: Sender<Message>, storage: Arc<Storage>) -> Result<Self, DataError> {
+    pub fn new(
+        log_sender: Sender<Message>,
+        storage: Arc<Storage>,
+    ) -> Result<(Self, DelayedLogPersister), DataError> {
         let (internal_sender, receiver) = bounded(CHANNEL_CAPACITY);
 
-        Ok(Self {
-            sender: log_sender,
-            receiver,
-            internal_sender,
-            storage,
-        })
+        Ok((
+            Self {
+                sender: log_sender,
+                internal_sender,
+                storage: storage.clone(),
+            },
+            DelayedLogPersister { receiver, storage },
+        ))
     }
 
     pub fn get_sender(&self) -> Sender<DelayedMessage> {
         self.internal_sender.clone()
-    }
-
-    pub async fn listen_for_incoming_logs(&self) {
-        while let Ok(mut log) = self.receiver.try_recv() {
-            let current_time = get_time();
-            log.delay += current_time;
-
-            // Prepare what will be stored in the DB by serializing the DelayedMessage
-            let db_item = match serde_json::to_vec(&log) {
-                Ok(db_item) => db_item,
-                Err(e) => {
-                    error!(
-                        "Failed to serialize DelayedMessage from {}. Error: {e}",
-                        log.message.source
-                    );
-                    continue;
-                }
-            };
-
-            if let Err(e) = self
-                .storage
-                .insert(LOGBACK_NS.to_string(), log.message.id.clone(), db_item)
-                .await
-            {
-                error!(
-                    "Storage system could not persist delayed log from {}. Error: {e}",
-                    log.message.source
-                );
-            }
-        }
     }
 
     pub async fn fetch_internal_logs(&mut self) -> Result<(), String> {
@@ -187,6 +148,63 @@ impl Internal {
         debug!("Heap Size: {}", log_heap.len());
 
         Ok(())
+    }
+}
+
+/// Fill the log heap with the content read from the DB
+async fn fill_heap_from_db(
+    storage: Arc<Storage>,
+) -> Result<BinaryHeap<Reverse<DelayedMessage>>, DataError> {
+    let mut log_heap = BinaryHeap::new();
+
+    let previous_logs = storage
+        .fetch_all(LOGBACK_NS, None)
+        .await
+        .map_err(DataError::StorageError)?;
+
+    for (key, value) in previous_logs {
+        if let Some(value) = value {
+            // We want to extract from the DB a message and a delay.
+            let (message, delay) = match serde_json::from_slice::<DelayedMessage>(&value) {
+                Ok(item) => (item.message, item.delay),
+                Err(e) => {
+                    warn!("Skipping log in storage system which could not be deserialized [{e}]");
+                    continue;
+                }
+            };
+            log_heap.push(Reverse(DelayedMessage { delay, message }));
+        } else {
+            warn!("Empty value for logback with key {key}, skipping it.");
+        }
+    }
+
+    Ok(log_heap)
+}
+
+async fn persist_delayed_log(storage: &Storage, log: DelayedMessage) {
+    let mut log = log;
+    let current_time = get_time();
+    log.delay += current_time;
+
+    let db_item = match serde_json::to_vec(&log) {
+        Ok(db_item) => db_item,
+        Err(e) => {
+            error!(
+                "Failed to serialize DelayedMessage from {}. Error: {e}",
+                log.message.source
+            );
+            return;
+        }
+    };
+
+    if let Err(e) = storage
+        .insert(LOGBACK_NS.to_string(), log.message.id.clone(), db_item)
+        .await
+    {
+        error!(
+            "Storage system could not persist delayed log from {}. Error: {e}",
+            log.message.source
+        );
     }
 }
 
