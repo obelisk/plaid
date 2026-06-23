@@ -67,7 +67,7 @@ impl PlaidLogger for SplunkLogger {
     /// will not block sending logs to other services (like stdout) but it
     /// does mean we cannot return a proper LoggingError to the caller since
     /// we cannot wait for it to complete.
-    fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError> {
+    async fn send_log(&self, log: &WrappedLog) -> Result<(), LoggingError> {
         let splunk_log = SplunkLogWrapper { event: log };
 
         let res = self
