@@ -7,7 +7,7 @@ use plaid_stl::blockchain::solana::types::{
     GetMinimumBalanceForRentExemptionRequest, GetMultipleAccountsRequest,
     GetProgramAccountsRequest, GetRecentPrioritizationFeesRequest, GetSignatureStatusesRequest,
     GetSignaturesForAddressRequest, GetTokenAccountsByOwnerRequest, GetTransactionRequest,
-    PubkeyRequest, SendTransactionRequest, UnvalidatedPubkey,
+    PubkeyRequest, SendTransactionRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -378,13 +378,12 @@ impl BlockchainClient<Solana> {
         // (defaulting to SPL Token).
         let filter = match request.mint {
             Some(mint) => json!({ "mint": mint }),
-            None => json!({
+            None if request.program_id.is_some() => json!({
                 "programId": request
                     .program_id
-                    .as_ref()
-                    .map(UnvalidatedPubkey::as_str)
-                    .unwrap_or(SPL_TOKEN_PROGRAM_ID),
+                    .unwrap(),
             }),
+            None => json!({"programId": SPL_TOKEN_PROGRAM_ID}),
         };
         let params = (
             request.owner,

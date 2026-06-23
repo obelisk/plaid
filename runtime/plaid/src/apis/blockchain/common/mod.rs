@@ -69,31 +69,31 @@ impl BlockchainError {
 }
 
 pub struct BlockchainClient<C: ChainFamily> {
-    pub(crate) node_selector: HashMap<C::Identifier, NodeSelector>,
-    pub(crate) client: Client,
-    pub(crate) max_retries: u8,
-    pub(crate) options: C::Options,
+    pub node_selector: HashMap<C::Identifier, NodeSelector>,
+    pub client: Client,
+    pub max_retries: u8,
+    pub options: C::Options,
 }
 
 /// Default timeout duration for client requests
-pub(crate) fn default_timeout() -> Duration {
+pub fn default_timeout() -> Duration {
     Duration::from_millis(3000)
 }
 
 /// Default maximum number of retries for client requests
-pub(crate) fn default_max_retries() -> u8 {
+pub fn default_max_retries() -> u8 {
     3
 }
 
 #[derive(Deserialize, Clone)]
 pub struct NodeConfig {
     /// The URIs of the RPC nodes to connect to
-    pub(crate) uri: String,
+    pub uri: String,
     /// A human-readable name for the node
-    pub(crate) name: String,
+    pub name: String,
     /// Optional tags for the node
     #[serde(rename = "tags")]
-    pub(crate) _tags: Option<Vec<String>>,
+    pub _tags: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -134,10 +134,10 @@ where
 #[derive(Deserialize)]
 pub struct ChainConfig {
     /// The list of nodes for this chain
-    pub(crate) nodes: Vec<NodeConfig>,
+    pub nodes: Vec<NodeConfig>,
     /// The selection strategy for this chain
     #[serde(deserialize_with = "selection_strategy_deserializer")]
-    pub(crate) selection_strategy: SelectionStrategy,
+    pub selection_strategy: SelectionStrategy,
 }
 
 impl<C: ChainFamily> BlockchainClient<C> {
@@ -171,10 +171,7 @@ impl<C: ChainFamily> BlockchainClient<C> {
     }
 
     /// Look up the node selector for a chain identifier, erroring if none is configured.
-    pub(crate) fn get_node_selector(
-        &self,
-        identifier: C::Identifier,
-    ) -> Result<&NodeSelector, ApiError> {
+    pub fn get_node_selector(&self, identifier: C::Identifier) -> Result<&NodeSelector, ApiError> {
         self.node_selector.get(&identifier).ok_or_else(|| {
             BlockchainError::NoNodes {
                 identifier: identifier.to_string(),
@@ -191,7 +188,7 @@ impl<C: ChainFamily> BlockchainClient<C> {
     ///
     /// It is generic over the method type `M`, so each chain family reuses this
     /// loop with its own set of RPC method names.
-    pub(crate) async fn execute_rpc_call<M: Serialize + Display, P: Serialize>(
+    pub async fn execute_rpc_call<M: Serialize + Display, P: Serialize>(
         &self,
         selector: &NodeSelector,
         identifier: C::Identifier,
