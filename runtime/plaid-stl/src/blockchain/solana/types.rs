@@ -161,6 +161,18 @@ pub struct SendTransactionRequest<'a> {
     /// Target cluster.
     pub cluster: Cluster,
     /// Base64-encoded, fully-signed transaction.
+    ///
+    /// NOTE: Transaction types in this module generally use `Cow` to hold their larger fields,
+    /// as these types perform two functions:
+    ///
+    /// * They provide the serialization format to send transactions through the FFI boundary out of
+    ///   WASM. In this scenario, they need to hold borrowed values to minimize unnecessary cloning before
+    ///   serialization.
+    /// * In the runtime, the memory passed across the FFI boundary is serialized into the owned variant,
+    ///   so the API can perform any transformations or decisions needed based on these parameters before
+    ///   submitting the final transaction to the RPC.
+    ///
+    /// This logic applies to all Cows after this point.
     pub transaction: Cow<'a, str>,
 }
 
@@ -248,7 +260,7 @@ pub struct DataSlice {
 /// programs is large enough to exceed the host return buffer or be rejected by
 /// RPC providers. Scope the query with `data_size` / `memcmp`, and trim each
 /// result with `data_slice`. [`Default`] (all unset) reproduces the full scan.
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct ProgramAccountsFilters {
     /// Keep only accounts whose data is exactly this many bytes.
     #[serde(default)]
@@ -271,7 +283,7 @@ pub struct GetProgramAccountsRequest<'a> {
     pub program_id: Cow<'a, UnvalidatedPubkey>,
     /// Filters/projection narrowing the scan. Defaults to an unfiltered scan.
     #[serde(default)]
-    pub filters: ProgramAccountsFilters,
+    pub filters: Cow<'a, ProgramAccountsFilters>,
 }
 
 /// Lists the SPL token accounts owned by a wallet.

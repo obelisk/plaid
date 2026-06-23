@@ -251,7 +251,7 @@ pub fn get_multiple_accounts(
 /// unfiltered scan, which can return a large payload — see [`RETURN_BUFFER_SIZE`].
 pub fn get_program_accounts(
     program_id: &UnvalidatedPubkey,
-    filters: ProgramAccountsFilters,
+    filters: &ProgramAccountsFilters,
     cluster: Cluster,
 ) -> Result<SolanaRpcResponse, PlaidFunctionError> {
     extern "C" {
@@ -260,7 +260,7 @@ pub fn get_program_accounts(
     let request = serialize_request(&GetProgramAccountsRequest {
         cluster,
         program_id: Cow::Borrowed(program_id),
-        filters,
+        filters: Cow::Borrowed(filters),
     })?;
     let mut buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {

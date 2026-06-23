@@ -25,6 +25,13 @@ use std::{
     collections::HashMap, fmt::Display, hash::Hash, str::FromStr, sync::Arc, time::Duration,
 };
 
+/// Identifies a chain family which can be interacted with through Json-RPC 2.0. This trait is
+/// mainly used as a type parameter to BlockchainClient.
+///
+/// Rpc methods available for each chain family are defined independently of this trait, since
+/// `BlockchainClient::execute_rpc_call` takes generic `JsonRpcRequest`. However, this trait
+/// defines the type for the identifier (chain IDs, network/cluster names, etc) and the config
+/// format.
 pub trait ChainFamily {
     /// The per-chain identifier used as the TOML map key (e.g. EVM `ChainId`, Solana `Cluster`).
     type Identifier: FromStr<Err: Display> + Eq + Hash + Display + Copy;

@@ -335,11 +335,11 @@ impl BlockchainClient<Solana> {
         if let Some(data_size) = request.filters.data_size {
             filters.push(json!({ "dataSize": data_size }));
         }
-        for memcmp in request.filters.memcmp {
+        for memcmp in request.filters.memcmp.iter() {
             let mut entry = serde_json::Map::new();
             entry.insert("offset".to_string(), json!(memcmp.offset));
             entry.insert("bytes".to_string(), json!(memcmp.bytes));
-            if let Some(encoding) = memcmp.encoding {
+            if let Some(encoding) = &memcmp.encoding {
                 entry.insert("encoding".to_string(), json!(encoding));
             }
             filters.push(json!({ "memcmp": entry }));
