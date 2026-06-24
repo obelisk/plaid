@@ -302,7 +302,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Graceful shutdown handling
     let cancellation_token = CancellationToken::new();
-    let performance_cancellation_token = CancellationToken::new();
     let is_ready = Arc::new(AtomicBool::new(false));
     let mut server_tasks = JoinSet::new();
 
@@ -323,9 +322,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             warn!("Plaid is running with performance monitoring enabled - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a channel that aggregates and reports metrics.");
             let (sender, rx) = crossbeam_channel::bounded::<ModulePerformanceMetadata>(4096);
 
-            let token = performance_cancellation_token.clone();
             let handle = tokio::task::spawn(async move {
-                perf.start(rx, token).await;
+                perf.start(rx).await;
             });
 
             (Some(sender), Some(handle))
@@ -660,9 +658,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     delayed_log_persister.flush_pending().await;
     drop(delayed_log_sender);
 
-    // Performance loop exits when cancelled and its sender disconnects.
+    // Performance loop exits the final sender disconnects.
     drop(performance_sender);
-    performance_cancellation_token.cancel();
 
     if let Some(handle) = performance_handle {
         info!("Waiting for performance monitoring system to shutdown...");
