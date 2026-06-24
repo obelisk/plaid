@@ -634,7 +634,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Data generators are the main source of new logs; wait for them to exit first.
     info!("Waiting for data generators to shutdown...");
-    let mut dg_tasks = dg_tasks;
     while let Some(result) = dg_tasks.join_next().await {
         log_join_result("data generator", result);
     }
