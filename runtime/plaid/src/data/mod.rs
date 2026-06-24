@@ -149,6 +149,7 @@ impl Data {
                 update_dg_from_storage(&mut gh, Some(storage_clone.clone())).await;
 
                 join_set.spawn(async move {
+                    let sleep_duration = Duration::from_secs(10);
                     loop {
                         if ct_clone.is_cancelled() {
                             return;
@@ -167,7 +168,7 @@ impl Data {
                                 return;
                             }
 
-                            _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                            _ = tokio::time::sleep(sleep_duration) => {}
                         }
                     }
                 });
@@ -181,6 +182,7 @@ impl Data {
                 update_dg_from_storage(&mut okta, Some(storage_clone.clone())).await;
 
                 join_set.spawn(async move {
+                    let sleep_duration = Duration::from_secs(10);
                     loop {
                         if ct_clone.is_cancelled() {
                             return;
@@ -199,7 +201,7 @@ impl Data {
                                 return;
                             }
 
-                            _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                            _ = tokio::time::sleep(sleep_duration) => {}
                         }
                     }
                 });
@@ -293,6 +295,7 @@ impl Data {
         if roles.logbacks {
             let ct_clone = cancellation_token.clone();
             join_set.spawn(async move {
+                let sleep_duration = Duration::from_secs(10);
                 loop {
                     if ct_clone.is_cancelled() {
                         return;
@@ -309,7 +312,7 @@ impl Data {
                             return;
                         }
 
-                        _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                        _ = tokio::time::sleep(sleep_duration) => {}
                     }
                 }
             });
