@@ -325,7 +325,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender)
+    let api = Api::new(config.apis, log_sender.clone(), delayed_log_sender, storage.clone())
         .await
         .map_err(|e| Errors::FailedToStartApiSystem(e))?;
 

@@ -53,6 +53,10 @@ use serde::Deserialize;
 use slack::{Slack, SlackConfig};
 use splunk::{Splunk, SplunkConfig};
 use tokio::runtime::Runtime;
+
+use std::sync::Arc;
+
+use crate::storage::Storage;
 use web::{Web, WebConfig};
 use yubikey::{Yubikey, YubikeyConfig};
 
@@ -183,6 +187,7 @@ impl Api {
         config: ApiConfigs,
         log_sender: Sender<Message>,
         delayed_log_sender: Sender<DelayedMessage>,
+        storage: Option<Arc<Storage>>,
     ) -> Result<Self, ApiError> {
         let cryptography = match config.cryptography {
             Some(cryptography) => Some(Cryptography::new(cryptography)),
@@ -259,7 +264,7 @@ impl Api {
         };
 
         let slack = match config.slack {
-            Some(sc) => Some(Slack::new(sc)),
+            Some(sc) => Some(Slack::new(sc, storage.clone())),
             _ => None,
         };
 

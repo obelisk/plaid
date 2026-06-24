@@ -37,6 +37,18 @@ struct GenericSlackResponse {
     ok: bool,
 }
 
+/// Parameters for `enqueue_message`: a pre-rendered `chat.postMessage` body plus
+/// the channel (for per-channel queueing/pacing) and the storage key under which
+/// the posted message ref should be written back.
+#[derive(serde::Deserialize)]
+struct EnqueueMessage {
+    bot: String,
+    channel: String,
+    /// Fully serialized `chat.postMessage` JSON body.
+    body: String,
+    ref_key: String,
+}
+
 impl Apis {
     fn build_request(&self, client: &Client) -> RequestBuilder {
         match self {
@@ -185,6 +197,48 @@ impl Slack {
             ))),
             Err(e) => Err(e),
         }
+    }
+
+    /// Enqueue a `chat.postMessage` for paced, rate-limit-safe delivery by the
+    /// background outbound queue. Non-blocking: it persists the entry and returns
+    /// immediately; the drain task posts it at ≤1/sec/channel and writes the
+    /// resulting `{ok, channel, ts}` ref into the calling rule's private storage
+    /// under `ref_key`, where the rule reads it to update the message later.
+    pub async fn enqueue_message(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String> {
+        let p: EnqueueMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let Some(tx) = self.queue_tx.as_ref() else {
+            return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                "outbound queue unavailable (no storage configured)".to_string(),
+            )));
+        };
+
+        let post = super::QueuedPost {
+            bot: p.bot,
+            channel: p.channel,
+            body: p.body,
+            ref_namespace: module.name.clone(),
+            ref_key: p.ref_key,
+            attempts: 0,
+            seq: super::queue::next_seq(),
+        };
+
+        // Persist before acking so a crash between enqueue and drain cannot drop it.
+        if let Some(storage) = self.storage.as_ref() {
+            super::queue::persist(storage, &post).await;
+        }
+
+        tx.send(post).map_err(|_| {
+            ApiError::SlackError(SlackError::UnexpectedPayload(
+                "outbound queue drain task is unavailable".to_string(),
+            ))
+        })?;
+
+        Ok(String::new())
     }
 
     /// Call the Slack chat.update API. Updates an existing message identified by its ts.

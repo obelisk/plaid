@@ -278,6 +278,63 @@ pub fn post_message_with_blocks_and_attachments_unfurl(
     serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
 }
 
+/// Enqueue a Block Kit message for paced, rate-limit-safe delivery by the runtime's
+/// outbound Slack queue, instead of posting inline. Non-blocking: returns as soon as
+/// the runtime has durably queued it. The runtime posts at ≤1 message/sec/channel
+/// (Slack's `chat.postMessage` limit), in order, retrying on rate limits, and writes
+/// the resulting `{ok, channel, ts}` ref into this rule's private storage under
+/// `ref_key` once posted — read it later (e.g. to update the message) with
+/// `plaid::storage::get(ref_key)`.
+pub fn enqueue_message_with_blocks_and_attachments_unfurl(
+    bot: &str,
+    channel: &str,
+    blocks: &str,
+    attachments: &str,
+    unfurl_links: Option<bool>,
+    unfurl_media: Option<bool>,
+    ref_key: &str,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, enqueue_message);
+    }
+
+    let message = SlackMessageWithBlocksAndAttachments {
+        channel: channel.to_owned(),
+        blocks: optional_blocks(blocks)?,
+        attachments: serde_json::from_str(attachments)
+            .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?,
+        unfurl_links,
+        unfurl_media,
+    };
+
+    let params = serde_json::json!({
+        "bot": bot,
+        "channel": channel,
+        "body": serde_json::to_string(&message).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?,
+        "ref_key": ref_key,
+    })
+    .to_string();
+
+    // Success returns an empty body; a small buffer is plenty.
+    const RETURN_BUFFER_SIZE: usize = 1024;
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        slack_enqueue_message(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
+
 /// Slack API response for message operations (chat.postMessage, chat.update).
 #[derive(Serialize, Deserialize)]
 pub struct SlackMessageResponse {

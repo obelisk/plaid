@@ -585,6 +585,7 @@ impl_new_function_with_error_buffer!(rustica, new_mtls_cert, DISALLOW_IN_TEST_MO
 // Slack Functions
 impl_new_function!(slack, views_open, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, post_message, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, enqueue_message, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, update_message, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, get_id_from_email, ALLOW_IN_TEST_MODE);
 impl_new_function!(slack, post_to_arbitrary_webhook, ALLOW_IN_TEST_MODE);
@@ -903,6 +904,7 @@ define_api_functions! {
         "slack_post_to_named_webhook"     => slack_post_to_named_webhook,
         "slack_post_to_arbitrary_webhook" => slack_post_to_arbitrary_webhook,
         "slack_post_message"              => slack_post_message,
+        "slack_enqueue_message"           => slack_enqueue_message,
         "slack_views_open"                => slack_views_open,
         "slack_get_id_from_email"         => slack_get_id_from_email,
         "slack_get_presence"              => slack_get_presence,
