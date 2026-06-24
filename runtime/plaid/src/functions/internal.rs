@@ -98,7 +98,7 @@ pub fn log_back(
     delay: u32,
     // How many logbacks the rule would like this new invocation to be able to trigger
     logbacks_requested: u32,
-) -> u32 {
+) -> i32 {
     log_back_detailed(
         env,
         type_buf,
@@ -118,7 +118,7 @@ pub fn log_back_unlimited(
     log_buf: WasmPtr<u8>,
     log_buf_len: u32,
     delay: u32,
-) -> u32 {
+) -> i32 {
     log_back_detailed(
         env,
         type_buf,
@@ -140,7 +140,7 @@ pub fn log_back_detailed(
     delay: u32,
     // How many logbacks the rule would like this new invocation to be able to trigger
     logbacks_requested: LogbacksAllowed,
-) -> u32 {
+) -> i32 {
     let name = env.data().module.name.clone();
     // We need to check that the that the module has the logbacks_allowed "budget"
     // for the logback they are requesting
@@ -151,7 +151,7 @@ pub fn log_back_detailed(
         // There is no logback budget left so this call is not allowed to continue
         LogbacksAllowed::Limited(0) => {
             error!("{name}: Logback attempted with zero budget.");
-            return 1;
+            return FunctionErrors::LogbackBudgetExhausted as i32;
         }
         LogbacksAllowed::Limited(x) => {
             // See what the caller was asking for
@@ -165,7 +165,7 @@ pub fn log_back_detailed(
                     // the budget is not 0 so it will not underflow.
                     if asked > (*x - 1) {
                         error!("{name}: Logback budget exceeded. Requested {asked}, but only {x} was available.");
-                        return 1;
+                        return FunctionErrors::LogbackBudgetExhausted as i32;
                     }
                     // The assigned logbacks are subtracted from the budget after
                     // we've checked that it is smaller.
@@ -175,7 +175,7 @@ pub fn log_back_detailed(
                 }
                 LogbacksAllowed::Unlimited => {
                     error!("{name} attempted unlimited log back with limited budget. The budget was {x}");
-                    return 1;
+                    return FunctionErrors::LogbackBudgetExhausted as i32;
                 }
             }
         }
@@ -193,7 +193,7 @@ pub fn log_back_detailed(
                 "{}: Memory error in log_back: {:?}",
                 env_data.module.name, e
             );
-            return 1;
+            return FunctionErrors::InternalApiError as i32;
         }
     };
 
@@ -201,7 +201,7 @@ pub fn log_back_detailed(
         Ok(s) => s,
         Err(e) => {
             error!("{}: Error in log_back: {:?}", env_data.module.name, e);
-            return 1;
+            return FunctionErrors::InternalApiError as i32;
         }
     };
 
@@ -209,40 +209,49 @@ pub fn log_back_detailed(
         Ok(d) => d,
         Err(e) => {
             error!("{}: Error in log_back: {:?}", env_data.module.name, e);
-            return 1;
+            return FunctionErrors::InternalApiError as i32;
         }
     };
 
     let msg = Message::new(type_, log, LogSource::Logback(name), assigned_budget);
-    dispatch_logback(env.data(), delay, msg)
+    match dispatch_logback(env.data(), delay, msg) {
+        Ok(()) => 0,
+        Err(e) => e as i32,
+    }
 }
 
-/// Route a logback to the executor queue or the delayed persistence path.
-fn dispatch_logback(env: &Env, delay: u32, msg: Message) -> u32 {
-    let success = match (
-        env.cancellation_token.is_cancelled(),
-        delay,
-        &env.immediate_sender,
-    ) {
-        // Happy path: Not cancelled, zero delay, and an immediate sender exists
-        (false, 0, Some(sender)) => sender.send(msg).is_ok(),
+fn dispatch_logback(env: &Env, delay: u32, msg: Message) -> Result<(), FunctionErrors> {
+    let cancelled = env.cancellation_token.is_cancelled();
 
-        // All other cases route to the delayed queue with a minimum delay of 1
-        _ => {
-            // Coerce immediate messages (delay 0) to 1 in delayed paths.
-            let actual_delay = std::cmp::max(delay as u64, 1);
-
-            env.delayed_log_sender
-                .send(DelayedMessage::new(actual_delay, msg))
-                .is_ok()
+    // Happy path: not shutting down, zero delay, immediate sender available.
+    if let (false, 0, Some(sender)) = (cancelled, delay, &env.immediate_sender) {
+        if let Err(e) = sender.try_send(msg) {
+            let err = e.to_string();
+            let source = e.into_inner().source;
+            error!("Failed to log back immediate message from: {source}. Error: {err}");
+            return Err(FunctionErrors::FailedToLogBack);
         }
-    };
 
-    if success {
-        0
-    } else {
-        1
+        return Ok(());
     }
+
+    // Everything else falls through to the delayed queue.
+    if delay == 0 && cancelled {
+        warn!("Shutdown in progress: immediate logback from {} unavailable, coercing message to delayed queue", msg.source);
+    }
+
+    let actual_delay = std::cmp::max(delay as u64, 1);
+    if let Err(e) = env
+        .delayed_log_sender
+        .try_send(DelayedMessage::new(actual_delay, msg))
+    {
+        let err = e.to_string();
+        let source = e.into_inner().message.source;
+        error!("Delayed logback dispatch from {source} failed; message dropped. Error: {err}");
+        return Err(FunctionErrors::FailedToLogBack);
+    }
+
+    Ok(())
 }
 
 /// Implement a way for randomness to get into the module

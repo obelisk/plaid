@@ -33,6 +33,8 @@ pub enum PlaidFunctionError {
     SharedDbError,
     TimeoutElapsed,
     Unknown,
+    FailedToLogBack,
+    LogbackBudgetExhausted,
 }
 
 impl Error for PlaidFunctionError {}
@@ -55,7 +57,8 @@ impl core::fmt::Display for PlaidFunctionError {
             PlaidFunctionError::SharedDbError => write!(f, "Error encountered on a shared DB"),
             PlaidFunctionError::TimeoutElapsed => write!(f, "A timeout has elapsed"),
             PlaidFunctionError::Unknown => write!(f, "An unknown error occurred. This can happen if the Plaid runtime is newer than the STL this rule was compiled against."),
-
+            PlaidFunctionError::FailedToLogBack => write!(f, "Failed to dispatch log message: the receiver is disconnected or at capacity"),
+            PlaidFunctionError::LogbackBudgetExhausted => write!(f, "Logback budget exhausted"),
         }
     }
 }
@@ -77,6 +80,8 @@ impl From<i32> for PlaidFunctionError {
             -12 => Self::OperationNotAllowed,
             -13 => Self::SharedDbError,
             -14 => Self::TimeoutElapsed,
+            -15 => Self::FailedToLogBack,
+            -16 => Self::LogbackBudgetExhausted,
             _ => Self::Unknown,
         }
     }
