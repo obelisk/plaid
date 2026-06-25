@@ -128,7 +128,7 @@ headers = []
 [webhooks."internal".webhooks."test_graceful_shutdown"]
 log_type = "test_graceful_shutdown"
 headers = []
-
+logbacks_allowed = "Unlimited"
 
 # End webhooks for tests
 
