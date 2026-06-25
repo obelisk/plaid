@@ -659,7 +659,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Performance loop exits the final sender disconnects.
     drop(performance_sender);
-
     if let Some(handle) = performance_handle {
         info!("Waiting for performance monitoring system to shutdown...");
         // Await here so the metrics report is written before we exit.

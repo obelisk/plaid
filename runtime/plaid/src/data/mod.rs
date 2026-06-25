@@ -24,7 +24,7 @@ use crossbeam_channel::Sender;
 
 use serde::Deserialize;
 use time::OffsetDateTime;
-use tokio::task::{self, JoinSet};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 pub use self::internal::{DelayedLogPersister, DelayedMessage};
@@ -273,21 +273,32 @@ impl Data {
             }
         }
 
-        // Spawns a perpetual, untracked listener for delayed logbacks. This task is
-        // intentionally left out of the JoinSet: rules may still send delayed logbacks
-        // while executor threads drain in-flight work, and terminating the listener
-        // early would leave those sends with no receiver.
+        // Spawns a listener for delayed logbacks.
         //
         // This can be improved upon with an async delayed message channel, but this
         // models the current implementation so we will leave it for now and can revisit
         // in a separate PR.
         let delayed_log_sender = di.internal.get_sender();
         let persister = delayed_log_persister.clone();
-        task::spawn(async move {
+        let ct_clone = cancellation_token.clone();
+        join_set.spawn(async move {
             let sleep_duration = Duration::from_secs(10);
             loop {
+                if ct_clone.is_cancelled() {
+                    return;
+                }
+
                 persister.listen_for_incoming_logs().await;
-                tokio::time::sleep(sleep_duration).await
+
+                tokio::select! {
+                    // Allow shutdown to interrupt the sleep immediately
+                    // instead of waiting for the polling interval.
+                    _ = ct_clone.cancelled() => {
+                        return;
+                    }
+
+                    _ = tokio::time::sleep(sleep_duration) => {}
+                }
             }
         });
 
