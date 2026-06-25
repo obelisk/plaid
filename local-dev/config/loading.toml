@@ -2,6 +2,7 @@
 module_dir = "/modules"
 compiler_backend = "cranelift"
 test_mode = false
+probe_listen_address = "0.0.0.0:8081"
 
 [loading.log_type_overrides]
 "hello_world.wasm" = "hello_world"
