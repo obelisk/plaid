@@ -52,7 +52,7 @@ impl Github {
         &self,
         params: &str,
         module: Arc<PlaidModule>,
-    ) -> Result<u32, ApiError> {
+    ) -> Result<String, ApiError> {
         let request: GithubApiWrapper<CreateDeployKeyParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let owner = self.validate_username(&request.params.owner)?;
@@ -81,6 +81,11 @@ impl Github {
             read_only,
         };
 
+        #[derive(serde::Deserialize)]
+        struct Response {
+            id: u64,
+        }
+
         info!("Creating read{perm} deploy key with title [{title}] for repo {owner}/{repo}");
 
         let address = format!("/repos/{owner}/{repo}/keys");
@@ -89,9 +94,11 @@ impl Github {
             .make_generic_post_request(request.client_id, address, Some(&body), module)
             .await
         {
-            Ok((status, Ok(_))) => {
+            Ok((status, Ok(body))) => {
                 if status == 201 {
-                    Ok(0)
+                    let response: Response =
+                        serde_json::from_str(&body).map_err(|_| ApiError::BadRequest)?;
+                    Ok(response.id.to_string())
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,

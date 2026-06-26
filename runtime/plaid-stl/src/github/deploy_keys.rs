@@ -62,9 +62,9 @@ pub fn create_deploy_key(
     title: impl Display,
     key: impl Display,
     read_only: bool,
-) -> Result<(), PlaidFunctionError> {
+) -> Result<u64, PlaidFunctionError> {
     extern "C" {
-        new_host_function!(github, create_deploy_key);
+        new_host_function_with_error_buffer!(github, create_deploy_key);
     }
 
     let params = CreateDeployKeyParams {
@@ -75,14 +75,23 @@ pub fn create_deploy_key(
         read_only,
     };
 
+    const RETURN_BUFFER_SIZE: usize = 64 * 1024; // 64 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
     let wrapped = GithubApiWrapper {
         client_id: client_id.to_string(),
         params,
     };
 
     let params = serde_json::to_string(&wrapped).unwrap();
-    let res =
-        unsafe { github_create_deploy_key(params.as_bytes().as_ptr(), params.as_bytes().len()) };
+    let res = unsafe {
+        github_create_deploy_key(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
 
     // There was an error with the Plaid system. Maybe the API is not
     // configured.
@@ -90,5 +99,11 @@ pub fn create_deploy_key(
         return Err(res.into());
     }
 
-    Ok(())
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    String::from_utf8(return_buffer)
+        .unwrap()
+        .parse::<u64>()
+        .map_err(|_| PlaidFunctionError::InternalApiError)
 }

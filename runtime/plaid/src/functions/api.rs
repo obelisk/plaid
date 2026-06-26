@@ -405,7 +405,7 @@ impl_new_function!(
     DISALLOW_IN_TEST_MODE
 );
 impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
-impl_new_function!(github, create_deploy_key, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, create_deploy_key, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, require_signed_commits, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, add_repo_to_team, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, remove_repo_from_team, DISALLOW_IN_TEST_MODE);
