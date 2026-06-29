@@ -1,5 +1,6 @@
 mod errors;
 mod limits;
+mod security;
 mod signing;
 mod utils;
 
@@ -32,6 +33,7 @@ use wasmer::{sys::BaseTunables, Engine, Module, Pages};
 use wasmer_middlewares::Metering;
 
 use crate::functions::is_known_api_function;
+use crate::loader::security::{Profile, SignedSecurityProfile};
 use crate::storage::Storage;
 
 /// Limit imposed on some resource
@@ -169,6 +171,12 @@ pub struct Configuration {
     /// Defaults to `true` if not provided.
     #[serde(default = "default_panic_on_load_failure")]
     pub panic_on_module_load_failure: bool,
+    /// This key is used to validate the embedded security profiles inside loaded modules. If this key is not
+    /// present, profiles are not required, and ones that are present are ignored. You should have this set
+    /// and use embedded security profiles if Plaid is running modules written by anyone other than the
+    /// Plaid administrator.
+    #[serde(default, deserialize_with = "deserialize_embedded_security_profile_verification_key")]
+    pub embedded_security_profile_verification_key: Option<PublicKey>,
 }
 
 fn default_panic_on_load_failure() -> bool {
@@ -268,6 +276,19 @@ fn default_sig_namespace() -> String {
     "PlaidRule".to_string()
 }
 
+/// Deserializer for a LimitedAmount where none of the provided values can be 0.
+fn deserialize_embedded_security_profile_verification_key<'de, D>(deserializer: D) -> Result<Option<PublicKey>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    
+    match PublicKey::from_string(&raw) {
+         Ok(pk) => Ok(Some(pk)),
+         Err(e) => Err(de::Error::custom(format!("Invalid embedded security profile verification key: {e}"))),
+      }
+}
+
 /// The persistent response allowed for the module. This is used for
 /// modules to store data that was generated from their last invocation which can be
 /// accessed by the next invocation or by GET requests configured to use it as a
@@ -328,6 +349,8 @@ pub struct PlaidModule {
     pub persistent_response: Option<PersistentResponse>,
     /// If the module is in test mode, meaning it should not be allowed to cause side effects
     pub test_mode: bool,
+    /// The embedded security profile that controls what the module is allowed to do
+    pub security_profile: Option<Profile>,
 }
 
 impl std::fmt::Display for PlaidModule {
@@ -361,6 +384,7 @@ impl PlaidModule {
         log_type: &str,
         test_mode: bool,
         compiler_backend: &CompilerBackend,
+        embedded_security_profile_verification_key: &Option<PublicKey>,
     ) -> Result<Self, Errors> {
         // Get the computation limit for the module
         let computation_limit =
@@ -400,6 +424,24 @@ impl PlaidModule {
         // Compile the module using the middleware and tunables we just set up
         let mut module = Module::new(&engine, module_bytes).map_err(Errors::CompileError)?;
         module.set_name(&filename);
+
+        let security_profile = if let Some(verification_key) = embedded_security_profile_verification_key {
+            let mut profiles: Vec<Box<[u8]>> = module.custom_sections(".plaidprofile.SECURITY").collect();
+            Some(match profiles.pop() {
+                Some(p) => {
+                    info!("{filename} has embedded security profile");
+                    SignedSecurityProfile::into_profile_from_bytes(p, verification_key.clone(), filename).map_err(|e| Errors::SecurityError(e))?
+                }
+                None => {
+                    warn!("[{filename}] has no security profile. An empty one with no permissions will be used");
+                    Profile::empty(filename, "")
+                }
+            })  
+        } else {
+            warn!("An embedded security profile verification key is not configured! Any embedded profiles will be ignored!");
+            None
+        };
+        
 
         // Validate that every import the module requires can be satisfied
         for import in module.imports() {
@@ -448,6 +490,7 @@ impl PlaidModule {
             secrets: None,
             persistent_response: None,
             test_mode,
+            security_profile,
         })
     }
 }
@@ -579,6 +622,7 @@ pub async fn load(
             &type_,
             test_mode,
             &config.compiler_backend,
+            &config.embedded_security_profile_verification_key
         )
         .await
         {

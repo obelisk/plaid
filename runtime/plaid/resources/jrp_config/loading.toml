@@ -7,6 +7,10 @@ module_dir = "../compiled_modules/"
 compiler_backend = "cranelift"
 probe_listen_address = "0.0.0.0:8081"
 
+# If you need to test with embedding profiles, here is where you can set that key.
+# When this is commented out, embedding profiles are not checked nor enforced.
+#embedded_security_profile_verification_key = "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIGfeuTjvmaBfXA0N+BJ4rgkFNROPmV17T8dWwkDviQUdAAAAF3NzaDpSdXN0aWNhQWdlbnRGSURPS2V5"
+
 test_mode = true
 test_mode_exemptions = []
 

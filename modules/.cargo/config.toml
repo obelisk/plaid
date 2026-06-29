@@ -1,2 +1,5 @@
 [build]
+# Starting in Rust 1.95 or 1.96, we started needing to add this to allow the linker to build a binary that doesn't have all
+# the functions available at compile time (which is the case for all Plaid runtime host functions).
+rustflags = ["-C", "link-arg=--allow-undefined"]
 target = "wasm32-unknown-unknown"

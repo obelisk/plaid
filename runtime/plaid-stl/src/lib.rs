@@ -362,3 +362,13 @@ macro_rules! entrypoint_vec_with_source {
         }
     };
 }
+
+#[macro_export]
+macro_rules! embed_plaid_profile {
+    ($name:ident, $path:literal) => {
+        #[link_section = concat!(".plaidprofile.", stringify!($name))]
+        #[used]
+        static $name: [u8; include_bytes!($path).len()] =
+            *include_bytes!($path);
+    };
+}
