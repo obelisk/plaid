@@ -202,17 +202,18 @@ impl Github {
             return Err(ApiError::BadRequest);
         }
 
-        let reference = &request.params.reference;
-
-        let (ref_log, ref_q_param) = match reference {
+        // If a reference is given (and passes validation), we will log about it and append it to the request URL as a query parameter.
+        // If it is not given, we will omit that part of the log and append nothing to the URL.
+        let (ref_log, ref_q_param) = match request.params.reference {
             Some(r) => {
-                // Reference can be commit hash OR a branch name.
-                // To validate that the provided ref is valid, we must check that it is either a
-                // commit hash or branch name using the provided validator functions
+                // According to https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28#get-repository-content, reference can be
+                // a commit SHA, a branch name, or a tag name. We will validate that it is either a valid commit hash or a valid branch name.
+                // This means that we try validating both ways: if both fail, we return an error. If either succeeds, we continue.
                 if self.validate_commit_hash(&r).is_err() && self.validate_branch_name(&r).is_err()
                 {
                     return Err(ApiError::BadRequest);
                 }
+                //               log                       query param
                 (format!(" and reference [{r}]"), format!("?ref={r}"))
             }
             None => (String::new(), String::new()),
@@ -220,7 +221,7 @@ impl Github {
 
         let custom_media_type = request.params.media_type;
 
-        info!("Fetching contents of file in repository [{organization}/{repository_name}] at {file_path}{ref_log} with encoding [{custom_media_type}]");
+        info!("Fetching contents of file in repository [{organization}/{repository_name}] at [{file_path}]{ref_log} with encoding [{custom_media_type}]");
         let address =
             format!("/repos/{organization}/{repository_name}/contents/{file_path}{ref_q_param}");
 
