@@ -177,7 +177,7 @@ impl FileSearchResultItem {
             &self.repository.owner.login,
             &self.repository.name,
             &self.path,
-            reference,
+            Some(reference),
         )
         .map_err(|_| PlaidFunctionError::InternalApiError)?;
         let content = serde_json::from_str::<GithubFileContent>(&content)
@@ -339,7 +339,7 @@ pub struct FetchFileRequest {
     pub organization: String,
     pub repository_name: String,
     pub file_path: String,
-    pub reference: String,
+    pub reference: Option<String>,
     pub media_type: FetchFileCustomMediaType,
 }
 
@@ -472,14 +472,14 @@ pub struct PullRequestRequestReviewers {
     pub team_reviewers: Vec<String>,
 }
 
-/// Request to create a new file in a repository.
+/// Request to create or update a file in a repository.
 #[derive(Serialize, Deserialize)]
-pub struct CreateFileRequest {
+pub struct CreateOrUpdateFileRequest {
     /// Owner of the repository (e.g., GitHub username or org).
     pub owner: String,
     /// Name of the repository.
     pub repo: String,
-    /// Path to create the file at
+    /// Path to create or update the file at
     pub path: String,
     /// The commit message.
     pub message: String,
@@ -487,6 +487,8 @@ pub struct CreateFileRequest {
     pub content: Vec<u8>,
     /// The branch name. Default: the repository’s default branch.
     pub branch: Option<String>,
+    /// The blob SHA of the file being replaced. Required if updating a file.
+    pub sha: Option<String>,
 }
 
 /// Request to comment on a pull request or issue

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     github::{
-        CreateFileRequest, FetchFileCustomMediaType, FetchFileRequest, GithubApiWrapper,
+        CreateOrUpdateFileRequest, FetchFileCustomMediaType, FetchFileRequest, GithubApiWrapper,
         RepositoryCollaborator, RepositoryCustomProperty, SbomResponse,
     },
     PlaidFunctionError,
@@ -409,7 +409,7 @@ pub fn fetch_file(
     organization: &str,
     repository_name: &str,
     file_path: &str,
-    reference: &str,
+    reference: Option<&str>,
 ) -> Result<String, PlaidFunctionError> {
     fetch_file_with_custom_media_type(
         client_id,
@@ -435,7 +435,7 @@ pub fn fetch_file_with_custom_media_type(
     organization: &str,
     repository_name: &str,
     file_path: &str,
-    reference: &str,
+    reference: Option<&str>,
     media_type: FetchFileCustomMediaType,
 ) -> Result<String, PlaidFunctionError> {
     extern "C" {
@@ -447,7 +447,7 @@ pub fn fetch_file_with_custom_media_type(
         organization: organization.to_string(),
         repository_name: repository_name.to_string(),
         file_path: file_path.to_string(),
-        reference: reference.to_string(),
+        reference: reference.map(|r| r.to_string()),
         media_type,
     };
     let wrapper = GithubApiWrapper {
@@ -578,13 +578,97 @@ pub fn create_file(
         new_host_function_with_error_buffer!(github, create_file);
     }
 
-    let request = CreateFileRequest {
+    let request = CreateOrUpdateFileRequest {
         owner: owner.to_string(),
         repo: repo.to_string(),
         path: path.to_string(),
         message: message.to_string(),
         content: content.into(),
         branch: branch.map(|b| b.to_string()),
+        sha: None,
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap();
+    const RETURN_BUFFER_SIZE: usize = 1024; // 1 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_create_file(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response_body =
+        String::from_utf8(return_buffer).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    Ok(response_body)
+}
+
+/// Updates an existing file in a repository (update-only).
+/// Updates an **existing** file in the given `owner` and `repo` at the specified `path`.
+/// The `message` will be used as the commit message. The `content` must be provided as raw bytes
+/// (e.g., a UTF-8 string’s `.into()` or a `Vec<u8>`).
+///
+/// **Do not base64-encode the content** — this function will base64-encode it automatically before sending it to the GitHub API.  
+/// If `branch` is omitted, the repository’s default branch is used.
+/// See the [GitHub API docs](https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28#create-or-update-file-contents)
+/// for protocol details (this function only supports updates; use the separate create API to create new files).
+pub fn update_file(
+    client_id: impl Display,
+    owner: impl Display,
+    repo: impl Display,
+    path: impl Display,
+    message: impl Display,
+    content: impl Into<Vec<u8>>,
+    branch: Option<impl Display>,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, create_file);
+    }
+
+    // Get the SHA of the existing file to update it
+    let file = fetch_file(
+        &client_id,
+        &owner.to_string(),
+        &repo.to_string(),
+        &path.to_string(),
+        branch.as_ref().map(|b| b.to_string()).as_deref(),
+    )?;
+
+    let sha = serde_json::from_str::<serde_json::Value>(&file)
+        .unwrap()
+        .as_object()
+        .and_then(|obj| obj.get("sha"))
+        .and_then(|sha| sha.as_str())
+        .unwrap()
+        .to_string();
+
+    let request = CreateOrUpdateFileRequest {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        path: path.to_string(),
+        message: message.to_string(),
+        content: content.into(),
+        branch: branch.map(|b| b.to_string()),
+        sha: Some(sha),
     };
 
     let wrapper = GithubApiWrapper {

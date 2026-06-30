@@ -3,12 +3,12 @@ use std::sync::Arc;
 use http::{HeaderMap, HeaderValue};
 use plaid_stl::github::{
     AddUserToRepoParams, CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus,
-    CommentOnPullRequestRequest, CreateFileRequest, FetchCommitParams, FetchFileCustomMediaType,
-    FetchFileRequest, GetBranchProtectionRulesParams, GetBranchProtectionRulesetParams,
-    GetCustomPropertiesValuesParams, GetRepoCollaboratorsParams, GetRepoIdFromRepoNameParams,
-    GetRepoNameFromRepoIdParams, GetRepoSbomParams, GetWeeklyCommitCountParams, GithubApiWrapper,
-    GithubRepository, ListFilesParams, RemoveUserFromRepoParams, RequireSignedCommitsParams,
-    UpdateBranchProtectionRuleParams,
+    CommentOnPullRequestRequest, CreateOrUpdateFileRequest, FetchCommitParams,
+    FetchFileCustomMediaType, FetchFileRequest, GetBranchProtectionRulesParams,
+    GetBranchProtectionRulesetParams, GetCustomPropertiesValuesParams, GetRepoCollaboratorsParams,
+    GetRepoIdFromRepoNameParams, GetRepoNameFromRepoIdParams, GetRepoSbomParams,
+    GetWeeklyCommitCountParams, GithubApiWrapper, GithubRepository, ListFilesParams,
+    RemoveUserFromRepoParams, RequireSignedCommitsParams, UpdateBranchProtectionRuleParams,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -204,20 +204,25 @@ impl Github {
 
         let reference = &request.params.reference;
 
-        // Reference can be commit hash OR a branch name.
-        // To validate that the provided ref is valid, we must check that it is either a
-        // commit hash or branch name using the provided validator functions
-        if self.validate_commit_hash(&reference).is_err()
-            && self.validate_branch_name(&reference).is_err()
-        {
-            return Err(ApiError::BadRequest);
-        }
+        let (ref_log, ref_q_param) = match reference {
+            Some(r) => {
+                // Reference can be commit hash OR a branch name.
+                // To validate that the provided ref is valid, we must check that it is either a
+                // commit hash or branch name using the provided validator functions
+                if self.validate_commit_hash(&r).is_err() && self.validate_branch_name(&r).is_err()
+                {
+                    return Err(ApiError::BadRequest);
+                }
+                (format!(" and reference [{r}]"), format!("?ref={r}"))
+            }
+            None => (String::new(), String::new()),
+        };
 
         let custom_media_type = request.params.media_type;
 
-        info!("Fetching contents of file in repository [{organization}/{repository_name}] at {file_path} and reference {reference} with encoding [{custom_media_type}]");
+        info!("Fetching contents of file in repository [{organization}/{repository_name}] at {file_path}{ref_log} with encoding [{custom_media_type}]");
         let address =
-            format!("/repos/{organization}/{repository_name}/contents/{file_path}?ref={reference}");
+            format!("/repos/{organization}/{repository_name}/contents/{file_path}{ref_q_param}");
 
         // Set the Accept header according to the media type we have
         let header_value = match custom_media_type {
@@ -637,7 +642,7 @@ impl Github {
         params: &str,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let request: GithubApiWrapper<CreateFileRequest> =
+        let request: GithubApiWrapper<CreateOrUpdateFileRequest> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
         let owner = self.validate_org(&request.params.owner)?;
@@ -654,6 +659,10 @@ impl Github {
         });
         if let Some(branch) = request.params.branch {
             body["branch"] = json!(branch);
+        }
+
+        if let Some(sha) = request.params.sha {
+            body["sha"] = json!(sha);
         }
 
         match self
