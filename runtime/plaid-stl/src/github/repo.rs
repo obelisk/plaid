@@ -654,11 +654,11 @@ pub fn update_file(
     )?;
 
     let sha = serde_json::from_str::<serde_json::Value>(&file)
-        .unwrap()
+        .map_err(|_| PlaidFunctionError::InternalApiError)?
         .as_object()
         .and_then(|obj| obj.get("sha"))
         .and_then(|sha| sha.as_str())
-        .unwrap()
+        .ok_or(PlaidFunctionError::InternalApiError)?
         .to_string();
 
     let request = CreateOrUpdateFileRequest {

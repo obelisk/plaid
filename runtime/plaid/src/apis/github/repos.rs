@@ -650,7 +650,6 @@ impl Github {
         let path = self.validate_path(&request.params.path)?;
         let file_hash = sha256_hex(&request.params.content);
 
-        info!("Creating file with hash [{file_hash}] at [{path}] in repository [{owner}/{repo}] on behalf of [{module}]");
         let address = format!("/repos/{owner}/{repo}/contents/{path}");
 
         let mut body = json!({
@@ -662,8 +661,12 @@ impl Github {
         }
 
         if let Some(sha) = request.params.sha {
+            // Validate: even if this is not a commit hash but a blob hash, the format is still the same
+            self.validate_commit_hash(&sha)?;
             body["sha"] = json!(sha);
         }
+
+        info!("Creating file with hash [{file_hash}] at [{path}] in repository [{owner}/{repo}] on behalf of [{module}]");
 
         match self
             .make_generic_put_request(&request.client_id, address, Some(&body), module)
