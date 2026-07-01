@@ -1,8 +1,29 @@
-use crate::apis::blockchain::evm::NodeConfig;
 use rand::seq::IndexedRandom;
+use serde::{de, Deserialize};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Selection strategy for choosing EVM nodes
+use crate::apis::blockchain::common::NodeConfig;
+
+/// Deserializes a selection strategy for blockchain nodes from a string
+pub fn selection_strategy_deserializer<'de, D>(
+    deserializer: D,
+) -> Result<SelectionStrategy, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let strategy = String::deserialize(deserializer)?;
+    match strategy.to_lowercase().as_str() {
+        "roundrobin" => Ok(SelectionStrategy::RoundRobin {
+            current_index: AtomicUsize::new(0),
+        }),
+        "random" => Ok(SelectionStrategy::Random),
+        _ => Err(de::Error::custom(format!(
+            "Unknown selection strategy: {strategy}",
+        ))),
+    }
+}
+
+/// Selection strategy for choosing RPC nodes
 pub enum SelectionStrategy {
     /// Select nodes in a round-robin fashion
     RoundRobin { current_index: AtomicUsize },
@@ -10,10 +31,8 @@ pub enum SelectionStrategy {
     Random,
 }
 
-/// Selector for EVM nodes based on a selection strategy
+/// Selector for RPC nodes based on a selection strategy
 pub struct NodeSelector {
-    /// The chain ID associated with this selector
-    pub id: u64,
     /// The available nodes for this chain
     nodes: Vec<NodeConfig>,
     /// The selection strategy to use
@@ -21,9 +40,8 @@ pub struct NodeSelector {
 }
 
 impl NodeSelector {
-    pub fn new(id: u64, nodes: Vec<NodeConfig>, selection_state: SelectionStrategy) -> Self {
+    pub fn new(nodes: Vec<NodeConfig>, selection_state: SelectionStrategy) -> Self {
         Self {
-            id,
             nodes,
             selection_state,
         }

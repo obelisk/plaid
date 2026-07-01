@@ -4,6 +4,11 @@ use serde::Serialize;
 
 use crate::{github::GithubApiWrapper, PlaidFunctionError};
 
+/// Make a GraphQL query.
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `query_name` - The name of the query to execute.
+/// * `variables` - Variables for the query.
 pub fn make_graphql_query(
     client_id: impl Display,
     query_name: &str,
@@ -55,6 +60,11 @@ pub fn make_graphql_query(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
+/// Make an advanced GraphQL query.
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `query_name` - The name of the query to execute.
+/// * `variables` - Variables for the query.
 pub fn make_advanced_graphql_query(
     client_id: impl Display,
     query_name: &str,

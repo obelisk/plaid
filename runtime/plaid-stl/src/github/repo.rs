@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     github::{
-        CreateFileRequest, DeleteDeployKeyParams, FetchFileCustomMediaType, FetchFileRequest,
-        GithubApiWrapper, RepositoryCollaborator, RepositoryCustomProperty, SbomResponse,
+        CreateFileRequest, FetchFileCustomMediaType, FetchFileRequest, GithubApiWrapper,
+        RepositoryCollaborator, RepositoryCustomProperty, SbomResponse,
     },
     PlaidFunctionError,
 };
@@ -26,6 +26,7 @@ pub fn remove_user_from_repo(client_id: impl Display, repo: &str, user: &str) ->
 /// Remove a user from a repo
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `repo` - The repo to remove the user from
 /// * `user` - The user to remove from `repo`
 pub fn remove_user_from_repo_detailed(
@@ -83,6 +84,7 @@ pub fn add_user_to_repo(
 /// Add a user to a repo
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `repo` - The repo to add the user to
 /// * `user` - The user to add to `repo`
 pub fn add_user_to_repo_detailed(
@@ -132,6 +134,7 @@ pub struct GetRepoCollaboratorsParams {
 /// Get first 30 collaborators on a repository
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 #[deprecated(
@@ -185,6 +188,7 @@ pub fn get_repository_collaborators(
 /// Get all collaborators on a repository.
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 pub fn get_all_repository_collaborators(
@@ -196,6 +200,11 @@ pub fn get_all_repository_collaborators(
 }
 
 /// Get all collaborators on a repository with direct access.
+/// ## Arguments
+///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 pub fn get_all_repository_collaborators_direct_access(
     client_id: impl Display,
     owner: impl Display,
@@ -205,6 +214,12 @@ pub fn get_all_repository_collaborators_direct_access(
 }
 
 /// Get all collaborators on a repository with affiliation filter.
+/// ## Arguments
+///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `affiliation` - Affiliation filter for collaborators (e.g., "direct").
 pub fn get_all_repository_collaborators_detailed(
     client_id: impl Display,
     owner: impl Display,
@@ -278,6 +293,7 @@ pub struct GetCustomPropertiesValuesParams {
 /// Get custom properties for a repository
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 pub fn get_custom_properties_values(
@@ -333,6 +349,10 @@ pub struct GetRepoSbomParams {
 }
 
 /// Get the software bill of materials (SBOM) for a repository in SPDX JSON format.
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account owner of the repository.
+/// * `repo` - The name of the repository.
 pub fn get_repo_sbom(
     client_id: impl Display,
     owner: impl Display,
@@ -377,12 +397,13 @@ pub fn get_repo_sbom(
 }
 
 /// Gets the contents of a file or directory in a repository.
-/// ## Arguments:
+/// ## Arguments
 ///
-/// * `organization`: The account owner of the repository. The name is not case sensitive.
-/// * `repository_name`: The name of the repository without the .git extension. The name is not case sensitive.
-/// * `file_path`: Path of the file or directory to read
-/// * `reference`: The name of the commit/branch/tag
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `organization` - The account owner of the repository. The name is not case sensitive.
+/// * `repository_name` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `file_path` - Path of the file or directory to read.
+/// * `reference` - The name of the commit/branch/tag.
 pub fn fetch_file(
     client_id: impl Display,
     organization: &str,
@@ -401,13 +422,14 @@ pub fn fetch_file(
 }
 
 /// Gets the contents of a file or directory in a repository.
-/// ## Arguments:
+/// ## Arguments
 ///
-/// * `organization`: The account owner of the repository. The name is not case sensitive.
-/// * `repository_name`: The name of the repository without the .git extension. The name is not case sensitive.
-/// * `file_path`: Path of the file or directory to read
-/// * `reference`: The name of the commit/branch/tag
-/// * `media_type`: The media type to fetch
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `organization` - The account owner of the repository. The name is not case sensitive.
+/// * `repository_name` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `file_path` - Path of the file or directory to read.
+/// * `reference` - The name of the commit/branch/tag.
+/// * `media_type` - The media type to fetch.
 pub fn fetch_file_with_custom_media_type(
     client_id: impl Display,
     organization: &str,
@@ -467,6 +489,7 @@ pub struct FetchCommitParams {
 /// Returns the contents of a single commit reference
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `user` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 /// * `commit` - The commit reference. Can be a commit SHA, branch name (heads/BRANCH_NAME), or tag name (tags/TAG_NAME)
@@ -515,42 +538,6 @@ pub fn fetch_commit(
     Ok(String::from_utf8(return_buffer).unwrap())
 }
 
-/// Delete a deploy key with given ID from a given repository.
-/// For more details, see https://docs.github.com/en/rest/deploy-keys/deploy-keys?apiVersion=2022-11-28#delete-a-deploy-key
-pub fn delete_deploy_key(
-    client_id: impl Display,
-    owner: impl Display,
-    repo: impl Display,
-    key_id: u64,
-) -> Result<(), PlaidFunctionError> {
-    extern "C" {
-        new_host_function!(github, delete_deploy_key);
-    }
-
-    let params = DeleteDeployKeyParams {
-        owner: owner.to_string(),
-        repo: repo.to_string(),
-        key_id,
-    };
-
-    let wrapped = GithubApiWrapper {
-        client_id: client_id.to_string(),
-        params,
-    };
-
-    let params = serde_json::to_string(&wrapped).unwrap();
-    let res =
-        unsafe { github_delete_deploy_key(params.as_bytes().as_ptr(), params.as_bytes().len()) };
-
-    // There was an error with the Plaid system. Maybe the API is not
-    // configured.
-    if res < 0 {
-        return Err(res.into());
-    }
-
-    Ok(())
-}
-
 /// Creates a new file in a repository (create-only).
 ///
 /// Creates a **new** file in the given `owner` and `repo` at the specified `path`.
@@ -564,18 +551,19 @@ pub fn delete_deploy_key(
 /// for protocol details (this function only supports creation; use the separate
 /// update API to modify existing files).
 ///
-/// # Arguments
-/// - `owner`: The account or organization that owns the repository.
-/// - `repo`: The name of the repository.
-/// - `path`: The path, including filename, where the file will be created.
-/// - `message`: The commit message to associate with the new file.
-/// - `content`: The raw file contents (not base64-encoded).
-/// - `branch`: The branch where the file will be created. Defaults to the
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account or organization that owns the repository.
+/// * `repo` - The name of the repository.
+/// * `path` - The path, including filename, where the file will be created.
+/// * `message` - The commit message to associate with the new file.
+/// * `content` - The raw file contents (not base64-encoded).
+/// * `branch` - The branch where the file will be created. Defaults to the
 ///   repository’s default branch if not provided.
 ///
-/// # Returns
-/// - `Ok(String)` with the hash of the created file if the request was successful, or
-/// - `Err(PlaidFunctionError)` if the request fails (e.g., file already exists,
+/// ## Returns
+/// * `Ok(String)` with the hash of the created file if the request was successful, or
+/// * `Err(PlaidFunctionError)` if the request fails (e.g., file already exists,
 ///   branch protection, missing configuration).
 pub fn create_file(
     client_id: impl Display,
@@ -641,6 +629,7 @@ pub struct GetRepoIdFromRepoNameParams {
 
 /// Get a repo ID from its name
 /// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The owner of the repo.
 /// * `repo` - The name of the repo without the owner.
 pub fn get_repo_id_from_repo_name(
@@ -697,6 +686,7 @@ pub struct GetRepoNameFromRepoIdParams {
 
 /// Get a repo_name from a repo ID
 /// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `repo_id` - The GitHub repo ID.
 pub fn get_repo_name_from_repo_id(
     client_id: impl Display,

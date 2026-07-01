@@ -42,14 +42,14 @@ jobs:
         echo "Timed out waiting for healthy status after ${timeout}s"
         exit 1
 
-    - name: Validate health endpoint
+    - name: Validate liveness endpoint
       run: |
-        response=$(curl -sf http://localhost:8080/webhook/health)
-        if [ "$response" != "ok" ]; then
-          echo "Expected 'ok', got: $response"
+        response=$(curl -sf http://localhost:8081/live)
+        if [ "$response" != "live" ]; then
+          echo "Expected 'live', got: $response"
           exit 1
         fi
-        echo "Health check returned: $response"
+        echo "Liveness check returned: $response"
 
     - name: Validate hello webhook
       run: |

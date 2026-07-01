@@ -19,7 +19,7 @@ pub mod yubikey;
 
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
-use crate::apis::blockchain::{evm, Blockchain, BlockchainConfig};
+use crate::apis::blockchain::{Blockchain, BlockchainConfig, BlockchainError};
 use crate::apis::bloom_filter::BloomFilter;
 #[cfg(feature = "gcp")]
 use crate::apis::gcp::{Gcp, GcpConfig};
@@ -40,9 +40,7 @@ use aws_sdk_kms::operation::get_public_key::GetPublicKeyError;
 #[cfg(feature = "aws")]
 use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 
-use crate::{data::DelayedMessage, executor::Message};
 use bloom_filter::BloomFilterConfig;
-use crossbeam_channel::Sender;
 use general::{General, GeneralConfig};
 use github::{Github, GithubConfig};
 use npm::{Npm, NpmConfig};
@@ -151,9 +149,9 @@ pub enum ApiError {
     CouldNotInstatiateRuntime(String),
 }
 
-impl From<evm::EvmCallError> for ApiError {
-    fn from(e: evm::EvmCallError) -> Self {
-        ApiError::BlockchainError(blockchain::BlockchainError::EvmError(e))
+impl From<BlockchainError> for ApiError {
+    fn from(e: BlockchainError) -> Self {
+        ApiError::BlockchainError(e)
     }
 }
 
@@ -179,11 +177,7 @@ impl From<gcp::bigquery::BigQueryError> for ApiError {
 }
 
 impl Api {
-    pub async fn new(
-        config: ApiConfigs,
-        log_sender: Sender<Message>,
-        delayed_log_sender: Sender<DelayedMessage>,
-    ) -> Result<Self, ApiError> {
+    pub async fn new(config: ApiConfigs) -> Result<Self, ApiError> {
         let cryptography = match config.cryptography {
             Some(cryptography) => Some(Cryptography::new(cryptography)),
             _ => None,
@@ -212,7 +206,7 @@ impl Api {
         };
 
         let general = match config.general {
-            Some(gc) => Some(General::new(gc, log_sender, delayed_log_sender)),
+            Some(gc) => Some(General::new(gc)),
             _ => None,
         };
 
@@ -279,7 +273,9 @@ impl Api {
         };
 
         Ok(Self {
-            runtime: Runtime::new().map_err(|e| ApiError::CouldNotInstatiateRuntime(format!("Failed to create runtime: {}", e)))?,
+            runtime: Runtime::new().map_err(|e| {
+                ApiError::CouldNotInstatiateRuntime(format!("Failed to create runtime: {}", e))
+            })?,
             #[cfg(feature = "aws")]
             aws,
             #[cfg(feature = "gcp")]

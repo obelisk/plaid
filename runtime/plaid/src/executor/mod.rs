@@ -3,6 +3,7 @@ pub mod thread_pools;
 use crate::apis::Api;
 
 use crate::cache::Cache;
+use crate::data::DelayedMessage;
 use crate::functions::{
     create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
 };
@@ -11,9 +12,10 @@ use crate::logging::{Logger, LoggingError, Severity};
 use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
 
-use crossbeam_channel::{Receiver, Sender, TrySendError};
+use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
 use thread_pools::ExecutionThreadPools;
 use tokio::sync::oneshot::Sender as OneShotSender;
+use tokio_util::sync::CancellationToken;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -22,9 +24,9 @@ use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedF
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Weak};
+use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 /// When a rule is used to generate a response to a GET request, this structure
 /// is what is passed from the executor to the async webhook runtime.
@@ -206,6 +208,14 @@ pub struct Env {
     pub response: Option<String>,
     // Context about error encountered by the module during its execution
     pub execution_error_context: Option<String>,
+    /// Available for immediate logback during normal operation; `None` during shutdown drain.
+    pub immediate_sender: Option<Sender<Message>>,
+    /// Sender for delayed logbacks (`delay > 0`), and for immediate logbacks coerced
+    /// during shutdown. Messages are persisted by the internal logback listener and
+    /// injected into the executor queue once their delay elapses.
+    pub delayed_log_sender: Sender<DelayedMessage>,
+    /// Shared with async tasks; set when shutdown begins.
+    pub cancellation_token: CancellationToken,
 }
 
 /// The executor that processes messages
@@ -213,23 +223,38 @@ pub struct Executor {
     thread_pools: ExecutionThreadPools,
 }
 
+/// Join handles for executor worker threads.
+pub struct ExecutorThreads {
+    thread_handles: Vec<JoinHandle<()>>,
+}
+
+impl ExecutorThreads {
+    /// Wait for worker threads to exit after all executor ingress senders have been dropped.
+    pub fn join(self) {
+        for handle in self.thread_handles {
+            if let Err(e) = handle.join() {
+                error!("Execution thread panicked during shutdown: {e:?}");
+            }
+        }
+    }
+}
+
 /// Errors encountered by the executor while trying to execute a module
 pub enum ExecutorError {
     ExternalLoggingError(LoggingError),
-    IncomingLogError,
     LinkError(LinkError),
     InstantiationError(String),
     MemoryError(String),
     NoEntrypoint,
     InvalidEntrypoint,
     ModuleExecutionError(ModuleExecutionError),
+    IncomingLogError(RecvError),
 }
 
 impl std::fmt::Display for ExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ExecutorError::ExternalLoggingError(e) => write!(f, "External Logging Error: {e}"),
-            ExecutorError::IncomingLogError => write!(f, "Incoming Log Error"),
             ExecutorError::LinkError(e) => write!(f, "Link Error: {e}"),
             ExecutorError::InstantiationError(e) => write!(f, "Instantiation Error: {e}"),
             ExecutorError::MemoryError(e) => write!(f, "Memory Error: {e}"),
@@ -239,6 +264,7 @@ impl std::fmt::Display for ExecutorError {
                 "Entrypoint is not a function or not the correct prototype"
             ),
             ExecutorError::ModuleExecutionError(e) => write!(f, "Module Execution Error: {e}"),
+            ExecutorError::IncomingLogError(e) => write!(f, "Error reading log from channel: {e}"),
         }
     }
 }
@@ -309,6 +335,9 @@ fn prepare_for_execution(
     cache: Option<Arc<Cache>>,
     els: Logger,
     response: Option<String>,
+    immediate_sender: Option<Sender<Message>>,
+    delayed_log_sender: Sender<DelayedMessage>,
+    cancellation_token: CancellationToken,
 ) -> Result<(Store, Instance, TypedFunction<(), i32>, FunctionEnv<Env>), ExecutorError> {
     // Prepare the structure for functions the module will use
     // AKA: Host Functions
@@ -328,6 +357,9 @@ fn prepare_for_execution(
         memory: None,
         response,
         execution_error_context: None,
+        immediate_sender,
+        delayed_log_sender,
+        cancellation_token,
     };
 
     let env = FunctionEnv::new(&mut store, env);
@@ -476,6 +508,9 @@ fn process_message_with_module(
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
+    immediate_sender: Option<Sender<Message>>,
+    delayed_log_sender: Sender<DelayedMessage>,
+    cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
     // TODO @obelisk: This will quietly swallow locking errors on the persistent response
     // This will eventually be caught if something tries to update the response but I don't
@@ -491,6 +526,9 @@ fn process_message_with_module(
         cache.clone(),
         els.clone(),
         persistent_response,
+        immediate_sender,
+        delayed_log_sender,
+        cancellation_token,
     ) {
         Ok((store, instance, ep, env)) => (store, instance, ep, env),
         Err(e) => {
@@ -598,9 +636,22 @@ fn execution_loop(
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
+    immediate_sender: Weak<Sender<Message>>,
+    delayed_log_sender: Sender<DelayedMessage>,
+    cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
-    // Wait on our receiver for logs to come in
-    while let Ok(message) = receiver.recv() {
+    loop {
+        let message = match receiver.recv() {
+            Ok(message) => message,
+            Err(RecvError) => return Ok(()),
+        };
+
+        let immediate_sender = if cancellation_token.is_cancelled() {
+            None
+        } else {
+            immediate_sender.upgrade().map(|sender| (*sender).clone())
+        };
+
         // Check that we know what modules to send this new log to
         match (&message.module, modules.get(&message.type_)) {
             // If this message has a response sender, we only
@@ -616,6 +667,9 @@ fn execution_loop(
                     cache.clone(),
                     els.clone(),
                     performance_monitoring_mode.clone(),
+                    immediate_sender.clone(),
+                    delayed_log_sender.clone(),
+                    cancellation_token.clone(),
                 )?;
             }
             (None, Some(modules)) => {
@@ -629,6 +683,9 @@ fn execution_loop(
                         cache.clone(),
                         els.clone(),
                         performance_monitoring_mode.clone(),
+                        immediate_sender.clone(),
+                        delayed_log_sender.clone(),
+                        cancellation_token.clone(),
                     )?;
                 }
             }
@@ -641,7 +698,6 @@ fn execution_loop(
             }
         };
     }
-    Err(ExecutorError::IncomingLogError)
 }
 
 fn determine_error(
@@ -675,7 +731,12 @@ impl Executor {
         cache: Option<Arc<Cache>>,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
-    ) -> Self {
+        immediate_sender: Weak<Sender<Message>>,
+        delayed_log_sender: Sender<DelayedMessage>,
+        cancellation_token: CancellationToken,
+    ) -> (Self, ExecutorThreads) {
+        let mut thread_handles = Vec::new();
+
         // General processing
         for i in 0..thread_pools.general_pool.num_threads {
             info!("Starting Execution Thread {i} Dedicated to General Processing");
@@ -686,7 +747,10 @@ impl Executor {
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
-            thread::spawn(move || loop {
+            let immediate_sender = immediate_sender.clone();
+            let delayed_log_sender = delayed_log_sender.clone();
+            let cancellation_token = cancellation_token.clone();
+            let handle = thread::spawn(move || {
                 if let Err(e) = execution_loop(
                     receiver.clone(),
                     modules.clone(),
@@ -695,11 +759,14 @@ impl Executor {
                     cache.clone(),
                     els.clone(),
                     performance_sender.clone(),
+                    immediate_sender.clone(),
+                    delayed_log_sender.clone(),
+                    cancellation_token.clone(),
                 ) {
-                    error!("Execution thread exited with error: {e}");
+                    error!("General execution thread {i} exited with error: {e}");
                 }
-                thread::sleep(Duration::from_secs(10));
             });
+            thread_handles.push(handle);
         }
 
         // Dedicated processing
@@ -713,7 +780,11 @@ impl Executor {
                 let modules = modules.clone();
                 let els = els.clone();
                 let performance_sender = performance_monitoring_mode.clone();
-                thread::spawn(move || loop {
+                let log_type = log_type.clone();
+                let immediate_sender = immediate_sender.clone();
+                let delayed_log_sender = delayed_log_sender.clone();
+                let cancellation_token = cancellation_token.clone();
+                let handle = thread::spawn(move || {
                     if let Err(e) = execution_loop(
                         receiver.clone(),
                         modules.clone(),
@@ -722,14 +793,17 @@ impl Executor {
                         cache.clone(),
                         els.clone(),
                         performance_sender.clone(),
+                        immediate_sender.clone(),
+                        delayed_log_sender.clone(),
+                        cancellation_token.clone(),
                     ) {
-                        error!("Execution thread exited with error: {e}");
+                        error!("{log_type} dedicated execution thread {i} exited with error: {e}");
                     }
-                    thread::sleep(Duration::from_secs(10));
                 });
+                thread_handles.push(handle);
             }
         }
-        Self { thread_pools }
+        (Self { thread_pools }, ExecutorThreads { thread_handles })
     }
 
     /// Execute a message coming from a webhook, by sending it to the appropriate thread pool.

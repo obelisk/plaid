@@ -17,15 +17,16 @@ use crate::{
 /// See the [GitHub API docs](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#get-a-reference)
 /// for more details.
 ///
-/// # Arguments
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account owner of the repository. Case-insensitive.
 /// * `repo` - The name of the repository without the `.git` extension. Case-insensitive.
 /// * `reference` - A `GitRef` representing either a branch or a tag, specified by its short name.
 ///
-/// # Returns
-/// - `Ok(Some(GitApiRef))` if the reference exists.
-/// - `Ok(None)` if the reference does not exist.
-/// - `Err(PlaidFunctionError)` if the request fails.
+/// ## Returns
+/// * `Ok(Some(GitApiRef))` if the reference exists.
+/// * `Ok(None)` if the reference does not exist.
+/// * `Err(PlaidFunctionError)` if the request fails.
 pub fn get_reference(
     client_id: impl Display,
     owner: impl Display,
@@ -96,15 +97,16 @@ pub fn get_reference(
 /// See the [GitHub API docs](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference)
 /// for more details.
 ///
-/// # Arguments
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account owner of the repository. Case-insensitive.
 /// * `repo` - The name of the repository without the `.git` extension. Case-insensitive.
 /// * `reference` - A `GitRef` representing either a branch or a tag, specified by its short name.
 /// * `sha` - The SHA-1 identifier of the commit or object the new reference should point to.
 ///
-/// # Returns
-/// - `Ok(())` if the reference was created successfully.
-/// - `Err(PlaidFunctionError)` if the request fails.
+/// ## Returns
+/// * `Ok(())` if the reference was created successfully.
+/// * `Err(PlaidFunctionError)` if the request fails.
 pub fn create_reference(
     client_id: impl Display,
     owner: impl Display,

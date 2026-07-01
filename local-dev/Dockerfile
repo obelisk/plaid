@@ -68,6 +68,6 @@ RUN mkdir -p /config /secrets /data && chown -R plaiduser:plaiduser /data
 
 USER plaiduser
 
-EXPOSE 8080
+EXPOSE 8080 8081
 
 CMD ["plaid", "--config", "/config", "--secrets", "/secrets/secrets.toml"]

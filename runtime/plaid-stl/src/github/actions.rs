@@ -8,6 +8,12 @@ use crate::{
 };
 
 /// Trigger a GHA workflow via repository_dispatch.
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The owner of the repository.
+/// * `repo` - The name of the repository.
+/// * `event_type` - The event type to dispatch.
+/// * `client_payload` - The client payload for the event.
 /// For more details, see
 /// * https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#create-a-repository-dispatch-event
 /// * https://docs.github.com/en/actions/writing-workflows/choosing-when-your-workflow-runs/events-that-trigger-workflows#repository_dispatch

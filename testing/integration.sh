@@ -8,7 +8,32 @@ SECRET_PATH="runtime/plaid/resources/secrets.example.toml"
 SECRET_WORKING_PATH="/tmp/plaid_config/secrets.example.toml"
 
 export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
+REPO_ROOT="$(pwd)"
 
+start_plaid() {
+  RUST_LOG=plaid=debug,aws_config=debug,aws_sdk_dynamodb=debug cargo run --release --bin plaid \
+    --no-default-features \
+    --features "$FEATURES" \
+    -- \
+    --config "$CONFIG_WORKING_PATH" \
+    --secrets "$SECRET_WORKING_PATH" &
+  PLAID_PID=$!
+
+  local url="http://localhost:8081/ready"
+  local timeout=120
+  local interval=5
+  local deadline=$((SECONDS + timeout))
+
+  until curl -fsS "$url" >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      echo "Error: '$url' did not return HTTP 200 within ${timeout}s." >&2
+      kill "$PLAID_PID" 2>/dev/null || true
+      wait "$PLAID_PID" 2>/dev/null || true
+      return 1
+    fi
+    sleep "$interval"
+  done
+}
 
 # Compiler should be passed in as the first argument
 if [ -z "$1" ]; then
@@ -82,6 +107,8 @@ openssl req -new -key server.key \
 cat > san.cnf <<EOF
 basicConstraints=CA:FALSE
 subjectAltName=DNS:localhost
+extendedKeyUsage=serverAuth
+keyUsage=digitalSignature,keyEncipherment
 EOF
 
 # Sign the server CSR with CA
@@ -175,22 +202,9 @@ if [ $? -ne 0 ]; then
   # Exit with an error
   exit 1
 fi
-RUST_LOG=plaid=debug,aws_config=debug,aws_sdk_dynamodb=debug cargo run --bin=plaid --release --no-default-features --features $FEATURES -- --config ${CONFIG_WORKING_PATH} --secrets $SECRET_WORKING_PATH &
-PLAID_PID=$!
 
-# Wait for Plaid to boot. When it's ready, a file called "plaid_ready" will be created.
-# If Plaid is not ready within 120 seconds, give up and return an error.
-file="plaid_ready"
-timeout=120
-interval=5
-deadline=$((SECONDS + timeout))
-
-until cat "$file" >/dev/null 2>&1; do
-  (( SECONDS >= deadline )) && { echo "Error: '$file' not found within ${timeout}s." >&2; exit 1; }
-  sleep "$interval"
-done
-
-# If we are here, then the file was found, meaning Plaid is fully ready. We can now proceed with our tests.
+start_plaid || exit 1
+# If we are here, the readiness endpoint returned 200 OK. We can now proceed with our tests.
 cd ..
 
 # Set the variables the test harnesses will need
@@ -198,7 +212,12 @@ export PLAID_LOCATION="localhost:4554"
 
 # Loop through all test modules in the test_modules directory
 for module in modules/tests/*; do
-  # If the cache backend is not redis, skip modules whose path/name contains "redis"
+  # Skip tests that are handled separately
+  if [[ "$module" == "modules/tests/test_graceful_shutdown" ]]; then
+    continue
+  fi
+
+  # Skip Redis tests when not using Redis
   if [[ "$CACHE_BACKEND" != redis* && "$module" == *redis* ]]; then
     echo "Skipping integration test for module $module"
     continue
@@ -223,6 +242,78 @@ for module in modules/tests/*; do
   fi
 done
 
-echo "Tests complete. Killing Plaid"
-# Kill the Plaid process
-kill $PLAID_PID
+# TODO: Move this logic into a dedicated script. It remains here temporarily
+# because refactoring the test framework is outside the scope of the runtime
+# graceful shutdown changes.
+echo "Running graceful shutdown test..."
+
+URL="test_graceful_shutdown"
+FILE="$REPO_ROOT/received_data.$URL.txt"
+LOG_COUNT=25
+
+rm -f "$FILE"
+
+# Start the webhook handler
+$REQUEST_HANDLER > "$FILE" &
+if [ $? -ne 0 ]; then
+  echo "Failed to start request handler"
+  rm $FILE
+  exit 1
+fi
+RH_PID=$!
+
+sleep 2
+
+# Flood Plaid with logs then immediately send the SIGTERM
+echo "Submitting $LOG_COUNT logs..."
+for i in $(seq 1 "$LOG_COUNT"); do
+  curl -d "$i" http://$PLAID_LOCATION/webhook/$URL
+done
+
+echo "Sending SIGTERM to Plaid..."
+kill "$PLAID_PID"
+wait "$PLAID_PID"
+
+# Start Plaid again, wait for it to be ready, and then immediately kill it
+# This allows us to test that the 0-delay logbacks from the previous generation were persisted
+echo "Rebooting Plaid..."
+cd "$REPO_ROOT/runtime"
+start_plaid || exit 1
+cd "$REPO_ROOT"
+echo "Sending SIGTERM to Plaid..."
+kill "$PLAID_PID"
+wait "$PLAID_PID"
+
+# Kill request handler before checking file
+kill "$RH_PID"
+
+# Validate all expected outputs were written
+if [ ! -f "$FILE" ]; then
+  echo "Expected output file not found: $FILE"
+  exit 1
+fi
+
+expected=$(mktemp)
+seq 1 "$LOG_COUNT" > "$expected"
+
+for prefix in webhook logback; do
+  actual=$(mktemp)
+
+  grep -o "^${prefix}_[0-9]\+$" "$FILE" \
+    | cut -d_ -f2 \
+    | sort -n > "$actual"
+
+  if ! diff -q "$expected" "$actual" >/dev/null; then
+    echo "$prefix entries do not contain exactly the numbers 1..$LOG_COUNT"
+    diff "$expected" "$actual"
+    rm -f "$expected" "$actual"
+    kill "$RH_PID" 2>/dev/null || true
+    rm -f "$FILE"
+    exit 1
+  fi
+
+  rm -f "$actual"
+done
+
+rm -f "$expected"
+rm "$FILE"

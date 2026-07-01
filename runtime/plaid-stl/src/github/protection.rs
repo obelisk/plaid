@@ -17,6 +17,7 @@ pub struct GetBranchProtectionRulesParams {
 /// Get protection rules for a branch
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 /// * `branch` - The name of the branch. Cannot contain wildcard characters.
@@ -74,6 +75,7 @@ pub struct GetBranchProtectionRulesetParams {
 /// Get protection rules (as in ruleset) for a branch
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 /// * `branch` - The name of the branch. Cannot contain wildcard characters.
@@ -133,6 +135,7 @@ pub struct UpdateBranchProtectionRuleParams {
 /// Update branch protection rule for a single branch
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
 /// * `branch` - The name of the branch. Cannot contain wildcard characters.
@@ -184,7 +187,8 @@ pub struct CreateEnvironmentForRepoParams {
 
 /// Create a GitHub deployment environment for a given repository.
 ///
-/// Arguments:
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The owner of the repository
 /// * `repo` - The name of the repository
 /// * `env_name` - The name of the environment to be created
@@ -232,7 +236,8 @@ pub struct CreateDeploymentBranchProtectionRuleParams {
 
 /// Create a deployment branch protection rule for a GitHub environment.
 ///
-/// Arguments:
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The owner of the repository
 /// * `repo` - The name of the repository
 /// * `env_name` - The name of the environment to be created
@@ -285,6 +290,12 @@ pub struct RequireSignedCommitsParams {
 }
 
 /// Enforce signed commits (if `activated` is true) or turn it off (if `activated` is false) on a given branch of a given repo.
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The owner of the repository.
+/// * `repo` - The name of the repository.
+/// * `branch` - The name of the branch.
+/// * `activated` - Whether to enforce signed commits.
 /// For more details, see https://docs.github.com/en/enterprise-cloud@latest/rest/branches/branch-protection?apiVersion=2022-11-28#create-commit-signature-protection
 pub fn require_signed_commits(
     client_id: impl Display,
@@ -325,7 +336,8 @@ pub fn require_signed_commits(
 
 /// Configure an environment secret for a GitHub deployment environment. If a secret with the same name is already present, it will be overwritten.
 ///
-/// Arguments:
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The owner of the repository
 /// * `repo` - The name of the repository
 /// * `env_name` - The name of the GitHub environment on which to set the secret. If not set, then a repository-level secret is created
@@ -369,6 +381,10 @@ pub fn configure_secret(
 }
 
 /// Check a repo's CODEOWNERS file
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The owner of the repository.
+/// * `repo` - The name of the repository.
 /// For more details, see https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-codeowners-errors
 pub fn check_codeowners_file(
     client_id: impl Display,

@@ -2,6 +2,7 @@ mod actions;
 mod code;
 mod copilot;
 mod deploy_keys;
+mod enterprise;
 mod environments;
 mod graphql;
 mod members;
@@ -215,6 +216,40 @@ impl Github {
         })?;
 
         let request = client._put(uri, body).await;
+
+        match request {
+            Ok(r) => {
+                let status = r.status().as_u16();
+                let body = client.body_to_string(r).await.map_err(|e| {
+                    ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
+                });
+                Ok((status, body))
+            }
+            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
+        }
+    }
+
+    /// Make a generic patch request to the GitHub API using the GitHub app library. This exists
+    /// to help facilitate the conversion from a token usage to GitHub app. It also means that
+    /// extra parsing can be avoided since we need to re-serialize anyway to pass back to the rules
+    /// (at least currently).
+    async fn make_generic_patch_request<T: Serialize>(
+        &self,
+        client_id: impl Display,
+        uri: String,
+        body: Option<&T>,
+        module: Arc<PlaidModule>,
+    ) -> Result<(u16, Result<String, ApiError>), ApiError> {
+        info!("Making a patch request to {uri} on behalf of {module}");
+
+        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+            ApiError::GitHubError(GitHubError::InvalidInput(format!(
+                "Client ID not found: {}",
+                client_id
+            )))
+        })?;
+
+        let request = client._patch(uri, body).await;
 
         match request {
             Ok(r) => {

@@ -15,6 +15,7 @@ pub struct ListFpatRequestsForOrgParams {
 /// Lists approved fine-grained personal access tokens owned by organization members that can access organization resources
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `org` - The organization name. The name is not case sensitive.
 pub fn list_fpat_requests_for_org(
     client_id: impl Display,
@@ -70,6 +71,7 @@ pub struct ReviewFpatRequestsForOrgParams {
 /// Approves or denies multiple pending requests to access organization resources via a fine-grained personal access token
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `org` - The organization name. The name is not case sensitive.
 /// * `pat_request_ids` - Unique identifiers of the requests for access via fine-grained personal access token. Must be formed of between 1 and 100 pat_request_id values
 /// * `action` - Action to apply to the requests.
@@ -127,6 +129,7 @@ pub struct GetReposForFpatParams {
 /// Lists the repositories a fine-grained personal access token request is requesting access to
 /// ## Arguments
 ///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `org` - The organization name. The name is not case sensitive.
 /// * `request_id` - Unique identifier of the request for access via fine-grained personal access token.
 /// * `per_page` - The number of results per page (max 100)
