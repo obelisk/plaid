@@ -233,12 +233,15 @@ impl Slack {
     /// following slot. Paces `chat.postMessage` to <=1/sec/channel to avoid
     /// Slack 429s during alert bursts. The pacing lock is released before the
     /// sleep, so waiting on one channel never blocks posts to other channels.
-    async fn await_post_slot(&self, channel: &str) {
+    async fn await_post_slot(&self, channel: String) {
         let wait = {
-            let mut pacing = self.post_pacing.lock().unwrap();
+            let mut pacing = self.post_pacing.lock().await;
             let now = Instant::now();
-            let (wait, reservation) = reserve_slot(pacing.get(channel).copied(), now);
-            pacing.insert(channel.to_string(), reservation);
+            let (wait, reservation) = reserve_slot(pacing.get(&channel).copied(), now);
+            pacing.insert(channel, reservation);
+            // Drop idle channels (slot already elapsed) so the map can't grow
+            // unbounded as new/ephemeral channel ids appear over time.
+            pacing.retain(|_, r| *r > now);
             wait
         };
         if !wait.is_zero() {
@@ -253,7 +256,7 @@ impl Slack {
         // Pace posts per channel to stay under Slack's ~1/sec/channel limit so a
         // burst of alerts to one channel doesn't 429 (which would drop the alert).
         if let Ok(ChannelOnly { channel }) = serde_json::from_str::<ChannelOnly>(&p.body) {
-            self.await_post_slot(&channel).await;
+            self.await_post_slot(channel).await;
         }
         match self
             .call_slack(p.bot.clone(), Apis::PostMessage(p), module)

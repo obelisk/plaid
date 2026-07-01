@@ -5,7 +5,7 @@ use reqwest::Client;
 
 use serde::Deserialize;
 
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use std::collections::HashMap;
