@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use plaid_stl::slack::{
     CreateChannel, CreateChannelResponse, GetDndInfo, GetDndInfoResponse, GetIdFromEmail,
@@ -30,11 +31,79 @@ enum Apis {
 const SLACK_API_URL: &str = "https://slack.com/api/";
 type Result<T> = std::result::Result<T, ApiError>;
 
+/// Minimum spacing between `chat.postMessage` calls to the same channel.
+/// Slack's per-channel postMessage limit is ~1 message/second.
+const PER_CHANNEL_POST_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Pure slot arithmetic for per-channel pacing: given a channel's current
+/// reservation (if any) and the current time, return how long this post must
+/// wait for its slot and the new reservation to store for the next post.
+fn reserve_slot(current: Option<Instant>, now: Instant) -> (Duration, Instant) {
+    let slot = current.unwrap_or(now).max(now);
+    (
+        slot.saturating_duration_since(now),
+        slot + PER_CHANNEL_POST_INTERVAL,
+    )
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::{reserve_slot, PER_CHANNEL_POST_INTERVAL};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn idle_channel_posts_immediately() {
+        let now = Instant::now();
+        let (wait, reservation) = reserve_slot(None, now);
+        assert_eq!(wait, Duration::ZERO);
+        assert_eq!(reservation, now + PER_CHANNEL_POST_INTERVAL);
+    }
+
+    #[test]
+    fn busy_channel_waits_until_its_slot() {
+        let now = Instant::now();
+        let current = now + Duration::from_millis(400);
+        let (wait, reservation) = reserve_slot(Some(current), now);
+        assert_eq!(wait, Duration::from_millis(400));
+        assert_eq!(reservation, current + PER_CHANNEL_POST_INTERVAL);
+    }
+
+    #[test]
+    fn stale_reservation_does_not_wait() {
+        // `now` is later than the reservation -> post immediately, don't wait
+        // for a slot that's already in the past.
+        let base = Instant::now();
+        let now = base + Duration::from_secs(10);
+        let (wait, reservation) = reserve_slot(Some(base), now);
+        assert_eq!(wait, Duration::ZERO);
+        assert_eq!(reservation, now + PER_CHANNEL_POST_INTERVAL);
+    }
+
+    #[test]
+    fn burst_spaces_posts_by_one_interval_each() {
+        // Simulate a burst to one channel: each reservation feeds the next.
+        let now = Instant::now();
+        let (w0, r0) = reserve_slot(None, now);
+        let (w1, r1) = reserve_slot(Some(r0), now);
+        let (w2, _r2) = reserve_slot(Some(r1), now);
+        assert_eq!(w0, Duration::ZERO);
+        assert_eq!(w1, PER_CHANNEL_POST_INTERVAL);
+        assert_eq!(w2, PER_CHANNEL_POST_INTERVAL * 2);
+    }
+}
+
 /// This struct is used to deserialize a response from Slack API and
 /// just check if the result is OK or not.
 #[derive(serde::Deserialize)]
 struct GenericSlackResponse {
     ok: bool,
+}
+
+/// Used to pull just the target channel out of a rendered `chat.postMessage`
+/// body, so posts can be paced per channel.
+#[derive(serde::Deserialize)]
+struct ChannelOnly {
+    channel: String,
 }
 
 impl Apis {
@@ -160,10 +229,32 @@ impl Slack {
         }
     }
 
+    /// Block until this channel's next post slot is due, then reserve the
+    /// following slot. Paces `chat.postMessage` to <=1/sec/channel to avoid
+    /// Slack 429s during alert bursts. The pacing lock is released before the
+    /// sleep, so waiting on one channel never blocks posts to other channels.
+    async fn await_post_slot(&self, channel: &str) {
+        let wait = {
+            let mut pacing = self.post_pacing.lock().unwrap();
+            let now = Instant::now();
+            let (wait, reservation) = reserve_slot(pacing.get(channel).copied(), now);
+            pacing.insert(channel.to_string(), reservation);
+            wait
+        };
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
+    }
+
     /// Call the Slack postMessage API. The message and location are defined by the module but the bot
     /// must be configured in Plaid.
     pub async fn post_message(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
         let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        // Pace posts per channel to stay under Slack's ~1/sec/channel limit so a
+        // burst of alerts to one channel doesn't 429 (which would drop the alert).
+        if let Ok(ChannelOnly { channel }) = serde_json::from_str::<ChannelOnly>(&p.body) {
+            self.await_post_slot(&channel).await;
+        }
         match self
             .call_slack(p.bot.clone(), Apis::PostMessage(p), module)
             .await

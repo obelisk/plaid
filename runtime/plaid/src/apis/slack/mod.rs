@@ -5,7 +5,8 @@ use reqwest::Client;
 
 use serde::Deserialize;
 
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use std::collections::HashMap;
 
@@ -30,6 +31,9 @@ pub struct Slack {
     config: SlackConfig,
     /// A client to make requests with
     client: Client,
+    /// Per-channel earliest-next-post time. Used to pace `chat.postMessage`
+    /// to <=1/sec/channel so alert bursts don't trip Slack's 429s.
+    post_pacing: Mutex<HashMap<String, Instant>>,
 }
 
 #[derive(Debug)]
@@ -47,6 +51,10 @@ impl Slack {
             .build()
             .unwrap();
 
-        Self { config, client }
+        Self {
+            config,
+            client,
+            post_pacing: Mutex::new(HashMap::new()),
+        }
     }
 }
