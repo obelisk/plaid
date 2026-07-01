@@ -266,7 +266,7 @@ pub fn list_keys(prefix: Option<impl Display>) -> Result<Vec<String>, PlaidFunct
 /// List all keys in a shared namespace.
 ///
 /// If `prefix` is given, only keys starting with that prefix are returned. The rule must have
-/// read access to the shared namespace in Plaid's configuration.
+/// read or read-write access to the shared namespace in Plaid's configuration.
 pub fn list_keys_shared(
     namespace: &str,
     prefix: Option<impl Display>,
