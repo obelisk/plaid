@@ -6,11 +6,12 @@ pub enum StorageError {
     BufferSizeMismatch,
 }
 
+/// Store `value` at `key` in this rule's namespace.
+///
+/// Returns the **previous** value at `key`, not the value that was written. If the key is new,
+/// returns an empty vector.
 pub fn insert(key: &str, value: &[u8]) -> Result<Vec<u8>, PlaidFunctionError> {
     extern "C" {
-        /// Send a request to store this data in whatever persistence system Plaid has configured.
-        /// There may not be one which is not visible to services. This will be addressed in a
-        /// future update.
         fn storage_insert(
             key: *const u8,
             key_len: usize,
@@ -52,15 +53,18 @@ pub fn insert(key: &str, value: &[u8]) -> Result<Vec<u8>, PlaidFunctionError> {
     }
 }
 
+/// Store `value` at `key` in a shared namespace.
+///
+/// Returns the **previous** value at `key`, not the value that was written. If the key is new,
+/// returns an empty vector.
+///
+/// The rule must have read-write access to `namespace` in Plaid's configuration.
 pub fn insert_shared(
     namespace: &str,
     key: &str,
     value: &[u8],
 ) -> Result<Vec<u8>, PlaidFunctionError> {
     extern "C" {
-        /// Send a request to store this data in whatever persistence system Plaid has configured.
-        /// There may not be one which is not visible to services. This will be addressed in a
-        /// future update.
         fn storage_insert_shared(
             namespace: *const u8,
             namespace_len: usize,
@@ -122,6 +126,9 @@ pub fn insert_shared(
     }
 }
 
+/// Read the value at `key` in this rule's namespace.
+///
+/// Returns an empty vector if the key is not set.
 pub fn get(key: &str) -> Result<Vec<u8>, PlaidFunctionError> {
     extern "C" {
         fn storage_get(key: *const u8, key_len: usize, data: *const u8, data_len: usize) -> i32;
@@ -153,6 +160,10 @@ pub fn get(key: &str) -> Result<Vec<u8>, PlaidFunctionError> {
     }
 }
 
+/// Read the value at `key` in a shared namespace.
+///
+/// Returns an empty vector if the key is not set. The rule must have read or read-write access
+/// to `namespace` in Plaid's configuration.
 pub fn get_shared(namespace: &str, key: &str) -> Result<Vec<u8>, PlaidFunctionError> {
     extern "C" {
         fn storage_get_shared(
@@ -202,8 +213,9 @@ pub fn get_shared(namespace: &str, key: &str) -> Result<Vec<u8>, PlaidFunctionEr
     }
 }
 
-/// List all the keys set by this rule in the runtime. An optional
-/// prefix can be provided so that only a subset of keys is returned
+/// List all keys in this rule's namespace.
+///
+/// If `prefix` is given, only keys starting with that prefix are returned.
 pub fn list_keys(prefix: Option<impl Display>) -> Result<Vec<String>, PlaidFunctionError> {
     extern "C" {
         fn storage_list_keys(
@@ -251,8 +263,10 @@ pub fn list_keys(prefix: Option<impl Display>) -> Result<Vec<String>, PlaidFunct
     }
 }
 
-/// List all the keys in a shared namespace. An optional
-/// prefix can be provided so that only a subset of keys is returned
+/// List all keys in a shared namespace.
+///
+/// If `prefix` is given, only keys starting with that prefix are returned. The rule must have
+/// read access to the shared namespace in Plaid's configuration.
 pub fn list_keys_shared(
     namespace: &str,
     prefix: Option<impl Display>,
@@ -310,6 +324,9 @@ pub fn list_keys_shared(
     }
 }
 
+/// Delete the value at `key` in this rule's namespace.
+///
+/// Returns the value that was stored at `key`. If the key was not set, returns an empty vector.
 pub fn delete(key: &str) -> Result<Vec<u8>, PlaidFunctionError> {
     extern "C" {
         fn storage_delete(key: *const u8, key_len: usize, data: *const u8, data_len: usize) -> i32;
@@ -341,6 +358,10 @@ pub fn delete(key: &str) -> Result<Vec<u8>, PlaidFunctionError> {
     }
 }
 
+/// Delete the value at `key` in a shared namespace.
+///
+/// Returns the value that was stored at `key`. If the key was not set, returns an empty vector.
+/// The rule must have read-write access to `namespace` in Plaid's configuration.
 pub fn delete_shared(namespace: &str, key: &str) -> Result<Vec<u8>, PlaidFunctionError> {
     extern "C" {
         fn storage_delete_shared(
