@@ -24,6 +24,10 @@ struct SlackMessageWithBlocksAndAttachments {
     #[serde(skip_serializing_if = "Option::is_none")]
     blocks: Option<serde_json::Value>,
     attachments: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unfurl_links: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unfurl_media: Option<bool>,
 }
 
 fn optional_blocks(blocks: &str) -> Result<Option<serde_json::Value>, PlaidFunctionError> {
@@ -218,6 +222,21 @@ pub fn post_message_with_blocks_and_attachments(
     blocks: &str,
     attachments: &str,
 ) -> Result<SlackMessageResponse, PlaidFunctionError> {
+    post_message_with_blocks_and_attachments_unfurl(bot, channel, blocks, attachments, None, None)
+}
+
+/// Post a Slack message with top-level Block Kit blocks and attachments, while
+/// explicitly controlling link/media unfurling. Passing `None` for an unfurl
+/// option leaves it unset, preserving Slack's default unfurling behavior, so
+/// existing callers are unaffected.
+pub fn post_message_with_blocks_and_attachments_unfurl(
+    bot: &str,
+    channel: &str,
+    blocks: &str,
+    attachments: &str,
+    unfurl_links: Option<bool>,
+    unfurl_media: Option<bool>,
+) -> Result<SlackMessageResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(slack, post_message);
     }
@@ -227,6 +246,8 @@ pub fn post_message_with_blocks_and_attachments(
         blocks: optional_blocks(blocks)?,
         attachments: serde_json::from_str(attachments)
             .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?,
+        unfurl_links,
+        unfurl_media,
     };
 
     const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
@@ -728,6 +749,10 @@ struct SlackUpdateMessageWithBlocksAndAttachments {
     #[serde(skip_serializing_if = "Option::is_none")]
     blocks: Option<serde_json::Value>,
     attachments: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unfurl_links: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unfurl_media: Option<bool>,
 }
 
 /// Data to be sent to the Plaid runtime for updating a message
@@ -794,6 +819,24 @@ pub fn update_message_with_blocks_and_attachments(
     blocks: &str,
     attachments: &str,
 ) -> Result<SlackMessageResponse, PlaidFunctionError> {
+    update_message_with_blocks_and_attachments_unfurl(
+        bot, channel, ts, blocks, attachments, None, None,
+    )
+}
+
+/// Update a Slack message with top-level Block Kit blocks and attachments, while
+/// explicitly controlling link/media unfurling. Passing `None` for an unfurl
+/// option leaves it unset, preserving Slack's default unfurling behavior, so
+/// existing callers are unaffected.
+pub fn update_message_with_blocks_and_attachments_unfurl(
+    bot: &str,
+    channel: &str,
+    ts: &str,
+    blocks: &str,
+    attachments: &str,
+    unfurl_links: Option<bool>,
+    unfurl_media: Option<bool>,
+) -> Result<SlackMessageResponse, PlaidFunctionError> {
     extern "C" {
         new_host_function_with_error_buffer!(slack, update_message);
     }
@@ -804,6 +847,8 @@ pub fn update_message_with_blocks_and_attachments(
         blocks: optional_blocks(blocks)?,
         attachments: serde_json::from_str(attachments)
             .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?,
+        unfurl_links,
+        unfurl_media,
     };
 
     const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB

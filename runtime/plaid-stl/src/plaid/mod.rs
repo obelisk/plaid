@@ -19,14 +19,20 @@ pub fn print_debug_string(log: &str) {
 /// Send a log to the logback system with no extra budget to trigger
 /// further invocations. This is the most limited log_back but will fail
 /// in the runtime if the module has no more LogbacksAllowed.
-pub fn log_back(type_: &str, log: &[u8], delay: u32) -> Result<(), i32> {
+///
+/// During shutdown, logbacks with `delay == 0` are coerced to a delay of 1 second
+/// and routed through the delayed persistence path rather than the executor queue.
+pub fn log_back(type_: &str, log: &[u8], delay: u32) -> Result<(), PlaidFunctionError> {
     log_back_with_budget(type_, log, delay, 0)
 }
 
 /// Send a log to the logback system with unlimited extra budget to trigger
 /// further invocations. Whoever will pick up the message will also have an
 /// unlimited budget for future invocations.
-pub fn log_back_unlimited(type_: &str, log: &[u8], delay: u32) -> Result<(), i32> {
+///
+/// During shutdown, logbacks with `delay == 0` are coerced to a delay of 1 second
+/// and routed through the delayed persistence path rather than the executor queue.
+pub fn log_back_unlimited(type_: &str, log: &[u8], delay: u32) -> Result<(), PlaidFunctionError> {
     extern "C" {
         /// Send a log to the logback system
         fn log_back_unlimited(
@@ -35,21 +41,21 @@ pub fn log_back_unlimited(type_: &str, log: &[u8], delay: u32) -> Result<(), i32
             log: *const u8,
             log_len: usize,
             delay: u32,
-        ) -> u32;
+        ) -> i32;
     }
 
     let type_bytes = type_.as_bytes().to_vec();
-    unsafe {
+    let code = unsafe {
         log_back_unlimited(
             type_bytes.as_ptr(),
             type_bytes.len(),
             log.as_ptr(),
             log.len(),
             delay,
-        );
+        )
     };
 
-    Ok(())
+    log_back_host_result(code)
 }
 
 /// Send a log to the logback system with a budget to trigger further
@@ -58,12 +64,15 @@ pub fn log_back_unlimited(type_: &str, log: &[u8], delay: u32) -> Result<(), i32
 /// function itself costs 1 budget, with a budget of 1, you must set
 /// logbacks_allowed to 0. This means that those further invocations will not
 /// be able to trigger logbacks.
+///
+/// During shutdown, logbacks with `delay == 0` are coerced to a delay of 1 second
+/// and routed through the delayed persistence path rather than the executor queue.
 pub fn log_back_with_budget(
     type_: &str,
     log: &[u8],
     delay: u32,
     logbacks_allowed: u32,
-) -> Result<(), i32> {
+) -> Result<(), PlaidFunctionError> {
     extern "C" {
         /// Send a log to the logback system
         fn log_back(
@@ -73,11 +82,11 @@ pub fn log_back_with_budget(
             log_len: usize,
             delay: u32,
             logbacks_allowed: u32,
-        ) -> u32;
+        ) -> i32;
     }
 
     let type_bytes = type_.as_bytes().to_vec();
-    unsafe {
+    let code = unsafe {
         log_back(
             type_bytes.as_ptr(),
             type_bytes.len(),
@@ -85,10 +94,18 @@ pub fn log_back_with_budget(
             log.len(),
             delay,
             logbacks_allowed,
-        );
+        )
     };
 
-    Ok(())
+    log_back_host_result(code)
+}
+
+fn log_back_host_result(code: i32) -> Result<(), PlaidFunctionError> {
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(code.into())
+    }
 }
 
 pub fn get_time() -> u32 {

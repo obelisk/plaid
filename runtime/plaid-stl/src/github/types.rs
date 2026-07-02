@@ -158,6 +158,9 @@ pub struct GithubFileContent {
 
 impl FileSearchResultItem {
     /// Retrieve the content of the search result
+    /// ## Arguments
+    ///
+    /// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
     pub fn retrieve_raw_content(
         &self,
         client_id: impl Display,
@@ -432,6 +435,16 @@ pub struct DeleteDeployKeyParams {
     pub owner: String,
     pub repo: String,
     pub key_id: u64,
+}
+
+/// Parameters sent to the runtime when creating a GH deploy key
+#[derive(Serialize, Deserialize)]
+pub struct CreateDeployKeyParams {
+    pub owner: String,
+    pub repo: String,
+    pub title: String,
+    pub key: String,
+    pub read_only: bool,
 }
 
 /// A custom property of a repo

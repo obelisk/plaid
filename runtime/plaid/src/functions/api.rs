@@ -405,6 +405,7 @@ impl_new_function!(
     DISALLOW_IN_TEST_MODE
 );
 impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, create_deploy_key, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, require_signed_commits, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, add_repo_to_team, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, remove_repo_from_team, DISALLOW_IN_TEST_MODE);
@@ -449,6 +450,17 @@ impl_new_function_with_error_buffer!(github, get_repo_name_from_repo_id, ALLOW_I
 impl_new_function!(github, add_repo_to_org_secret, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, remove_repo_from_org_secret, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, list_org_secrets_for_repo, ALLOW_IN_TEST_MODE);
+impl_new_function!(
+    github,
+    grant_repo_access_to_org_installation,
+    DISALLOW_IN_TEST_MODE
+);
+impl_new_function!(
+    github,
+    remove_repo_access_from_org_installation,
+    DISALLOW_IN_TEST_MODE
+);
+impl_new_function_with_error_buffer!(github, get_enterprise_license_status, ALLOW_IN_TEST_MODE);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
@@ -628,6 +640,111 @@ impl_new_sub_module_function_with_error_buffer!(blockchain, evm, gas_price, ALLO
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_logs, ALLOW_IN_TEST_MODE);
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_block, ALLOW_IN_TEST_MODE);
 
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    send_signed_transaction,
+    DISALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_balance,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_account_info,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(blockchain, solana, get_slot, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_latest_blockhash,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_transaction_count,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_transaction,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_signature_statuses,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(blockchain, solana, get_block, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_multiple_accounts,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_program_accounts,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_token_accounts_by_owner,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_token_account_balance,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_token_supply,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_minimum_balance_for_rent_exemption,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_fee_for_message,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_recent_prioritization_fees,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    simulate_transaction,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_signatures_for_address,
+    ALLOW_IN_TEST_MODE
+);
+
 // Bloom filter functions
 impl_new_function_with_error_buffer!(bloom_filter, build_with_items, ALLOW_IN_TEST_MODE);
 
@@ -765,6 +882,7 @@ define_api_functions! {
         "github_check_org_membership_of_user"              => github_check_org_membership_of_user,
         "github_comment_on_pull_request"                   => github_comment_on_pull_request,
         "github_delete_deploy_key"                         => github_delete_deploy_key,
+        "github_create_deploy_key"                         => github_create_deploy_key,
         "github_pull_request_request_reviewers"            => github_pull_request_request_reviewers,
         "github_require_signed_commits"                    => github_require_signed_commits,
         "github_get_weekly_commit_count"                   => github_get_weekly_commit_count,
@@ -786,6 +904,9 @@ define_api_functions! {
         "github_add_repo_to_org_secret"                    => github_add_repo_to_org_secret,
         "github_remove_repo_from_org_secret"               => github_remove_repo_from_org_secret,
         "github_list_org_secrets_for_repo"                 => github_list_org_secrets_for_repo,
+        "github_grant_repo_access_to_org_installation"    => github_grant_repo_access_to_org_installation,
+        "github_remove_repo_access_from_org_installation" => github_remove_repo_access_from_org_installation,
+        "github_get_enterprise_license_status"                 => github_get_enterprise_license_status,
 
         // Slack Calls
         "slack_post_to_named_webhook"     => slack_post_to_named_webhook,
@@ -871,6 +992,26 @@ define_api_functions! {
         "blockchain_evm_gas_price"               => blockchain_evm_gas_price,
         "blockchain_evm_get_logs"                => blockchain_evm_get_logs,
         "blockchain_evm_get_block"               => blockchain_evm_get_block,
+
+        "blockchain_solana_send_signed_transaction"        => blockchain_solana_send_signed_transaction,
+        "blockchain_solana_get_balance"                    => blockchain_solana_get_balance,
+        "blockchain_solana_get_account_info"               => blockchain_solana_get_account_info,
+        "blockchain_solana_get_slot"                       => blockchain_solana_get_slot,
+        "blockchain_solana_get_latest_blockhash"           => blockchain_solana_get_latest_blockhash,
+        "blockchain_solana_get_transaction_count"          => blockchain_solana_get_transaction_count,
+        "blockchain_solana_get_transaction"                => blockchain_solana_get_transaction,
+        "blockchain_solana_get_signature_statuses"         => blockchain_solana_get_signature_statuses,
+        "blockchain_solana_get_block"                      => blockchain_solana_get_block,
+        "blockchain_solana_get_multiple_accounts"          => blockchain_solana_get_multiple_accounts,
+        "blockchain_solana_get_program_accounts"           => blockchain_solana_get_program_accounts,
+        "blockchain_solana_get_token_accounts_by_owner"    => blockchain_solana_get_token_accounts_by_owner,
+        "blockchain_solana_get_token_account_balance"      => blockchain_solana_get_token_account_balance,
+        "blockchain_solana_get_token_supply"               => blockchain_solana_get_token_supply,
+        "blockchain_solana_get_minimum_balance_for_rent_exemption" => blockchain_solana_get_minimum_balance_for_rent_exemption,
+        "blockchain_solana_get_fee_for_message"            => blockchain_solana_get_fee_for_message,
+        "blockchain_solana_get_recent_prioritization_fees" => blockchain_solana_get_recent_prioritization_fees,
+        "blockchain_solana_simulate_transaction"           => blockchain_solana_simulate_transaction,
+        "blockchain_solana_get_signatures_for_address"     => blockchain_solana_get_signatures_for_address,
 
         // Bloomfilter calls
         "bloom_filter_build_with_items" => bloom_filter_build_with_items,

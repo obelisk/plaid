@@ -11,6 +11,7 @@ use sshcerts::PublicKey;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs::{self};
+use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 pub use utils::cost_function;
 use utils::{
@@ -161,9 +162,8 @@ pub struct Configuration {
     pub module_signing: Option<ModuleSigningConfiguration>,
     /// The compiler backend to use for the modules.
     pub compiler_backend: CompilerBackend,
-    /// If this value is set, Plaid will treat it as an absolute path, create a text file and write "READY"
-    /// when the system is fully up and ready to receive traffic.
-    pub readiness_check_file: Option<String>,
+    /// If this value is set, Plaid will serve readiness and liveness endpoints on this address.
+    pub probe_listen_address: Option<SocketAddr>,
     /// If this value is set, Plaid will panic if a module fails to load
     ///
     /// Defaults to `true` if not provided.

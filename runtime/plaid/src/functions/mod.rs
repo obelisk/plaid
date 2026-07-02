@@ -32,6 +32,8 @@ pub enum FunctionErrors {
     OperationNotAllowed = -12,
     SharedDbError = -13,
     TimeoutElapsed = -14,
+    FailedToLogBack = -15,
+    LogbackBudgetExhausted = -16,
 }
 
 #[derive(Debug)]
