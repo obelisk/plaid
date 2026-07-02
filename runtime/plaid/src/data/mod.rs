@@ -97,7 +97,7 @@ impl DataInternal {
 
         let okta = config
             .okta
-            .map(|okta| okta::Okta::new(okta, logger.clone()));
+            .map(|okta| okta::Okta::new(okta, logger.clone(), metrics.clone()));
 
         let (internal, persister) = internal::Internal::new(logger.clone(), storage.clone())?;
 
