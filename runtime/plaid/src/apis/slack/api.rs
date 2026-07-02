@@ -80,6 +80,17 @@ struct SlackStatusResponse {
     error: Option<String>,
 }
 
+/// Detects whether a `post_message` caller opted in to the scheduleMessage
+/// fallback on rate limit. Parsed alongside `PostMessage` so the opt-in is
+/// per call: callers that don't set it keep the historical behavior of a hard
+/// error on 429 (and never receive a scheduled-message response shape they may
+/// not know how to parse).
+#[derive(serde::Deserialize)]
+struct ScheduleOptIn {
+    #[serde(default)]
+    schedule_on_ratelimit: bool,
+}
+
 impl Apis {
     fn build_request(&self, client: &Client) -> RequestBuilder {
         match self {
@@ -251,6 +262,10 @@ impl Slack {
         let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let bot = p.bot.clone();
         let body = p.body.clone();
+        // Opt-in per call; unset means the historical "429 is an error" behavior.
+        let schedule_on_ratelimit = serde_json::from_str::<ScheduleOptIn>(params)
+            .map(|o| o.schedule_on_ratelimit)
+            .unwrap_or(false);
         match self
             .call_slack(bot.clone(), Apis::PostMessage(p), module.clone())
             .await
@@ -267,7 +282,9 @@ impl Slack {
                 }
                 Ok(response)
             }
-            Ok((429, _)) => self.schedule_message_fallback(bot, &body, module).await,
+            Ok((429, _)) if schedule_on_ratelimit => {
+                self.schedule_message_fallback(bot, &body, module).await
+            }
             Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                 status,
             ))),
@@ -305,13 +322,18 @@ impl Slack {
             .unwrap_or("<unknown>")
             .to_string();
 
+        // Anchor all windows to a single `now` so they tile contiguously (as the
+        // ladder logic and tests assume) instead of drifting as the probe loop
+        // makes API calls. A clock before the UNIX epoch is unrecoverable here,
+        // so surface it rather than panicking.
+        let base_now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| ApiError::ImpossibleError)?
+            .as_secs();
+
         for window in 0..SCHEDULE_MAX_WINDOWS {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock before UNIX epoch")
-                .as_secs();
             let jitter = rand::rng().random_range(0..SCHEDULE_WINDOW_SECS);
-            let post_at = schedule_post_at(now, window, jitter);
+            let post_at = schedule_post_at(base_now, window, jitter);
             payload["post_at"] = serde_json::Value::from(post_at);
             let schedule_body = payload.to_string();
 

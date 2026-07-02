@@ -1027,9 +1027,20 @@ pub fn post_message_with_options(
     const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    let params = serde_json::to_string(&PostMessage {
+    // Opt in to the runtime's scheduleMessage fallback on rate limit. Only this
+    // helper sets the flag, so existing post helpers keep the historical 429
+    // behavior and never see a scheduled-delivery response.
+    #[derive(Serialize)]
+    struct PostMessageScheduled {
+        bot: String,
+        body: String,
+        schedule_on_ratelimit: bool,
+    }
+
+    let params = serde_json::to_string(&PostMessageScheduled {
         bot: bot.to_string(),
         body: serde_json::to_string(&message).unwrap(),
+        schedule_on_ratelimit: true,
     })
     .unwrap();
 
