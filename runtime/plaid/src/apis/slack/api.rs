@@ -1,10 +1,13 @@
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use plaid_stl::slack::{
-    CreateChannel, CreateChannelResponse, GetDndInfo, GetDndInfoResponse, GetIdFromEmail,
-    GetPresence, GetPresenceResponse, InviteToChannel, PostMessage, RemoveFromChannel,
-    UpdateMessage, UserInfo, UserInfoResponse, ViewOpen,
+    ConversationsHistory, CreateChannel, CreateChannelResponse, DeleteScheduledMessage,
+    GetDndInfo, GetDndInfoResponse, GetIdFromEmail, GetPresence, GetPresenceResponse,
+    InviteToChannel, PostMessage, RemoveFromChannel, UpdateMessage, UserInfo, UserInfoResponse,
+    ViewOpen,
 };
+use rand::Rng;
 use reqwest::{Client, RequestBuilder};
 
 use crate::{
@@ -16,6 +19,11 @@ use super::Slack;
 
 enum Apis {
     PostMessage(plaid_stl::slack::PostMessage),
+    /// Internal fallback for rate limited PostMessage calls. Carries the fully
+    /// rendered chat.scheduleMessage body (the original postMessage body plus `post_at`).
+    ScheduleMessage(String),
+    DeleteScheduledMessage(plaid_stl::slack::DeleteScheduledMessage),
+    ConversationsHistory(plaid_stl::slack::ConversationsHistory),
     UpdateMessage(plaid_stl::slack::UpdateMessage),
     ViewsOpen(plaid_stl::slack::ViewOpen),
     LookupByEmail(plaid_stl::slack::GetIdFromEmail),
@@ -30,11 +38,57 @@ enum Apis {
 const SLACK_API_URL: &str = "https://slack.com/api/";
 type Result<T> = std::result::Result<T, ApiError>;
 
+/// Minimum lead time for a scheduled message. Keeps `post_at` safely in the
+/// future (Slack rejects past timestamps with `time_in_past`) even with some
+/// clock skew.
+const SCHEDULE_BASE_DELAY_SECS: u64 = 30;
+/// Slack rejects scheduling more than 30 messages to post within a 5 minute
+/// window to the same channel (`restricted_too_many`). When that happens we
+/// escalate the target window by this much and try again.
+const SCHEDULE_WINDOW_SECS: u64 = 300;
+/// How many windows to try before giving up (~3 hours of backlog per channel).
+/// A channel that exceeds this (36 windows * 30 messages = 1080 pending
+/// messages) has a problem upstream that delaying further won't fix.
+const SCHEDULE_MAX_WINDOWS: u64 = 36;
+/// chat.scheduleMessage is itself rate limited (Tier 3). How many times to
+/// retry a single window after an HTTP 429 before giving up.
+const SCHEDULE_RATE_LIMIT_RETRIES: u32 = 5;
+/// How long to wait between retries when chat.scheduleMessage returns HTTP 429.
+const SCHEDULE_RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(2);
+
+/// Compute the `post_at` for an escalation window. Window `n` covers
+/// `[base + n*window, base + (n+1)*window)` where `base = now + SCHEDULE_BASE_DELAY_SECS`;
+/// windows tile contiguously so a drained backlog is a continuous trickle, not
+/// batches. `jitter` (in `[0, SCHEDULE_WINDOW_SECS)`) spreads messages inside
+/// the window so a burst drips out instead of landing all at once.
+fn schedule_post_at(now: u64, window: u64, jitter: u64) -> u64 {
+    now + SCHEDULE_BASE_DELAY_SECS + window * SCHEDULE_WINDOW_SECS + jitter
+}
+
 /// This struct is used to deserialize a response from Slack API and
 /// just check if the result is OK or not.
 #[derive(serde::Deserialize)]
 struct GenericSlackResponse {
     ok: bool,
+}
+
+/// Slack API response carrying the error code when `ok` is false.
+#[derive(serde::Deserialize)]
+struct SlackStatusResponse {
+    ok: bool,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+/// Detects whether a `post_message` caller opted in to the scheduleMessage
+/// fallback on rate limit. Parsed alongside `PostMessage` so the opt-in is
+/// per call: callers that don't set it keep the historical behavior of a hard
+/// error on 429 (and never receive a scheduled-message response shape they may
+/// not know how to parse).
+#[derive(serde::Deserialize)]
+struct ScheduleOptIn {
+    #[serde(default)]
+    schedule_on_ratelimit: bool,
 }
 
 impl Apis {
@@ -44,6 +98,37 @@ impl Apis {
                 .post(format!("{SLACK_API_URL}{api}", api = "chat.postMessage"))
                 .body(p.body.clone())
                 .header("Content-Type", "application/json; charset=utf-8"),
+            Self::ScheduleMessage(body) => client
+                .post(format!("{SLACK_API_URL}{api}", api = "chat.scheduleMessage"))
+                .body(body.clone())
+                .header("Content-Type", "application/json; charset=utf-8"),
+            Self::DeleteScheduledMessage(p) => client
+                .post(format!(
+                    "{SLACK_API_URL}{api}",
+                    api = "chat.deleteScheduledMessage"
+                ))
+                .body(p.body().unwrap_or_default()) // TODO this is not great: maybe this method should be fallible
+                .header("Content-Type", "application/json; charset=utf-8"),
+            Self::ConversationsHistory(p) => {
+                let mut query: Vec<(&str, String)> = vec![
+                    ("channel", p.channel.clone()),
+                    // Metadata is only returned when explicitly requested. Callers use it
+                    // to correlate posted messages back to the event that generated them.
+                    ("include_all_metadata", "true".to_string()),
+                ];
+                if let Some(limit) = p.limit {
+                    query.push(("limit", limit.to_string()));
+                }
+                if let Some(oldest) = &p.oldest {
+                    query.push(("oldest", oldest.clone()));
+                }
+                client
+                    .get(format!(
+                        "{SLACK_API_URL}{api}",
+                        api = "conversations.history"
+                    ))
+                    .query(&query)
+            }
             Self::UpdateMessage(p) => client
                 .post(format!("{SLACK_API_URL}{api}", api = "chat.update"))
                 .body(p.body.clone())
@@ -90,6 +175,9 @@ impl std::fmt::Display for Apis {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PostMessage(_) => write!(f, "PostMessage"),
+            Self::ScheduleMessage(_) => write!(f, "ScheduleMessage"),
+            Self::DeleteScheduledMessage(_) => write!(f, "DeleteScheduledMessage"),
+            Self::ConversationsHistory(_) => write!(f, "ConversationsHistory"),
             Self::UpdateMessage(_) => write!(f, "UpdateMessage"),
             Self::ViewsOpen(_) => write!(f, "ViewsOpen"),
             Self::LookupByEmail(_) => write!(f, "LookupByEmail"),
@@ -162,10 +250,193 @@ impl Slack {
 
     /// Call the Slack postMessage API. The message and location are defined by the module but the bot
     /// must be configured in Plaid.
+    ///
+    /// Slack rate limits chat.postMessage to roughly one message per second per
+    /// channel, so a burst of posts to one channel gets HTTP 429s. Rather than
+    /// surfacing those as errors (historically: dropped messages), we fall back
+    /// to chat.scheduleMessage and let Slack deliver the message shortly after —
+    /// see [`Self::schedule_message_fallback`]. Callers can distinguish the two
+    /// outcomes by the response body: an immediate post carries `ts`, a
+    /// scheduled one carries `scheduled_message_id` and `post_at`.
     pub async fn post_message(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
         let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let bot = p.bot.clone();
+        let body = p.body.clone();
+        // Opt-in per call; unset means the historical "429 is an error" behavior.
+        let schedule_on_ratelimit = serde_json::from_str::<ScheduleOptIn>(params)
+            .map(|o| o.schedule_on_ratelimit)
+            .unwrap_or(false);
         match self
-            .call_slack(p.bot.clone(), Apis::PostMessage(p), module)
+            .call_slack(bot.clone(), Apis::PostMessage(p), module.clone())
+            .await
+        {
+            Ok((200, response)) => {
+                let slack_response: GenericSlackResponse = serde_json::from_str(&response)
+                    .map_err(|_| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(response.clone()))
+                    })?;
+                if !slack_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(response)
+            }
+            Ok((429, _)) if schedule_on_ratelimit => {
+                self.schedule_message_fallback(bot, &body, module).await
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fallback for rate limited chat.postMessage calls: hand the message to
+    /// Slack for scheduled delivery instead of failing.
+    ///
+    /// Finds the earliest 5 minute window with capacity by first-fit probing:
+    /// try `now + SCHEDULE_BASE_DELAY_SECS` plus a random offset inside the
+    /// window; if Slack answers `restricted_too_many` (that window already has
+    /// 30 messages scheduled for this channel), step forward one window and try
+    /// again. Slack is the arbiter of capacity, so this needs no local state
+    /// and is safe across multiple runtime instances. The random offset spreads
+    /// a burst across its window so delivery is a steady drip rather than 30
+    /// messages landing on the same second.
+    async fn schedule_message_fallback(
+        &self,
+        bot: String,
+        post_body: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String> {
+        // chat.scheduleMessage takes the same payload as chat.postMessage plus
+        // `post_at`, so reuse the module's rendered body with post_at injected.
+        let mut payload: serde_json::Value =
+            serde_json::from_str(post_body).map_err(|_| ApiError::BadRequest)?;
+        if !payload.is_object() {
+            return Err(ApiError::BadRequest);
+        }
+        let channel = payload
+            .get("channel")
+            .and_then(|c| c.as_str())
+            .unwrap_or("<unknown>")
+            .to_string();
+
+        // Anchor all windows to a single `now` so they tile contiguously (as the
+        // ladder logic and tests assume) instead of drifting as the probe loop
+        // makes API calls. A clock before the UNIX epoch is unrecoverable here,
+        // so surface it rather than panicking.
+        let base_now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| ApiError::ImpossibleError)?
+            .as_secs();
+
+        for window in 0..SCHEDULE_MAX_WINDOWS {
+            let jitter = rand::rng().random_range(0..SCHEDULE_WINDOW_SECS);
+            let post_at = schedule_post_at(base_now, window, jitter);
+            payload["post_at"] = serde_json::Value::from(post_at);
+            let schedule_body = payload.to_string();
+
+            let mut rate_limit_retries = 0;
+            loop {
+                match self
+                    .call_slack(
+                        bot.clone(),
+                        Apis::ScheduleMessage(schedule_body.clone()),
+                        module.clone(),
+                    )
+                    .await?
+                {
+                    (200, response) => {
+                        let slack_response: SlackStatusResponse = serde_json::from_str(&response)
+                            .map_err(|_| {
+                                ApiError::SlackError(SlackError::UnexpectedPayload(
+                                    response.clone(),
+                                ))
+                            })?;
+                        if slack_response.ok {
+                            info!("PostMessage to [{channel}] was rate limited; scheduled for delivery at [{post_at}] instead (window {window})");
+                            return Ok(response);
+                        }
+                        match slack_response.error.as_deref() {
+                            // This window already has 30 messages scheduled for
+                            // this channel (or our post_at drifted into the
+                            // past); step forward to the next window.
+                            Some("restricted_too_many") | Some("time_in_past") => break,
+                            _ => {
+                                return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                                    response,
+                                )))
+                            }
+                        }
+                    }
+                    // chat.scheduleMessage itself is rate limited (Tier 3);
+                    // back off briefly and retry the same window.
+                    (429, _) => {
+                        rate_limit_retries += 1;
+                        if rate_limit_retries > SCHEDULE_RATE_LIMIT_RETRIES {
+                            return Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                                429,
+                            )));
+                        }
+                        tokio::time::sleep(SCHEDULE_RATE_LIMIT_BACKOFF).await;
+                    }
+                    (status, _) => {
+                        return Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                            status,
+                        )))
+                    }
+                }
+            }
+        }
+
+        warn!("PostMessage to [{channel}] was rate limited and no scheduling capacity was found within {SCHEDULE_MAX_WINDOWS} windows");
+        Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(429)))
+    }
+
+    /// Delete a scheduled message before it posts (chat.deleteScheduledMessage).
+    ///
+    /// Returns the raw Slack response even when `ok` is false: callers need the
+    /// error code to distinguish "already posted" (`invalid_scheduled_message_id`)
+    /// from real failures, since a scheduled message that has posted can no
+    /// longer be deleted and must be handled differently.
+    pub async fn delete_scheduled_message(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String> {
+        let p: DeleteScheduledMessage =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::DeleteScheduledMessage(p), module)
+            .await
+        {
+            Ok((200, response)) => {
+                // Validate it parses as a Slack response but pass it through
+                // regardless of `ok` — see doc comment.
+                serde_json::from_str::<SlackStatusResponse>(&response).map_err(|_| {
+                    ApiError::SlackError(SlackError::UnexpectedPayload(response.clone()))
+                })?;
+                Ok(response)
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fetch recent message history for a channel (conversations.history),
+    /// including message metadata.
+    pub async fn conversations_history(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String> {
+        let p: ConversationsHistory =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::ConversationsHistory(p), module)
             .await
         {
             Ok((200, response)) => {
@@ -399,5 +670,81 @@ impl Slack {
             ))),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::*;
+
+    const NOW: u64 = 1_750_000_000;
+
+    #[test]
+    fn first_window_starts_at_base_delay() {
+        // The earliest possible scheduled delivery is now + base delay.
+        assert_eq!(schedule_post_at(NOW, 0, 0), NOW + SCHEDULE_BASE_DELAY_SECS);
+    }
+
+    #[test]
+    fn windows_tile_contiguously() {
+        // The latest post_at in window n is immediately before the earliest
+        // post_at in window n+1, with no gap: a draining backlog is a
+        // continuous trickle, not spaced batches.
+        for window in 0..SCHEDULE_MAX_WINDOWS - 1 {
+            let latest_in_window = schedule_post_at(NOW, window, SCHEDULE_WINDOW_SECS - 1);
+            let earliest_in_next = schedule_post_at(NOW, window + 1, 0);
+            assert_eq!(latest_in_window + 1, earliest_in_next);
+        }
+    }
+
+    #[test]
+    fn escalation_is_monotonic_across_windows() {
+        // Escalating always moves post_at forward regardless of jitter,
+        // preserving FIFO at window granularity.
+        let worst_case_early = schedule_post_at(NOW, 1, 0);
+        let best_case_late = schedule_post_at(NOW, 0, SCHEDULE_WINDOW_SECS - 1);
+        assert!(worst_case_early > best_case_late);
+    }
+
+    #[test]
+    fn ladder_covers_expected_backlog() {
+        // 36 windows of 5 minutes ≈ 3 hours of per-channel backlog.
+        let last = schedule_post_at(NOW, SCHEDULE_MAX_WINDOWS - 1, SCHEDULE_WINDOW_SECS - 1);
+        let horizon = last - NOW;
+        assert!(horizon >= 3 * 60 * 60);
+        assert!(horizon < 4 * 60 * 60);
+    }
+
+    #[test]
+    fn slack_status_response_parses_error_codes() {
+        let full: SlackStatusResponse =
+            serde_json::from_str(r#"{"ok":false,"error":"restricted_too_many"}"#).unwrap();
+        assert!(!full.ok);
+        assert_eq!(full.error.as_deref(), Some("restricted_too_many"));
+
+        let ok: SlackStatusResponse = serde_json::from_str(
+            r#"{"ok":true,"scheduled_message_id":"Q1298393284","post_at":1750000030}"#,
+        )
+        .unwrap();
+        assert!(ok.ok);
+        assert!(ok.error.is_none());
+    }
+
+    #[test]
+    fn post_at_injection_preserves_payload() {
+        // The fallback reuses the postMessage body with post_at added; make
+        // sure the surgery keeps the original fields intact.
+        let mut payload: serde_json::Value =
+            serde_json::from_str(r#"{"channel":"C012345","blocks":"[]","thread_ts":"123.456"}"#)
+                .unwrap();
+        payload["post_at"] = serde_json::Value::from(schedule_post_at(NOW, 0, 10));
+        let out = payload.to_string();
+        let round_trip: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(round_trip["channel"], "C012345");
+        assert_eq!(round_trip["thread_ts"], "123.456");
+        assert_eq!(
+            round_trip["post_at"],
+            serde_json::Value::from(NOW + SCHEDULE_BASE_DELAY_SECS + 10)
+        );
     }
 }
