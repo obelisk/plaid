@@ -1,3 +1,4 @@
+pub mod metrics;
 pub mod thread_pools;
 
 use crate::apis::Api;

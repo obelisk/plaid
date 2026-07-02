@@ -10,6 +10,7 @@ use crate::{
     apis::ApiError,
     executor::Message,
     logging::Logger,
+    metrics::MetricsHandle,
     storage::{Storage, StorageError},
     InstanceRoles,
 };
@@ -84,10 +85,14 @@ impl DataInternal {
         logger: Sender<Message>,
         storage: Arc<Storage>,
         els: Logger,
+        metrics: Option<Arc<MetricsHandle>>,
     ) -> Result<(Self, internal::DelayedLogPersister), DataError> {
         let github = config
             .github
-            .map(|gh| github::Github::new(gh, logger.clone()).map_err(DataError::ApiError))
+            .map(|gh| {
+                github::Github::new(gh, logger.clone(), metrics.clone())
+                    .map_err(DataError::ApiError)
+            })
             .transpose()?;
 
         let okta = config
@@ -134,9 +139,10 @@ impl Data {
         els: Logger,
         roles: &InstanceRoles,
         cancellation_token: CancellationToken,
+        metrics: Option<Arc<MetricsHandle>>,
     ) -> Result<(Sender<DelayedMessage>, DelayedLogPersister, JoinSet<()>), DataError> {
         let (mut di, delayed_log_persister) =
-            DataInternal::new(config, sender, storage.clone(), els).await?;
+            DataInternal::new(config, sender, storage.clone(), els, metrics).await?;
 
         let mut join_set = JoinSet::new();
 

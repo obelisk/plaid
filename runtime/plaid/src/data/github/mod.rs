@@ -1,16 +1,19 @@
 use crate::apis::github::{build_github_clients, Authentication};
 use crate::apis::ApiError;
 use crate::executor::Message;
+use crate::metrics::MetricsHandle;
 use crate::parse_duration;
 use crossbeam_channel::Sender;
 use lru::LruCache;
 use octocrab::{self, Octocrab};
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
+use prometheus::IntCounter;
 use serde::Deserialize;
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::time::Duration;
 use time::OffsetDateTime;
 
@@ -170,10 +173,16 @@ pub struct Github {
     /// This LRU has a limited capacity: when this is reached, the least-recently-used item is removed to make space for a new insertion.
     /// Note: we only use the "key" part to keep track of the UUIDs we have seen. The "value" part is not used and always set to 0u32.
     seen_logs_uuid: LruCache<String, u32>,
+    /// Cumulative count of logs sent for processing, when metrics are enabled.
+    logs_fetched: Option<IntCounter>,
 }
 
 impl Github {
-    pub fn new(config: GithubConfig, logger: Sender<Message>) -> Result<Self, ApiError> {
+    pub fn new(
+        config: GithubConfig,
+        logger: Sender<Message>,
+        metrics: Option<Arc<MetricsHandle>>,
+    ) -> Result<Self, ApiError> {
         let default_client_auth: HashMap<String, Authentication> = [(
             "gh_data_generator".to_string(),
             config.authentication.clone(),
@@ -189,12 +198,25 @@ impl Github {
             size => NonZeroUsize::new(size).unwrap(),
         };
 
+        let logs_fetched = metrics.map(|handle| {
+            let counter = IntCounter::new(
+                "plaid_github_logs_fetched_total",
+                "Total number of GitHub logs sent for processing by the data generator",
+            )
+            .expect("valid metric definition");
+            if let Err(e) = handle.register(Box::new(counter.clone())) {
+                error!("Failed to register GitHub logs_fetched counter: {e}");
+            }
+            counter
+        });
+
         Ok(Self {
             config,
             client,
             last_seen: OffsetDateTime::now_utc(),
             seen_logs_uuid: LruCache::new(lru_cache_size),
             logger,
+            logs_fetched,
         })
     }
 }
@@ -364,7 +386,13 @@ impl DataGenerator for Github {
                 LogSource::Generator(Generator::Github),
                 self.config.logbacks_allowed.clone(),
             ))
-            .map_err(|_| ())
+            .map_err(|_| ())?;
+
+        if let Some(counter) = &self.logs_fetched {
+            counter.inc();
+        }
+
+        Ok(())
     }
 
     fn list_already_seen(&self) -> Vec<String> {

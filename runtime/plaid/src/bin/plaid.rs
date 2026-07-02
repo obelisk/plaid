@@ -18,7 +18,9 @@ use plaid::{
 
 use apis::Api;
 use data::Data;
+use executor::metrics::QueueMetrics;
 use executor::*;
+use plaid::metrics::MetricsHandle;
 use plaid_stl::messages::LogSource;
 use storage::Storage;
 use tokio::{
@@ -246,6 +248,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create thread pools for log execution
     let exec_thread_pools = thread_pools::ExecutionThreadPools::new(&config.executor);
 
+    let metrics = config
+        .metrics
+        .as_ref()
+        .map(|_| Arc::new(MetricsHandle::new()));
+    if let Some(handle) = &metrics {
+        let queue_metrics = QueueMetrics::from_pools(&exec_thread_pools);
+        if let Err(e) = handle.register(Box::new(queue_metrics)) {
+            error!("Failed to register queue metrics collector: {e}");
+        }
+    }
+
     // For convenience, keep a sender for the general channel, so that we can quickly clone it around
     let log_sender = exec_thread_pools.general_pool.sender.clone();
 
@@ -317,6 +330,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         warn!("No probe_listen_address configured; readiness and liveness endpoints are disabled");
     }
 
+    if let Some(metrics_config) = &config.metrics {
+        let handle = metrics
+            .as_ref()
+            .expect("metrics handle must exist when metrics config is present")
+            .clone();
+        let token = cancellation_token.clone();
+        info!(
+            "Started metrics server at: {}",
+            metrics_config.listen_address
+        );
+
+        let listen_addr = metrics_config.listen_address.clone();
+        server_tasks.spawn(async move {
+            let routes = warp::path!("metrics").and(warp::get()).map(move || {
+                warp::reply::with_header(
+                    handle.encode(),
+                    "content-type",
+                    "text/plain; version=0.0.4; charset=utf-8",
+                )
+            });
+            let (_, server) =
+                warp::serve(routes).bind_with_graceful_shutdown(listen_addr, async move {
+                    token.cancelled().await;
+                });
+            server.await;
+            info!("Metrics server shut down");
+        });
+    }
+
     let (performance_sender, performance_handle) = match config.performance_monitoring {
         Some(perf) => {
             warn!("Plaid is running with performance monitoring enabled - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a channel that aggregates and reports metrics.");
@@ -372,6 +414,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         els.clone(),
         &roles,
         cancellation_token.clone(),
+        metrics.clone(),
     )
     .await?;
     info!("Configuring APIs for Modules");
@@ -646,6 +689,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Drop every Sender<Message> so worker threads exit once the queues drain.
     info!("Waiting for executor threads to drain...");
+    drop(metrics);
     drop(log_sender);
     drop(exec_thread_pools);
     drop(immediate_dispatch);
