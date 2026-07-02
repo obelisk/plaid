@@ -206,8 +206,9 @@ impl Github {
         // If it is not given, we will omit that part of the log and append nothing to the URL.
         let (ref_log, ref_q_param) = match request.params.reference {
             Some(r) => {
-                // According to https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28#get-repository-content, reference can be
-                // a commit SHA, a branch name, or a tag name. We will validate that it is either a valid commit hash or a valid branch name.
+                // According to https://docs.github.com/en/rest/repos/contents?apiVersion=2022-11-28#get-repository-content,
+                // `reference` can be a commit SHA, a branch name, or a tag name. We validate that it is either a 40-char SHA-1,
+                // or a branch/tag name that matches our `branch_name` validator (see validators.rs).
                 // This means that we try validating both ways: if both fail, we return an error. If either succeeds, we continue.
                 if self.validate_commit_hash(&r).is_err() && self.validate_branch_name(&r).is_err()
                 {
