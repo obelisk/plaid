@@ -131,6 +131,63 @@ pub struct ExecutorConfig {
     /// This is a mapping {log type --> num threads}.
     #[serde(default)]
     pub dedicated_threads: HashMap<String, DedicatedThreadsConfig>,
+    /// Optional durable overflow for the execution queue. When present, messages that
+    /// would otherwise be dropped (queue full, or still queued when the process is told
+    /// to stop) are persisted to storage and replayed on a later boot instead of being
+    /// lost. Absent = feature disabled (default), and behaviour is unchanged.
+    ///
+    /// Requires a persistent storage backend; enabling it without one is a
+    /// configuration error caught at startup.
+    ///
+    /// Note on multi-replica deployments: cross-pod recovery (a message spilled by a pod
+    /// that then dies being replayed by a sibling) only works with a *shared* backend such
+    /// as DynamoDB. With a node-local backend (Sled), each replica sees only its own
+    /// spilled messages, so a dead pod's overflow is recovered only when that pod's storage
+    /// comes back. Single-replica roles are unaffected.
+    #[serde(default)]
+    pub queue_overflow: Option<QueueOverflowConfig>,
+}
+
+/// Configuration for the durable execution-queue overflow feature.
+#[derive(Deserialize, Clone)]
+pub struct QueueOverflowConfig {
+    /// Hard cap on the number of messages held in the overflow store at once. Once the
+    /// store holds this many, further messages are dropped (and logged) rather than
+    /// persisted, bounding the blast radius on the storage backend when the executor is
+    /// wedged. Defaults to 100_000.
+    #[serde(default = "default_overflow_max_persisted")]
+    pub max_persisted: u64,
+    /// Messages older than this many seconds are discarded by the reloader instead of
+    /// being replayed, so a message for a since-removed rule cannot loop forever.
+    /// Defaults to 86_400 (24h).
+    #[serde(default = "default_overflow_max_age_secs")]
+    pub max_message_age_secs: u64,
+    /// How many overflow messages to claim and reinject per reload poll. Keeps a single
+    /// poll from loading an unbounded namespace into memory. Defaults to 256.
+    #[serde(default = "default_overflow_reload_batch")]
+    pub reload_batch_size: usize,
+}
+
+impl Default for QueueOverflowConfig {
+    fn default() -> Self {
+        Self {
+            max_persisted: default_overflow_max_persisted(),
+            max_message_age_secs: default_overflow_max_age_secs(),
+            reload_batch_size: default_overflow_reload_batch(),
+        }
+    }
+}
+
+fn default_overflow_max_persisted() -> u64 {
+    100_000
+}
+
+fn default_overflow_max_age_secs() -> u64 {
+    86_400
+}
+
+fn default_overflow_reload_batch() -> usize {
+    256
 }
 
 /// The full configuration of Plaid

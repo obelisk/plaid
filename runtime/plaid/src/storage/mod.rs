@@ -216,6 +216,11 @@ impl Storage {
         })
     }
 
+    /// Return whether the backing store persists data across reboots.
+    pub fn is_persistent(&self) -> bool {
+        self.database.is_persistent()
+    }
+
     pub async fn insert(
         &self,
         namespace: String,
