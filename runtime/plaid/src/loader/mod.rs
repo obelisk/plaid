@@ -542,7 +542,7 @@ async fn populate_storage_sizes(
             }
         }
     }))
-    .buffer_unordered(MAX_STORAGE_LOOKUP_CONCURRENCY)
+    .buffered(MAX_STORAGE_LOOKUP_CONCURRENCY)
     .filter_map(|res| async move { res })
     .collect::<Vec<PlaidModule>>()
     .await
@@ -581,12 +581,12 @@ pub async fn load(
                 Ok(filename_and_bytes) => filename_and_bytes,
                 Err(e) => {
                     let file_path = path.path().to_string_lossy().into_owned();
-                        if config.panic_on_module_load_failure {
-                            panic!("Failed to parse module at [{file_path}]: {e}")
-                        } else {
-                            error!("Failed to parse module at [{file_path}]: {e}. Skipping load");
-                            return None;
-                        }
+                    if config.panic_on_module_load_failure {
+                        panic!("Failed to parse module at [{file_path}]: {e}")
+                    } else {
+                        error!("Failed to parse module at [{file_path}]: {e}. Skipping load");
+                        return None;
+                    }
                 }
             };
 
