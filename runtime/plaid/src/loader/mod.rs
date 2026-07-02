@@ -590,7 +590,7 @@ pub async fn load(
                 }
             };
 
-
+            info!("Loading module [{filename}]");
             if let Some(signing) = &config.module_signing {
                 if let Err(e) = check_module_signatures(signing, &filename, &module_bytes) {
                     if signing.panic_on_invalid_signature {
@@ -622,6 +622,7 @@ pub async fn load(
 
             let test_mode = config.test_mode && !config.test_mode_exemptions.contains(&filename);
 
+            
             let mut plaid_module = match PlaidModule::compile(
                 &filename,
                 &config.computation_amount,
@@ -653,6 +654,7 @@ pub async fn load(
             plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
             plaid_module.accessory_data = module_accessory_data(config, &plaid_module.name, &type_);
 
+            info!("Finished loading module [{filename}]");
             Some(plaid_module)
         })
         .collect();
