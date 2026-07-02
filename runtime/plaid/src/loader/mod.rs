@@ -353,7 +353,7 @@ impl PlaidModule {
     /// This function sets up the computation metering, configures the module tunables, and
     /// compiles the module using the provided bytecode and settings.
     ///
-    /// This function returns a PlaidModule with `secrets`, `cache`, and `persistent_response` set to `None.`
+    /// This function returns a PlaidModule with `secrets` and `persistent_response` set to `None`.
     /// __Ensure that you set these values if needed after calling this function__.
     ///
     /// Storage byte counts are initialized to zero; call [`Self::log_load_info`] after applying
