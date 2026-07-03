@@ -72,6 +72,9 @@ async fn post_handler(
     webhooks: HashMap<String, WebhookConfig>,
     exec: Arc<Executor>,
 ) -> impl warp::Reply {
+    // The status code we'll return. Defaults to 200, but is bumped to 429 if the
+    // execution system's bounded queue is full so the sender can back off and retry.
+    let mut status = StatusCode::OK;
     // If this is a webhook that is configured
     if let Some(webhook_configuration) = webhooks.get(&webhook) {
         // If the webhook has a label, use that as the source, otherwise use the webhook address
@@ -89,7 +92,7 @@ async fn post_handler(
             Err(e) => {
                 error!("Error reading body for webhook: {webhook}: {e}");
                 // We still return a 200 to avoid leaking information
-                return Box::new(warp::reply());
+                return Box::new(warp::reply::with_status(warp::reply(), StatusCode::OK));
             }
         };
 
@@ -115,10 +118,15 @@ async fn post_handler(
         // Webhook exists, buffer log
         if let Err(e) = exec.execute_webhook_message(message) {
             match e {
-                TrySendError::Full(_) => error!(
-                    "Queue Full! [{}] log dropped!",
-                    webhook_configuration.log_type
-                ),
+                TrySendError::Full(_) => {
+                    error!(
+                        "Queue Full! [{}] log dropped!",
+                        webhook_configuration.log_type
+                    );
+                    // The bounded queue to the execution system is full: signal
+                    // backpressure to the caller instead of silently dropping the log.
+                    status = StatusCode::TOO_MANY_REQUESTS;
+                }
                 // TODO: Have this actually cause Plaid to exit
                 TrySendError::Disconnected(_) => panic!(
                     "The execution system is no longer accepting messages. Nothing can continue."
@@ -126,8 +134,8 @@ async fn post_handler(
             }
         }
     }
-    // Always Empty Response
-    Box::new(warp::reply())
+    // Empty response, with the status code determined above.
+    Box::new(warp::reply::with_status(warp::reply(), status))
 }
 
 /// Read the body of a request with a maximum size limit
