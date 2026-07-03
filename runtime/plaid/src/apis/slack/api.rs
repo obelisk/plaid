@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use plaid_stl::slack::{
-    CreateChannel, CreateChannelResponse, GetDndInfo, GetDndInfoResponse, GetIdFromEmail,
-    GetPresence, GetPresenceResponse, InviteToChannel, PostMessage, RemoveFromChannel,
-    UpdateMessage, UserInfo, UserInfoResponse, ViewOpen,
+    ConversationsHistory, CreateChannel, CreateChannelResponse, DeleteScheduledMessage,
+    GetDndInfo, GetDndInfoResponse, GetIdFromEmail, GetPresence, GetPresenceResponse,
+    InviteToChannel, PostMessage, RemoveFromChannel, ScheduleMessage, UpdateMessage, UserInfo,
+    UserInfoResponse, ViewOpen,
 };
 use reqwest::{Client, RequestBuilder};
 
@@ -16,6 +17,9 @@ use super::Slack;
 
 enum Apis {
     PostMessage(plaid_stl::slack::PostMessage),
+    ScheduleMessage(plaid_stl::slack::ScheduleMessage),
+    DeleteScheduledMessage(plaid_stl::slack::DeleteScheduledMessage),
+    ConversationsHistory(plaid_stl::slack::ConversationsHistory),
     UpdateMessage(plaid_stl::slack::UpdateMessage),
     ViewsOpen(plaid_stl::slack::ViewOpen),
     LookupByEmail(plaid_stl::slack::GetIdFromEmail),
@@ -30,11 +34,27 @@ enum Apis {
 const SLACK_API_URL: &str = "https://slack.com/api/";
 type Result<T> = std::result::Result<T, ApiError>;
 
+/// Body returned to a `post_message` caller that opted in to rate-limit
+/// handling when Slack responds 429. It mirrors a Slack error payload so the
+/// STL response type can parse it uniformly; the rule reacts by scheduling the
+/// message itself (see the notifier's schedule ladder). Deciding *how* to react
+/// to a rate limit is deliberately left to the rule, not the runtime.
+const RATE_LIMITED_BODY: &str = r#"{"ok":false,"error":"ratelimited"}"#;
+
 /// This struct is used to deserialize a response from Slack API and
 /// just check if the result is OK or not.
 #[derive(serde::Deserialize)]
 struct GenericSlackResponse {
     ok: bool,
+}
+
+/// Detects whether a `post_message` caller opted in to rate-limit handling.
+/// Parsed alongside `PostMessage` so the opt-in is per call: callers that don't
+/// set it keep the historical behavior of a hard error on 429.
+#[derive(serde::Deserialize)]
+struct ScheduleOptIn {
+    #[serde(default)]
+    schedule_on_ratelimit: bool,
 }
 
 impl Apis {
@@ -44,6 +64,37 @@ impl Apis {
                 .post(format!("{SLACK_API_URL}{api}", api = "chat.postMessage"))
                 .body(p.body.clone())
                 .header("Content-Type", "application/json; charset=utf-8"),
+            Self::ScheduleMessage(p) => client
+                .post(format!("{SLACK_API_URL}{api}", api = "chat.scheduleMessage"))
+                .body(p.body.clone())
+                .header("Content-Type", "application/json; charset=utf-8"),
+            Self::DeleteScheduledMessage(p) => client
+                .post(format!(
+                    "{SLACK_API_URL}{api}",
+                    api = "chat.deleteScheduledMessage"
+                ))
+                .body(p.body().unwrap_or_default()) // TODO this is not great: maybe this method should be fallible
+                .header("Content-Type", "application/json; charset=utf-8"),
+            Self::ConversationsHistory(p) => {
+                let mut query: Vec<(&str, String)> = vec![
+                    ("channel", p.channel.clone()),
+                    // Metadata is only returned when explicitly requested. Callers use it
+                    // to correlate posted messages back to the event that generated them.
+                    ("include_all_metadata", "true".to_string()),
+                ];
+                if let Some(limit) = p.limit {
+                    query.push(("limit", limit.to_string()));
+                }
+                if let Some(oldest) = &p.oldest {
+                    query.push(("oldest", oldest.clone()));
+                }
+                client
+                    .get(format!(
+                        "{SLACK_API_URL}{api}",
+                        api = "conversations.history"
+                    ))
+                    .query(&query)
+            }
             Self::UpdateMessage(p) => client
                 .post(format!("{SLACK_API_URL}{api}", api = "chat.update"))
                 .body(p.body.clone())
@@ -90,6 +141,9 @@ impl std::fmt::Display for Apis {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PostMessage(_) => write!(f, "PostMessage"),
+            Self::ScheduleMessage(_) => write!(f, "ScheduleMessage"),
+            Self::DeleteScheduledMessage(_) => write!(f, "DeleteScheduledMessage"),
+            Self::ConversationsHistory(_) => write!(f, "ConversationsHistory"),
             Self::UpdateMessage(_) => write!(f, "UpdateMessage"),
             Self::ViewsOpen(_) => write!(f, "ViewsOpen"),
             Self::LookupByEmail(_) => write!(f, "LookupByEmail"),
@@ -162,10 +216,115 @@ impl Slack {
 
     /// Call the Slack postMessage API. The message and location are defined by the module but the bot
     /// must be configured in Plaid.
+    ///
+    /// Slack rate limits chat.postMessage to roughly one message per second per
+    /// channel, so a burst of posts to one channel gets HTTP 429s. A caller can
+    /// opt in (via `schedule_on_ratelimit` in the request) to receive a
+    /// `{"ok":false,"error":"ratelimited"}` body on 429 instead of a hard error,
+    /// so it can decide how to react — typically by scheduling the message with
+    /// [`Self::schedule_message`]. How to handle the rate limit (delay, windows,
+    /// retries) is intentionally left to the rule, not baked into the runtime.
     pub async fn post_message(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
         let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        let bot = p.bot.clone();
+        // Opt-in per call; unset means the historical "429 is an error" behavior.
+        let schedule_on_ratelimit = serde_json::from_str::<ScheduleOptIn>(params)
+            .map(|o| o.schedule_on_ratelimit)
+            .unwrap_or(false);
         match self
-            .call_slack(p.bot.clone(), Apis::PostMessage(p), module)
+            .call_slack(bot, Apis::PostMessage(p), module)
+            .await
+        {
+            Ok((200, response)) => {
+                let slack_response: GenericSlackResponse = serde_json::from_str(&response)
+                    .map_err(|_| {
+                        ApiError::SlackError(SlackError::UnexpectedPayload(response.clone()))
+                    })?;
+                if !slack_response.ok {
+                    return Err(ApiError::SlackError(SlackError::UnexpectedPayload(
+                        response,
+                    )));
+                }
+                Ok(response)
+            }
+            Ok((429, _)) if schedule_on_ratelimit => Ok(RATE_LIMITED_BODY.to_string()),
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Call the Slack chat.scheduleMessage API. The caller supplies a fully
+    /// rendered body (including `post_at`); the runtime just relays it.
+    ///
+    /// Returns the raw Slack response on a 200 even when `ok` is false, so the
+    /// caller can react to `restricted_too_many` (the 30-per-5-minute-window
+    /// limit) by choosing a different `post_at` — that policy lives in the rule.
+    pub async fn schedule_message(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
+        let p: ScheduleMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::ScheduleMessage(p), module)
+            .await
+        {
+            // Pass the body through regardless of `ok`: the caller needs to see
+            // `restricted_too_many` / `time_in_past` to pick another window.
+            Ok((200, response)) => {
+                serde_json::from_str::<GenericSlackResponse>(&response).map_err(|_| {
+                    ApiError::SlackError(SlackError::UnexpectedPayload(response.clone()))
+                })?;
+                Ok(response)
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Delete a scheduled message before it posts (chat.deleteScheduledMessage).
+    ///
+    /// Returns the raw Slack response even when `ok` is false: callers need the
+    /// error code to distinguish "already posted" (`invalid_scheduled_message_id`)
+    /// from real failures, since a scheduled message that has posted can no
+    /// longer be deleted and must be handled differently.
+    pub async fn delete_scheduled_message(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String> {
+        let p: DeleteScheduledMessage =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::DeleteScheduledMessage(p), module)
+            .await
+        {
+            Ok((200, response)) => {
+                // Validate it parses as a Slack response but pass it through
+                // regardless of `ok` — see doc comment.
+                serde_json::from_str::<GenericSlackResponse>(&response).map_err(|_| {
+                    ApiError::SlackError(SlackError::UnexpectedPayload(response.clone()))
+                })?;
+                Ok(response)
+            }
+            Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
+                status,
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fetch recent message history for a channel (conversations.history),
+    /// including message metadata.
+    pub async fn conversations_history(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String> {
+        let p: ConversationsHistory =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        match self
+            .call_slack(p.bot.clone(), Apis::ConversationsHistory(p), module)
             .await
         {
             Ok((200, response)) => {
