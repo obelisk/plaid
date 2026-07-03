@@ -5,6 +5,7 @@ mod utils;
 
 use errors::Errors;
 use limits::LimitingTunables;
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use serde::{de, Deserialize, Serialize};
 use signing::check_module_signatures;
 use sshcerts::PublicKey;
@@ -15,7 +16,6 @@ use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
 use futures_util::stream::{self, StreamExt};
-use rayon::prelude::*;
 
 pub use utils::cost_function;
 use utils::{
@@ -510,7 +510,7 @@ const MAX_STORAGE_LOOKUP_CONCURRENCY: usize = 10;
 /// load panics) according to `config.panic_on_module_load_failure`.
 async fn populate_storage_sizes(
     modules: Vec<PlaidModule>,
-    storage: &Arc<Storage>,
+    storage: Arc<Storage>,
     config: &Configuration,
 ) -> Vec<PlaidModule> {
     stream::iter(modules.into_iter().map(|module| {
@@ -542,7 +542,7 @@ async fn populate_storage_sizes(
             }
         }
     }))
-    .buffered(MAX_STORAGE_LOOKUP_CONCURRENCY)
+    .buffer_unordered(MAX_STORAGE_LOOKUP_CONCURRENCY)
     .filter_map(|res| async move { res })
     .collect::<Vec<PlaidModule>>()
     .await
@@ -621,7 +621,6 @@ pub async fn load(
             }
 
             let test_mode = config.test_mode && !config.test_mode_exemptions.contains(&filename);
-
             
             let mut plaid_module = match PlaidModule::compile(
                 &filename,
@@ -663,7 +662,7 @@ pub async fn load(
     // module, so these lookups are performed concurrently rather than one at a time. Without a
     // storage backend there is nothing to count, so every module keeps its default of zero.
     let loaded_modules = match &storage {
-        Some(storage) => populate_storage_sizes(loaded_modules, storage, config).await,
+        Some(storage) => populate_storage_sizes(loaded_modules, storage.clone(), config).await,
         None => loaded_modules,
     };
 
