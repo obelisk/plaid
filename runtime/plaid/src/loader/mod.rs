@@ -5,6 +5,7 @@ mod utils;
 
 use errors::Errors;
 use limits::LimitingTunables;
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use serde::{de, Deserialize, Serialize};
 use signing::check_module_signatures;
 use sshcerts::PublicKey;
@@ -13,6 +14,9 @@ use std::fmt::{Display, Formatter};
 use std::fs::{self};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
+
+use futures_util::stream::{self, StreamExt};
+
 pub use utils::cost_function;
 use utils::{
     get_module_computation_limit, get_module_page_count, get_module_persistent_storage_limit,
@@ -344,19 +348,21 @@ impl PlaidModule {
             .flatten()
     }
 
-    /// Configure and compiles a Plaid module with specified computation limits and memory page count.
+    /// Configure and compile a Plaid module with specified computation limits and memory page count.
     ///
     /// This function sets up the computation metering, configures the module tunables, and
     /// compiles the module using the provided bytecode and settings.
     ///
-    /// This function returns a PlaidModule with `secrets`, `cache`, and `persistent_response` set to `None.`
+    /// This function returns a PlaidModule with `secrets` and `persistent_response` set to `None`.
     /// __Ensure that you set these values if needed after calling this function__.
-    async fn configure_and_compile(
+    ///
+    /// Storage byte counts are initialized to zero; call [`Self::log_load_info`] after applying
+    /// storage size from the backing store.
+    fn compile(
         filename: &str,
         computation_amount: &LimitedAmount,
         memory_page_count: &LimitedAmount,
         storage_amount: &LimitableAmount,
-        storage: Option<Arc<Storage>>,
         module_bytes: Vec<u8>,
         log_type: &str,
         test_mode: bool,
@@ -420,20 +426,7 @@ impl PlaidModule {
             }
         }
 
-        // Count bytes already in storage
-        let storage_current_bytes: u64 = match storage {
-            None => 0,
-            Some(s) => s
-                .get_namespace_byte_size(filename)
-                .await
-                .map_err(Errors::StorageError)?,
-        };
-        let storage_current = Arc::new(RwLock::new(storage_current_bytes));
-
-        info!("Name: [{filename}] Computation Limit: [{computation_limit}] Memory Limit: [{page_limit} pages] Storage: [{storage_current_bytes}/{storage_limit} bytes used] Log Type: [{log_type}]. Test Mode: [{test_mode}]");
-        for import in module.imports() {
-            info!("\tImport: {}", import.name());
-        }
+        let storage_current = Arc::new(RwLock::new(0));
 
         Ok(Self {
             name: filename.to_string(),
@@ -449,6 +442,23 @@ impl PlaidModule {
             persistent_response: None,
             test_mode,
         })
+    }
+
+    fn log_load_info(&self) {
+        let storage_current_bytes = *self.storage_current.read().unwrap();
+        info!(
+            "Name: [{}] Computation Limit: [{}] Memory Limit: [{} pages] Storage: [{}/{} bytes used] Log Type: [{}]. Test Mode: [{}]",
+            self.name,
+            self.computation_limit,
+            self.page_limit,
+            storage_current_bytes,
+            self.storage_limit,
+            self.logtype,
+            self.test_mode,
+        );
+        for import in self.module.imports() {
+            info!("\tImport: {}", import.name());
+        }
     }
 }
 
@@ -490,12 +500,62 @@ impl PlaidModules {
     }
 }
 
+/// Maximum number of concurrent storage namespace byte-size lookups during module load.
+const MAX_STORAGE_LOOKUP_CONCURRENCY: usize = 10;
+
+/// Concurrently populate each module's current storage byte usage from the backing store.
+///
+/// Lookups run with bounded concurrency to avoid overwhelming the storage backend. Each byte count
+/// is written straight into its own module. Modules whose lookup fails are dropped (or the whole
+/// load panics) according to `config.panic_on_module_load_failure`.
+async fn populate_storage_sizes(
+    modules: Vec<PlaidModule>,
+    storage: Arc<Storage>,
+    config: &Configuration,
+) -> Vec<PlaidModule> {
+    stream::iter(modules.into_iter().map(|module| {
+        let storage = storage.clone();
+        async move {
+            match storage
+                .get_namespace_byte_size(&module.name)
+                .await
+                .map_err(Errors::StorageError)
+            {
+                Ok(bytes) => {
+                    *module.storage_current.write().unwrap() = bytes;
+                    Some(module)
+                }
+                Err(e) => {
+                    if config.panic_on_module_load_failure {
+                        panic!(
+                            "Module [{}] failed to look up namespace byte size: {e}",
+                            module.name
+                        )
+                    } else {
+                        error!(
+                            "Module [{}] failed to look up namespace byte size: {e}. Skipping module load",
+                            module.name
+                        );
+                        None
+                    }
+                }
+            }
+        }
+    }))
+    .buffer_unordered(MAX_STORAGE_LOOKUP_CONCURRENCY)
+    .filter_map(|res| async move { res })
+    .collect::<Vec<PlaidModule>>()
+    .await
+}
+
 /// Load all modules, according to Plaid's configuration
 pub async fn load(
     config: &Configuration,
     storage: Option<Arc<Storage>>,
 ) -> Result<PlaidModules, ()> {
-    let module_paths = fs::read_dir(config.module_dir.clone()).unwrap();
+    let module_paths = fs::read_dir(config.module_dir.clone())
+        .unwrap()
+        .collect::<Vec<_>>();
     let mut modules = PlaidModules::default();
     let byte_secrets = read_and_configure_secrets(&config.secrets);
 
@@ -510,9 +570,14 @@ pub async fn load(
         }
     };
 
-    for path in module_paths {
-        let (filename, module_bytes) = match path {
-            Ok(path) => match read_and_parse_modules(&path) {
+    let loaded_modules: Vec<PlaidModule> = module_paths
+        .par_iter()
+        .filter_map(|path| {
+            let path = path.as_ref().inspect_err(|e| {
+                error!("Bad entry in modules directory - skipping. Error: {e}")
+            }).ok()?;
+
+            let (filename, module_bytes) = match read_and_parse_modules(&path) {
                 Ok(filename_and_bytes) => filename_and_bytes,
                 Err(e) => {
                     let file_path = path.path().to_string_lossy().into_owned();
@@ -520,104 +585,100 @@ pub async fn load(
                         panic!("Failed to parse module at [{file_path}]: {e}")
                     } else {
                         error!("Failed to parse module at [{file_path}]: {e}. Skipping load");
-                        continue;
+                        return None;
                     }
                 }
-            },
-            Err(e) => {
-                error!("Bad entry in modules directory - skipping. Error: {e}");
-                continue;
-            }
-        };
+            };
 
-        // Fetch and verify the corresponding signature over this module if we require
-        // rule signing. If any rule does not have enough valid signatures it will not be loaded.
-        if let Some(signing) = &config.module_signing {
-            if let Err(e) = check_module_signatures(signing, &filename, &module_bytes) {
-                if signing.panic_on_invalid_signature {
-                    panic!("Module [{filename}] failed signature verification: {e}")
-                } else {
-                    error!(
-                        "Module [{filename}] failed signature verification: {e}. Skipping module load"
-                    );
-                    continue;
+            info!("Loading module [{filename}]");
+            if let Some(signing) = &config.module_signing {
+                if let Err(e) = check_module_signatures(signing, &filename, &module_bytes) {
+                    if signing.panic_on_invalid_signature {
+                        panic!("Module [{filename}] failed signature verification: {e}")
+                    } else {
+                        error!(
+                            "Module [{filename}] failed signature verification: {e}. Skipping module load"
+                        );
+                        return None;
+                    }
                 }
             }
-        }
 
-        // See if a type is defined in the configuration file, if not then we will grab the first part
-        // of the filename up to the first underscore.
-        let type_ = if let Some(type_) = config.log_type_overrides.get(&filename) {
-            type_.to_string()
-        } else {
-            let type_: Vec<&str> = filename.split('_').collect();
-            type_[0].to_string()
-        };
+            let type_ = if let Some(type_) = config.log_type_overrides.get(&filename) {
+                type_.to_string()
+            } else {
+                let type_: Vec<&str> = filename.split('_').collect();
+                type_[0].to_string()
+            };
 
-        // Warn when the inferred log type differs from what the full filename would suggest
-        let filename_without_ext = filename.trim_end_matches(".wasm");
-        if !config.log_type_overrides.contains_key(&filename) && filename_without_ext != type_ {
-            warn!(
-                "Module [{filename}] assigned log type [{type_}] (inferred from first segment before '_'). \
-                 If you expected log type [{filename_without_ext}], add to [loading.log_type_overrides]: \
-                 \"{filename}\" = \"{filename_without_ext}\""
-            );
-        }
-
-        // Default is the global test mode. Then if the module is in the exemptions specification
-        // we will disable test mode for that module.
-        let test_mode = config.test_mode && !config.test_mode_exemptions.contains(&filename);
-
-        // Configure and compile module
-        let mut plaid_module = match PlaidModule::configure_and_compile(
-            &filename,
-            &config.computation_amount,
-            &config.memory_page_count,
-            &config.storage_size,
-            storage.clone(),
-            module_bytes,
-            &type_,
-            test_mode,
-            &config.compiler_backend,
-        )
-        .await
-        {
-            Ok(pm) => pm,
-            Err(e) => {
-                if config.panic_on_module_load_failure {
-                    panic!("Module [{filename}] failed to load: {e}")
-                } else {
-                    error!("Module [{filename}] failed to load: {e}. Skipping module load");
-                    continue;
-                }
+            let filename_without_ext = filename.trim_end_matches(".wasm");
+            if !config.log_type_overrides.contains_key(&filename) && filename_without_ext != type_ {
+                warn!(
+                    "Module [{filename}] assigned log type [{type_}] (inferred from first segment before '_'). \
+                     If you expected log type [{filename_without_ext}], add to [loading.log_type_overrides]: \
+                     \"{filename}\" = \"{filename_without_ext}\""
+                );
             }
-        };
 
-        // Persistent response is available to be set per module. This allows it to persistently
-        // store the result of its run. It can use this during further runs, or it can be used
-        // as the target of GET request hooks.
-        let persistent_response = config
-            .persistent_response_size
-            .get(&filename)
-            .copied()
-            .map(PersistentResponse::new);
+            let test_mode = config.test_mode && !config.test_mode_exemptions.contains(&filename);
+            
+            let mut plaid_module = match PlaidModule::compile(
+                &filename,
+                &config.computation_amount,
+                &config.memory_page_count,
+                &config.storage_size,
+                module_bytes,
+                &type_,
+                test_mode,
+                &config.compiler_backend,
+            ) {
+                Ok(pm) => pm,
+                Err(e) => {
+                    if config.panic_on_module_load_failure {
+                        panic!("Module [{filename}] failed to load: {e}")
+                    } else {
+                        error!("Module [{filename}] failed to load: {e}. Skipping module load");
+                        return None;
+                    }
+                }
+            };
 
-        // Set optional fields on our new module
-        plaid_module.persistent_response = persistent_response;
-        plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
-        plaid_module.accessory_data = module_accessory_data(config, &plaid_module.name, &type_);
+            let persistent_response = config
+                .persistent_response_size
+                .get(&filename)
+                .copied()
+                .map(PersistentResponse::new);
 
-        // Put it in an Arc because we're going to have multiple references to it
-        let plaid_module = Arc::new(plaid_module);
+            plaid_module.persistent_response = persistent_response;
+            plaid_module.secrets = byte_secrets.get(&type_).map(|x| x.clone());
+            plaid_module.accessory_data = module_accessory_data(config, &plaid_module.name, &type_);
 
-        // Insert into the channels map
+            info!("Finished loading module [{filename}]");
+            Some(plaid_module)
+        })
+        .collect();
+
+    // Counting the bytes already in storage requires a round trip to the backing store per
+    // module, so these lookups are performed concurrently rather than one at a time. Without a
+    // storage backend there is nothing to count, so every module keeps its default of zero.
+    let loaded_modules = match &storage {
+        Some(storage) => populate_storage_sizes(loaded_modules, storage.clone(), config).await,
+        None => loaded_modules,
+    };
+
+    for module in loaded_modules {
+        module.log_load_info();
+
+        let type_ = module.logtype.clone();
+        let filename = module.name.clone();
+        let plaid_module = Arc::new(module);
+
         if let Some(mods) = modules.channels.get_mut(&type_) {
             mods.push(plaid_module.clone());
         } else {
             modules.channels.insert(type_, vec![plaid_module.clone()]);
         }
 
-        // Insert into the name map
         modules.modules.insert(filename, plaid_module);
     }
 
