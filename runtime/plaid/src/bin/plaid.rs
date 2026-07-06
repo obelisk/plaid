@@ -342,15 +342,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             metrics_config.listen_address
         );
 
-        let listen_addr = metrics_config.listen_address.clone();
+        let listen_addr = metrics_config.listen_address;
         server_tasks.spawn(async move {
-            let routes = warp::path!("metrics").and(warp::get()).map(move || {
-                warp::reply::with_header(
-                    handle.encode(),
-                    "content-type",
-                    "text/plain; version=0.0.4; charset=utf-8",
-                )
-            });
+            let routes =
+                warp::path!("metrics")
+                    .and(warp::get())
+                    .map(move || match handle.encode() {
+                        Ok(body) => {
+                            let reply = warp::reply::with_header(
+                                body,
+                                "content-type",
+                                "text/plain; version=0.0.4; charset=utf-8",
+                            );
+                            warp::reply::with_status(reply, StatusCode::OK)
+                        }
+                        Err(e) => {
+                            error!("Failed to encode metrics: {e}");
+                            warp::reply::with_status(
+                                warp::reply::with_header(
+                                    String::new(),
+                                    "content-type",
+                                    "text/plain; version=0.0.4; charset=utf-8",
+                                ),
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                            )
+                        }
+                    });
             let (_, server) =
                 warp::serve(routes).bind_with_graceful_shutdown(listen_addr, async move {
                     token.cancelled().await;
