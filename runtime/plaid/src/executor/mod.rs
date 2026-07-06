@@ -14,6 +14,7 @@ use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
 
 use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
+use metrics::ModuleExecutionMetrics;
 use thread_pools::ExecutionThreadPools;
 use tokio::sync::oneshot::Sender as OneShotSender;
 use tokio_util::sync::CancellationToken;
@@ -509,6 +510,7 @@ fn process_message_with_module(
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
+    module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
     immediate_sender: Option<Sender<Message>>,
     delayed_log_sender: Sender<DelayedMessage>,
     cancellation_token: CancellationToken,
@@ -563,14 +565,14 @@ fn process_message_with_module(
                     let computation_remaining_percentage =
                         (remaining as f32 / computation_limit as f32) * 100.0;
                     let computation_used = 100.0 - computation_remaining_percentage;
-                    els.log_ts(
-                        format!("{}_computation_percentage_used", module.name),
-                        computation_used as i64,
-                    )?;
-                    els.log_ts(
-                        format!("{}_execution_duration", module.name),
-                        begin.elapsed().as_micros() as i64,
-                    )?;
+
+                    if let Some(metrics) = &module_execution_metrics {
+                        metrics.record_successful_execution(
+                            &module.name,
+                            computation_used as f64,
+                            begin.elapsed(),
+                        );
+                    }
 
                     // If performance monitoring is enabled, log data to the monitoring system
                     if let Some(ref sender) = performance_mode {
@@ -637,6 +639,7 @@ fn execution_loop(
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
+    module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
     immediate_sender: Weak<Sender<Message>>,
     delayed_log_sender: Sender<DelayedMessage>,
     cancellation_token: CancellationToken,
@@ -668,6 +671,7 @@ fn execution_loop(
                     cache.clone(),
                     els.clone(),
                     performance_monitoring_mode.clone(),
+                    module_execution_metrics.clone(),
                     immediate_sender.clone(),
                     delayed_log_sender.clone(),
                     cancellation_token.clone(),
@@ -684,6 +688,7 @@ fn execution_loop(
                         cache.clone(),
                         els.clone(),
                         performance_monitoring_mode.clone(),
+                        module_execution_metrics.clone(),
                         immediate_sender.clone(),
                         delayed_log_sender.clone(),
                         cancellation_token.clone(),
@@ -732,6 +737,7 @@ impl Executor {
         cache: Option<Arc<Cache>>,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
+        module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
         immediate_sender: Weak<Sender<Message>>,
         delayed_log_sender: Sender<DelayedMessage>,
         cancellation_token: CancellationToken,
@@ -748,6 +754,7 @@ impl Executor {
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
+            let module_execution_metrics = module_execution_metrics.clone();
             let immediate_sender = immediate_sender.clone();
             let delayed_log_sender = delayed_log_sender.clone();
             let cancellation_token = cancellation_token.clone();
@@ -760,6 +767,7 @@ impl Executor {
                     cache.clone(),
                     els.clone(),
                     performance_sender.clone(),
+                    module_execution_metrics.clone(),
                     immediate_sender.clone(),
                     delayed_log_sender.clone(),
                     cancellation_token.clone(),
@@ -781,6 +789,7 @@ impl Executor {
                 let modules = modules.clone();
                 let els = els.clone();
                 let performance_sender = performance_monitoring_mode.clone();
+                let module_execution_metrics = module_execution_metrics.clone();
                 let log_type = log_type.clone();
                 let immediate_sender = immediate_sender.clone();
                 let delayed_log_sender = delayed_log_sender.clone();
@@ -794,6 +803,7 @@ impl Executor {
                         cache.clone(),
                         els.clone(),
                         performance_sender.clone(),
+                        module_execution_metrics.clone(),
                         immediate_sender.clone(),
                         delayed_log_sender.clone(),
                         cancellation_token.clone(),

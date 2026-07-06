@@ -18,7 +18,7 @@ use plaid::{
 
 use apis::Api;
 use data::Data;
-use executor::metrics::QueueMetrics;
+use executor::metrics::{ModuleExecutionMetrics, QueueMetrics};
 use executor::*;
 use plaid::metrics::MetricsHandle;
 use plaid_stl::messages::LogSource;
@@ -252,12 +252,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .metrics
         .as_ref()
         .map(|_| Arc::new(MetricsHandle::new()));
-    if let Some(handle) = &metrics {
-        let queue_metrics = QueueMetrics::from_pools(&exec_thread_pools);
-        if let Err(e) = handle.register(Box::new(queue_metrics)) {
-            error!("Failed to register queue metrics collector: {e}");
-        }
-    }
+
+    let module_execution_metrics = if let Some(handle) = &metrics {
+        QueueMetrics::register(handle, &exec_thread_pools);
+        Some(Arc::new(ModuleExecutionMetrics::register(handle)))
+    } else {
+        None
+    };
 
     // For convenience, keep a sender for the general channel, so that we can quickly clone it around
     let log_sender = exec_thread_pools.general_pool.sender.clone();
@@ -439,6 +440,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(cache),
         els.clone(),
         performance_sender.clone(),
+        module_execution_metrics.clone(),
         Arc::downgrade(&immediate_dispatch),
         delayed_log_sender.clone(),
         cancellation_token.clone(),
