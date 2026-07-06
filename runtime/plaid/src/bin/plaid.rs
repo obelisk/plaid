@@ -18,7 +18,9 @@ use plaid::{
 
 use apis::Api;
 use data::Data;
+use executor::metrics::{ModuleExecutionMetrics, QueueMetrics};
 use executor::*;
+use plaid::metrics::MetricsHandle;
 use plaid_stl::messages::LogSource;
 use storage::Storage;
 use tokio::{
@@ -254,6 +256,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create thread pools for log execution
     let exec_thread_pools = thread_pools::ExecutionThreadPools::new(&config.executor);
 
+    let metrics = config
+        .metrics
+        .as_ref()
+        .map(|_| Arc::new(MetricsHandle::new()));
+
+    let module_execution_metrics = if let Some(handle) = &metrics {
+        QueueMetrics::register(handle, &exec_thread_pools);
+        Some(Arc::new(ModuleExecutionMetrics::register(handle)))
+    } else {
+        None
+    };
+
     // For convenience, keep a sender for the general channel, so that we can quickly clone it around
     let log_sender = exec_thread_pools.general_pool.sender.clone();
 
@@ -325,6 +339,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         warn!("No probe_listen_address configured; readiness and liveness endpoints are disabled");
     }
 
+    if let Some(metrics_config) = &config.metrics {
+        let handle = metrics
+            .as_ref()
+            .expect("metrics handle must exist when metrics config is present")
+            .clone();
+        let token = cancellation_token.clone();
+        info!(
+            "Started metrics server at: {}",
+            metrics_config.listen_address
+        );
+
+        let listen_addr = metrics_config.listen_address;
+        server_tasks.spawn(async move {
+            let routes =
+                warp::path!("metrics")
+                    .and(warp::get())
+                    .map(move || match handle.encode() {
+                        Ok(body) => {
+                            let reply = warp::reply::with_header(
+                                body,
+                                "content-type",
+                                "text/plain; version=0.0.4; charset=utf-8",
+                            );
+                            warp::reply::with_status(reply, StatusCode::OK)
+                        }
+                        Err(e) => {
+                            error!("Failed to encode metrics: {e}");
+                            warp::reply::with_status(
+                                warp::reply::with_header(
+                                    String::new(),
+                                    "content-type",
+                                    "text/plain; version=0.0.4; charset=utf-8",
+                                ),
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                            )
+                        }
+                    });
+            let (_, server) =
+                warp::serve(routes).bind_with_graceful_shutdown(listen_addr, async move {
+                    token.cancelled().await;
+                });
+            server.await;
+            info!("Metrics server shut down");
+        });
+    }
+
     let (performance_sender, performance_handle) = match config.performance_monitoring {
         Some(perf) => {
             warn!("Plaid is running with performance monitoring enabled - this is NOT recommended for production deployments. Metadata about rule execution will be logged to a channel that aggregates and reports metrics.");
@@ -380,6 +440,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         els.clone(),
         &roles,
         cancellation_token.clone(),
+        metrics.clone(),
     )
     .await?;
     info!("Configuring APIs for Modules");
@@ -404,6 +465,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(cache),
         els.clone(),
         performance_sender.clone(),
+        module_execution_metrics.clone(),
         Arc::downgrade(&immediate_dispatch),
         delayed_log_sender.clone(),
         cancellation_token.clone(),
@@ -654,6 +716,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Drop every Sender<Message> so worker threads exit once the queues drain.
     info!("Waiting for executor threads to drain...");
+    drop(metrics);
     drop(log_sender);
     drop(exec_thread_pools);
     drop(immediate_dispatch);

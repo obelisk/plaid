@@ -1,10 +1,12 @@
-use crate::{data::DataGeneratorLog, executor::Message, parse_duration};
+use crate::{data::DataGeneratorLog, executor::Message, metrics::MetricsHandle, parse_duration};
 use crossbeam_channel::Sender;
 use lru::LruCache;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
+use prometheus::IntCounter;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::Arc;
 use std::{num::NonZeroUsize, time::Duration};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -119,15 +121,35 @@ pub struct Okta {
     /// This LRU has a limited capacity: when this is reached, the least-recently-used item is removed to make space for a new insertion.
     /// Note: we only use the "key" part to keep track of the UUIDs we have seen. The "value" part is not used and always set to 0u32.
     seen_logs_uuid: LruCache<String, u32>,
+    /// Cumulative count of logs sent for processing, when metrics are enabled.
+    logs_fetched: Option<IntCounter>,
 }
 
 impl Okta {
-    pub fn new(config: OktaConfig, logger: Sender<Message>) -> Self {
+    pub fn new(
+        config: OktaConfig,
+        logger: Sender<Message>,
+        metrics: Option<Arc<MetricsHandle>>,
+    ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
             .build()
             .unwrap();
         let lru_cache_size = config.lru_cache_size;
+
+        let logs_fetched = metrics.map(|handle| {
+            let counter = IntCounter::new(
+                "plaid_okta_logs_fetched_total",
+                "Total number of Okta logs sent for processing by the data generator",
+            )
+            .expect("valid metric definition");
+
+            handle
+                .register(Box::new(counter.clone()))
+                .expect("expected unique collector");
+
+            counter
+        });
 
         Self {
             client,
@@ -135,6 +157,7 @@ impl Okta {
             last_seen: OffsetDateTime::now_utc(),
             logger,
             seen_logs_uuid: LruCache::new(NonZeroUsize::new(lru_cache_size).unwrap()),
+            logs_fetched,
         }
     }
 }
@@ -313,7 +336,13 @@ impl DataGenerator for Okta {
                 LogSource::Generator(Generator::Okta),
                 self.config.logbacks_allowed.clone(),
             ))
-            .map_err(|_| ())
+            .map_err(|_| ())?;
+
+        if let Some(counter) = &self.logs_fetched {
+            counter.inc();
+        }
+
+        Ok(())
     }
 
     fn list_already_seen(&self) -> Vec<String> {
