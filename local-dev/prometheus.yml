@@ -22,4 +22,4 @@ scrape_configs:
       # Use "plaid:9464" when both services run via `docker compose up` (shared network).
       # Use "host.docker.internal:9464" when Prometheus runs in Docker but Plaid runs on the host (`cargo run`).
       # Use "localhost:9464" if Prometheus runs directly on the host.
-      - targets: ["host.docker.internal:9464"]
+      - targets: ["plaid:9464"]

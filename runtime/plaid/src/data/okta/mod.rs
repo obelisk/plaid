@@ -143,9 +143,11 @@ impl Okta {
                 "Total number of Okta logs sent for processing by the data generator",
             )
             .expect("valid metric definition");
-            if let Err(e) = handle.register(Box::new(counter.clone())) {
-                error!("Failed to register Okta logs_fetched counter: {e}");
-            }
+
+            handle
+                .register(Box::new(counter.clone()))
+                .expect("expected unique collector");
+
             counter
         });
 

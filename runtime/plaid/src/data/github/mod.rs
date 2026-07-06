@@ -204,9 +204,11 @@ impl Github {
                 "Total number of GitHub logs sent for processing by the data generator",
             )
             .expect("valid metric definition");
-            if let Err(e) = handle.register(Box::new(counter.clone())) {
-                error!("Failed to register GitHub logs_fetched counter: {e}");
-            }
+
+            handle
+                .register(Box::new(counter.clone()))
+                .expect("expected unique collector");
+
             counter
         });
 
