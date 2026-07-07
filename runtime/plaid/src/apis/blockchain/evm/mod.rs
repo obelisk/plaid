@@ -14,9 +14,10 @@ use crate::{
 };
 use plaid_stl::blockchain::evm::types::{
     ChainId, EstimateGasRequest, EthCallRequest, GetAddressMetadataRequest, GetBlockRequest,
-    GetGasPriceRequest, GetLogsRequest, GetTransactionRequest, SendRawTransactionRequest,
+    GetFeeHistoryRequest, GetGasPriceRequest, GetLogsRequest, GetTransactionRequest,
+    SendRawTransactionRequest,
 };
-use serde_json::{json, Value};
+use serde_json::{json, Number, Value};
 use std::sync::Arc;
 
 pub struct Evm;
@@ -282,6 +283,38 @@ impl BlockchainClient<Evm> {
             Value::Bool(request.hydrated_transactions),
         ]);
         let request = JsonRpcRequest::new(RpcMethods::GetBlock, Some(params));
+
+        self.execute_rpc_call(node_selector, chain_id, request, module)
+            .await
+    }
+
+    /// Returns transaction base fee per gas and effective priority fee per gas for the requested block range.
+    pub async fn get_fee_history(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request = serde_json::from_str::<GetFeeHistoryRequest>(params)
+            .map_err(BlockchainError::SerdeError)?;
+        let chain_id = request.chain_id;
+
+        let node_selector = self.get_node_selector(chain_id)?;
+
+        let mut params = vec![
+            Value::String(request.block_count.to_string()),
+            Value::String(request.block_tag.to_string()),
+        ];
+        if let Some(percentiles) = request.reward_percentiles {
+            let percentiles = percentiles
+                .into_iter()
+                .map(|perc| Value::Number(Number::from(perc as u16)))
+                .collect::<Vec<_>>();
+
+            params.push(Value::Array(percentiles));
+        }
+
+        let params = Value::Array(params);
+        let request = JsonRpcRequest::new(RpcMethods::GetFeeHistory, Some(params));
 
         self.execute_rpc_call(node_selector, chain_id, request, module)
             .await

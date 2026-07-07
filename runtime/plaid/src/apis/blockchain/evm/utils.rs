@@ -14,6 +14,7 @@ pub enum RpcMethods {
     EstimateGas,
     GetLogs,
     GetBlock,
+    GetFeeHistory,
 }
 
 impl Display for RpcMethods {
@@ -29,6 +30,7 @@ impl Display for RpcMethods {
             Self::EstimateGas => write!(f, "eth_estimateGas"),
             Self::GetLogs => write!(f, "eth_getLogs"),
             Self::GetBlock => write!(f, "eth_getBlockByNumber"),
+            Self::GetFeeHistory => write!(f, "eth_getFeeHistory"),
         }
     }
 }
