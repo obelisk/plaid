@@ -426,8 +426,8 @@ pub struct FeeHistory {
     /// An array of block base fees per blob gas in wei. This includes the next block after the newest of the returned range,
     /// because this value can be derived from the newest block. Zeroes are returned for pre-EIP-4844 blocks.
     #[serde(rename = "baseFeePerBlobGas")]
-    pub base_fee_per_blob_gas: Vec<String>,
+    pub base_fee_per_blob_gas: Option<Vec<String>>,
     /// An array of block blob gas used ratios. These are calculated as the ratio of blobGasUsed and the maximum blob gas per block.
     #[serde(rename = "blobGasUsedRatio")]
-    pub blob_gas_used_ratio: Vec<f64>,
+    pub blob_gas_used_ratio: Option<Vec<f64>>,
 }

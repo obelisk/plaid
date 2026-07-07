@@ -30,7 +30,7 @@ impl Display for RpcMethods {
             Self::EstimateGas => write!(f, "eth_estimateGas"),
             Self::GetLogs => write!(f, "eth_getLogs"),
             Self::GetBlock => write!(f, "eth_getBlockByNumber"),
-            Self::GetFeeHistory => write!(f, "eth_getFeeHistory"),
+            Self::GetFeeHistory => write!(f, "eth_feeHistory"),
         }
     }
 }

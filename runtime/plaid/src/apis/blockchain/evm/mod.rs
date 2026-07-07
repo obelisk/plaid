@@ -301,7 +301,7 @@ impl BlockchainClient<Evm> {
         let node_selector = self.get_node_selector(chain_id)?;
 
         let mut params = vec![
-            Value::String(request.block_count.to_string()),
+            Value::String(format!("0x{:x}", request.block_count)),
             Value::String(request.block_tag.to_string()),
         ];
         if let Some(percentiles) = request.reward_percentiles {
