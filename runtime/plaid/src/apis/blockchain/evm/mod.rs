@@ -300,18 +300,18 @@ impl BlockchainClient<Evm> {
 
         let node_selector = self.get_node_selector(chain_id)?;
 
-        let mut params = vec![
+        let percentiles = request
+            .reward_percentiles
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| Value::Number(Number::from(p as u16)))
+            .collect::<Vec<_>>();
+
+        let params = vec![
             Value::String(format!("0x{:x}", request.block_count)),
             Value::String(request.block_tag.to_string()),
+            Value::Array(percentiles),
         ];
-        if let Some(percentiles) = request.reward_percentiles {
-            let percentiles = percentiles
-                .into_iter()
-                .map(|perc| Value::Number(Number::from(perc as u16)))
-                .collect::<Vec<_>>();
-
-            params.push(Value::Array(percentiles));
-        }
 
         let params = Value::Array(params);
         let request = JsonRpcRequest::new(RpcMethods::GetFeeHistory, Some(params));
