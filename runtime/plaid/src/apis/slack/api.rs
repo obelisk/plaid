@@ -34,13 +34,6 @@ enum Apis {
 const SLACK_API_URL: &str = "https://slack.com/api/";
 type Result<T> = std::result::Result<T, ApiError>;
 
-/// Body returned to a `post_message` caller that opted in to rate-limit
-/// handling when Slack responds 429. It mirrors a Slack error payload so the
-/// STL response type can parse it uniformly; the rule reacts by scheduling the
-/// message itself (see the notifier's schedule ladder). Deciding *how* to react
-/// to a rate limit is deliberately left to the rule, not the runtime.
-const RATE_LIMITED_BODY: &str = r#"{"ok":false,"error":"ratelimited"}"#;
-
 /// This struct is used to deserialize a response from Slack API and
 /// just check if the result is OK or not.
 #[derive(serde::Deserialize)]
@@ -219,11 +212,12 @@ impl Slack {
     ///
     /// Slack rate limits chat.postMessage to roughly one message per second per
     /// channel, so a burst of posts to one channel gets HTTP 429s. A caller can
-    /// opt in (via `schedule_on_ratelimit` in the request) to receive a
-    /// `{"ok":false,"error":"ratelimited"}` body on 429 instead of a hard error,
-    /// so it can decide how to react — typically by scheduling the message with
-    /// [`Self::schedule_message`]. How to handle the rate limit (delay, windows,
-    /// retries) is intentionally left to the rule, not baked into the runtime.
+    /// opt in (via `schedule_on_ratelimit` in the request) to receive Slack's
+    /// rate-limited response body on 429 (which carries `error: "ratelimited"`)
+    /// instead of a hard error, so it can decide how to react — typically by
+    /// scheduling the message with [`Self::schedule_message`]. How to handle the
+    /// rate limit (delay, windows, retries) is intentionally left to the rule,
+    /// not baked into the runtime.
     pub async fn post_message(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
         let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let bot = p.bot.clone();
@@ -247,7 +241,10 @@ impl Slack {
                 }
                 Ok(response)
             }
-            Ok((429, _)) if schedule_on_ratelimit => Ok(RATE_LIMITED_BODY.to_string()),
+            // Pass Slack's own rate-limited response body through so the caller
+            // sees the real payload (it carries `error: "ratelimited"`), rather
+            // than a synthetic stand-in.
+            Ok((429, response)) if schedule_on_ratelimit => Ok(response),
             Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                 status,
             ))),

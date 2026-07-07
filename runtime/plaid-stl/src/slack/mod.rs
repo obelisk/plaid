@@ -1117,10 +1117,12 @@ struct ScheduledMessageBody {
 }
 
 /// Schedule a Block Kit message for future delivery (chat.scheduleMessage).
-/// Used to deliver a message that would otherwise be dropped when a channel is
-/// rate limited (see [`SlackDeliveryResponse::rate_limited`]). The runtime just
-/// relays the call — the caller owns the retry/window policy and inspects
-/// [`ScheduleMessageResponse::window_full`] to pick another `post_at`.
+/// The runtime just relays the call — the caller supplies the delivery time and
+/// owns any retry/window policy, inspecting [`ScheduleMessageResponse::window_full`]
+/// to pick another `post_at` if a window is full. One use is delivering a
+/// message that would otherwise be dropped when a channel is rate limited
+/// (see [`SlackDeliveryResponse::rate_limited`]), but scheduling is general —
+/// any caller that wants a message delivered at a specific time can use it.
 /// - `post_at`: Unix timestamp (seconds) to deliver at; must be in the future.
 pub fn schedule_message(
     bot: &str,
