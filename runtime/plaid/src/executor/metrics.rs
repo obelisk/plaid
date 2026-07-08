@@ -10,7 +10,7 @@ use crate::metrics::MetricsHandle;
 use super::thread_pools::ExecutionThreadPools;
 use super::Message;
 
-/// Histograms for per-module execution stats, updated after each successful run.
+/// Metrics for per-module execution stats
 pub struct ModuleExecutionMetrics {
     computation_percentage: HistogramVec,
     execution_duration_seconds: HistogramVec,
@@ -40,8 +40,8 @@ impl ModuleExecutionMetrics {
 
         let module_failures = IntCounterVec::new(
             Opts::new(
-                "plaid_module_failures",
-                "Total number of failures per module",
+                "plaid_module_failures_total",
+                "Total number of module executions that returned a non-zero status",
             ),
             &["module"],
         )
