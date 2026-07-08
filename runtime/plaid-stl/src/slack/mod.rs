@@ -985,7 +985,7 @@ impl SlackDeliveryResponse {
 
 /// Post a Slack message with Block Kit blocks, attachments and optional
 /// settings (unfurl behavior, message metadata). Returns a
-/// [`SlackDeliveryResponse`]; callers that set `schedule_on_ratelimit` should
+/// [`SlackDeliveryResponse`]; callers that set `surface_rate_limit` should
 /// check [`SlackDeliveryResponse::rate_limited`] and, when true, deliver the
 /// message themselves via [`schedule_message`] — the runtime does not schedule
 /// automatically, it only reports the rate limit.
@@ -1025,20 +1025,20 @@ pub fn post_message_with_options(
     const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
     let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-    // Opt in to the runtime's scheduleMessage fallback on rate limit. Only this
-    // helper sets the flag, so existing post helpers keep the historical 429
-    // behavior and never see a scheduled-delivery response.
+    // Ask the runtime to surface a rate limit (429) as a response body instead
+    // of a hard error, so the caller can react. Only this helper sets the flag,
+    // so existing post helpers keep the historical 429-is-an-error behavior.
     #[derive(Serialize)]
-    struct PostMessageScheduled {
+    struct PostMessageRequest {
         bot: String,
         body: String,
-        schedule_on_ratelimit: bool,
+        surface_rate_limit: bool,
     }
 
-    let params = serde_json::to_string(&PostMessageScheduled {
+    let params = serde_json::to_string(&PostMessageRequest {
         bot: bot.to_string(),
         body: serde_json::to_string(&message).unwrap(),
-        schedule_on_ratelimit: true,
+        surface_rate_limit: true,
     })
     .unwrap();
 

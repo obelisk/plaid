@@ -45,9 +45,11 @@ struct GenericSlackResponse {
 /// Parsed alongside `PostMessage` so the opt-in is per call: callers that don't
 /// set it keep the historical behavior of a hard error on 429.
 #[derive(serde::Deserialize)]
-struct ScheduleOptIn {
+struct RateLimitOptIn {
+    /// When true, a 429 returns Slack's rate-limited body to the caller instead
+    /// of erroring, so the caller can react (e.g. schedule the message).
     #[serde(default)]
-    schedule_on_ratelimit: bool,
+    surface_rate_limit: bool,
 }
 
 impl Apis {
@@ -212,7 +214,7 @@ impl Slack {
     ///
     /// Slack rate limits chat.postMessage to roughly one message per second per
     /// channel, so a burst of posts to one channel gets HTTP 429s. A caller can
-    /// opt in (via `schedule_on_ratelimit` in the request) to receive Slack's
+    /// opt in (via `surface_rate_limit` in the request) to receive Slack's
     /// rate-limited response body on 429 (which carries `error: "ratelimited"`)
     /// instead of a hard error, so it can decide how to react — typically by
     /// scheduling the message with [`Self::schedule_message`]. How to handle the
@@ -222,8 +224,8 @@ impl Slack {
         let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let bot = p.bot.clone();
         // Opt-in per call; unset means the historical "429 is an error" behavior.
-        let schedule_on_ratelimit = serde_json::from_str::<ScheduleOptIn>(params)
-            .map(|o| o.schedule_on_ratelimit)
+        let surface_rate_limit = serde_json::from_str::<RateLimitOptIn>(params)
+            .map(|o| o.surface_rate_limit)
             .unwrap_or(false);
         match self
             .call_slack(bot, Apis::PostMessage(p), module)
@@ -244,7 +246,7 @@ impl Slack {
             // Pass Slack's own rate-limited response body through so the caller
             // sees the real payload (it carries `error: "ratelimited"`), rather
             // than a synthetic stand-in.
-            Ok((429, response)) if schedule_on_ratelimit => Ok(response),
+            Ok((429, response)) if surface_rate_limit => Ok(response),
             Ok((status, _)) => Err(ApiError::SlackError(SlackError::UnexpectedStatusCode(
                 status,
             ))),
