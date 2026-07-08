@@ -38,8 +38,14 @@ impl ModuleExecutionMetrics {
         )
         .expect("valid metric definition");
 
-        let module_failures = IntCounterVec::new(Opts::new("name", "help"), &["module"])
-            .expect("valid metric definition");
+        let module_failures = IntCounterVec::new(
+            Opts::new(
+                "plaid_module_failures",
+                "Total number of failures per module",
+            ),
+            &["module"],
+        )
+        .expect("valid metric definition");
 
         handle
             .register(Box::new(computation_percentage.clone()))
