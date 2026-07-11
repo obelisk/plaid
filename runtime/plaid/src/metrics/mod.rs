@@ -47,6 +47,11 @@ impl MetricsHandle {
         self.registry.register(collector)
     }
 
+    /// Borrow the underlying Prometheus registry (for `register_*_with_registry` helpers).
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
     pub fn encode(&self) -> Result<String, EncodeError> {
         let metric_families = self.registry.gather();
         let mut buffer = Vec::new();

@@ -30,22 +30,36 @@
 //!
 //! Multi-replica: delete-returns-value ensures a given ready row is claimed by at most one
 //! reloader at a time. Cross-pod recovery requires a *shared* backend (e.g. DynamoDB).
+//!
+//! # Burst design
+//!
+//! - Ingress never blocks on storage: messages go through a bounded mpsc spill channel.
+//! - Multiple concurrent persist tasks drain the channel (`spill_concurrency`).
+//! - Spill offers are rejected at a high watermark (HTTP 429) before the channel hard-fills.
+//! - HTTP returns **202** when a message is accepted onto the spill path (not yet durable).
+//! - Reload lists only `reload_batch_size` oldest keys (not the full namespace).
+//! - Age reaper runs on a slower cadence than reload.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crossbeam_channel::TrySendError;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
+use prometheus::{
+    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_with_registry, HistogramVec, IntCounterVec, IntGauge, Registry,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::config::QueueOverflowConfig;
 use crate::executor::{Executor, Message};
+use crate::metrics::MetricsHandle;
 use crate::storage::Storage;
 
 /// Storage namespace holding ready (not yet claimed) overflow messages.
@@ -60,15 +74,19 @@ pub const QUEUE_OVERFLOW_INFLIGHT_NS: &str = "queue_overflow_inflight";
 /// overhead, and log a distinct error instead of letting the backend reject the write.
 const MAX_ITEM_BYTES: usize = 380 * 1024;
 
-/// Wire format version for stored message envelopes (base64 payloads).
-const STORED_MESSAGE_VERSION: u8 = 1;
+/// Wire format versions.
+const STORED_MESSAGE_V1: u8 = 1;
+const STORED_MESSAGE_V2: u8 = 2;
+
+/// Magic prefix for uncompressed v2 envelopes (before gzip).
+const V2_MAGIC: &[u8; 4] = b"POF2";
 
 /// Even forced persists (shutdown) refuse to grow the store beyond this multiple of
 /// `max_persisted`, so a crash loop cannot fill the backend without bound.
 const FORCED_CAP_MULTIPLIER: u64 = 2;
 
-/// Log a warning when the ready namespace exceeds this many keys (list cost / memory).
-const LIST_SIZE_WARN_THRESHOLD: usize = 10_000;
+/// How long a recent persist failure keeps the spill path under elevated backpressure.
+const FAILURE_BACKPRESSURE_SECS: u64 = 5;
 
 /// The result of trying to persist a single message to the overflow store.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -113,8 +131,6 @@ impl PersistOutcome {
                 );
             }
             Self::TooLarge => {
-                // persist path already logs details; keep a one-liner here for callers
-                // that only see the outcome.
                 error!(
                     "Overflow {context}: message {message_id} from {source} exceeds item size limit"
                 );
@@ -126,10 +142,315 @@ impl PersistOutcome {
             }
         }
     }
+
+    fn is_failure(self) -> bool {
+        matches!(self, Self::Failed | Self::CapExceeded | Self::TooLarge)
+    }
 }
 
-/// Compact on-disk envelope: binary fields are base64 so gzip sees compressible text and
-/// we avoid JSON's array-of-bytes blow-up (which caused many false `TooLarge` drops).
+/// Result of offering a message to the spill path (in-memory channel only).
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum SpillOffer {
+    /// Accepted onto the spill channel; persistence is still async. HTTP should return 202.
+    Accepted,
+    /// Rejected (disabled, pressure, full, or closed). HTTP should return 429; message dropped.
+    Rejected,
+}
+
+/// Prometheus metrics for the overflow path. Optional — absent when metrics are disabled.
+#[derive(Clone)]
+pub struct OverflowMetrics {
+    spill_depth: IntGauge,
+    spill_capacity: IntGauge,
+    ready_approx: IntGauge,
+    inflight_approx: IntGauge,
+    persist_total: IntCounterVec,
+    persist_seconds: HistogramVec,
+    reload_total: IntCounterVec,
+    offer_total: IntCounterVec,
+}
+
+impl OverflowMetrics {
+    pub fn register(handle: &MetricsHandle) -> Self {
+        let registry = handle.registry();
+        Self::register_with_registry(registry)
+    }
+
+    fn register_with_registry(registry: &Registry) -> Self {
+        let spill_depth = register_int_gauge_with_registry!(
+            "plaid_overflow_spill_depth",
+            "Messages currently buffered in the in-process spill channel",
+            registry
+        )
+        .expect("overflow spill_depth metric");
+
+        let spill_capacity = register_int_gauge_with_registry!(
+            "plaid_overflow_spill_capacity",
+            "Configured capacity of the in-process spill channel",
+            registry
+        )
+        .expect("overflow spill_capacity metric");
+
+        let ready_approx = register_int_gauge_with_registry!(
+            "plaid_overflow_ready_approx",
+            "Approximate ready overflow messages counted by this process",
+            registry
+        )
+        .expect("overflow ready_approx metric");
+
+        let inflight_approx = register_int_gauge_with_registry!(
+            "plaid_overflow_inflight_approx",
+            "Approximate inflight overflow messages counted by this process",
+            registry
+        )
+        .expect("overflow inflight_approx metric");
+
+        let persist_total = register_int_counter_vec_with_registry!(
+            "plaid_overflow_persist_total",
+            "Overflow persist attempts by outcome",
+            &["result"],
+            registry
+        )
+        .expect("overflow persist_total metric");
+
+        let persist_seconds = register_histogram_vec_with_registry!(
+            "plaid_overflow_persist_seconds",
+            "Wall time of a single overflow persist (encode + storage write)",
+            &["result"],
+            registry
+        )
+        .expect("overflow persist_seconds metric");
+
+        let reload_total = register_int_counter_vec_with_registry!(
+            "plaid_overflow_reload_total",
+            "Overflow reload/reclaim/reap events",
+            &["event"],
+            registry
+        )
+        .expect("overflow reload_total metric");
+
+        let offer_total = register_int_counter_vec_with_registry!(
+            "plaid_overflow_offer_total",
+            "Spill channel offer attempts by result",
+            &["result"],
+            registry
+        )
+        .expect("overflow offer_total metric");
+
+        Self {
+            spill_depth,
+            spill_capacity,
+            ready_approx,
+            inflight_approx,
+            persist_total,
+            persist_seconds,
+            reload_total,
+            offer_total,
+        }
+    }
+
+    fn record_persist(&self, outcome: PersistOutcome, elapsed: std::time::Duration) {
+        let label = outcome.as_str();
+        self.persist_total.with_label_values(&[label]).inc();
+        self.persist_seconds
+            .with_label_values(&[label])
+            .observe(elapsed.as_secs_f64());
+    }
+
+    fn record_offer(&self, offer: SpillOffer) {
+        let label = match offer {
+            SpillOffer::Accepted => "accepted",
+            SpillOffer::Rejected => "rejected",
+        };
+        self.offer_total.with_label_values(&[label]).inc();
+    }
+
+    fn record_reload_event(&self, event: &str, n: usize) {
+        if n > 0 {
+            self.reload_total.with_label_values(&[event]).inc_by(n as u64);
+        }
+    }
+}
+
+/// Shared spill-path state: depth tracking, recent failure backpressure, metrics.
+#[derive(Clone)]
+pub struct SpillIngress {
+    tx: tokio::sync::mpsc::Sender<Message>,
+    high_watermark_pct: u8,
+    /// Approximate messages currently in the spill channel (inc on offer, dec on recv).
+    depth: Arc<AtomicUsize>,
+    capacity: usize,
+    /// Unix secs of last non-success persist (for elevated backpressure).
+    last_failure_secs: Arc<AtomicU64>,
+    metrics: Option<OverflowMetrics>,
+}
+
+impl SpillIngress {
+    pub fn new(
+        tx: tokio::sync::mpsc::Sender<Message>,
+        capacity: usize,
+        high_watermark_pct: u8,
+        metrics: Option<OverflowMetrics>,
+    ) -> Self {
+        if let Some(m) = &metrics {
+            m.spill_capacity.set(capacity as i64);
+            m.spill_depth.set(0);
+        }
+        Self {
+            tx,
+            high_watermark_pct: high_watermark_pct.min(100),
+            depth: Arc::new(AtomicUsize::new(0)),
+            capacity: capacity.max(1),
+            last_failure_secs: Arc::new(AtomicU64::new(0)),
+            metrics,
+        }
+    }
+
+    pub fn sender(&self) -> tokio::sync::mpsc::Sender<Message> {
+        self.tx.clone()
+    }
+
+    pub fn depth_handle(&self) -> Arc<AtomicUsize> {
+        self.depth.clone()
+    }
+
+    pub fn failure_handle(&self) -> Arc<AtomicU64> {
+        self.last_failure_secs.clone()
+    }
+
+    pub fn metrics(&self) -> Option<OverflowMetrics> {
+        self.metrics.clone()
+    }
+
+    fn occupancy_pct(&self) -> u8 {
+        let depth = self.depth.load(Ordering::Relaxed);
+        ((depth.saturating_mul(100)) / self.capacity) as u8
+    }
+
+    fn under_failure_backpressure(&self) -> bool {
+        let last = self.last_failure_secs.load(Ordering::Relaxed);
+        if last == 0 {
+            return false;
+        }
+        now_secs().saturating_sub(last) < FAILURE_BACKPRESSURE_SECS
+    }
+
+    /// Non-blocking offer onto the spill channel with high-watermark + failure backpressure.
+    pub fn offer(&self, message: Message, log_type: &str) -> SpillOffer {
+        // Reject oversized bodies early so they never sit in the spill buffer.
+        if message.data.len() > MAX_ITEM_BYTES {
+            error!(
+                "Queue Full! [{log_type}] message {} body is {} bytes (over {MAX_ITEM_BYTES}); not spilled",
+                message.id,
+                message.data.len()
+            );
+            let offer = SpillOffer::Rejected;
+            if let Some(m) = &self.metrics {
+                m.record_offer(offer);
+            }
+            return offer;
+        }
+
+        let mut threshold = self.high_watermark_pct;
+        if self.under_failure_backpressure() {
+            // Tighten admission while storage is unhealthy so clients retry sooner.
+            threshold = threshold.min(50);
+        }
+        if self.occupancy_pct() >= threshold {
+            error!(
+                "Queue Full AND overflow spill under pressure (depth≈{}/{}, threshold={}%)! [{log_type}] log dropped!",
+                self.depth.load(Ordering::Relaxed),
+                self.capacity,
+                threshold
+            );
+            let offer = SpillOffer::Rejected;
+            if let Some(m) = &self.metrics {
+                m.record_offer(offer);
+            }
+            return offer;
+        }
+
+        match self.tx.try_send(message) {
+            Ok(()) => {
+                let d = self.depth.fetch_add(1, Ordering::Relaxed) + 1;
+                if let Some(m) = &self.metrics {
+                    m.spill_depth.set(d as i64);
+                    m.record_offer(SpillOffer::Accepted);
+                }
+                debug!("Queue Full! [{log_type}] message routed to durable overflow (202 path)");
+                SpillOffer::Accepted
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                error!(
+                    "Queue Full AND overflow spill backlog full! [{log_type}] log dropped!"
+                );
+                let offer = SpillOffer::Rejected;
+                if let Some(m) = &self.metrics {
+                    m.record_offer(offer);
+                }
+                offer
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                error!(
+                    "Queue Full and overflow spill channel closed! [{log_type}] log dropped!"
+                );
+                let offer = SpillOffer::Rejected;
+                if let Some(m) = &self.metrics {
+                    m.record_offer(offer);
+                }
+                offer
+            }
+        }
+    }
+}
+
+/// Try the executor channel first; on Full, offer to spill if configured.
+///
+/// When overflow is disabled and the queue is full, falls back to blocking `send` so
+/// data generators retain prior backpressure behaviour. Returns `Ok(())` if the message
+/// was enqueued or accepted onto spill; `Err(())` if lost or the channel disconnected.
+pub fn send_or_spill(
+    sender: &crossbeam_channel::Sender<Message>,
+    message: Message,
+    log_type: &str,
+    spill: &Option<SpillIngress>,
+) -> Result<(), ()> {
+    match sender.try_send(message) {
+        Ok(()) => Ok(()),
+        Err(TrySendError::Full(message)) => match spill {
+            Some(ingress) => match ingress.offer(message, log_type) {
+                SpillOffer::Accepted => Ok(()),
+                SpillOffer::Rejected => Err(()),
+            },
+            None => {
+                // Preserve historical blocking behaviour when overflow is off.
+                sender.send(message).map_err(|_| ())
+            }
+        },
+        Err(TrySendError::Disconnected(_)) => Err(()),
+    }
+}
+
+/// Offer a message that could not be enqueued to the spill path (non-blocking).
+///
+/// Returns [`SpillOffer::Accepted`] if the message was accepted onto the spill channel
+/// (persistence is still async — HTTP should use 202). Returns [`SpillOffer::Rejected`]
+/// if overflow is disabled or the spill path is under pressure / full / closed.
+pub fn offer_to_spill(
+    message: Message,
+    log_type: &str,
+    spill: &Option<SpillIngress>,
+) -> SpillOffer {
+    match spill {
+        Some(ingress) => ingress.offer(message, log_type),
+        None => {
+            error!("Queue Full! [{log_type}] log dropped!");
+            SpillOffer::Rejected
+        }
+    }
+}
+
+/// Compact on-disk envelope v1: binary fields are base64 so gzip sees compressible text.
 #[derive(Serialize, Deserialize)]
 struct StoredMessageV1 {
     v: u8,
@@ -143,9 +464,10 @@ struct StoredMessageV1 {
 }
 
 impl StoredMessageV1 {
+    #[cfg(test)]
     fn from_message(message: &Message) -> Self {
         Self {
-            v: STORED_MESSAGE_VERSION,
+            v: STORED_MESSAGE_V1,
             id: message.id.clone(),
             type_: message.type_.clone(),
             data_b64: base64::encode(&message.data),
@@ -206,11 +528,20 @@ pub struct OverflowStore {
     /// accounting. Uses saturating arithmetic so concurrent claims can never wrap the
     /// counter into a permanent self-DoS.
     count: AtomicU64,
+    metrics: Option<OverflowMetrics>,
 }
 
 impl OverflowStore {
     /// Build a store and seed the approximate count from ready + inflight namespaces.
     pub async fn new(storage: Arc<Storage>, config: QueueOverflowConfig) -> Self {
+        Self::new_with_metrics(storage, config, None).await
+    }
+
+    pub async fn new_with_metrics(
+        storage: Arc<Storage>,
+        config: QueueOverflowConfig,
+        metrics: Option<OverflowMetrics>,
+    ) -> Self {
         let ready = match storage.list_keys(QUEUE_OVERFLOW_NS, None).await {
             Ok(keys) => keys.len() as u64,
             Err(e) => {
@@ -230,11 +561,20 @@ impl OverflowStore {
             "Overflow store initialized with {count} persisted message(s) ({ready} ready, {inflight} inflight); max_persisted={}",
             config.max_persisted
         );
+        if let Some(m) = &metrics {
+            m.ready_approx.set(ready as i64);
+            m.inflight_approx.set(inflight as i64);
+        }
         Self {
             storage,
             config,
             count: AtomicU64::new(count),
+            metrics,
         }
+    }
+
+    pub fn config(&self) -> &QueueOverflowConfig {
+        &self.config
     }
 
     /// Current approximate persisted count (ready + inflight) for this process.
@@ -253,6 +593,23 @@ impl OverflowStore {
     /// data loss — but still refuse unbounded growth across crash loops.
     pub async fn persist_forced(&self, message: &Message) -> PersistOutcome {
         self.persist_with_key(message, true, None).await
+    }
+
+    /// Record a persist outcome for spill backpressure + metrics. Call from spill workers.
+    pub fn note_persist_outcome(
+        &self,
+        outcome: PersistOutcome,
+        elapsed: std::time::Duration,
+        last_failure_secs: Option<&AtomicU64>,
+    ) {
+        if let Some(m) = &self.metrics {
+            m.record_persist(outcome, elapsed);
+        }
+        if outcome.is_failure() {
+            if let Some(flag) = last_failure_secs {
+                flag.store(now_secs(), Ordering::Relaxed);
+            }
+        }
     }
 
     /// Persist `message`. If `existing_key` is given (a message being put back after a
@@ -323,6 +680,7 @@ impl OverflowStore {
                 // must not inflate the approximate counter.
                 if !is_restore && previous.is_none() {
                     self.count.fetch_add(1, Ordering::Relaxed);
+                    self.refresh_count_gauges();
                 }
                 PersistOutcome::Persisted
             }
@@ -336,12 +694,27 @@ impl OverflowStore {
         }
     }
 
+    fn refresh_count_gauges(&self) {
+        if let Some(m) = &self.metrics {
+            // We only track a combined count; split gauges use the same approximate for
+            // ready and leave inflight as 0 unless reclaimed/claimed paths update them.
+            m.ready_approx
+                .set(self.count.load(Ordering::Relaxed) as i64);
+        }
+    }
+
     /// Drop ready messages older than `max_message_age_secs` without reinjecting them.
-    /// Safe to run while the executor queue is full (unlike claim/reinject).
+    /// Scans only the oldest `reload_batch_size` keys (sorted); stops at the first
+    /// non-expired key so a large backlog of fresh messages is not fully listed.
     ///
     /// Returns the number of messages reaped.
     pub async fn reap_expired(&self) -> usize {
-        let keys = match self.storage.list_keys(QUEUE_OVERFLOW_NS, None).await {
+        let limit = self.config.reload_batch_size.max(1);
+        let keys = match self
+            .storage
+            .list_keys_limited(QUEUE_OVERFLOW_NS, None, limit)
+            .await
+        {
             Ok(keys) => keys,
             Err(e) => {
                 error!("Could not list overflow messages to reap: {e}");
@@ -358,8 +731,6 @@ impl OverflowStore {
 
         for key in keys {
             let Some(created) = millis_from_key(&key) else {
-                // Malformed keys never age out via the normal path; delete them so they
-                // cannot pin the namespace forever.
                 warn!("Reaping overflow message with unparseable key {key}");
                 match self.storage.delete(QUEUE_OVERFLOW_NS, &key).await {
                     Ok(Some(_)) => {
@@ -373,7 +744,8 @@ impl OverflowStore {
             };
             let age_secs = now.saturating_sub(created / 1000);
             if age_secs <= self.config.max_message_age_secs {
-                continue;
+                // Keys are oldest-first; nothing older remains in this page.
+                break;
             }
             match self.storage.delete(QUEUE_OVERFLOW_NS, &key).await {
                 Ok(Some(_)) => {
@@ -388,6 +760,10 @@ impl OverflowStore {
 
         if reaped > 0 {
             info!("Reaped {reaped} expired overflow message(s)");
+            if let Some(m) = &self.metrics {
+                m.record_reload_event("reaped", reaped);
+            }
+            self.refresh_count_gauges();
         }
         reaped
     }
@@ -395,9 +771,10 @@ impl OverflowStore {
     /// Move expired inflight leases back to the ready namespace so they can be claimed
     /// again after a crash mid-reload. Returns how many rows were reclaimed.
     pub async fn reclaim_stale_inflight(&self) -> usize {
+        let limit = self.config.reload_batch_size.max(1).saturating_mul(2);
         let keys = match self
             .storage
-            .list_keys(QUEUE_OVERFLOW_INFLIGHT_NS, None)
+            .list_keys_limited(QUEUE_OVERFLOW_INFLIGHT_NS, None, limit)
             .await
         {
             Ok(keys) => keys,
@@ -463,23 +840,32 @@ impl OverflowStore {
             }
         }
 
+        if reclaimed > 0 {
+            if let Some(m) = &self.metrics {
+                m.record_reload_event("reclaimed", reclaimed);
+            }
+        }
         reclaimed
     }
 
     /// Claim and reinject up to `reload_batch_size` overflowed messages into the executor.
     ///
     /// Returns the number of messages successfully reinjected. Stops early (leaving the
-    /// rest for a later poll) as soon as the executor queue is full, so a wedged executor
-    /// does not spin this into a claim loop. Over-age messages are dropped.
+    /// rest for a later poll) as soon as the target queue is at/above the reinject high
+    /// watermark or the executor rejects a send, so a wedged executor does not spin this
+    /// into a claim loop.
     ///
-    /// Note: this lists keys in the ready namespace each call. `reload_batch_size` bounds
-    /// how many are *claimed*, not how many keys are loaded into memory. Prefer keeping
-    /// `max_persisted` reasonable for the storage backend.
+    /// Lists only up to `reload_batch_size` oldest keys — not the full namespace.
     pub async fn reload_batch(&self, executor: &Executor) -> usize {
         // Recover anything left mid-claim by a crashed peer / prior boot first.
         let _ = self.reclaim_stale_inflight().await;
 
-        let keys = match self.storage.list_keys(QUEUE_OVERFLOW_NS, None).await {
+        let batch_limit = self.config.reload_batch_size.max(1);
+        let keys = match self
+            .storage
+            .list_keys_limited(QUEUE_OVERFLOW_NS, None, batch_limit)
+            .await
+        {
             Ok(keys) => keys,
             Err(e) => {
                 error!("Could not list overflow messages to reload: {e}");
@@ -491,22 +877,16 @@ impl OverflowStore {
             return 0;
         }
 
-        if keys.len() > LIST_SIZE_WARN_THRESHOLD {
-            warn!(
-                "Overflow ready namespace has {} keys; full list_keys each reload poll is expensive. Consider lowering max_persisted or draining backlog.",
-                keys.len()
-            );
-        }
-
-        // Keys are `{zero-padded-millis}:{id}`, so a lexical sort is oldest-first.
+        // Keys are `{zero-padded-millis}:{id}`; limited list is already oldest-first on
+        // DynamoDB/Sled. Sort for backends that do not guarantee order (in-memory).
         let mut keys = keys;
         keys.sort();
 
         let now = now_secs();
         let mut reinjected = 0usize;
-        let batch_limit = self.config.reload_batch_size;
+        let watermark = self.config.reinject_high_watermark_pct.min(100);
 
-        for key in keys.into_iter().take(batch_limit) {
+        for key in keys {
             // Step 1: claim ready row. Only one replica receives Some(value).
             let body = match self.storage.delete(QUEUE_OVERFLOW_NS, &key).await {
                 Ok(Some(value)) => value,
@@ -571,6 +951,12 @@ impl OverflowStore {
                 }
             };
 
+            // Avoid claim/restore thrash when the target queue is already near capacity.
+            if executor.queue_occupancy_pct(&message.type_) >= watermark {
+                self.return_to_ready(&key, &body, &message).await;
+                break;
+            }
+
             match executor.execute_webhook_message(message) {
                 Ok(()) => {
                     self.ack_inflight(&key).await;
@@ -596,6 +982,10 @@ impl OverflowStore {
 
         if reinjected > 0 {
             info!("Reinjected {reinjected} overflow message(s) into the executor");
+            if let Some(m) = &self.metrics {
+                m.record_reload_event("reinjected", reinjected);
+            }
+            self.refresh_count_gauges();
         }
         reinjected
     }
@@ -666,21 +1056,46 @@ fn millis_from_key(key: &str) -> Option<u64> {
     key.split(':').next()?.parse::<u64>().ok()
 }
 
-/// Encode a message to the on-disk format: gzip(json StoredMessageV1).
+/// Encode a message to the on-disk format: gzip(v2 binary envelope).
 fn encode_message(message: &Message) -> Result<Vec<u8>, String> {
-    let envelope = StoredMessageV1::from_message(message);
-    let serialized =
-        serde_json::to_vec(&envelope).map_err(|e| format!("serialize envelope: {e}"))?;
-    compress(&serialized).map_err(|e| format!("compress: {e}"))
+    let raw = encode_v2_raw(message)?;
+    compress(&raw).map_err(|e| format!("compress: {e}"))
 }
 
-/// Decode on-disk bytes. Accepts the v1 base64 envelope and falls back to legacy
-/// `serde_json::Message` payloads so an in-place upgrade does not strand rows.
+/// Length-prefixed binary envelope (v2). Smaller than base64+JSON for binary payloads.
+fn encode_v2_raw(message: &Message) -> Result<Vec<u8>, String> {
+    let mut buf = Vec::with_capacity(64 + message.data.len());
+    buf.extend_from_slice(V2_MAGIC);
+    buf.push(STORED_MESSAGE_V2);
+    write_str(&mut buf, &message.id);
+    write_str(&mut buf, &message.type_);
+    write_bytes(&mut buf, &message.data);
+    write_u32(&mut buf, message.headers.len() as u32);
+    for (k, v) in &message.headers {
+        write_str(&mut buf, k);
+        write_bytes(&mut buf, v);
+    }
+    write_u32(&mut buf, message.query_params.len() as u32);
+    for (k, v) in &message.query_params {
+        write_str(&mut buf, k);
+        write_bytes(&mut buf, v);
+    }
+    let meta = serde_json::to_vec(&(&message.source, &message.logbacks_allowed))
+        .map_err(|e| format!("serialize meta: {e}"))?;
+    write_bytes(&mut buf, &meta);
+    Ok(buf)
+}
+
+/// Decode on-disk bytes. Accepts v2 binary, v1 base64 envelope, and legacy Message JSON.
 fn decode_message(bytes: &[u8]) -> Result<Message, String> {
     let decompressed = decompress(bytes).map_err(|e| format!("decompress: {e}"))?;
 
+    if decompressed.starts_with(V2_MAGIC) {
+        return decode_v2_raw(&decompressed);
+    }
+
     if let Ok(env) = serde_json::from_slice::<StoredMessageV1>(&decompressed) {
-        if env.v == STORED_MESSAGE_VERSION {
+        if env.v == STORED_MESSAGE_V1 {
             return env.into_message();
         }
     }
@@ -688,6 +1103,84 @@ fn decode_message(bytes: &[u8]) -> Result<Message, String> {
     // Legacy: direct Message JSON (array-of-bytes data field).
     serde_json::from_slice::<Message>(&decompressed)
         .map_err(|e| format!("deserialize legacy or v1 message: {e}"))
+}
+
+fn decode_v2_raw(raw: &[u8]) -> Result<Message, String> {
+    if raw.len() < 5 || &raw[..4] != V2_MAGIC {
+        return Err("bad v2 magic".into());
+    }
+    if raw[4] != STORED_MESSAGE_V2 {
+        return Err(format!("unsupported v2 version {}", raw[4]));
+    }
+    let mut i = 5usize;
+    let id = read_str(raw, &mut i)?;
+    let type_ = read_str(raw, &mut i)?;
+    let data = read_bytes(raw, &mut i)?;
+    let header_count = read_u32(raw, &mut i)? as usize;
+    let mut headers = HashMap::with_capacity(header_count);
+    for _ in 0..header_count {
+        let k = read_str(raw, &mut i)?;
+        let v = read_bytes(raw, &mut i)?;
+        headers.insert(k, v);
+    }
+    let qp_count = read_u32(raw, &mut i)? as usize;
+    let mut query_params = HashMap::with_capacity(qp_count);
+    for _ in 0..qp_count {
+        let k = read_str(raw, &mut i)?;
+        let v = read_bytes(raw, &mut i)?;
+        query_params.insert(k, v);
+    }
+    let meta = read_bytes(raw, &mut i)?;
+    let (source, logbacks_allowed): (LogSource, LogbacksAllowed) =
+        serde_json::from_slice(&meta).map_err(|e| format!("deserialize meta: {e}"))?;
+    Ok(Message {
+        id,
+        type_,
+        data,
+        headers,
+        query_params,
+        source,
+        logbacks_allowed,
+        response_sender: None,
+        module: None,
+    })
+}
+
+fn write_u32(buf: &mut Vec<u8>, v: u32) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
+
+fn write_str(buf: &mut Vec<u8>, s: &str) {
+    write_bytes(buf, s.as_bytes());
+}
+
+fn write_bytes(buf: &mut Vec<u8>, b: &[u8]) {
+    write_u32(buf, b.len() as u32);
+    buf.extend_from_slice(b);
+}
+
+fn read_u32(buf: &[u8], i: &mut usize) -> Result<u32, String> {
+    if *i + 4 > buf.len() {
+        return Err("truncated u32".into());
+    }
+    let v = u32::from_le_bytes(buf[*i..*i + 4].try_into().unwrap());
+    *i += 4;
+    Ok(v)
+}
+
+fn read_bytes(buf: &[u8], i: &mut usize) -> Result<Vec<u8>, String> {
+    let len = read_u32(buf, i)? as usize;
+    if *i + len > buf.len() {
+        return Err("truncated bytes".into());
+    }
+    let out = buf[*i..*i + len].to_vec();
+    *i += len;
+    Ok(out)
+}
+
+fn read_str(buf: &[u8], i: &mut usize) -> Result<String, String> {
+    let bytes = read_bytes(buf, i)?;
+    String::from_utf8(bytes).map_err(|e| format!("utf8: {e}"))
 }
 
 /// Inflight blob: 8-byte big-endian claimed_at_secs || original ready body.
@@ -709,7 +1202,8 @@ fn unwrap_inflight(blob: &[u8]) -> Option<(u64, Vec<u8>)> {
 }
 
 fn compress(data: &[u8]) -> std::io::Result<Vec<u8>> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    // Fast compression: spill path is latency-sensitive under burst.
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
     encoder.write_all(data)?;
     encoder.finish()
 }
@@ -735,38 +1229,84 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// Offer a message that could not be enqueued to the spill channel (non-blocking).
-///
-/// Returns `true` if the message was accepted onto the spill path (persistence is async).
-/// Returns `false` if overflow is disabled or the spill backlog itself is saturated /
-/// closed — the message is then dropped and the caller should treat it as lost.
-pub fn offer_to_spill(
-    message: Message,
-    log_type: &str,
-    spill_sender: &Option<tokio::sync::mpsc::Sender<Message>>,
-) -> bool {
-    match spill_sender {
-        Some(tx) => match tx.try_send(message) {
-            Ok(()) => {
-                debug!("Queue Full! [{log_type}] message routed to durable overflow");
-                true
+/// Run concurrent spill workers until cancellation, then force-drain remaining messages.
+pub async fn run_spill_workers(
+    store: Arc<OverflowStore>,
+    mut rx: tokio::sync::mpsc::Receiver<Message>,
+    depth: Arc<AtomicUsize>,
+    last_failure_secs: Arc<AtomicU64>,
+    concurrency: usize,
+    cancellation: tokio_util::sync::CancellationToken,
+) {
+    let concurrency = concurrency.max(1);
+    let mut in_flight = tokio::task::JoinSet::new();
+
+    loop {
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {
+                // Drain buffered messages with forced persist.
+                while let Ok(message) = rx.try_recv() {
+                    dec_depth(&depth, store.metrics.as_ref());
+                    while in_flight.len() >= concurrency {
+                        let _ = in_flight.join_next().await;
+                    }
+                    let store = store.clone();
+                    let last_failure_secs = last_failure_secs.clone();
+                    in_flight.spawn(async move {
+                        let start = Instant::now();
+                        let id = message.id.clone();
+                        let source = message.source.clone();
+                        let outcome = store.persist_forced(&message).await;
+                        store.note_persist_outcome(outcome, start.elapsed(), Some(&last_failure_secs));
+                        outcome.log_if_not_persisted("spill-shutdown", &id, &source);
+                    });
+                }
+                while in_flight.join_next().await.is_some() {}
+                break;
             }
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                error!(
-                    "Queue Full AND overflow spill backlog full! [{log_type}] log dropped!"
-                );
-                false
+            maybe_msg = rx.recv() => {
+                match maybe_msg {
+                    Some(message) => {
+                        dec_depth(&depth, store.metrics.as_ref());
+                        while in_flight.len() >= concurrency {
+                            let _ = in_flight.join_next().await;
+                        }
+                        let store = store.clone();
+                        let last_failure_secs = last_failure_secs.clone();
+                        in_flight.spawn(async move {
+                            let start = Instant::now();
+                            let id = message.id.clone();
+                            let source = message.source.clone();
+                            let outcome = store.persist(&message).await;
+                            store.note_persist_outcome(outcome, start.elapsed(), Some(&last_failure_secs));
+                            outcome.log_if_not_persisted("spill", &id, &source);
+                        });
+                    }
+                    None => {
+                        // All senders dropped; finish in-flight work.
+                        while in_flight.join_next().await.is_some() {}
+                        break;
+                    }
+                }
             }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                error!(
-                    "Queue Full and overflow spill channel closed! [{log_type}] log dropped!"
-                );
-                false
+        }
+    }
+    info!("Overflow spill workers shut down");
+}
+
+fn dec_depth(depth: &AtomicUsize, metrics: Option<&OverflowMetrics>) {
+    let mut cur = depth.load(Ordering::Relaxed);
+    loop {
+        let next = cur.saturating_sub(1);
+        match depth.compare_exchange_weak(cur, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => {
+                if let Some(m) = metrics {
+                    m.spill_depth.set(next as i64);
+                }
+                break;
             }
-        },
-        None => {
-            error!("Queue Full! [{log_type}] log dropped!");
-            false
+            Err(actual) => cur = actual,
         }
     }
 }
@@ -832,25 +1372,33 @@ mod tests {
     }
 
     #[test]
-    fn envelope_is_much_smaller_than_legacy_json_array_for_binary() {
-        // 50 KiB of binary: legacy JSON array-of-bytes is enormous; v1+gzip should fit
-        // comfortably under the DynamoDB item guard.
+    fn v2_envelope_is_smaller_than_v1_for_binary() {
         let message = test_message_with_data(vec![0xABu8; 50 * 1024]);
-        let encoded = encode_message(&message).unwrap();
+        let v2 = encode_message(&message).unwrap();
         assert!(
-            encoded.len() < MAX_ITEM_BYTES,
+            v2.len() < MAX_ITEM_BYTES,
             "encoded {} bytes should be under limit",
-            encoded.len()
+            v2.len()
         );
 
-        // Legacy path for comparison: raw Message JSON then gzip.
-        let legacy = compress(&serde_json::to_vec(&message).unwrap()).unwrap();
+        let v1_raw = serde_json::to_vec(&StoredMessageV1::from_message(&message)).unwrap();
+        let v1 = compress(&v1_raw).unwrap();
         assert!(
-            encoded.len() < legacy.len(),
-            "v1 envelope ({}) should beat legacy json-array ({})",
-            encoded.len(),
-            legacy.len()
+            v2.len() <= v1.len(),
+            "v2 envelope ({}) should not exceed v1 ({})",
+            v2.len(),
+            v1.len()
         );
+    }
+
+    #[test]
+    fn legacy_v1_envelope_still_decodes() {
+        let message = test_message();
+        let v1_raw = serde_json::to_vec(&StoredMessageV1::from_message(&message)).unwrap();
+        let encoded = compress(&v1_raw).unwrap();
+        let restored = decode_message(&encoded).unwrap();
+        assert_eq!(restored.id, message.id);
+        assert_eq!(restored.data, message.data);
     }
 
     fn test_message() -> Message {
@@ -920,12 +1468,10 @@ mod tests {
             store.persist(&test_message()).await,
             PersistOutcome::CapExceeded
         );
-        // Forced bypasses soft cap...
         assert_eq!(
             store.persist_forced(&test_message()).await,
             PersistOutcome::Persisted
         );
-        // ...but hard cap (2x) still binds: count is 2, hard is 2, so next forced fails.
         assert_eq!(
             store.persist_forced(&test_message()).await,
             PersistOutcome::CapExceeded
@@ -937,11 +1483,9 @@ mod tests {
         let storage = Arc::new(Storage::new_in_memory());
         let store = OverflowStore::new(storage, QueueOverflowConfig::default()).await;
         assert_eq!(store.approximate_count(), 0);
-        // Simulate claiming messages we never counted (peer-written rows).
         store.saturating_dec();
         store.saturating_dec();
         assert_eq!(store.approximate_count(), 0);
-        // Cap must still allow persists after underflow attempts.
         assert_eq!(store.persist(&test_message()).await, PersistOutcome::Persisted);
     }
 
@@ -1008,7 +1552,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        // Claimed far in the past → lease expired.
         storage
             .insert(
                 QUEUE_OVERFLOW_INFLIGHT_NS.to_string(),
@@ -1084,15 +1627,13 @@ mod tests {
         };
         let store = OverflowStore::new(storage.clone(), cfg).await;
 
-        // Insert directly with an ancient key so age check fires.
         let message = test_message();
         let encoded = encode_message(&message).unwrap();
-        let ancient_key = overflow_key(1_000, &message.id); // year ~1970
+        let ancient_key = overflow_key(1_000, &message.id);
         storage
             .insert(QUEUE_OVERFLOW_NS.to_string(), ancient_key, encoded)
             .await
             .unwrap();
-        // Manually bump count to match (persist path would have).
         store.count.store(1, Ordering::Relaxed);
 
         let reaped = store.reap_expired().await;
@@ -1126,5 +1667,47 @@ mod tests {
         let b = storage.delete(QUEUE_OVERFLOW_NS, &key).await.unwrap();
         assert!(a.is_some());
         assert!(b.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_keys_limited_returns_oldest_first() {
+        let storage = Arc::new(Storage::new_in_memory());
+        for i in 0..5u128 {
+            storage
+                .insert(
+                    QUEUE_OVERFLOW_NS.to_string(),
+                    overflow_key(1000 + i, &format!("id{i}")),
+                    vec![i as u8],
+                )
+                .await
+                .unwrap();
+        }
+        let keys = storage
+            .list_keys_limited(QUEUE_OVERFLOW_NS, None, 2)
+            .await
+            .unwrap();
+        assert_eq!(keys.len(), 2);
+        assert!(keys[0] < keys[1]);
+        assert_eq!(millis_from_key(&keys[0]), Some(1000));
+    }
+
+    #[tokio::test]
+    async fn spill_offer_rejects_at_high_watermark() {
+        let (tx, _rx) = tokio::sync::mpsc::channel::<Message>(4);
+        let ingress = SpillIngress::new(tx, 4, 50, None);
+        // Fill to 50% (2/4) — next offer at exactly threshold is rejected.
+        assert_eq!(
+            ingress.offer(test_message(), "t"),
+            SpillOffer::Accepted
+        );
+        assert_eq!(
+            ingress.offer(test_message(), "t"),
+            SpillOffer::Accepted
+        );
+        // depth=2, capacity=4 → 50% >= 50 → reject
+        assert_eq!(
+            ingress.offer(test_message(), "t"),
+            SpillOffer::Rejected
+        );
     }
 }

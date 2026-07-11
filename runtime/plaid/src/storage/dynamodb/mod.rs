@@ -154,6 +154,7 @@ impl StorageProvider for DynamoDb {
             namespace,
             prefix,
             vec![KEY].as_slice(),
+            None,
         )
         .await?;
 
@@ -175,6 +176,46 @@ impl StorageProvider for DynamoDb {
         Ok(all_keys)
     }
 
+    async fn list_keys_limited(
+        &self,
+        namespace: &str,
+        prefix: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<String>, StorageError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut all_keys = vec![];
+        let items = dynamodb_query(
+            &self.client,
+            &self.table_name,
+            namespace,
+            prefix,
+            vec![KEY].as_slice(),
+            Some(limit),
+        )
+        .await?;
+
+        for item in &items {
+            all_keys.push(
+                item.get(KEY)
+                    .ok_or(StorageError::Access(
+                        "Could not list storage contents".to_string(),
+                    ))?
+                    .as_s()
+                    .map_err(|_| {
+                        StorageError::Access("Could not list storage contents".to_string())
+                    })?
+                    .clone(),
+            );
+            if all_keys.len() >= limit {
+                break;
+            }
+        }
+
+        Ok(all_keys)
+    }
+
     async fn fetch_all(
         &self,
         namespace: &str,
@@ -188,6 +229,7 @@ impl StorageProvider for DynamoDb {
             namespace,
             prefix,
             vec!["key", "value"].as_slice(),
+            None,
         )
         .await?;
 
@@ -227,13 +269,15 @@ impl StorageProvider for DynamoDb {
 /// `table_name` - the name of the DynamoDB table  
 /// `namespace` - the namespace we want to query  
 /// `prefix` - [Optional] a prefix that keys must have in order to be returned by this query  
-/// `attributes_to_get` - A list of attributes to get from DynamoDB
+/// `attributes_to_get` - A list of attributes to get from DynamoDB  
+/// `limit` - [Optional] stop after collecting this many items (ascending sort-key order)
 async fn dynamodb_query(
     client: &Client,
     table_name: &str,
     namespace: &str,
     prefix: Option<&str>,
     attributes_to_get: &[&str],
+    limit: Option<usize>,
 ) -> Result<Vec<HashMap<String, AttributeValue>>, StorageError> {
     // This is necessary because the STL is converting a None prefix to an empty string,
     // which would result in passing an empty string to DynamoDB, which then complains.
@@ -282,11 +326,21 @@ async fn dynamodb_query(
     .to_string();
 
     loop {
+        let remaining = limit.map(|l| l.saturating_sub(output.len()));
+        if remaining == Some(0) {
+            break;
+        }
+
         let mut request = client
             .query()
             .consistent_read(true)
             .table_name(table_name)
             .projection_expression(projection_expression.clone());
+
+        if let Some(n) = remaining {
+            // DynamoDB Limit is per-page (before filter); we only need key projection so it matches.
+            request = request.limit(n as i32);
+        }
 
         // Set in the request the key condition expression, expression attribute names and expression attribute values
         // that we had prepared above
@@ -317,6 +371,13 @@ async fn dynamodb_query(
         // Add retrieved items to our growing list
         if let Some(items) = response.items {
             output.extend(items);
+        }
+
+        if let Some(l) = limit {
+            if output.len() >= l {
+                output.truncate(l);
+                break;
+            }
         }
 
         // Set up for next iteration

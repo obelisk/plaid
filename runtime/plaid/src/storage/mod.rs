@@ -125,6 +125,26 @@ pub trait StorageProvider {
         namespace: &str,
         prefix: Option<&str>,
     ) -> Result<Vec<String>, StorageError>;
+    /// List up to `limit` keys in the namespace (optionally prefix-filtered), in ascending
+    /// sort-key order when the backend supports it (DynamoDB / Sled). Used by overflow
+    /// reload/reaper to avoid loading an entire hot namespace into memory each poll.
+    ///
+    /// Default implementation falls back to `list_keys` + sort + truncate; backends should
+    /// override with a true limited query when possible.
+    async fn list_keys_limited(
+        &self,
+        namespace: &str,
+        prefix: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<String>, StorageError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut keys = self.list_keys(namespace, prefix).await?;
+        keys.sort();
+        keys.truncate(limit);
+        Ok(keys)
+    }
     /// Same as list_keys but will return the keys and values. An optional prefix can be provided
     /// but this only applies to the key, values have no host provided filtering.
     async fn fetch_all(
@@ -248,6 +268,18 @@ impl Storage {
         prefix: Option<&str>,
     ) -> Result<Vec<String>, StorageError> {
         self.database.list_keys(namespace, prefix).await
+    }
+
+    /// List up to `limit` keys, ascending order when the backend supports it.
+    pub async fn list_keys_limited(
+        &self,
+        namespace: &str,
+        prefix: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<String>, StorageError> {
+        self.database
+            .list_keys_limited(namespace, prefix, limit)
+            .await
     }
 
     pub async fn fetch_all(

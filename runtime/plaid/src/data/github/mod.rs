@@ -167,6 +167,8 @@ pub struct Github {
     last_seen: OffsetDateTime,
     /// The logger used to send logs to the execution system for processing
     logger: Sender<Message>,
+    /// Optional durable spill when the executor queue is full.
+    spill: Option<crate::executor::overflow::SpillIngress>,
     /// An LRU where we store the UUIDs of logs that we have already seen and sent into the logging system.
     /// This, together with some overlapping queries to the GH API, helps us ensure that all logs are processed
     /// exactly once.
@@ -182,6 +184,7 @@ impl Github {
         config: GithubConfig,
         logger: Sender<Message>,
         metrics: Option<Arc<MetricsHandle>>,
+        spill: Option<crate::executor::overflow::SpillIngress>,
     ) -> Result<Self, ApiError> {
         let default_client_auth: HashMap<String, Authentication> = [(
             "gh_data_generator".to_string(),
@@ -218,6 +221,7 @@ impl Github {
             last_seen: OffsetDateTime::now_utc(),
             seen_logs_uuid: LruCache::new(lru_cache_size),
             logger,
+            spill,
             logs_fetched,
         })
     }
@@ -381,14 +385,18 @@ impl DataGenerator for Github {
     }
 
     fn send_for_processing(&self, payload: Vec<u8>) -> Result<(), ()> {
-        self.logger
-            .send(Message::new(
-                format!("github"),
-                payload,
-                LogSource::Generator(Generator::Github),
-                self.config.logbacks_allowed.clone(),
-            ))
-            .map_err(|_| ())?;
+        let message = Message::new(
+            "github".to_string(),
+            payload,
+            LogSource::Generator(Generator::Github),
+            self.config.logbacks_allowed.clone(),
+        );
+        crate::executor::overflow::send_or_spill(
+            &self.logger,
+            message,
+            "github",
+            &self.spill,
+        )?;
 
         if let Some(counter) = &self.logs_fetched {
             counter.inc();

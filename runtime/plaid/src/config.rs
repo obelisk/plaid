@@ -140,11 +140,16 @@ pub struct ExecutorConfig {
     /// Requires a persistent storage backend; enabling it without one is a
     /// configuration error caught at startup.
     ///
-    /// Coverage today: webhook POST path on queue-full, plus force-persist of still-queued
-    /// messages on timeboxed shutdown. GET-mode requests are never spilled (they carry a
-    /// live response channel). Delayed logbacks already have their own durable store and
-    /// are left there when the executor queue is full. Other data generators (interval,
-    /// SQS, …) are not yet routed through this path.
+    /// Coverage: webhook POST and data generators (interval, SQS, GitHub, Okta, websocket)
+    /// on queue-full, plus force-persist of still-queued messages on timeboxed shutdown.
+    /// GET-mode requests are never spilled (they carry a live response channel). Delayed
+    /// logbacks already have their own durable store and stay there when the executor
+    /// queue is full.
+    ///
+    /// HTTP admission: messages accepted onto the executor return 200; messages accepted
+    /// onto the spill path return **202 Accepted** (not yet durable — persistence is
+    /// async). When the spill channel is over its high watermark, closed, or overflow is
+    /// off, the handler returns **429** so clients can retry.
     ///
     /// Delivery is **at-least-once**: a crash after enqueue but before lease ack can cause
     /// a duplicate reinject. Rules should tolerate reprocessing.
@@ -165,7 +170,8 @@ pub struct QueueOverflowConfig {
     /// Soft cap on the number of messages held in the overflow store (ready + inflight)
     /// as counted by *this* process. Once reached, further hot-path persists are dropped
     /// (and logged) rather than written, bounding blast radius when the executor is
-    /// wedged. Defaults to 100_000. Forced shutdown persists may exceed this up to
+    /// wedged. Defaults to 50_000 (lower than earlier drafts so full-namespace scans at
+    /// startup stay tractable). Forced shutdown persists may exceed this up to
     /// `2 * max_persisted` (hard ceiling).
     #[serde(default = "default_overflow_max_persisted")]
     pub max_persisted: u64,
@@ -174,9 +180,9 @@ pub struct QueueOverflowConfig {
     /// forever. Defaults to 86_400 (24h).
     #[serde(default = "default_overflow_max_age_secs")]
     pub max_message_age_secs: u64,
-    /// How many ready overflow messages to claim and reinject per reload poll. Bounds
-    /// claim work per cycle; each poll still lists keys in the ready namespace (memory
-    /// scales with total persisted rows, not this setting). Defaults to 256.
+    /// How many ready overflow messages to claim and reinject per reload poll. Also
+    /// bounds how many keys are listed from storage per cycle (oldest-first, limited
+    /// query — not a full namespace scan). Defaults to 256.
     #[serde(default = "default_overflow_reload_batch")]
     pub reload_batch_size: usize,
     /// How long a claimed (inflight) message may sit before another reloader reclaims it
@@ -185,11 +191,32 @@ pub struct QueueOverflowConfig {
     /// short enough that a dead claimer's messages recover promptly.
     #[serde(default = "default_overflow_claim_lease_secs")]
     pub claim_lease_secs: u64,
-    /// Capacity of the in-process spill channel that decouples webhook ingress from
-    /// storage writes. Bounds memory under burst (each slot holds one `Message`). Defaults
-    /// to 512.
+    /// Capacity of the in-process spill channel that decouples ingress from storage
+    /// writes. Bounds memory under burst (each slot holds one `Message`). Defaults to
+    /// 4096. Size as `peak_excess_rps * p99_persist_latency_secs * safety`.
     #[serde(default = "default_overflow_spill_channel_capacity")]
     pub spill_channel_capacity: usize,
+    /// How many storage persists may run concurrently on the spill path. Serial writes
+    /// bottleneck bursts; defaults to 8.
+    #[serde(default = "default_overflow_spill_concurrency")]
+    pub spill_concurrency: usize,
+    /// When the spill channel is at least this full (percent), new spill offers are
+    /// rejected so clients see 429 / generators back off *before* the channel hard-fills.
+    /// Defaults to 75.
+    #[serde(default = "default_overflow_spill_high_watermark_pct")]
+    pub spill_high_watermark_pct: u8,
+    /// Stop reinjecting when the target execution queue is at least this full (percent),
+    /// avoiding claim→restore thrash against a near-full queue. Defaults to 70.
+    #[serde(default = "default_overflow_reinject_high_watermark_pct")]
+    pub reinject_high_watermark_pct: u8,
+    /// How often (seconds) the age reaper scans ready overflow. Kept slower than reload
+    /// so reaping does not amplify storage load during catch-up. Defaults to 300.
+    #[serde(default = "default_overflow_reaper_interval_secs")]
+    pub reaper_interval_secs: u64,
+    /// Idle poll interval (seconds) for the reload task when nothing was reinjected.
+    /// Defaults to 10.
+    #[serde(default = "default_overflow_reload_poll_interval_secs")]
+    pub reload_poll_interval_secs: u64,
 }
 
 impl Default for QueueOverflowConfig {
@@ -200,12 +227,17 @@ impl Default for QueueOverflowConfig {
             reload_batch_size: default_overflow_reload_batch(),
             claim_lease_secs: default_overflow_claim_lease_secs(),
             spill_channel_capacity: default_overflow_spill_channel_capacity(),
+            spill_concurrency: default_overflow_spill_concurrency(),
+            spill_high_watermark_pct: default_overflow_spill_high_watermark_pct(),
+            reinject_high_watermark_pct: default_overflow_reinject_high_watermark_pct(),
+            reaper_interval_secs: default_overflow_reaper_interval_secs(),
+            reload_poll_interval_secs: default_overflow_reload_poll_interval_secs(),
         }
     }
 }
 
 fn default_overflow_max_persisted() -> u64 {
-    100_000
+    50_000
 }
 
 fn default_overflow_max_age_secs() -> u64 {
@@ -221,7 +253,27 @@ fn default_overflow_claim_lease_secs() -> u64 {
 }
 
 fn default_overflow_spill_channel_capacity() -> usize {
-    512
+    4096
+}
+
+fn default_overflow_spill_concurrency() -> usize {
+    8
+}
+
+fn default_overflow_spill_high_watermark_pct() -> u8 {
+    75
+}
+
+fn default_overflow_reinject_high_watermark_pct() -> u8 {
+    70
+}
+
+fn default_overflow_reaper_interval_secs() -> u64 {
+    300
+}
+
+fn default_overflow_reload_poll_interval_secs() -> u64 {
+    10
 }
 
 /// The full configuration of Plaid

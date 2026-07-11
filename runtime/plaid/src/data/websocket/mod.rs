@@ -187,7 +187,12 @@ pub struct WebsocketGenerator {
 /// # Returns
 /// A new `WebsocketGenerator` instance.
 impl WebsocketGenerator {
-    pub fn new(config: WebSocketDataGenerator, sender: Sender<Message>, logger: Logger) -> Self {
+    pub fn new(
+        config: WebSocketDataGenerator,
+        sender: Sender<Message>,
+        logger: Logger,
+        spill: Option<crate::executor::overflow::SpillIngress>,
+    ) -> Self {
         let clients = config
             .websockets
             .into_iter()
@@ -198,6 +203,7 @@ impl WebsocketGenerator {
                     name,
                     config.max_message_size,
                     config.max_frame_size,
+                    spill.clone(),
                 )
             })
             .collect();
@@ -269,6 +275,8 @@ struct WebSocketClient {
     configuration: WebSocket,
     /// The sending channel to send logs to the executor.
     sender: Sender<Message>,
+    /// Optional durable spill when the executor queue is full.
+    spill: Option<crate::executor::overflow::SpillIngress>,
     /// The name of the WebSocket as defined in the configuration.
     name: String,
     /// Manages a list of URI entries and handles the selection and retry logic for connection attempts.
@@ -290,6 +298,7 @@ impl WebSocketClient {
         name: String,
         max_message_size: usize,
         max_frame_size: usize,
+        spill: Option<crate::executor::overflow::SpillIngress>,
     ) -> Self {
         let uri_selector = UriSelector::new(
             configuration.uris.clone(),
@@ -301,6 +310,7 @@ impl WebSocketClient {
         Self {
             configuration,
             sender,
+            spill,
             name,
             uri_selector,
             max_message_size,
@@ -409,9 +419,17 @@ impl WebSocketClient {
                     self.configuration.logbacks_allowed.clone(),
                 );
 
-                if let Err(e) = self.sender.send(log_message) {
+                let log_type = log_message.type_.clone();
+                if crate::executor::overflow::send_or_spill(
+                    &self.sender,
+                    log_message,
+                    &log_type,
+                    &self.spill,
+                )
+                .is_err()
+                {
                     error!(
-                        "Failed to send log generated from WebSocket {} ({uri_name}) to executor: {e}",
+                        "Failed to send log generated from WebSocket {} ({uri_name}) to executor (queue full/disconnected and spill rejected)",
                         self.name
                     );
                 }

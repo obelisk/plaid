@@ -8,7 +8,7 @@ mod websocket;
 
 use crate::{
     apis::ApiError,
-    executor::Message,
+    executor::{overflow::SpillIngress, Message},
     logging::Logger,
     metrics::MetricsHandle,
     storage::{Storage, StorageError},
@@ -86,35 +86,37 @@ impl DataInternal {
         storage: Arc<Storage>,
         els: Logger,
         metrics: Option<Arc<MetricsHandle>>,
+        spill: Option<SpillIngress>,
     ) -> Result<(Self, internal::DelayedLogPersister), DataError> {
         let github = config
             .github
             .map(|gh| {
-                github::Github::new(gh, logger.clone(), metrics.clone())
+                github::Github::new(gh, logger.clone(), metrics.clone(), spill.clone())
                     .map_err(DataError::ApiError)
             })
             .transpose()?;
 
         let okta = config
             .okta
-            .map(|okta| okta::Okta::new(okta, logger.clone(), metrics.clone()));
+            .map(|okta| okta::Okta::new(okta, logger.clone(), metrics.clone(), spill.clone()));
 
+        // Logbacks keep their own durable store on queue-full; do not route through spill.
         let (internal, persister) = internal::Internal::new(logger.clone(), storage.clone())?;
 
         let interval = config
             .interval
-            .map(|config| interval::Interval::new(config, logger.clone()));
+            .map(|config| interval::Interval::new(config, logger.clone(), spill.clone()));
 
         #[cfg(feature = "aws")]
         let sqs = if let Some(cfg) = config.sqs {
-            Some(sqs::SQS::new(cfg, logger.clone()).await)
+            Some(sqs::SQS::new(cfg, logger.clone(), spill.clone()).await)
         } else {
             None
         };
 
         let websocket_external = config
             .websocket
-            .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
+            .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els, spill.clone()));
 
         Ok((
             Self {
@@ -140,9 +142,10 @@ impl Data {
         roles: &InstanceRoles,
         cancellation_token: CancellationToken,
         metrics: Option<Arc<MetricsHandle>>,
+        spill: Option<SpillIngress>,
     ) -> Result<(Sender<DelayedMessage>, DelayedLogPersister, JoinSet<()>), DataError> {
         let (mut di, delayed_log_persister) =
-            DataInternal::new(config, sender, storage.clone(), els, metrics).await?;
+            DataInternal::new(config, sender, storage.clone(), els, metrics, spill).await?;
 
         let mut join_set = JoinSet::new();
 

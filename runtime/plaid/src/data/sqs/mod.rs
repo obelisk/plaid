@@ -55,6 +55,8 @@ pub struct SQS {
     client: Client,
     /// The logger used to send logs to the execution system for processing
     logger: Sender<Message>,
+    /// Optional durable spill when the executor queue is full.
+    spill: Option<crate::executor::overflow::SpillIngress>,
     /// SQS sends messages 'at least once' so we use this cache to dedup messages
     /// An LRU where we store the UUIDs of messages that we have already seen and sent into the logging system.
     /// This LRU has a limited capacity: when this is reached, the least-recently-used item is removed to make space for a new insertion.
@@ -63,7 +65,11 @@ pub struct SQS {
 }
 
 impl SQS {
-    pub async fn new(config: SQSConfig, logger: Sender<Message>) -> Self {
+    pub async fn new(
+        config: SQSConfig,
+        logger: Sender<Message>,
+        spill: Option<crate::executor::overflow::SpillIngress>,
+    ) -> Self {
         let sdk_config = get_aws_sdk_config(&config.authentication).await;
         let client = aws_sdk_sqs::Client::new(&sdk_config);
 
@@ -72,6 +78,7 @@ impl SQS {
             client,
             seen_messages: LruCache::new(NonZeroUsize::new(4096).unwrap()),
             logger,
+            spill,
         }
     }
 
@@ -154,16 +161,17 @@ impl SQS {
     }
 
     fn send_for_processing(&self, payload: Vec<u8>) -> Result<(), String> {
-        self.logger
-            .send(Message::new(
-                format!("sqs/{}", self.config.name),
-                payload,
-                LogSource::Generator(Generator::SQS(self.config.name.clone())),
-                self.config.logbacks_allowed.clone(),
-            ))
-            .map_err(|e| {
+        let log_type = format!("sqs/{}", self.config.name);
+        let message = Message::new(
+            log_type.clone(),
+            payload,
+            LogSource::Generator(Generator::SQS(self.config.name.clone())),
+            self.config.logbacks_allowed.clone(),
+        );
+        crate::executor::overflow::send_or_spill(&self.logger, message, &log_type, &self.spill)
+            .map_err(|_| {
                 format!(
-                    "sqs/{} send_for_processing failed. error: {e}",
+                    "sqs/{} send_for_processing failed (queue full/disconnected and spill rejected)",
                     self.config.name
                 )
             })
