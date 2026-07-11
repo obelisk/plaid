@@ -14,6 +14,7 @@ use super::cache::Config as CacheConfig;
 use super::data::DataConfig;
 use super::loader::Configuration as LoaderConfiguration;
 use super::logging::LoggingConfiguration;
+use super::metrics::MetricsConfiguration;
 use super::storage::Config as StorageConfig;
 
 /// How should responses to GET requests be cached.
@@ -251,6 +252,8 @@ pub struct Configuration {
     pub loading: LoaderConfiguration,
     /// Configuration for the cache system.
     pub cache: CacheConfig,
+    /// Optional Prometheus metrics endpoint configuration.
+    pub metrics: Option<MetricsConfiguration>,
 }
 
 /// Plaid's configuration augmented with the roles that this instance is playing.
