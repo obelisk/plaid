@@ -139,11 +139,21 @@ pub struct ExecutorConfig {
     /// Requires a persistent storage backend; enabling it without one is a
     /// configuration error caught at startup.
     ///
+    /// Coverage today: webhook POST path on queue-full, plus force-persist of still-queued
+    /// messages on timeboxed shutdown. GET-mode requests are never spilled (they carry a
+    /// live response channel). Delayed logbacks already have their own durable store and
+    /// are left there when the executor queue is full. Other data generators (interval,
+    /// SQS, …) are not yet routed through this path.
+    ///
+    /// Delivery is **at-least-once**: a crash after enqueue but before lease ack can cause
+    /// a duplicate reinject. Rules should tolerate reprocessing.
+    ///
     /// Note on multi-replica deployments: cross-pod recovery (a message spilled by a pod
     /// that then dies being replayed by a sibling) only works with a *shared* backend such
     /// as DynamoDB. With a node-local backend (Sled), each replica sees only its own
     /// spilled messages, so a dead pod's overflow is recovered only when that pod's storage
-    /// comes back. Single-replica roles are unaffected.
+    /// comes back. Single-replica roles are unaffected. The `max_persisted` cap is enforced
+    /// per process, so N replicas can hold roughly up to `N * max_persisted` rows combined.
     #[serde(default)]
     pub queue_overflow: Option<QueueOverflowConfig>,
 }
@@ -151,21 +161,34 @@ pub struct ExecutorConfig {
 /// Configuration for the durable execution-queue overflow feature.
 #[derive(Deserialize, Clone)]
 pub struct QueueOverflowConfig {
-    /// Hard cap on the number of messages held in the overflow store at once. Once the
-    /// store holds this many, further messages are dropped (and logged) rather than
-    /// persisted, bounding the blast radius on the storage backend when the executor is
-    /// wedged. Defaults to 100_000.
+    /// Soft cap on the number of messages held in the overflow store (ready + inflight)
+    /// as counted by *this* process. Once reached, further hot-path persists are dropped
+    /// (and logged) rather than written, bounding blast radius when the executor is
+    /// wedged. Defaults to 100_000. Forced shutdown persists may exceed this up to
+    /// `2 * max_persisted` (hard ceiling).
     #[serde(default = "default_overflow_max_persisted")]
     pub max_persisted: u64,
-    /// Messages older than this many seconds are discarded by the reloader instead of
-    /// being replayed, so a message for a since-removed rule cannot loop forever.
-    /// Defaults to 86_400 (24h).
+    /// Messages older than this many seconds are discarded by the reaper / reloader
+    /// instead of being replayed, so a message for a since-removed rule cannot loop
+    /// forever. Defaults to 86_400 (24h).
     #[serde(default = "default_overflow_max_age_secs")]
     pub max_message_age_secs: u64,
-    /// How many overflow messages to claim and reinject per reload poll. Keeps a single
-    /// poll from loading an unbounded namespace into memory. Defaults to 256.
+    /// How many ready overflow messages to claim and reinject per reload poll. Bounds
+    /// claim work per cycle; each poll still lists keys in the ready namespace (memory
+    /// scales with total persisted rows, not this setting). Defaults to 256.
     #[serde(default = "default_overflow_reload_batch")]
     pub reload_batch_size: usize,
+    /// How long a claimed (inflight) message may sit before another reloader reclaims it
+    /// back to ready. Covers the crash window between claim and enqueue-ack. Defaults to
+    /// 120 seconds. Must be long enough for a single decompress + try_send under load,
+    /// short enough that a dead claimer's messages recover promptly.
+    #[serde(default = "default_overflow_claim_lease_secs")]
+    pub claim_lease_secs: u64,
+    /// Capacity of the in-process spill channel that decouples webhook ingress from
+    /// storage writes. Bounds memory under burst (each slot holds one `Message`). Defaults
+    /// to 512.
+    #[serde(default = "default_overflow_spill_channel_capacity")]
+    pub spill_channel_capacity: usize,
 }
 
 impl Default for QueueOverflowConfig {
@@ -174,6 +197,8 @@ impl Default for QueueOverflowConfig {
             max_persisted: default_overflow_max_persisted(),
             max_message_age_secs: default_overflow_max_age_secs(),
             reload_batch_size: default_overflow_reload_batch(),
+            claim_lease_secs: default_overflow_claim_lease_secs(),
+            spill_channel_capacity: default_overflow_spill_channel_capacity(),
         }
     }
 }
@@ -188,6 +213,14 @@ fn default_overflow_max_age_secs() -> u64 {
 
 fn default_overflow_reload_batch() -> usize {
     256
+}
+
+fn default_overflow_claim_lease_secs() -> u64 {
+    120
+}
+
+fn default_overflow_spill_channel_capacity() -> usize {
+    512
 }
 
 /// The full configuration of Plaid
