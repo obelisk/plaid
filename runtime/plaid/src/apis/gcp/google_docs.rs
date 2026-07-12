@@ -40,6 +40,14 @@ pub struct GoogleDocs {
     config: GoogleDocsConfig,
     /// Cached Google OAuth Access Token (Token, Expiry)
     access_token: Mutex<Option<(String, Instant)>>,
+    /// Folders created at runtime by modules: `folder_id -> module_name`.
+    ///
+    /// Static config can only grant write access to known folder IDs. When a
+    /// rule creates a new subfolder (e.g. cloning a template workspace), it
+    /// must also be allowed to write into that newly created folder. Tracking
+    /// creator ownership here closes that gap without opening write access to
+    /// arbitrary Drive IDs the puppet account can see.
+    created_folders: Mutex<HashMap<String, String>>,
 }
 
 // Google OAuth Token URL
@@ -72,12 +80,22 @@ impl GoogleDocs {
             client,
             config,
             access_token: Mutex::new(None),
+            created_folders: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Returns true if `module` created `resource_id` earlier in this process.
+    async fn module_created_folder(&self, module: &PlaidModule, resource_id: &str) -> bool {
+        let guard = self.created_folders.lock().await;
+        guard
+            .get(resource_id)
+            .map(|owner| owner == &module.to_string())
+            .unwrap_or(false)
     }
 
     /// Checks if a module can perform a given action on a specific resource
     /// Modules are registered as as read (R) or write (RW) under self
-    fn check_module_permissions(
+    async fn check_module_permissions(
         &self,
         access_scope: AccessScope,
         module: Arc<PlaidModule>,
@@ -102,6 +120,11 @@ impl GoogleDocs {
                     }
                 }
 
+                // Creator of a folder may also read it
+                if self.module_created_folder(&module, resource_id).await {
+                    return Ok(());
+                }
+
                 warn!(
                 "[{module}] failed [read] permission check for google drive folder [{resource_id}]"
             );
@@ -114,6 +137,12 @@ impl GoogleDocs {
                     if write_access.contains(&module.to_string()) {
                         return Ok(());
                     };
+                }
+
+                // Allow the creating module to write into folders it created
+                // (required for "create folder then copy template docs into it")
+                if self.module_created_folder(&module, resource_id).await {
+                    return Ok(());
                 }
 
                 warn!(
@@ -180,7 +209,8 @@ impl GoogleDocs {
 
         info!("[{module}] create_folder in parent [{parent_id}] name [{name}]");
 
-        self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
+        self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)
+            .await?;
 
         let access_token = self
             .refresh_access_token()
@@ -224,6 +254,12 @@ impl GoogleDocs {
             .map_err(|err| ApiError::GoogleDocsError(err.into()))?
             .to_string();
 
+        // Record ownership so subsequent copy/upload into this folder succeed
+        {
+            let mut guard = self.created_folders.lock().await;
+            guard.insert(folder_id.clone(), module.to_string());
+        }
+
         let output = CreateFolderOutput { folder_id };
         let output =
             serde_json::to_string(&output).map_err(|err| ApiError::SerdeError(err.to_string()))?;
@@ -246,8 +282,10 @@ impl GoogleDocs {
         info!("[{module}] copy_file [{file_id}] to parent [{parent_id}] name [{name}]");
 
         // check this module has access to [read] file_id and [write] parent_folder
-        self.check_module_permissions(AccessScope::Read, module.clone(), &file_id)?;
-        self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
+        self.check_module_permissions(AccessScope::Read, module.clone(), &file_id)
+            .await?;
+        self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)
+            .await?;
 
         let access_token = self
             .refresh_access_token()
@@ -315,7 +353,8 @@ impl GoogleDocs {
 
         info!("[{module}] upload_file to parent [{parent_id}] name [{name}] source_mime [{source_mime}] target_mime [{target_mime}]");
 
-        self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)?;
+        self.check_module_permissions(AccessScope::Write, module.clone(), &parent_id)
+            .await?;
 
         let access_token = self
             .refresh_access_token()
@@ -532,40 +571,72 @@ mod tests {
 
         client
             .check_module_permissions(AccessScope::Read, module_a.clone(), &folder_name)
+            .await
             .unwrap();
 
         client
             .check_module_permissions(AccessScope::Read, module_b.clone(), &folder_name)
+            .await
             .unwrap();
 
         client
             .check_module_permissions(AccessScope::Read, module_c.clone(), &folder_name)
+            .await
             .expect_err("expect to fail with BadRequest");
 
         // readers can't write
         client
             .check_module_permissions(AccessScope::Write, module_a.clone(), &folder_name)
+            .await
             .expect_err("expect to fail with BadRequest");
 
         client
             .check_module_permissions(AccessScope::Write, module_b.clone(), &folder_name)
+            .await
             .unwrap();
 
         client
             .check_module_permissions(AccessScope::Write, module_c.clone(), &folder_name)
+            .await
             .expect_err("expect to fail with BadRequest");
 
         // unknown folder
         client
             .check_module_permissions(AccessScope::Read, module_a.clone(), "unknown_folder")
+            .await
             .expect_err("expect to fail with BadRequest");
 
         client
             .check_module_permissions(AccessScope::Read, module_b.clone(), "unknown_folder")
+            .await
             .expect_err("expect to fail with BadRequest");
 
         client
             .check_module_permissions(AccessScope::Read, module_c.clone(), "unknown_folder")
+            .await
+            .expect_err("expect to fail with BadRequest");
+
+        // module that created a folder can write into it even without static config
+        {
+            let mut guard = client.created_folders.lock().await;
+            guard.insert("runtime_created_folder".to_string(), "module_c".to_string());
+        }
+        client
+            .check_module_permissions(
+                AccessScope::Write,
+                module_c.clone(),
+                "runtime_created_folder",
+            )
+            .await
+            .unwrap();
+        // other modules still cannot
+        client
+            .check_module_permissions(
+                AccessScope::Write,
+                module_a.clone(),
+                "runtime_created_folder",
+            )
+            .await
             .expect_err("expect to fail with BadRequest");
     }
 
