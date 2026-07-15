@@ -640,6 +640,12 @@ impl_new_sub_module_function_with_error_buffer!(blockchain, evm, eth_call, ALLOW
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, gas_price, ALLOW_IN_TEST_MODE);
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_logs, ALLOW_IN_TEST_MODE);
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_block, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    get_fee_history,
+    ALLOW_IN_TEST_MODE
+);
 
 impl_new_sub_module_function_with_error_buffer!(
     blockchain,
@@ -994,6 +1000,7 @@ define_api_functions! {
         "blockchain_evm_gas_price"               => blockchain_evm_gas_price,
         "blockchain_evm_get_logs"                => blockchain_evm_get_logs,
         "blockchain_evm_get_block"               => blockchain_evm_get_block,
+        "blockchain_evm_get_fee_history"         => blockchain_evm_get_fee_history,
 
         "blockchain_solana_send_signed_transaction"        => blockchain_solana_send_signed_transaction,
         "blockchain_solana_get_balance"                    => blockchain_solana_get_balance,
