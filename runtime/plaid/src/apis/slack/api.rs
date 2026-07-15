@@ -41,13 +41,16 @@ struct GenericSlackResponse {
     ok: bool,
 }
 
-/// Detects whether a `post_message` caller opted in to rate-limit handling.
-/// Parsed alongside `PostMessage` so the opt-in is per call: callers that don't
-/// set it keep the historical behavior of a hard error on 429.
+/// Request shape for [`Slack::post_message`]: the standard `PostMessage` fields
+/// plus a per-call opt-in. Parsed in a single pass since the flag rides in the
+/// same JSON as the message.
 #[derive(serde::Deserialize)]
-struct RateLimitOptIn {
+struct PostMessageParams {
+    bot: String,
+    body: String,
     /// When true, a 429 returns Slack's rate-limited body to the caller instead
     /// of erroring, so the caller can react (e.g. schedule the message).
+    /// Defaults off, preserving the historical hard-error behavior.
     #[serde(default)]
     surface_rate_limit: bool,
 }
@@ -221,14 +224,22 @@ impl Slack {
     /// rate limit (delay, windows, retries) is intentionally left to the rule,
     /// not baked into the runtime.
     pub async fn post_message(&self, params: &str, module: Arc<PlaidModule>) -> Result<String> {
-        let p: PostMessage = serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+        // Single parse: message fields plus the per-call opt-in. A malformed
+        // `surface_rate_limit` now fails as BadRequest rather than being
+        // silently ignored.
+        let p: PostMessageParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
         let bot = p.bot.clone();
-        // Opt-in per call; unset means the historical "429 is an error" behavior.
-        let surface_rate_limit = serde_json::from_str::<RateLimitOptIn>(params)
-            .map(|o| o.surface_rate_limit)
-            .unwrap_or(false);
+        let surface_rate_limit = p.surface_rate_limit;
         match self
-            .call_slack(bot, Apis::PostMessage(p), module)
+            .call_slack(
+                bot,
+                Apis::PostMessage(PostMessage {
+                    bot: p.bot,
+                    body: p.body,
+                }),
+                module,
+            )
             .await
         {
             Ok((200, response)) => {
