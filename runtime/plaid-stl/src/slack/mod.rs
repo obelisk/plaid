@@ -928,3 +928,439 @@ pub fn remove_from_channel(bot: &str, channel: &str, user: &str) -> Result<(), P
 
     Ok(())
 }
+
+#[derive(Serialize)]
+struct SlackMessageWithOptions {
+    channel: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocks: Option<serde_json::Value>,
+    attachments: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unfurl_links: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unfurl_media: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<serde_json::Value>,
+}
+
+/// Optional settings for [`post_message_with_options`].
+#[derive(Default)]
+pub struct PostMessageOptions {
+    /// Whether Slack should unfurl links in the message.
+    pub unfurl_links: Option<bool>,
+    /// Whether Slack should unfurl media in the message.
+    pub unfurl_media: Option<bool>,
+    /// Message metadata JSON: `{"event_type": "...", "event_payload": {...}}`.
+    /// Metadata is invisible to users but is returned by conversations.history,
+    /// letting rules correlate posted messages back to the event that generated
+    /// them (e.g. to recover the `ts` of a message delivered via scheduling).
+    pub metadata: Option<String>,
+}
+
+/// Response from a `post_message` call. On success the message posted
+/// immediately and `ts` is set. If the caller opted in to rate-limit handling
+/// and the channel was rate limited, `ok` is false and `error` is
+/// `"ratelimited"` — the caller should then schedule the message itself via
+/// [`schedule_message`].
+#[derive(Serialize, Deserialize)]
+pub struct SlackDeliveryResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub channel: Option<String>,
+    /// Set when the message posted immediately.
+    #[serde(default)]
+    pub ts: Option<String>,
+    /// Slack error code when `ok` is false (e.g. `"ratelimited"`).
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl SlackDeliveryResponse {
+    /// Whether the post was rejected because the channel is rate limited, i.e.
+    /// the caller should schedule the message for later delivery instead.
+    pub fn rate_limited(&self) -> bool {
+        !self.ok && self.error.as_deref() == Some("ratelimited")
+    }
+}
+
+/// Post a Slack message with Block Kit blocks, attachments and optional
+/// settings (unfurl behavior, message metadata). Returns a
+/// [`SlackDeliveryResponse`]; callers that set `surface_rate_limit` should
+/// check [`SlackDeliveryResponse::rate_limited`] and, when true, deliver the
+/// message themselves via [`schedule_message`] — the runtime does not schedule
+/// automatically, it only reports the rate limit.
+/// - `bot`: configured bot name
+/// - `channel`: channel ID to post to
+/// - `blocks`: Block Kit JSON array (may be empty)
+/// - `attachments`: attachments JSON array
+/// - `options`: see [`PostMessageOptions`]
+pub fn post_message_with_options(
+    bot: &str,
+    channel: &str,
+    blocks: &str,
+    attachments: &str,
+    options: PostMessageOptions,
+) -> Result<SlackDeliveryResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, post_message);
+    }
+
+    let metadata = match options.metadata {
+        Some(m) => Some(
+            serde_json::from_str(&m).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?,
+        ),
+        None => None,
+    };
+
+    let message = SlackMessageWithOptions {
+        channel: channel.to_owned(),
+        blocks: optional_blocks(blocks)?,
+        attachments: serde_json::from_str(attachments)
+            .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?,
+        unfurl_links: options.unfurl_links,
+        unfurl_media: options.unfurl_media,
+        metadata,
+    };
+
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    // Ask the runtime to surface a rate limit (429) as a response body instead
+    // of a hard error, so the caller can react. Only this helper sets the flag,
+    // so existing post helpers keep the historical 429-is-an-error behavior.
+    #[derive(Serialize)]
+    struct PostMessageRequest {
+        bot: String,
+        body: String,
+        surface_rate_limit: bool,
+    }
+
+    let params = serde_json::to_string(&PostMessageRequest {
+        bot: bot.to_string(),
+        body: serde_json::to_string(&message).unwrap(),
+        surface_rate_limit: true,
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_post_message(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
+}
+
+/// Data sent to the runtime to schedule a message (chat.scheduleMessage). The
+/// `body` is the fully rendered Slack payload including `post_at`.
+#[derive(Serialize, Deserialize)]
+pub struct ScheduleMessage {
+    pub bot: String,
+    pub body: String,
+}
+
+/// Response from chat.scheduleMessage.
+#[derive(Serialize, Deserialize)]
+pub struct ScheduleMessageResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub channel: Option<String>,
+    /// Set on success; identifies the scheduled message for later deletion.
+    #[serde(default)]
+    pub scheduled_message_id: Option<String>,
+    /// Unix timestamp the message is scheduled to post at.
+    #[serde(default)]
+    pub post_at: Option<u64>,
+    /// Slack error code when `ok` is false.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl ScheduleMessageResponse {
+    /// Whether scheduling was rejected because this 5-minute window already
+    /// holds the maximum scheduled messages for the channel
+    /// (`restricted_too_many`), or the target time slipped into the past
+    /// (`time_in_past`). Either way the caller should retry with a later
+    /// `post_at`.
+    pub fn window_full(&self) -> bool {
+        !self.ok
+            && matches!(
+                self.error.as_deref(),
+                Some("restricted_too_many") | Some("time_in_past")
+            )
+    }
+}
+
+#[derive(Serialize)]
+struct ScheduledMessageBody {
+    channel: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocks: Option<serde_json::Value>,
+    attachments: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unfurl_links: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unfurl_media: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<serde_json::Value>,
+    post_at: u64,
+}
+
+/// Schedule a Block Kit message for future delivery (chat.scheduleMessage).
+/// The runtime just relays the call — the caller supplies the delivery time and
+/// owns any retry/window policy, inspecting [`ScheduleMessageResponse::window_full`]
+/// to pick another `post_at` if a window is full. One use is delivering a
+/// message that would otherwise be dropped when a channel is rate limited
+/// (see [`SlackDeliveryResponse::rate_limited`]), but scheduling is general —
+/// any caller that wants a message delivered at a specific time can use it.
+/// - `post_at`: Unix timestamp (seconds) to deliver at; must be in the future.
+pub fn schedule_message(
+    bot: &str,
+    channel: &str,
+    blocks: &str,
+    attachments: &str,
+    post_at: u64,
+    options: PostMessageOptions,
+) -> Result<ScheduleMessageResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, schedule_message);
+    }
+
+    let metadata = match options.metadata {
+        Some(m) => Some(
+            serde_json::from_str(&m).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?,
+        ),
+        None => None,
+    };
+
+    let message = ScheduledMessageBody {
+        channel: channel.to_owned(),
+        blocks: optional_blocks(blocks)?,
+        attachments: serde_json::from_str(attachments)
+            .map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?,
+        unfurl_links: options.unfurl_links,
+        unfurl_media: options.unfurl_media,
+        metadata,
+        post_at,
+    };
+
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&ScheduleMessage {
+        bot: bot.to_string(),
+        body: serde_json::to_string(&message).unwrap(),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_schedule_message(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
+}
+
+/// Data to be sent to the runtime for deleting a scheduled message
+#[derive(Serialize, Deserialize)]
+pub struct DeleteScheduledMessage {
+    /// Bot to use for deleting the scheduled message
+    pub bot: String,
+    /// ID of the channel the message is scheduled to post to
+    pub channel: String,
+    /// ID returned by chat.scheduleMessage
+    pub scheduled_message_id: String,
+}
+
+impl DeleteScheduledMessage {
+    /// Serialize the body for the Slack API request
+    pub fn body(&self) -> Result<String, String> {
+        #[derive(Serialize)]
+        struct DeleteScheduledMessageBody<'a> {
+            channel: &'a str,
+            scheduled_message_id: &'a str,
+        }
+
+        let body = DeleteScheduledMessageBody {
+            channel: &self.channel,
+            scheduled_message_id: &self.scheduled_message_id,
+        };
+
+        serde_json::to_string(&body).map_err(|e| format!("Failed to serialize body: {}", e))
+    }
+}
+
+/// Response from chat.deleteScheduledMessage. When `ok` is false, `error`
+/// carries the Slack error code; `invalid_scheduled_message_id` means the
+/// message already posted (or never existed) and can no longer be deleted.
+#[derive(Serialize, Deserialize)]
+pub struct DeleteScheduledMessageResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl DeleteScheduledMessageResponse {
+    /// Whether the delete failed because the message already posted
+    /// (or the ID was never valid).
+    pub fn already_posted(&self) -> bool {
+        !self.ok && self.error.as_deref() == Some("invalid_scheduled_message_id")
+    }
+}
+
+/// Delete a scheduled message before it posts (chat.deleteScheduledMessage).
+/// - `bot`: configured bot name
+/// - `channel`: ID of the channel the message is scheduled to post to
+/// - `scheduled_message_id`: ID returned when the message was scheduled
+///
+/// Returns `ok: false` with the Slack error code rather than an `Err` for
+/// API-level failures so callers can handle `invalid_scheduled_message_id`
+/// (the message already posted) distinctly.
+pub fn delete_scheduled_message(
+    bot: &str,
+    channel: &str,
+    scheduled_message_id: &str,
+) -> Result<DeleteScheduledMessageResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, delete_scheduled_message);
+    }
+    const RETURN_BUFFER_SIZE: usize = 32 * 1024; // 32 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&DeleteScheduledMessage {
+        bot: bot.to_string(),
+        channel: channel.to_string(),
+        scheduled_message_id: scheduled_message_id.to_string(),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_delete_scheduled_message(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
+}
+
+/// Data to be sent to the runtime for fetching channel history
+#[derive(Serialize, Deserialize)]
+pub struct ConversationsHistory {
+    /// Bot to use for fetching history
+    pub bot: String,
+    /// ID of the channel to fetch history for
+    pub channel: String,
+    /// Maximum number of messages to return
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// Only include messages after this Slack timestamp
+    #[serde(default)]
+    pub oldest: Option<String>,
+}
+
+/// Message metadata as returned by conversations.history
+#[derive(Serialize, Deserialize)]
+pub struct MessageMetadata {
+    pub event_type: String,
+    #[serde(default)]
+    pub event_payload: serde_json::Value,
+}
+
+/// A single message in a conversations.history response. Only the fields
+/// needed for correlating messages are deserialized.
+#[derive(Serialize, Deserialize)]
+pub struct HistoryMessage {
+    pub ts: String,
+    #[serde(default)]
+    pub metadata: Option<MessageMetadata>,
+}
+
+/// Response from conversations.history
+#[derive(Serialize, Deserialize)]
+pub struct ConversationsHistoryResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub messages: Vec<HistoryMessage>,
+}
+
+/// Fetch recent message history for a channel (conversations.history),
+/// including message metadata. Requires the bot to have the
+/// `channels:history` scope (or `groups:history` for private channels).
+/// - `bot`: configured bot name
+/// - `channel`: ID of the channel to fetch history for
+/// - `limit`: maximum number of messages to return
+/// - `oldest`: only include messages after this Slack timestamp
+pub fn conversations_history(
+    bot: &str,
+    channel: &str,
+    limit: Option<u32>,
+    oldest: Option<&str>,
+) -> Result<ConversationsHistoryResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(slack, conversations_history);
+    }
+    // History responses carry full message payloads so they can be large.
+    const RETURN_BUFFER_SIZE: usize = 256 * 1024; // 256 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let params = serde_json::to_string(&ConversationsHistory {
+        bot: bot.to_string(),
+        channel: channel.to_string(),
+        limit,
+        oldest: oldest.map(|o| o.to_string()),
+    })
+    .unwrap();
+
+    let res = unsafe {
+        slack_conversations_history(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let res = String::from_utf8(return_buffer).unwrap();
+
+    serde_json::from_str(&res).map_err(|_| PlaidFunctionError::Unknown)
+}
