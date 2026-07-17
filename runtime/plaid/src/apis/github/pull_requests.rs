@@ -84,16 +84,16 @@ impl Github {
 
         let owner = self.validate_org(&request.params.owner)?;
         let repo = self.validate_repository_name(&request.params.repo)?;
-        let pull_number = request.params.pull_number;
+        let number = request.params.number;
 
-        info!("Approving pull request [{owner}/{repo}/{pull_number}] on behalf of {module}");
+        info!("Approving pull request [{owner}/{repo}/{number}] on behalf of {module}");
 
         let mut request_body = json!({ "event": "APPROVE" });
         if let Some(body) = request.params.body {
             request_body["body"] = json!(body);
         }
 
-        let address = format!("/repos/{owner}/{repo}/pulls/{pull_number}/reviews");
+        let address = format!("/repos/{owner}/{repo}/pulls/{number}/reviews");
 
         match self
             .make_generic_post_request(&request.client_id, address, request_body, module)

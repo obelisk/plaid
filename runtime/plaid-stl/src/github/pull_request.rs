@@ -169,7 +169,7 @@ pub struct ApprovePullRequestRequest {
     /// The name of the repository without the `.git` extension. The name is not case sensitive.
     pub repo: String,
     /// The number of the pull request to approve.
-    pub pull_number: u64,
+    pub number: u32,
     /// An optional comment to leave alongside the approval.
     pub body: Option<String>,
 }
@@ -183,7 +183,7 @@ pub struct ApprovePullRequestRequest {
 /// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account or organization that owns the repository.
 /// * `repo` - The name of the repository.
-/// * `pull_number` - The number of the pull request to approve.
+/// * `number` - The number of the pull request to approve.
 /// * `body` - An optional comment to leave alongside the approval.
 ///
 /// ## Returns
@@ -193,7 +193,7 @@ pub fn approve_pull_request(
     client_id: impl Display,
     owner: impl Display,
     repo: impl Display,
-    pull_number: u64,
+    number: u32,
     body: Option<impl Display>,
 ) -> Result<String, PlaidFunctionError> {
     extern "C" {
@@ -204,7 +204,7 @@ pub fn approve_pull_request(
     let request = ApprovePullRequestRequest {
         owner: owner.to_string(),
         repo: repo.to_string(),
-        pull_number,
+        number,
         body: body.map(|b| b.to_string()),
     };
 
