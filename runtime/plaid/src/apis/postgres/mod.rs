@@ -335,6 +335,7 @@ fn module_is_allowed(allowed_rules: &HashSet<String>, module_name: &str) -> bool
     allowed_rules.contains(module_name)
 }
 
+// Newtype wrapper to allow deriving ToSql on an STL type.
 #[derive(Debug)]
 struct BoundParameter(QueryParameter);
 
@@ -357,7 +358,7 @@ impl fmt::Display for ParameterTypeError {
 impl Error for ParameterTypeError {}
 
 impl BoundParameter {
-    fn wrong_type(&self, postgres_type: &Type) -> Box<dyn Error + Sync + Send> {
+    fn wrong_type(&self, postgres_type: &Type) -> ParameterTypeError {
         let parameter = match self.0 {
             QueryParameter::Null => "null",
             QueryParameter::Boolean(_) => "boolean",
@@ -367,10 +368,10 @@ impl BoundParameter {
             QueryParameter::Bytes(_) => "bytes",
             QueryParameter::Json(_) => "JSON",
         };
-        Box::new(ParameterTypeError {
+        ParameterTypeError {
             parameter,
             postgres_type: postgres_type.name().to_string(),
-        })
+        }
     }
 }
 
@@ -401,7 +402,7 @@ impl ToSql for BoundParameter {
             QueryParameter::Json(value) if matches!(*ty, Type::JSON | Type::JSONB) => {
                 Json(value).to_sql(ty, out)
             }
-            _ => Err(self.wrong_type(ty)),
+            _ => Err(self.wrong_type(ty).into()),
         }
     }
 
