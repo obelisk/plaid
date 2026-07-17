@@ -161,6 +161,81 @@ pub fn pull_request_request_reviewers(
     Ok(())
 }
 
+/// Request to approve a pull request.
+#[derive(Serialize, Deserialize)]
+pub struct ApprovePullRequestRequest {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the `.git` extension. The name is not case sensitive.
+    pub repo: String,
+    /// The number of the pull request to approve.
+    pub pull_number: u64,
+    /// An optional comment to leave alongside the approval.
+    pub body: Option<String>,
+}
+
+/// Approves a pull request by submitting an `APPROVE` review on it.
+///
+/// See the [GitHub API docs](https://docs.github.com/en/rest/pulls/reviews?apiVersion=2022-11-28#create-a-review-for-a-pull-request)
+/// for more details.
+///
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account or organization that owns the repository.
+/// * `repo` - The name of the repository.
+/// * `pull_number` - The number of the pull request to approve.
+/// * `body` - An optional comment to leave alongside the approval.
+///
+/// ## Returns
+/// * `Ok(String)` with the raw JSON of the created review, or
+/// * `Err(PlaidFunctionError)` if the request fails.
+pub fn approve_pull_request(
+    client_id: impl Display,
+    owner: impl Display,
+    repo: impl Display,
+    pull_number: u64,
+    body: Option<impl Display>,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, approve_pull_request);
+    }
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+
+    let request = ApprovePullRequestRequest {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        pull_number,
+        body: body.map(|b| b.to_string()),
+    };
+
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+    let request = serde_json::to_string(&wrapped).unwrap();
+
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+    let res = unsafe {
+        github_approve_pull_request(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
 /// Request to fetch pull requests from a repository.
 ///
 /// Represents the top-level parameters needed to query pull requests

@@ -1,6 +1,6 @@
 use plaid_stl::github::{
-    AddLabelsRequest, CreatePullRequestRequest, GetPullRequestOptions, GetPullRequestRequest,
-    GithubApiWrapper, PullRequestRequestReviewers,
+    AddLabelsRequest, ApprovePullRequestRequest, CreatePullRequestRequest, GetPullRequestOptions,
+    GetPullRequestRequest, GithubApiWrapper, PullRequestRequestReviewers,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -62,6 +62,46 @@ impl Github {
                 } else if status == 422 {
                     warn!("Some of the reviewers or teams are not collaborators on this repository. Context: [{owner}/{repo}/{pull_number}]. Users: [{}] and teams: [{}]", request.params.reviewers.join(", "), request.params.team_reviewers.join(", "));
                     Ok(false)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Approves a pull request by submitting an `APPROVE` review on it.
+    pub async fn approve_pull_request(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: GithubApiWrapper<ApprovePullRequestRequest> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_org(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let pull_number = request.params.pull_number;
+
+        info!("Approving pull request [{owner}/{repo}/{pull_number}] on behalf of {module}");
+
+        let mut request_body = json!({ "event": "APPROVE" });
+        if let Some(body) = request.params.body {
+            request_body["body"] = json!(body);
+        }
+
+        let address = format!("/repos/{owner}/{repo}/pulls/{pull_number}/reviews");
+
+        match self
+            .make_generic_post_request(&request.client_id, address, request_body, module)
+            .await
+        {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
