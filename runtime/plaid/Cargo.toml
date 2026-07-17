@@ -16,6 +16,7 @@ aws = [
 cranelift = ["wasmer/cranelift"]
 llvm = ["wasmer/llvm"]
 gcp = ["dep:gcloud-bigquery"]
+postgres = ["dep:deadpool-postgres", "dep:tokio-postgres"]
 
 [dependencies]
 aes = "0.7"
@@ -39,6 +40,7 @@ clap = { version = "4", default-features = false, features = [
 ] }
 cron = "0.15.0"
 crossbeam-channel = "0.5"
+deadpool-postgres = { version = "0.14", optional = true }
 env_logger = "0.8"
 flate2 = "1.0"
 futures-util = "0.3.30"
@@ -78,6 +80,7 @@ tar = "0.4"
 time = "0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.26"
+tokio-postgres = { version = "0.7", optional = true, features = ["with-serde_json-1"] }
 tokio-util = "0.7.12"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 toml = "0.5"

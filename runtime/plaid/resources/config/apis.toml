@@ -366,3 +366,22 @@ rules_and_actions = { "some_rule.wasm"  = ["Encrypt", "Decrypt"] }
 # [apis.gcp.bigquery.schemas."<some-dataset>"."table1"]
 # column1 = "string"
 # colum2 = "float"
+
+# =============================================================================
+# PostgreSQL read-query API (requires the `postgres` runtime feature)
+# =============================================================================
+# The MVP PostgreSQL client uses unencrypted connections. Use a dedicated,
+# least-privilege database role and an explicit `sslmode=disable` connection
+# string only in a trusted network or local development environment.
+#
+# [apis.postgres.connections.local_readonly]
+# connection_string = "{plaid-secret{postgres-local-readonly-url}}"
+# allowed_rules = ["postgres_reader.wasm"]
+# max_pool_size = 4
+# pool_timeout_ms = 1000
+# statement_timeout_ms = 5000
+# lock_timeout_ms = 1000
+# max_query_size = 65536
+# max_parameters = 100
+# max_rows = 1000
+# max_response_size = 1048576

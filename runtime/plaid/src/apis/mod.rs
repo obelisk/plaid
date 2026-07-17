@@ -11,6 +11,8 @@ pub mod jira;
 pub mod npm;
 pub mod okta;
 pub mod pagerduty;
+#[cfg(feature = "postgres")]
+pub mod postgres;
 pub mod rustica;
 pub mod slack;
 pub mod splunk;
@@ -49,6 +51,8 @@ use npm::{Npm, NpmConfig};
 use okta::{Okta, OktaConfig};
 use pagerduty::{PagerDuty, PagerDutyConfig};
 use plaid_stl::npm::shared_structs::NpmError;
+#[cfg(feature = "postgres")]
+use postgres::{Postgres, PostgresConfig};
 use serde::Deserialize;
 use slack::{Slack, SlackConfig};
 use splunk::{Splunk, SplunkConfig};
@@ -73,6 +77,8 @@ pub struct Api {
     pub npm: Option<Npm>,
     pub okta: Option<Okta>,
     pub pagerduty: Option<PagerDuty>,
+    #[cfg(feature = "postgres")]
+    pub postgres: Option<Postgres>,
     pub rustica: Option<Rustica>,
     pub slack: Option<Slack>,
     pub splunk: Option<Splunk>,
@@ -97,6 +103,8 @@ pub struct ApiConfigs {
     pub npm: Option<NpmConfig>,
     pub okta: Option<OktaConfig>,
     pub pagerduty: Option<PagerDutyConfig>,
+    #[cfg(feature = "postgres")]
+    pub postgres: Option<PostgresConfig>,
     pub rustica: Option<RusticaConfig>,
     pub slack: Option<SlackConfig>,
     pub splunk: Option<SplunkConfig>,
@@ -137,6 +145,8 @@ pub enum ApiError {
     NpmError(NpmError),
     OktaError(okta::OktaError),
     PagerDutyError(pagerduty::PagerDutyError),
+    #[cfg(feature = "postgres")]
+    PostgresError(postgres::PostgresError),
     RusticaError(rustica::RusticaError),
     SlackError(slack::SlackError),
     SplunkError(splunk::SplunkError),
@@ -154,6 +164,13 @@ pub enum ApiError {
 impl From<evm::EvmCallError> for ApiError {
     fn from(e: evm::EvmCallError) -> Self {
         ApiError::BlockchainError(blockchain::BlockchainError::EvmError(e))
+    }
+}
+
+#[cfg(feature = "postgres")]
+impl From<postgres::PostgresError> for ApiError {
+    fn from(e: postgres::PostgresError) -> Self {
+        Self::PostgresError(e)
     }
 }
 
@@ -253,6 +270,12 @@ impl Api {
             _ => None,
         };
 
+        #[cfg(feature = "postgres")]
+        let postgres = match config.postgres {
+            Some(postgres) => Some(Postgres::new(postgres).await?),
+            _ => None,
+        };
+
         let rustica = match config.rustica {
             Some(q) => Some(Rustica::new(q)),
             _ => None,
@@ -279,7 +302,9 @@ impl Api {
         };
 
         Ok(Self {
-            runtime: Runtime::new().map_err(|e| ApiError::CouldNotInstatiateRuntime(format!("Failed to create runtime: {}", e)))?,
+            runtime: Runtime::new().map_err(|e| {
+                ApiError::CouldNotInstatiateRuntime(format!("Failed to create runtime: {}", e))
+            })?,
             #[cfg(feature = "aws")]
             aws,
             #[cfg(feature = "gcp")]
@@ -293,6 +318,8 @@ impl Api {
             npm,
             okta,
             pagerduty,
+            #[cfg(feature = "postgres")]
+            postgres,
             rustica,
             slack,
             splunk,

@@ -100,6 +100,7 @@ pub mod npm;
 pub mod okta;
 pub mod pagerduty;
 pub mod plaid;
+pub mod postgres;
 pub mod quorum;
 pub mod rustica;
 pub mod slack;
