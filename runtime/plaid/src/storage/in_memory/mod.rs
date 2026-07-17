@@ -68,6 +68,21 @@ impl StorageProvider for InMemoryDb {
         Ok(keys)
     }
 
+    async fn list_keys_limited(
+        &self,
+        namespace: &str,
+        prefix: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<String>, StorageError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut keys = self.list_keys(namespace, prefix).await?;
+        keys.sort();
+        keys.truncate(limit);
+        Ok(keys)
+    }
+
     async fn fetch_all(
         &self,
         namespace: &str,

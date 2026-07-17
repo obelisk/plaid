@@ -113,6 +113,40 @@ impl StorageProvider for Sled {
         Ok(keys)
     }
 
+    async fn list_keys_limited(
+        &self,
+        namespace: &str,
+        prefix: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<String>, StorageError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let tree = self
+            .db
+            .open_tree(namespace.as_bytes())
+            .map_err(|_| StorageError::Access(format!("Could not open Sled tree {namespace}")))?;
+
+        let key_iter = match prefix {
+            Some(p) => tree.scan_prefix(p),
+            None => tree.iter(),
+        };
+        // Sled iterates in ascending key order — take the first `limit` keys only.
+        let keys: Vec<String> = key_iter
+            .keys()
+            .filter_map(|x| match x {
+                Ok(v) => String::from_utf8(v.to_vec()).ok(),
+                Err(e) => {
+                    error!("Storage Error Listing Keys: {e}");
+                    None
+                }
+            })
+            .take(limit)
+            .collect();
+
+        Ok(keys)
+    }
+
     async fn fetch_all(
         &self,
         namespace: &str,

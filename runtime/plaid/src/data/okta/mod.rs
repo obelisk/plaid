@@ -115,6 +115,8 @@ pub struct Okta {
     last_seen: OffsetDateTime,
     /// Sending channel used to send logs into the execution system
     logger: Sender<Message>,
+    /// Optional durable spill when the executor queue is full.
+    spill: Option<crate::executor::overflow::SpillIngress>,
     /// An LRU where we store the UUIDs of Okta logs that we have already seen and sent into the logging system.
     /// This, together with some overlapping queries to the Okta API, helps us ensure that all Okta logs are processed
     /// exactly once.
@@ -130,6 +132,7 @@ impl Okta {
         config: OktaConfig,
         logger: Sender<Message>,
         metrics: Option<Arc<MetricsHandle>>,
+        spill: Option<crate::executor::overflow::SpillIngress>,
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
@@ -156,6 +159,7 @@ impl Okta {
             config,
             last_seen: OffsetDateTime::now_utc(),
             logger,
+            spill,
             seen_logs_uuid: LruCache::new(NonZeroUsize::new(lru_cache_size).unwrap()),
             logs_fetched,
         }
@@ -329,14 +333,13 @@ impl DataGenerator for Okta {
     }
 
     fn send_for_processing(&self, payload: Vec<u8>) -> Result<(), ()> {
-        self.logger
-            .send(Message::new(
-                "okta".to_string(),
-                payload,
-                LogSource::Generator(Generator::Okta),
-                self.config.logbacks_allowed.clone(),
-            ))
-            .map_err(|_| ())?;
+        let message = Message::new(
+            "okta".to_string(),
+            payload,
+            LogSource::Generator(Generator::Okta),
+            self.config.logbacks_allowed.clone(),
+        );
+        crate::executor::overflow::send_or_spill(&self.logger, message, "okta", &self.spill)?;
 
         if let Some(counter) = &self.logs_fetched {
             counter.inc();

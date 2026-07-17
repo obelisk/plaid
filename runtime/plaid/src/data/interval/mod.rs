@@ -1,6 +1,6 @@
 use chrono::Utc;
 use cron::Schedule;
-use crossbeam_channel::{Sender, TrySendError};
+use crossbeam_channel::Sender;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use serde::Deserialize;
 use std::str::FromStr;
@@ -109,12 +109,18 @@ pub struct Interval {
     // config: IntervalConfig,
     /// Sends logs to executor
     sender: Sender<Message>,
+    /// Optional durable spill when the executor queue is full.
+    spill: Option<crate::executor::overflow::SpillIngress>,
     /// Stores jobs while they are waiting to be processed
     job_heap: BinaryHeap<Reverse<ScheduledJob>>,
 }
 
 impl Interval {
-    pub fn new(config: IntervalConfig, log_sender: Sender<Message>) -> Self {
+    pub fn new(
+        config: IntervalConfig,
+        log_sender: Sender<Message>,
+        spill: Option<crate::executor::overflow::SpillIngress>,
+    ) -> Self {
         let mut job_heap = BinaryHeap::new();
 
         // Initialize job heap
@@ -143,6 +149,7 @@ impl Interval {
 
         Interval {
             sender: log_sender,
+            spill,
             job_heap,
         }
     }
@@ -165,22 +172,23 @@ impl Interval {
                 break;
             }
 
-            // Send job to executor
+            // Send job to executor (or durable spill on queue-full when configured).
             // safe unwrap because if the job_heap was empty, the call to `peek()` above would have returned None
             let job = self.job_heap.pop().unwrap();
-            let _ = self
-                .sender
-                .try_send(job.0.message.create_duplicate())
-                .inspect_err(|e| match e {
-                    TrySendError::Disconnected(_) => {
-                        error!("Interval job sender channel has been disconnected. Unable to send interval job message.");
-                    }
-                    TrySendError::Full(_) => {
-                        error!(
-                            "Interval job sender channel is full. Unable to send interval job message."
-                        );
-                    }
-                });
+            let msg = job.0.message.create_duplicate();
+            let log_type = msg.type_.clone();
+            if crate::executor::overflow::send_or_spill(
+                &self.sender,
+                msg,
+                &log_type,
+                &self.spill,
+            )
+            .is_err()
+            {
+                error!(
+                    "Interval job sender channel is full/disconnected and spill rejected. Unable to send interval job message."
+                );
+            }
 
             // Try to get next execution time. If there are no more scheduled executions for this job, we'll exit early.
             let next_execution = job.0.schedule.upcoming(Utc).take(1).collect::<Vec<_>>();

@@ -54,6 +54,7 @@ use warp::{
 enum Errors {
     FailedToStartApiSystem(ApiError),
     FailedToLoadModules,
+    InvalidQueueOverflowConfig,
 }
 
 impl std::fmt::Display for Errors {
@@ -61,6 +62,9 @@ impl std::fmt::Display for Errors {
         match self {
             Errors::FailedToStartApiSystem(e) => write!(f, "Failed to start API system: {:?}", e),
             Errors::FailedToLoadModules => write!(f, "Failed to load modules"),
+            Errors::InvalidQueueOverflowConfig => {
+                write!(f, "Invalid queue overflow configuration")
+            }
         }
     }
 }
@@ -73,9 +77,10 @@ async fn post_handler(
     headers: HeaderMap,
     webhooks: HashMap<String, WebhookConfig>,
     exec: Arc<Executor>,
+    spill: Option<executor::overflow::SpillIngress>,
 ) -> impl warp::Reply {
-    // The status code we'll return. Defaults to 200, but is bumped to 429 if the
-    // execution system's bounded queue is full so the sender can back off and retry.
+    // 200 = enqueued for execution; 202 = accepted onto async spill path (not yet
+    // durable); 429 = rejected (queue full and spill under pressure / disabled).
     let mut status = StatusCode::OK;
     // If this is a webhook that is configured
     if let Some(webhook_configuration) = webhooks.get(&webhook) {
@@ -120,14 +125,21 @@ async fn post_handler(
         // Webhook exists, buffer log
         if let Err(e) = exec.execute_webhook_message(message) {
             match e {
-                TrySendError::Full(_) => {
-                    error!(
-                        "Queue Full! [{}] log dropped!",
-                        webhook_configuration.log_type
-                    );
-                    // The bounded queue to the execution system is full: signal
-                    // backpressure to the caller instead of silently dropping the log.
-                    status = StatusCode::TOO_MANY_REQUESTS;
+                TrySendError::Full(message) => {
+                    match executor::overflow::offer_to_spill(
+                        message,
+                        &webhook_configuration.log_type,
+                        &spill,
+                    ) {
+                        // Accepted onto spill: not yet durable — tell the client so it
+                        // can treat this differently from a fully enqueued log if needed.
+                        executor::overflow::SpillOffer::Accepted => {
+                            status = StatusCode::ACCEPTED;
+                        }
+                        executor::overflow::SpillOffer::Rejected => {
+                            status = StatusCode::TOO_MANY_REQUESTS;
+                        }
+                    }
                 }
                 // TODO: Have this actually cause Plaid to exit
                 TrySendError::Disconnected(_) => panic!(
@@ -138,6 +150,32 @@ async fn post_handler(
     }
     // Empty response, with the status code determined above.
     Box::new(warp::reply::with_status(warp::reply(), status))
+}
+
+/// Force-persist every message still sitting in the given execution-queue receivers.
+/// Used when the executor drain times out (wedged workers) so queued work survives reboot.
+async fn spill_queued_messages(
+    store: &executor::overflow::OverflowStore,
+    receivers: &[crossbeam_channel::Receiver<Message>],
+) {
+    let mut spilled = 0usize;
+    let mut failed = 0usize;
+    for rx in receivers {
+        while let Ok(message) = rx.try_recv() {
+            let id = message.id.clone();
+            let source = message.source.clone();
+            let outcome = store.persist_forced(&message).await;
+            if matches!(outcome, executor::overflow::PersistOutcome::Persisted) {
+                spilled += 1;
+            } else {
+                failed += 1;
+                outcome.log_if_not_persisted("executor-drain", &id, &source);
+            }
+        }
+    }
+    warn!(
+        "Persisted {spilled} queued message(s) to durable overflow before exit ({failed} failed)"
+    );
 }
 
 /// Read the body of a request with a maximum size limit
@@ -256,6 +294,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create thread pools for log execution
     let exec_thread_pools = thread_pools::ExecutionThreadPools::new(&config.executor);
 
+    // Durable execution-queue overflow configuration, if the operator enabled it.
+    let queue_overflow_config = config.executor.queue_overflow.clone();
+
     let metrics = config
         .metrics
         .as_ref()
@@ -321,6 +362,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(s) => s.clone(),
         None => Arc::new(Storage::new_in_memory()),
     };
+
+    // Overflow metrics (registered early so the store can publish gauges at seed time).
+    let overflow_metrics = metrics
+        .as_ref()
+        .map(|h| executor::overflow::OverflowMetrics::register(h));
+
+    // Set up the durable execution-queue overflow store if the feature is enabled. It
+    // requires a persistent backend: without one, "durable" would be a lie (data would
+    // still be lost on reboot), so we refuse to boot rather than silently no-op.
+    let (overflow_store, mut spill_rx, spill_ingress, spill_concurrency) =
+        match queue_overflow_config {
+            Some(cfg) => {
+                let backing = storage.clone().ok_or_else(|| {
+                    error!(
+                        "[executor.queue_overflow] is enabled but no storage system is configured"
+                    );
+                    Errors::InvalidQueueOverflowConfig
+                })?;
+                if !backing.is_persistent() {
+                    error!("[executor.queue_overflow] is enabled but the configured storage backend is not persistent; refusing to start");
+                    return Err(Errors::InvalidQueueOverflowConfig.into());
+                }
+                let capacity = cfg.spill_channel_capacity.max(1);
+                let concurrency = cfg.spill_concurrency.max(1);
+                info!(
+                    "Durable execution-queue overflow is ENABLED (spill_channel_capacity={capacity}, spill_concurrency={concurrency}, max_persisted={}, claim_lease_secs={}, spill_hwm={}%, reinject_hwm={}%)",
+                    cfg.max_persisted,
+                    cfg.claim_lease_secs,
+                    cfg.spill_high_watermark_pct,
+                    cfg.reinject_high_watermark_pct
+                );
+                let store = Arc::new(
+                    executor::overflow::OverflowStore::new_with_metrics(
+                        backing,
+                        cfg.clone(),
+                        overflow_metrics.clone(),
+                    )
+                    .await,
+                );
+                let (tx, rx) = tokio::sync::mpsc::channel::<Message>(capacity);
+                let ingress = executor::overflow::SpillIngress::new(
+                    tx,
+                    capacity,
+                    cfg.spill_high_watermark_pct,
+                    overflow_metrics.clone(),
+                );
+                (Some(store), Some(rx), Some(ingress), concurrency)
+            }
+            None => (None, None, None, 1),
+        };
 
     // Graceful shutdown handling
     let cancellation_token = CancellationToken::new();
@@ -432,7 +523,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Starting {} {thread_or_threads} dedicated to log type [{log_type}]. Log queue size = {}", tp.num_threads, tp.sender.capacity().unwrap_or_default());
     }
     // This sender provides an internal route to sending logs. This is what
-    // powers the logback functions.
+    // powers the logback functions. Spill ingress (if any) lets data generators
+    // persist on queue-full instead of blocking or dropping.
     let (delayed_log_sender, delayed_log_persister, mut dg_tasks) = Data::start(
         config.data,
         log_sender.clone(),
@@ -441,6 +533,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &roles,
         cancellation_token.clone(),
         metrics.clone(),
+        spill_ingress.clone(),
     )
     .await?;
     info!("Configuring APIs for Modules");
@@ -473,6 +566,83 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let executor = Arc::new(executor);
 
+    // When overflow is enabled, producers hand messages they cannot enqueue to the spill
+    // channel. Concurrent workers drain it to storage so a slow backend cannot block
+    // ingress. High-watermark admission rejects before the channel hard-fills (429 / drop).
+    let mut spill_handle = None;
+    if let (Some(store), Some(rx)) = (overflow_store.clone(), spill_rx.take()) {
+        let depth = spill_ingress
+            .as_ref()
+            .map(|s| s.depth_handle())
+            .expect("spill ingress present when store is");
+        let last_failure = spill_ingress
+            .as_ref()
+            .map(|s| s.failure_handle())
+            .expect("spill ingress present when store is");
+        let ct = cancellation_token.clone();
+        let concurrency = spill_concurrency;
+        spill_handle = Some(spawn(async move {
+            executor::overflow::run_spill_workers(
+                store,
+                rx,
+                depth,
+                last_failure,
+                concurrency,
+                ct,
+            )
+            .await;
+        }));
+    }
+
+    // Same-role reload: only pods that own the execution queue (the webhook role) replay
+    // overflowed messages. Claiming parks rows in an inflight lease namespace so a crash
+    // mid-reload is recoverable. Age reaper runs on a slower cadence than reload so
+    // catch-up does not full-scan the namespace every poll.
+    //
+    // We keep the task handle: it holds an `Arc<Executor>` (and therefore queue senders),
+    // so it must be awaited to completion BEFORE the executor is torn down at shutdown.
+    let mut reload_handle = None;
+    if roles.webhooks {
+        if let Some(store) = &overflow_store {
+            let store = store.clone();
+            let executor = executor.clone();
+            let ct = cancellation_token.clone();
+            let poll_interval = std::time::Duration::from_secs(
+                store.config().reload_poll_interval_secs.max(1),
+            );
+            let reaper_interval = std::time::Duration::from_secs(
+                store.config().reaper_interval_secs.max(1),
+            );
+            reload_handle = Some(spawn(async move {
+                let mut last_reap = std::time::Instant::now()
+                    .checked_sub(reaper_interval)
+                    .unwrap_or_else(std::time::Instant::now);
+                loop {
+                    if ct.is_cancelled() {
+                        return;
+                    }
+                    if last_reap.elapsed() >= reaper_interval {
+                        let _ = store.reap_expired().await;
+                        last_reap = std::time::Instant::now();
+                    }
+                    // Keep draining while the executor accepts messages; reload_batch stops
+                    // itself at the reinject high watermark or when the queue is full.
+                    let reinjected = store.reload_batch(&executor).await;
+                    if reinjected > 0 {
+                        // Small yield so we do not peg a core against storage under catch-up.
+                        tokio::task::yield_now().await;
+                        continue;
+                    }
+                    tokio::select! {
+                        _ = ct.cancelled() => return,
+                        _ = tokio::time::sleep(poll_interval) => {}
+                    }
+                }
+            }));
+            info!("Overflow reload task started");
+        }
+    }
+
     if roles.webhooks {
         info!("Configured Webhook Servers");
         for (server_name, config) in config.webhooks {
@@ -483,12 +653,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let webhooks = config.webhooks.clone();
             let exec = executor.clone();
+            let post_spill = spill_ingress.clone();
             let post_route = warp::post()
                 .and(path!("webhook" / String))
                 .and(warp::body::stream())
                 .and(warp::header::headers_cloned())
                 .and(with(webhooks))
                 .and(with(exec.clone()))
+                .and(with(post_spill))
                 .then(post_handler);
 
             // This is a cache for get requests that are configured to be cached
@@ -614,7 +786,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 }
 
-                                // Put the message into the standard message queue
+                                // Put the message into the standard message queue.
+                                // Note: GET-mode messages carry a response_sender and block the
+                                // caller on a reply, so they are intentionally NOT routed to the
+                                // durable overflow store (they cannot be meaningfully replayed on a
+                                // later boot). On a full queue they are dropped as before.
                                 if let Err(e) = log_sender.try_send(message) {
                                     match e {
                                         TrySendError::Full(_) => error!("Queue Full! [{}] log dropped!", webhook_configuration.log_type),
@@ -714,14 +890,87 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         log_join_result("webhook server", result);
     }
 
+    // Spill senders are only held by webhook handlers (now joined). Drop ours so the
+    // spill task sees channel close after it finishes its cancel-path drain.
+    drop(spill_ingress);
+    if let Some(handle) = spill_handle {
+        info!("Waiting for overflow spill task to shutdown...");
+        if let Err(e) = handle.await {
+            error!("Overflow spill task failed during shutdown: {e}");
+        }
+    }
+
+    // The overflow reload task holds an Arc<Executor> (and therefore queue senders). It
+    // was cancelled above; await it now so those senders are released before we join the
+    // worker threads. Awaiting (rather than aborting) guarantees a message mid-claim is
+    // either reinjected, returned to ready, or left in the inflight lease namespace.
+    if let Some(handle) = reload_handle {
+        info!("Waiting for overflow reload task to shutdown...");
+        if let Err(e) = handle.await {
+            error!("Overflow reload task failed during shutdown: {e}");
+        }
+    }
+
     // Drop every Sender<Message> so worker threads exit once the queues drain.
     info!("Waiting for executor threads to drain...");
     drop(metrics);
     drop(log_sender);
+
+    // If durable overflow is enabled, keep a clone of every execution-queue receiver
+    // BEFORE dropping the pools. If the executor is wedged (workers stuck, not pulling),
+    // joining would block until the orchestrator SIGKILLs us and the queued messages
+    // would be lost; instead we time-box the join and, on timeout, persist whatever is
+    // still queued so it can be replayed after the next boot. Messages already being
+    // processed by a stuck worker are not recoverable this way (they are not in the
+    // channel), which is the documented residual gap of a hard wedge.
+    let overflow_drain = overflow_store.as_ref().map(|store| {
+        let mut receivers = vec![exec_thread_pools.general_pool.receiver.clone()];
+        receivers.extend(
+            exec_thread_pools
+                .dedicated_pools
+                .values()
+                .map(|tp| tp.receiver.clone()),
+        );
+        (store.clone(), receivers)
+    });
+
     drop(exec_thread_pools);
     drop(immediate_dispatch);
     drop(executor);
-    executor_threads.join();
+
+    match overflow_drain {
+        Some((store, receivers)) => {
+            // Well under the orchestrator's termination grace period, leaving time for the
+            // overflow drain below to run before a SIGKILL.
+            const EXECUTOR_DRAIN_DEADLINE: std::time::Duration =
+                std::time::Duration::from_secs(30);
+            // Detach join onto a plain OS thread + oneshot so a wedged worker cannot pin
+            // a Tokio blocking-pool slot for the rest of process lifetime after timeout.
+            let (join_tx, join_rx) = tokio::sync::oneshot::channel::<()>();
+            std::thread::Builder::new()
+                .name("executor-drain-join".into())
+                .spawn(move || {
+                    executor_threads.join();
+                    let _ = join_tx.send(());
+                })
+                .expect("spawn executor drain join thread");
+            match tokio::time::timeout(EXECUTOR_DRAIN_DEADLINE, join_rx).await {
+                Ok(Ok(())) => info!("Executor threads drained cleanly"),
+                Ok(Err(_)) => {
+                    // Join thread dropped the sender without sending — treat like timeout.
+                    warn!("Executor drain join thread ended unexpectedly; persisting still-queued messages");
+                    spill_queued_messages(&store, &receivers).await;
+                }
+                Err(_) => {
+                    warn!(
+                        "Executor threads did not drain within {EXECUTOR_DRAIN_DEADLINE:?}; persisting still-queued messages to overflow (join thread left detached if still blocked)"
+                    );
+                    spill_queued_messages(&store, &receivers).await;
+                }
+            }
+        }
+        None => executor_threads.join(),
+    }
 
     // Persist any delayed logbacks still in the in-memory channel.
     info!("Flushing delayed logbacks to storage...");

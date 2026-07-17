@@ -1,4 +1,5 @@
 pub mod metrics;
+pub mod overflow;
 pub mod thread_pools;
 
 use crate::apis::Api;
@@ -824,16 +825,28 @@ impl Executor {
         self: &Self,
         message: Message,
     ) -> Result<(), TrySendError<Message>> {
-        let sender = match self.thread_pools.dedicated_pools.get(&message.type_) {
-            Some(tp) => {
-                // We have a dedicated thread pool for this type: send the log to that channel
-                &tp.sender
-            }
-            None => {
-                // We have no dedicated thread pool for this type: just send to the general one.
-                &self.thread_pools.general_pool.sender
-            }
-        };
+        let sender = self.sender_for_type(&message.type_);
         sender.try_send(message)
+    }
+
+    /// Sender for a log type (dedicated pool if configured, else general).
+    fn sender_for_type(&self, type_: &str) -> &Sender<Message> {
+        match self.thread_pools.dedicated_pools.get(type_) {
+            Some(tp) => &tp.sender,
+            None => &self.thread_pools.general_pool.sender,
+        }
+    }
+
+    /// Approximate occupancy of the execution queue that would receive `type_`, as a
+    /// percentage of capacity (0–100). Used by overflow reload to stop reinjecting before
+    /// the queue hard-fills (avoids claim→restore thrash under load).
+    pub fn queue_occupancy_pct(&self, type_: &str) -> u8 {
+        let sender = self.sender_for_type(type_);
+        let depth = sender.len();
+        let capacity = sender.capacity().unwrap_or(0);
+        if capacity == 0 {
+            return 100;
+        }
+        ((depth.saturating_mul(100)) / capacity).min(100) as u8
     }
 }
