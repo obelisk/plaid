@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,7 +8,7 @@ use plaid_stl::gcp::google_docs::{
     UploadFileOutput,
 };
 use pulldown_cmark::{html, Options, Parser};
-use reqwest::{multipart, Client};
+use reqwest::{multipart, Client, Url};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -40,14 +40,8 @@ pub struct GoogleDocs {
     config: GoogleDocsConfig,
     /// Cached Google OAuth Access Token (Token, Expiry)
     access_token: Mutex<Option<(String, Instant)>>,
-    /// Folders created at runtime by modules: `folder_id -> module_name`.
-    ///
-    /// Static config can only grant write access to known folder IDs. When a
-    /// rule creates a new subfolder (e.g. cloning a template workspace), it
-    /// must also be allowed to write into that newly created folder. Tracking
-    /// creator ownership here closes that gap without opening write access to
-    /// arbitrary Drive IDs the puppet account can see.
-    created_folders: Mutex<HashMap<String, String>>,
+    /// Base URL for Google Drive file metadata requests.
+    drive_api_url: Url,
 }
 
 // Google OAuth Token URL
@@ -57,6 +51,13 @@ const DRIVE_UPLOAD_URL: &str =
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 
 const DRIVE_API_URL: &str = "https://www.googleapis.com/drive/v3/files";
+const MAX_ANCESTRY_NODES: usize = 1_000;
+
+#[derive(Deserialize)]
+struct DriveFileMetadata {
+    #[serde(default)]
+    parents: Vec<String>,
+}
 
 #[derive(Error, Debug)]
 pub enum GoogleDocsError {
@@ -80,77 +81,129 @@ impl GoogleDocs {
             client,
             config,
             access_token: Mutex::new(None),
-            created_folders: Mutex::new(HashMap::new()),
+            drive_api_url: Url::parse(&format!("{DRIVE_API_URL}/"))
+                .expect("DRIVE_API_URL must be a valid URL"),
         }
     }
 
-    /// Returns true if `module` created `resource_id` earlier in this process.
-    async fn module_created_folder(&self, module: &PlaidModule, resource_id: &str) -> bool {
-        let guard = self.created_folders.lock().await;
-        guard
-            .get(resource_id)
-            .map(|owner| owner == &module.to_string())
-            .unwrap_or(false)
+    fn permission_roots(&self, access_scope: &AccessScope, module: &str) -> HashSet<&str> {
+        let mut roots = HashSet::new();
+
+        if *access_scope == AccessScope::Read {
+            roots.extend(
+                self.config
+                    .r
+                    .iter()
+                    .filter(|(_, modules)| modules.contains(module))
+                    .map(|(resource_id, _)| resource_id.as_str()),
+            );
+        }
+
+        roots.extend(
+            self.config
+                .rw
+                .iter()
+                .filter(|(_, modules)| modules.contains(module))
+                .map(|(resource_id, _)| resource_id.as_str()),
+        );
+
+        roots
+    }
+
+    async fn resource_has_ancestor(
+        &self,
+        resource_id: &str,
+        ancestors: &HashSet<&str>,
+    ) -> Result<bool, ApiError> {
+        if ancestors.contains(resource_id) {
+            return Ok(true);
+        }
+
+        let access_token = self
+            .refresh_access_token()
+            .await
+            .map_err(ApiError::GoogleDocsError)?;
+        let mut pending = VecDeque::from([resource_id.to_string()]);
+        let mut visited = HashSet::new();
+
+        while let Some(current_id) = pending.pop_front() {
+            if ancestors.contains(current_id.as_str()) {
+                return Ok(true);
+            }
+            if !visited.insert(current_id.clone()) {
+                continue;
+            }
+            if visited.len() > MAX_ANCESTRY_NODES {
+                return Err(ApiError::GoogleDocsError(GoogleDocsError::GoogleApi(
+                    format!(
+                        "Drive ancestry for resource [{resource_id}] exceeded {MAX_ANCESTRY_NODES} nodes"
+                    ),
+                )));
+            }
+
+            let mut url = self.drive_api_url.clone();
+            url.path_segments_mut()
+                .map_err(|_| {
+                    ApiError::GoogleDocsError(GoogleDocsError::GoogleApi(
+                        "Drive API URL cannot be used as a base URL".to_string(),
+                    ))
+                })?
+                .pop_if_empty()
+                .push(&current_id);
+            url.query_pairs_mut()
+                .append_pair("fields", "parents")
+                .append_pair("supportsAllDrives", "true");
+
+            let response = self
+                .client
+                .get(url)
+                .bearer_auth(&access_token)
+                .send()
+                .await
+                .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = response
+                    .text()
+                    .await
+                    .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+                return Err(ApiError::GoogleDocsError(GoogleDocsError::GoogleApi(
+                    format!(
+                        "Get Drive metadata for resource [{current_id}] failed ({status}): {error_text}"
+                    ),
+                )));
+            }
+
+            let metadata: DriveFileMetadata = response
+                .json()
+                .await
+                .map_err(|err| ApiError::GoogleDocsError(err.into()))?;
+            pending.extend(metadata.parents);
+        }
+
+        Ok(false)
     }
 
     /// Checks if a module can perform a given action on a specific resource
-    /// Modules are registered as as read (R) or write (RW) under self
+    /// Modules inherit configured folder permissions for all descendants.
     async fn check_module_permissions(
         &self,
         access_scope: AccessScope,
         module: Arc<PlaidModule>,
         resource_id: &str,
     ) -> Result<(), ApiError> {
-        match access_scope {
-            AccessScope::Read => {
-                // check if read access is configured for this folder
-                if let Some(folder_readers) = self.config.r.get(resource_id) {
-                    // check if this module has read access to this folder
-                    if folder_readers.contains(&module.to_string()) {
-                        return Ok(());
-                    }
-                }
+        let module_name = module.to_string();
+        let roots = self.permission_roots(&access_scope, &module_name);
 
-                // check if write access is configured for this folder
-                // writers can also read
-                if let Some(folder_writers) = self.config.rw.get(resource_id) {
-                    // check if this module has write access to this folder
-                    if folder_writers.contains(&module.to_string()) {
-                        return Ok(());
-                    }
-                }
-
-                // Creator of a folder may also read it
-                if self.module_created_folder(&module, resource_id).await {
-                    return Ok(());
-                }
-
-                warn!(
-                "[{module}] failed [read] permission check for google drive folder [{resource_id}]"
-            );
-                Err(ApiError::BadRequest)
-            }
-            AccessScope::Write => {
-                // check if write access is configured for this folder
-                if let Some(write_access) = self.config.rw.get(resource_id) {
-                    // check if this module has write access to this folder
-                    if write_access.contains(&module.to_string()) {
-                        return Ok(());
-                    };
-                }
-
-                // Allow the creating module to write into folders it created
-                // (required for "create folder then copy template docs into it")
-                if self.module_created_folder(&module, resource_id).await {
-                    return Ok(());
-                }
-
-                warn!(
-                "[{module}] failed [write] permission check for google drive folder [{resource_id}]"
-            );
-                Err(ApiError::BadRequest)
-            }
+        if !roots.is_empty() && self.resource_has_ancestor(resource_id, &roots).await? {
+            return Ok(());
         }
+
+        warn!(
+            "[{module}] failed [{access_scope:?}] permission check for google drive resource [{resource_id}]"
+        );
+        Err(ApiError::BadRequest)
     }
 
     /// Returns a valid Access Token, reusing the cached one if valid, or refreshing it
@@ -253,12 +306,6 @@ impl GoogleDocs {
             .ok_or(GoogleDocsError::MissingField("id"))
             .map_err(|err| ApiError::GoogleDocsError(err.into()))?
             .to_string();
-
-        // Record ownership so subsequent copy/upload into this folder succeed
-        {
-            let mut guard = self.created_folders.lock().await;
-            guard.insert(folder_id.clone(), module.to_string());
-        }
 
         let output = CreateFolderOutput { folder_id };
         let output =
@@ -507,6 +554,7 @@ mod tests {
     use serde_json::from_value;
     use serde_json::Value;
     use std::io::BufRead;
+    use warp::Filter;
     use wasmer::{
         sys::{Cranelift, EngineBuilder},
         Module, Store,
@@ -545,7 +593,7 @@ mod tests {
 
     #[tokio::test]
     async fn permission_checks() {
-        let folder_name = String::from("local_test");
+        let folder_name = String::from("root");
         // permissions
         let r = json!({folder_name.clone(): ["module_a"]});
         let r = from_value::<HashMap<String, HashSet<String>>>(r).unwrap();
@@ -560,7 +608,26 @@ mod tests {
             r,
             rw,
         };
-        let client = GoogleDocs::new(config);
+        let parent_routes = warp::path!("files" / String).map(|resource_id: String| {
+            let parents = match resource_id.as_str() {
+                "child" => vec!["nested"],
+                "nested" => vec!["root"],
+                "outside" => vec!["other"],
+                "cycle-a" => vec!["cycle-b"],
+                "cycle-b" => vec!["cycle-a"],
+                _ => vec![],
+            };
+            warp::reply::json(&json!({ "parents": parents }))
+        });
+        let (address, server) = warp::serve(parent_routes).bind_ephemeral(([127, 0, 0, 1], 0));
+        tokio::spawn(server);
+
+        let mut client = GoogleDocs::new(config);
+        client.drive_api_url = Url::parse(&format!("http://{address}/files/")).unwrap();
+        *client.access_token.lock().await = Some((
+            "test_access_token".to_string(),
+            Instant::now() + Duration::from_secs(60),
+        ));
 
         // modules
         let module_a = test_module("module_a", true); // reader
@@ -600,42 +667,42 @@ mod tests {
             .await
             .expect_err("expect to fail with BadRequest");
 
-        // unknown folder
+        // Permissions are inherited by nested children.
         client
-            .check_module_permissions(AccessScope::Read, module_a.clone(), "unknown_folder")
-            .await
-            .expect_err("expect to fail with BadRequest");
-
-        client
-            .check_module_permissions(AccessScope::Read, module_b.clone(), "unknown_folder")
-            .await
-            .expect_err("expect to fail with BadRequest");
-
-        client
-            .check_module_permissions(AccessScope::Read, module_c.clone(), "unknown_folder")
-            .await
-            .expect_err("expect to fail with BadRequest");
-
-        // module that created a folder can write into it even without static config
-        {
-            let mut guard = client.created_folders.lock().await;
-            guard.insert("runtime_created_folder".to_string(), "module_c".to_string());
-        }
-        client
-            .check_module_permissions(
-                AccessScope::Write,
-                module_c.clone(),
-                "runtime_created_folder",
-            )
+            .check_module_permissions(AccessScope::Read, module_a.clone(), "child")
             .await
             .unwrap();
-        // other modules still cannot
+
         client
-            .check_module_permissions(
-                AccessScope::Write,
-                module_a.clone(),
-                "runtime_created_folder",
-            )
+            .check_module_permissions(AccessScope::Read, module_b.clone(), "child")
+            .await
+            .unwrap();
+
+        client
+            .check_module_permissions(AccessScope::Write, module_b.clone(), "child")
+            .await
+            .unwrap();
+
+        // Read permission does not imply write permission.
+        client
+            .check_module_permissions(AccessScope::Write, module_a.clone(), "child")
+            .await
+            .expect_err("expect to fail with BadRequest");
+
+        // Other modules and resources outside an allowed root remain denied.
+        client
+            .check_module_permissions(AccessScope::Read, module_c.clone(), "child")
+            .await
+            .expect_err("expect to fail with BadRequest");
+
+        client
+            .check_module_permissions(AccessScope::Write, module_b.clone(), "outside")
+            .await
+            .expect_err("expect to fail with BadRequest");
+
+        // Malformed cyclic ancestry terminates and fails closed.
+        client
+            .check_module_permissions(AccessScope::Write, module_b.clone(), "cycle-a")
             .await
             .expect_err("expect to fail with BadRequest");
     }
