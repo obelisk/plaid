@@ -31,6 +31,25 @@ allowed_rules = ["http_proxy.wasm"]
 [apis."general".network.web_requests."httpbin_post".headers]
 Content-Type = "application/json"
 
+# ──────────────────────────────────────────────────────────────
+# postgres-reader example: parameterized reads from a local database
+# ──────────────────────────────────────────────────────────────
+
+# These credentials are intentionally local-only. The PostgreSQL service is
+# reachable only inside the Compose network and the role has SELECT access to
+# the seeded demo table.
+[apis.postgres.connections.local_readonly]
+connection_string = "host=postgres port=5432 dbname=plaid_local user=plaid_reader password=plaid_reader sslmode=disable"
+allowed_rules = ["postgres_reader.wasm"]
+max_pool_size = 4
+pool_timeout_ms = 2000
+statement_timeout_ms = 5000
+lock_timeout_ms = 1000
+max_query_size = 65536
+max_parameters = 10
+max_rows = 100
+max_response_size = 65536
+
 # Example: Slack integration
 # [apis."slack"]
 # [apis."slack".webhooks]

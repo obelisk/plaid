@@ -14,6 +14,11 @@ test_mode = false
 "todo_api.wasm" = "todo_api"
 "http_proxy.wasm" = "http_proxy"
 "error_handling.wasm" = "error_handling"
+"postgres_reader.wasm" = "postgres_reader"
+
+# Rules that return webhook responses must opt into bounded response storage.
+[loading.persistent_response_size]
+"postgres_reader.wasm" = 65536
 
 [loading.computation_amount]
 default = 55_000_000

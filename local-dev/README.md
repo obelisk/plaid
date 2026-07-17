@@ -29,6 +29,48 @@ plaid  | [hello-world] payload: {"message": "hello from local dev"}
 plaid  | [hello-world] parsed JSON with 1 keys
 ```
 
+## PostgreSQL API Example
+
+The Compose stack includes an ephemeral PostgreSQL 17 database with seeded
+fixture data and a least-privilege `plaid_reader` role. The database is not
+published to the host; Plaid reaches it through the internal Compose network.
+
+With the stack running, exercise the complete webhook → WASM rule → Plaid API
+→ PostgreSQL path:
+
+```bash
+./scripts/test-postgres.sh
+```
+
+Plaid POST webhooks are fire-and-forget. POST the filters to run the rule, then
+GET the same endpoint to read the rule's bounded persistent response:
+
+```bash
+curl -s -X POST http://localhost:8080/webhook/postgres \
+  -H "Content-Type: application/json" \
+  -d '{"minimum_id":1,"active":true}'
+
+curl -s http://localhost:8080/webhook/postgres
+```
+
+The response contains PostgreSQL column metadata and the matching positional
+rows:
+
+```json
+{"columns":[{"name":"id","postgres_type":"int8"},{"name":"name","postgres_type":"text"},{"name":"active","postgres_type":"bool"},{"name":"profile","postgres_type":"jsonb"}],"rows":[[1,"Ada Lovelace",true,{"team":"security"}],[3,"Linus Torvalds",true,{"team":"infrastructure"}]]}
+```
+
+To inspect the fixture database as its administrator:
+
+```bash
+docker compose exec postgres \
+  psql -U plaid_admin -d plaid_local -c 'TABLE demo.people;'
+```
+
+PostgreSQL data lives only in the container filesystem. A restart preserves
+it, while `docker compose down` followed by `docker compose up` recreates and
+reseeds it.
+
 ## Project Structure
 
 ```
@@ -45,17 +87,21 @@ local-dev/
 │   ├── logging.toml            # Log sinks (stdout default)
 │   ├── storage.toml            # Persistent storage backend
 │   └── webhooks.toml           # Webhook endpoints and routing
+├── postgres/
+│   └── init.sql                # Read-only role and deterministic fixtures
 ├── secrets/
 │   ├── .gitignore              # Prevents committing real secrets
 │   └── secrets.toml.example    # Template — copy to secrets.toml
 ├── rules/                      # Your WASM rule source code
 │   ├── Cargo.toml              # Workspace — add your rules here
 │   ├── .cargo/config.toml      # Sets wasm32-unknown-unknown target
-│   └── hello-world/            # Example rule
+│   ├── hello-world/            # Minimal example rule
+│   └── postgres-reader/        # Parameterized PostgreSQL query example
 │       ├── Cargo.toml
 │       └── src/lib.rs
 ├── scripts/
 │   ├── build-modules.sh        # Build modules locally (no Docker)
+│   ├── test-postgres.sh        # PostgreSQL end-to-end smoke test
 │   ├── test-webhook.sh         # Quick webhook test helper
 │   └── watch-modules.sh        # Watch .wasm files and auto-restart
 └── README.md
