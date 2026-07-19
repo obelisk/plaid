@@ -216,6 +216,20 @@ pub fn get_response() -> Result<String, PlaidFunctionError> {
     }
 }
 
+/// Set the HTTP status returned when this rule serves a webhook response.
+pub fn set_response_status(status: u16) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        fn set_response_status(status: u32) -> i32;
+    }
+
+    let result = unsafe { set_response_status(status.into()) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(result.into())
+    }
+}
+
 /// Give the runtime more context about an error encountered during execution
 pub fn set_error_context(context: &str) {
     extern "C" {

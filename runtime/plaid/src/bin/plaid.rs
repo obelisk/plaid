@@ -8,8 +8,8 @@ use plaid::{
     apis::ApiError,
     cache::Cache,
     config::{
-        CachingMode, ConfigurationWithRoles, GetMode, ResponseMode, WebhookConfig,
-        WebhookServerConfiguration,
+        CachingMode, ConfigurationWithRoles, GetMode, PostResponseMode, ResponseMode,
+        WebhookConfig, WebhookServerConfiguration,
     },
     loader::PlaidModule,
     logging::Logger,
@@ -41,13 +41,13 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use crossbeam_channel::TrySendError;
 use warp::{
     http::{HeaderMap, StatusCode},
-    path, Filter,
+    path, Filter, Reply,
 };
 
 #[derive(Debug)]
@@ -67,77 +67,177 @@ impl std::fmt::Display for Errors {
 
 impl std::error::Error for Errors {}
 
+enum PostResponseAction {
+    Static(String),
+    Rule {
+        name: String,
+        receiver: tokio::sync::oneshot::Receiver<Option<ResponseMessage>>,
+        message: Message,
+        timeout_seconds: u64,
+    },
+    MissingRule(String),
+}
+
 async fn post_handler(
     webhook: String,
     body: impl Stream<Item = Result<impl Buf, warp::Error>> + Unpin + Send + Sync,
     headers: HeaderMap,
     webhooks: HashMap<String, WebhookConfig>,
+    modules: Arc<HashMap<String, Arc<PlaidModule>>>,
     exec: Arc<Executor>,
-) -> impl warp::Reply {
+) -> warp::reply::Response {
     // The status code we'll return. Defaults to 200, but is bumped to 429 if the
     // execution system's bounded queue is full so the sender can back off and retry.
     let mut status = StatusCode::OK;
-    // If this is a webhook that is configured
-    if let Some(webhook_configuration) = webhooks.get(&webhook) {
-        // If the webhook has a label, use that as the source, otherwise use the webhook address
-        let source = match webhook_configuration.label {
-            Some(ref label) => LogSource::WebhookPost(label.to_string()),
-            None => LogSource::WebhookPost(webhook.to_string()),
-        };
 
-        let logbacks_allowed = webhook_configuration.logbacks_allowed.clone();
+    // If this is a webhook that is configured get the configuration for it,
+    // otherwise return an empty 200 to avoid leaking information about what webhooks are configured.
+    let Some(webhook_configuration) = webhooks.get(&webhook) else {
+        return warp::reply::with_status(warp::reply(), status).into_response();
+    };
 
-        // Read the body with size limit
-        let full_body = match read_body_with_limit(body, webhook_configuration.max_body_size).await
-        {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                error!("Error reading body for webhook: {webhook}: {e}");
-                // We still return a 200 to avoid leaking information
-                return Box::new(warp::reply::with_status(warp::reply(), StatusCode::OK));
-            }
-        };
+    // If the webhook has a label, use that as the source, otherwise use the webhook address
+    let source = match webhook_configuration.label {
+        Some(ref label) => LogSource::WebhookPost(label.to_string()),
+        None => LogSource::WebhookPost(webhook.to_string()),
+    };
 
-        // Create the message we're going to send into the execution system.
-        let mut message = Message::new(
-            webhook_configuration.log_type.to_owned(),
-            full_body,
-            source,
-            logbacks_allowed,
-        );
+    let logbacks_allowed = webhook_configuration.logbacks_allowed.clone();
 
-        for requested_header in webhook_configuration.headers.iter() {
-            // TODO: Investigate if this should be get_all?
-            // Without this we don't support receiving multiple headers with the same name
-            // I don't know if this is an issue or not, practically, or if there are security implications.
-            if let Some(value) = headers.get(requested_header) {
-                message
-                    .headers
-                    .insert(requested_header.to_string(), value.as_bytes().to_vec());
-            }
+    // Read the body with size limit
+    let full_body = match read_body_with_limit(body, webhook_configuration.max_body_size).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            error!("Error reading body for webhook: {webhook}: {e}");
+            // We still return a 200 to avoid leaking information
+            return warp::reply::with_status(warp::reply(), StatusCode::OK).into_response();
         }
+    };
 
-        // Webhook exists, buffer log
-        if let Err(e) = exec.execute_webhook_message(message) {
-            match e {
-                TrySendError::Full(_) => {
-                    error!(
-                        "Queue Full! [{}] log dropped!",
-                        webhook_configuration.log_type
-                    );
-                    // The bounded queue to the execution system is full: signal
-                    // backpressure to the caller instead of silently dropping the log.
-                    status = StatusCode::TOO_MANY_REQUESTS;
-                }
-                // TODO: Have this actually cause Plaid to exit
-                TrySendError::Disconnected(_) => panic!(
-                    "The execution system is no longer accepting messages. Nothing can continue."
-                ),
-            }
+    // Create the message we're going to send into the execution system.
+    let mut message = Message::new(
+        webhook_configuration.log_type.to_owned(),
+        full_body,
+        source,
+        logbacks_allowed,
+    );
+
+    for requested_header in webhook_configuration.headers.iter() {
+        // TODO: Investigate if this should be get_all?
+        // Without this we don't support receiving multiple headers with the same name
+        // I don't know if this is an issue or not, practically, or if there are security implications.
+        if let Some(value) = headers.get(requested_header) {
+            message
+                .headers
+                .insert(requested_header.to_string(), value.as_bytes().to_vec());
         }
     }
+
+    // Prepare the post response before moving the normal message into its
+    // configured execution queue. The response action is handled only after
+    // normal fan-out has been accepted.
+    let post_response = match webhook_configuration.post_mode.as_ref() {
+        Some(post_mode) => match &post_mode.response_mode {
+            PostResponseMode::Static(body) => Some(PostResponseAction::Static(body.clone())),
+            PostResponseMode::Rule(name) => match modules.get(name) {
+                Some(rule) => {
+                    let (response_sender, response_receiver) = tokio::sync::oneshot::channel();
+                    let mut response_message = message.create_duplicate();
+                    response_message.response_sender = Some(response_sender);
+                    response_message.module = Some(rule.clone());
+                    Some(PostResponseAction::Rule {
+                        name: name.clone(),
+                        receiver: response_receiver,
+                        message: response_message,
+                        timeout_seconds: post_mode.response_timeout_seconds,
+                    })
+                }
+                None => Some(PostResponseAction::MissingRule(name.clone())),
+            },
+        },
+        None => None,
+    };
+
+    // Webhook exists, buffer log for normal fan-out.
+    if let Err(e) = exec.execute_webhook_message(message) {
+        match e {
+            TrySendError::Full(_) => {
+                error!(
+                    "Queue Full! [{}] log dropped!",
+                    webhook_configuration.log_type
+                );
+                // The bounded queue to the execution system is full: signal
+                // backpressure to the caller instead of silently dropping the log.
+                status = StatusCode::TOO_MANY_REQUESTS;
+            }
+            // TODO: Have this actually cause Plaid to exit
+            TrySendError::Disconnected(_) => panic!(
+                "The execution system is no longer accepting messages. Nothing can continue."
+            ),
+        }
+    }
+
+    if status != StatusCode::OK {
+        return warp::reply::with_status(warp::reply(), status).into_response();
+    }
+
+    match post_response {
+        Some(PostResponseAction::Static(body)) => {
+            return warp::reply::with_status(body, StatusCode::OK).into_response();
+        }
+        Some(PostResponseAction::MissingRule(name)) => {
+            error!("Got a POST request to {webhook} but the response rule [{name}] does not exist");
+            return warp::reply::with_status(warp::reply(), StatusCode::BAD_GATEWAY)
+                .into_response();
+        }
+        Some(PostResponseAction::Rule {
+            name,
+            receiver,
+            message,
+            timeout_seconds,
+        }) => {
+            if let Err(e) = exec.execute_webhook_message(message) {
+                match e {
+                    TrySendError::Full(_) => {
+                        error!("Queue Full! Response rule [{name}] for webhook {webhook} was not run");
+                        return warp::reply::with_status(warp::reply(), StatusCode::TOO_MANY_REQUESTS).into_response();
+                    }
+                    TrySendError::Disconnected(_) => panic!(
+                        "The execution system is no longer accepting messages. Nothing can continue."
+                    ),
+                }
+            }
+
+            match tokio::time::timeout(Duration::from_secs(timeout_seconds), receiver).await {
+                Ok(Ok(Some(response))) => match StatusCode::from_u16(response.code) {
+                    Ok(status) => return warp::reply::with_status(response.body, status).into_response(),
+                    Err(e) => {
+                        error!("Response rule [{name}] for webhook {webhook} returned an invalid status: {e}");
+                        return warp::reply::with_status(warp::reply(), StatusCode::BAD_GATEWAY)
+                            .into_response();
+                    }
+                },
+                Ok(Ok(None)) => {
+                    warn!("Response rule [{name}] for webhook {webhook} did not return a response");
+                    return warp::reply::with_status(warp::reply(), StatusCode::BAD_GATEWAY)
+                        .into_response();
+                }
+                Ok(Err(_)) => {
+                    error!("Response rule [{name}] for webhook {webhook} failed before returning a response");
+                    return warp::reply::with_status(warp::reply(), StatusCode::BAD_GATEWAY)
+                        .into_response();
+                }
+                Err(_) => {
+                    error!("Response rule [{name}] for webhook {webhook} timed out after {timeout_seconds} seconds");
+                    return warp::reply::with_status(warp::reply(), StatusCode::GATEWAY_TIMEOUT)
+                        .into_response();
+                }
+            }
+        }
+        None => {}
+    }
     // Empty response, with the status code determined above.
-    Box::new(warp::reply::with_status(warp::reply(), status))
+    warp::reply::with_status(warp::reply(), status).into_response()
 }
 
 /// Read the body of a request with a maximum size limit
@@ -483,11 +583,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let webhooks = config.webhooks.clone();
             let exec = executor.clone();
+            let post_modules = modules_by_name.clone();
             let post_route = warp::post()
                 .and(path!("webhook" / String))
                 .and(warp::body::stream())
                 .and(warp::header::headers_cloned())
                 .and(with(webhooks))
+                .and(with(post_modules))
                 .and(with(exec.clone()))
                 .then(post_handler);
 

@@ -35,6 +35,7 @@ pub enum PlaidFunctionError {
     Unknown,
     FailedToLogBack,
     LogbackBudgetExhausted,
+    InvalidHttpResponseStatus,
 }
 
 impl Error for PlaidFunctionError {}
@@ -59,6 +60,7 @@ impl core::fmt::Display for PlaidFunctionError {
             PlaidFunctionError::Unknown => write!(f, "An unknown error occurred. This can happen if the Plaid runtime is newer than the STL this rule was compiled against."),
             PlaidFunctionError::FailedToLogBack => write!(f, "Failed to dispatch log message: the receiver is disconnected or at capacity"),
             PlaidFunctionError::LogbackBudgetExhausted => write!(f, "Logback budget exhausted"),
+            PlaidFunctionError::InvalidHttpResponseStatus => write!(f, "Invalid HTTP response status"),
         }
     }
 }
@@ -82,6 +84,7 @@ impl From<i32> for PlaidFunctionError {
             -14 => Self::TimeoutElapsed,
             -15 => Self::FailedToLogBack,
             -16 => Self::LogbackBudgetExhausted,
+            -17 => Self::InvalidHttpResponseStatus,
             _ => Self::Unknown,
         }
     }
@@ -90,6 +93,26 @@ impl From<i32> for PlaidFunctionError {
 impl From<PlaidFunctionError> for i32 {
     fn from(e: PlaidFunctionError) -> Self {
         e as i32
+    }
+}
+
+/// A response returned by a rule serving a webhook request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WebhookResponse {
+    /// The HTTP status to return to the webhook sender.
+    pub status: u16,
+    /// The response body to return to the webhook sender.
+    pub body: String,
+}
+
+impl WebhookResponse {
+    /// Construct a webhook response. The runtime validates that `status` is a
+    /// valid HTTP status code when the response is served.
+    pub fn new(status: u16, body: impl Into<String>) -> Self {
+        Self {
+            status,
+            body: body.into(),
+        }
     }
 }
 
@@ -291,6 +314,82 @@ macro_rules! entrypoint_with_source_and_response {
             match main(log, source) {
                 Ok(Some(response)) => {
                     let response_bytes = response.as_bytes().to_vec();
+                    unsafe {
+                        set_response(response_bytes.as_ptr(), response_bytes.len() as u32);
+                    };
+                    0
+                }
+                Ok(None) => 0,
+                Err(e) => {
+                    set_error_context(&e.to_string());
+                    1
+                }
+            }
+        }
+    };
+}
+
+/// Generate an entrypoint for a rule that returns a body and HTTP status for a
+/// webhook request. The rule's `main` function must return
+/// `Result<Option<WebhookResponse>, _>`.
+#[macro_export]
+macro_rules! entrypoint_with_source_and_webhook_response {
+    () => {
+        use plaid_stl::{plaid::set_error_context, set_panic_hook};
+
+        #[no_mangle]
+        pub unsafe extern "C" fn entrypoint() -> i32 {
+            extern "C" {
+                fn fetch_data_and_source(data_buffer: *mut u8, buffer_size: u32) -> i32;
+                fn set_response_status(status: u32) -> i32;
+                fn set_response(data_buffer: *const u8, buffer_size: u32);
+            }
+
+            let buffer_size = fetch_data_and_source(vec![].as_mut_ptr(), 0);
+            let buffer_size = if buffer_size < 4 {
+                return -3;
+            } else {
+                buffer_size as u32
+            };
+
+            let mut data_buffer = vec![0; buffer_size as usize];
+
+            let copied_size = fetch_data_and_source(data_buffer.as_mut_ptr(), buffer_size);
+            let copied_size = if copied_size < 4 {
+                return -4;
+            } else {
+                copied_size as u32
+            };
+
+            if copied_size != buffer_size {
+                return -1;
+            }
+
+            let log_length = u32::from_le_bytes(data_buffer[0..4].try_into().unwrap()) as usize;
+
+            let log = &data_buffer[4..4 + log_length];
+            let log = match String::from_utf8(log.to_vec()) {
+                Ok(s) => s,
+                Err(_) => return -2,
+            };
+
+            let log_source = &data_buffer[4 + log_length..];
+            let source = match serde_json::from_slice::<LogSource>(log_source) {
+                Ok(s) => s,
+                Err(_) => return -2,
+            };
+
+            set_panic_hook!();
+
+            match main(log, source) {
+                Ok(Some(response)) => {
+                    let status_result = unsafe { set_response_status(response.status.into()) };
+                    if status_result != 0 {
+                        set_error_context("Invalid HTTP response status");
+                        return 1;
+                    }
+
+                    let response_bytes = response.body.as_bytes().to_vec();
                     unsafe {
                         set_response(response_bytes.as_ptr(), response_bytes.len() as u32);
                     };

@@ -821,6 +821,7 @@ define_api_functions! {
         // so are broken out into their own module.
         "get_response"             => super::response::get_response,
         "set_response"             => super::response::set_response,
+        "set_response_status"      => super::response::set_response_status,
         "set_error_context"        => super::internal::set_error_context,
         "print_debug_string"       => super::internal::print_debug_string,
         "storage_insert"           => super::storage::insert,

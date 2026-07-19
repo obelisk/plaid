@@ -30,14 +30,13 @@ use std::sync::{Arc, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
-/// When a rule is used to generate a response to a GET request, this structure
-/// is what is passed from the executor to the async webhook runtime.
+/// When a rule is used to generate a webhook response, this structure is what
+/// is passed from the executor to the async webhook runtime.
 #[derive(Serialize, Deserialize)]
 pub struct ResponseMessage {
-    /// Currently unused because there is no API to set this and how it should
-    /// treated by the higher level cache is still to be defined.
+    /// The HTTP status selected by the response rule.
     pub code: u16,
-    /// The data the rule intends to return in the serviced GET request.
+    /// The data the rule intends to return in the serviced webhook request.
     pub body: String,
 }
 
@@ -206,8 +205,13 @@ pub struct Env {
     /// Memory for host-guest communication
     pub memory: Option<Memory>,
     // A special value that can be filled to leave a string response available after
-    // the module has execute. Generally this is used for GET mode responses.
+    // the module has executed. Generally this is used for webhook responses.
     pub response: Option<String>,
+    /// The HTTP status selected by a response rule.
+    pub response_status: Option<u16>,
+    /// An invalid status supplied by a rule. This turns the invocation into a
+    /// response failure even when the rule ignores the host function result.
+    pub invalid_response_status: Option<u32>,
     // Context about error encountered by the module during its execution
     pub execution_error_context: Option<String>,
     /// Available for immediate logback during normal operation; `None` during shutdown drain.
@@ -358,6 +362,8 @@ fn prepare_for_execution(
         external_logging_system: els.clone(),
         memory: None,
         response,
+        response_status: None,
+        invalid_response_status: None,
         execution_error_context: None,
         immediate_sender,
         delayed_log_sender,
@@ -433,26 +439,12 @@ fn update_persistent_response(
     plaid_module: &Arc<PlaidModule>,
     env: &FunctionEnv<Env>,
     mut store: &mut Store,
-    response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
 ) -> Result<(), ExecutorError> {
     match (
         env.as_mut(&mut store).response.clone(),
         &plaid_module.persistent_response,
     ) {
         (None, _) => {
-            // We need to check if there might be a tokio task serving a GET
-            // that is waiting on this response. If the rule doesn't give one, we
-            // need to ensure we send a None to wake up that task and complete it
-            if let Some(sender) = response_sender {
-                if let Err(_) = sender.send(None) {
-                    error!("[{}] was servicing a request that returned no response and failed to send!", plaid_module.name);
-                } else {
-                    error!(
-                        "[{}] was servicing a request that returned no response!",
-                        plaid_module.name
-                    );
-                }
-            }
             // There was no response to save
             return Ok(());
         }
@@ -469,17 +461,6 @@ fn update_persistent_response(
                 match pr.data.write() {
                     Ok(mut data) => {
                         *data = Some(response.clone());
-                        if let Some(sender) = response_sender {
-                            if let Err(_) = sender.send(Some(ResponseMessage {
-                                code: 200,
-                                body: response,
-                            })) {
-                                error!(
-                                    "[{}] was servicing a request but sending the response failed!",
-                                    plaid_module.name
-                                );
-                            }
-                        }
                         info!("{} updated its persistent response", plaid_module.name);
                         Ok(())
                     }
@@ -619,8 +600,30 @@ fn process_message_with_module(
         );
     }
 
+    if let Some(invalid_status) = env.as_ref(&store).invalid_response_status {
+        els.log_module_error(
+            module.name.clone(),
+            format!("Invalid HTTP response status: {invalid_status}"),
+            message.data.clone(),
+        )?;
+        return Ok(());
+    }
+
+    if let Some(sender) = message.response_sender {
+        let response = env.as_ref(&store).response.clone().map(|body| ResponseMessage {
+            code: env.as_ref(&store).response_status.unwrap_or(200),
+            body,
+        });
+        if sender.send(response).is_err() {
+            error!(
+                "[{}] was servicing a request but sending the response failed!",
+                module.name
+            );
+        }
+    }
+
     // Update the persistent response
-    if let Err(e) = update_persistent_response(&module, &env, &mut store, message.response_sender) {
+    if let Err(e) = update_persistent_response(&module, &env, &mut store) {
         let _ = els.log_module_error(
             module.name.clone(),
             format!("Failed to update persistent response: {e}"),
