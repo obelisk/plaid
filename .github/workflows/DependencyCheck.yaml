@@ -12,9 +12,6 @@ jobs:
       pull-requests: read
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - name: Check for relevant changes
         id: filter
         uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
@@ -22,7 +19,9 @@ jobs:
           filters: |
             relevant:
               - "runtime/Cargo.lock"
-              - ".github/workflows/DependencyCheck.yaml"
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
         if: steps.filter.outputs.relevant == 'true'
