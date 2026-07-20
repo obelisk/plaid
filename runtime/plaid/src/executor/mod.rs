@@ -550,6 +550,10 @@ fn process_message_with_module(
     let error = match entrypoint.call(&mut store) {
         Ok(n) => {
             if n != 0 {
+                if let Some(metrics) = &module_execution_metrics {
+                    metrics.record_module_failure(&module.name);
+                }
+
                 Some(ModuleExecutionError::ModuleError(
                     env.as_ref(&store)
                         .execution_error_context
