@@ -78,7 +78,14 @@ impl Github {
         &self,
         params: &str,
         module: Arc<PlaidModule>,
-    ) -> Result<String, ApiError> {
+    ) -> Result<u32, ApiError> {
+        #[derive(Serialize)]
+        struct SubmitReview {
+            event: &'static str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            body: Option<String>,
+        }
+
         let request: GithubApiWrapper<ApprovePullRequestRequest> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
@@ -88,20 +95,19 @@ impl Github {
 
         info!("Approving pull request [{owner}/{repo}/{number}] on behalf of {module}");
 
-        let mut request_body = json!({ "event": "APPROVE" });
-        if let Some(body) = request.params.body {
-            request_body["body"] = json!(body);
-        }
-
         let address = format!("/repos/{owner}/{repo}/pulls/{number}/reviews");
+        let request_body = SubmitReview {
+            event: "APPROVE",
+            body: request.params.body,
+        };
 
         match self
             .make_generic_post_request(&request.client_id, address, request_body, module)
             .await
         {
-            Ok((status, Ok(body))) => {
+            Ok((status, Ok(_))) => {
                 if status == 200 {
-                    Ok(body)
+                    Ok(0)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,

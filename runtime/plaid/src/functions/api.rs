@@ -436,7 +436,7 @@ impl_new_function!(
     pull_request_request_reviewers,
     DISALLOW_IN_TEST_MODE
 );
-impl_new_function_with_error_buffer!(github, approve_pull_request, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, approve_pull_request, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_weekly_commit_count, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_reference, ALLOW_IN_TEST_MODE);
 impl_new_function!(github, create_reference, DISALLOW_IN_TEST_MODE);

@@ -187,7 +187,7 @@ pub struct ApprovePullRequestRequest {
 /// * `body` - An optional comment to leave alongside the approval.
 ///
 /// ## Returns
-/// * `Ok(String)` with the raw JSON of the created review, or
+/// * `Ok(())` if the review was successfully submitted, or
 /// * `Err(PlaidFunctionError)` if the request fails.
 pub fn approve_pull_request(
     client_id: impl Display,
@@ -195,11 +195,10 @@ pub fn approve_pull_request(
     repo: impl Display,
     number: u32,
     body: Option<impl Display>,
-) -> Result<String, PlaidFunctionError> {
+) -> Result<(), PlaidFunctionError> {
     extern "C" {
-        new_host_function_with_error_buffer!(github, approve_pull_request);
+        new_host_function!(github, approve_pull_request);
     }
-    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
     let request = ApprovePullRequestRequest {
         owner: owner.to_string(),
@@ -214,14 +213,8 @@ pub fn approve_pull_request(
     };
     let request = serde_json::to_string(&wrapped).unwrap();
 
-    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
     let res = unsafe {
-        github_approve_pull_request(
-            request.as_bytes().as_ptr(),
-            request.as_bytes().len(),
-            return_buffer.as_mut_ptr(),
-            RETURN_BUFFER_SIZE,
-        )
+        github_approve_pull_request(request.as_bytes().as_ptr(), request.as_bytes().len())
     };
 
     // There was an error with the Plaid system. Maybe the API is not
@@ -230,10 +223,7 @@ pub fn approve_pull_request(
         return Err(res.into());
     }
 
-    return_buffer.truncate(res as usize);
-    // This should be safe because unless the Plaid runtime is expressly trying
-    // to mess with us, this came from a String in the API module.
-    Ok(String::from_utf8(return_buffer).unwrap())
+    Ok(())
 }
 
 /// Request to fetch pull requests from a repository.
