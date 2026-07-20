@@ -161,23 +161,94 @@ pub fn pull_request_request_reviewers(
     Ok(())
 }
 
-/// Request to approve a pull request.
+/// The review action to submit as part of a pull request review.
+///
+/// GitHub requires a non-empty `body` alongside `RequestChanges` and `Comment`;
+/// it is optional for `Approve`.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestReviewEvent {
+    /// Approve the pull request.
+    #[serde(rename = "APPROVE")]
+    Approve,
+    /// Request changes on the pull request. Requires a `body`.
+    #[serde(rename = "REQUEST_CHANGES")]
+    RequestChanges,
+    /// Leave a review comment without approving or requesting changes. Requires a `body`.
+    #[serde(rename = "COMMENT")]
+    Comment,
+}
+
+/// Request to submit a review on a pull request.
 #[derive(Serialize, Deserialize)]
-pub struct ApprovePullRequestRequest {
+pub struct SubmitPullRequestReviewRequest {
     /// The account owner of the repository. The name is not case sensitive.
     pub owner: String,
     /// The name of the repository without the `.git` extension. The name is not case sensitive.
     pub repo: String,
-    /// The number of the pull request to approve.
+    /// The number of the pull request to review.
     pub number: u32,
-    /// An optional comment to leave alongside the approval.
+    /// The review action to submit.
+    pub event: PullRequestReviewEvent,
+    /// A comment to leave alongside the review. Required unless `event` is `Approve`.
     pub body: Option<String>,
 }
 
-/// Approves a pull request by submitting an `APPROVE` review on it.
+/// Submits a review on a pull request.
 ///
 /// See the [GitHub API docs](https://docs.github.com/en/rest/pulls/reviews?apiVersion=2022-11-28#create-a-review-for-a-pull-request)
 /// for more details.
+///
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account or organization that owns the repository.
+/// * `repo` - The name of the repository.
+/// * `number` - The number of the pull request to review.
+/// * `event` - The review action to submit.
+/// * `body` - A comment to leave alongside the review. Required unless `event` is `Approve`.
+///
+/// ## Returns
+/// * `Ok(())` if the review was successfully submitted, or
+/// * `Err(PlaidFunctionError)` if the request fails.
+pub fn submit_pull_request_review(
+    client_id: impl Display,
+    owner: impl Display,
+    repo: impl Display,
+    number: u32,
+    event: PullRequestReviewEvent,
+    body: Option<impl Display>,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, submit_pull_request_review);
+    }
+
+    let request = SubmitPullRequestReviewRequest {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        number,
+        event,
+        body: body.map(|b| b.to_string()),
+    };
+
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+    let request = serde_json::to_string(&wrapped).unwrap();
+
+    let res = unsafe {
+        github_submit_pull_request_review(request.as_bytes().as_ptr(), request.as_bytes().len())
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
+}
+
+/// Approves a pull request by submitting an `APPROVE` review on it.
 ///
 /// ## Arguments
 /// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
@@ -196,34 +267,14 @@ pub fn approve_pull_request(
     number: u32,
     body: Option<impl Display>,
 ) -> Result<(), PlaidFunctionError> {
-    extern "C" {
-        new_host_function!(github, approve_pull_request);
-    }
-
-    let request = ApprovePullRequestRequest {
-        owner: owner.to_string(),
-        repo: repo.to_string(),
+    submit_pull_request_review(
+        client_id,
+        owner,
+        repo,
         number,
-        body: body.map(|b| b.to_string()),
-    };
-
-    let wrapped = GithubApiWrapper {
-        client_id: client_id.to_string(),
-        params: request,
-    };
-    let request = serde_json::to_string(&wrapped).unwrap();
-
-    let res = unsafe {
-        github_approve_pull_request(request.as_bytes().as_ptr(), request.as_bytes().len())
-    };
-
-    // There was an error with the Plaid system. Maybe the API is not
-    // configured.
-    if res < 0 {
-        return Err(res.into());
-    }
-
-    Ok(())
+        PullRequestReviewEvent::Approve,
+        body,
+    )
 }
 
 /// Request to fetch pull requests from a repository.
