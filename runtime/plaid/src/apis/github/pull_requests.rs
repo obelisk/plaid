@@ -1,6 +1,7 @@
 use plaid_stl::github::{
     AddLabelsRequest, CreatePullRequestRequest, GetPullRequestOptions, GetPullRequestRequest,
-    GithubApiWrapper, PullRequestRequestReviewers,
+    GithubApiWrapper, PullRequestRequestReviewers, PullRequestReviewEvent,
+    SubmitPullRequestReviewRequest,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -62,6 +63,54 @@ impl Github {
                 } else if status == 422 {
                     warn!("Some of the reviewers or teams are not collaborators on this repository. Context: [{owner}/{repo}/{pull_number}]. Users: [{}] and teams: [{}]", request.params.reviewers.join(", "), request.params.team_reviewers.join(", "));
                     Ok(false)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Submits a review on a pull request.
+    pub async fn submit_pull_request_review(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        #[derive(Serialize)]
+        struct SubmitReview {
+            event: PullRequestReviewEvent,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            body: Option<String>,
+        }
+
+        let request: GithubApiWrapper<SubmitPullRequestReviewRequest> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_org(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let number = request.params.number;
+        let event = request.params.event;
+        self.validate_review_body(event, request.params.body.as_deref())?;
+
+        info!("Submitting {event:?} review on pull request [{owner}/{repo}/{number}] on behalf of {module}");
+
+        let address = format!("/repos/{owner}/{repo}/pulls/{number}/reviews");
+        let request_body = SubmitReview {
+            event,
+            body: request.params.body,
+        };
+
+        match self
+            .make_generic_post_request(&request.client_id, address, request_body, module)
+            .await
+        {
+            Ok((status, Ok(_))) => {
+                if status == 200 {
+                    Ok(0)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,

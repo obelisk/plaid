@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use plaid_stl::github::PullRequestReviewEvent;
+
 use crate::apis::ApiError;
 
 use super::{GitHubError, Github};
@@ -107,5 +109,22 @@ impl Github {
     pub fn validate_repo_id<'a>(&self, repo_id: &'a str) -> Result<&'a str, ApiError> {
         // Repo IDs are positive integers
         self.validate_pint(repo_id)
+    }
+
+    /// Ensure a pull request review has a body when GitHub requires one.
+    /// A non-empty `body` is mandatory for `RequestChanges` and `Comment`;
+    /// it is optional for `Approve`.
+    pub fn validate_review_body(
+        &self,
+        event: PullRequestReviewEvent,
+        body: Option<&str>,
+    ) -> Result<(), ApiError> {
+        match (event, body) {
+            (PullRequestReviewEvent::Approve, _) => Ok(()),
+            (_, Some(body)) if !body.is_empty() => Ok(()),
+            (_, _) => Err(ApiError::GitHubError(GitHubError::InvalidInput(format!(
+                "a non-empty body is required for review event {event:?}"
+            )))),
+        }
     }
 }
