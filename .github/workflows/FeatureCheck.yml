@@ -22,6 +22,7 @@ jobs:
             "aws,cranelift",
             "aws,sled,cranelift",
             "aws,cranelift,redis",
+            "postgres,cranelift",
             "aws,gcp,sled,cranelift",
             "aws,gcp,cranelift,redis",
           ]

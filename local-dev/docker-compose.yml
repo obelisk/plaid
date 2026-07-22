@@ -20,8 +20,7 @@ services:
       context: ..
       dockerfile: local-dev/Dockerfile
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     ports:
       - "8080:8080"
     volumes:

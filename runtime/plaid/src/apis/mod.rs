@@ -272,7 +272,7 @@ impl Api {
 
         #[cfg(feature = "postgres")]
         let postgres = match config.postgres {
-            Some(postgres) => Some(Postgres::new(postgres).await?),
+            Some(postgres) => Some(Postgres::new(postgres)?),
             _ => None,
         };
 

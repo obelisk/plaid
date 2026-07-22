@@ -163,7 +163,11 @@ pub enum PostgresError {
 }
 
 impl Postgres {
-    pub async fn new(config: PostgresConfig) -> Result<Self, PostgresError> {
+    /// Build pools for all configured PostgreSQL connections without opening
+    /// them. Connections are established lazily by [`Self::query`], so an
+    /// unavailable database cannot prevent Plaid from starting and can recover
+    /// without requiring a Plaid restart.
+    pub fn new(config: PostgresConfig) -> Result<Self, PostgresError> {
         let mut connections = HashMap::new();
 
         for (name, config) in config.connections {
@@ -178,9 +182,6 @@ impl Postgres {
                 .max_size(config.max_pool_size.get())
                 .build()
                 .map_err(|e| PostgresError::Configuration(name.to_string(), e.to_string()))?;
-
-            let pool_timeout = Duration::from_millis(config.pool_timeout_ms.get());
-            check_connectivity(&pool, pool_timeout, &name).await?;
 
             connections.insert(
                 name,
@@ -312,23 +313,6 @@ impl Postgres {
 
         result.map_err(ApiError::from)
     }
-}
-
-async fn check_connectivity(
-    pool: &Pool,
-    pool_timeout: Duration,
-    connection_name: &ConnectionName,
-) -> Result<(), PostgresError> {
-    let client = tokio::time::timeout(pool_timeout, pool.get())
-        .await
-        .map_err(|_| PostgresError::PoolTimeout(connection_name.to_string()))?
-        .map_err(|e| PostgresError::Pool(connection_name.to_string(), e.to_string()))?;
-    client
-        .simple_query("SELECT 1")
-        .await
-        .map_err(PostgresError::Database)?;
-
-    Ok(())
 }
 
 fn module_is_allowed(allowed_rules: &HashSet<String>, module_name: &str) -> bool {
@@ -591,6 +575,44 @@ mod tests {
     }
 
     #[cfg(feature = "cranelift")]
+    #[tokio::test]
+    async fn unavailable_database_is_only_reported_when_queried() {
+        // A nonexistent Unix socket makes connection attempts fail without
+        // requiring network access. The lazy pool should still construct and
+        // report the unavailable service only when queried.
+        let config: PostgresConfig = toml::from_str(
+            r#"
+            [connections.unavailable]
+            connection_string = "host=/nonexistent/plaid-postgres-test user=reader"
+            allowed_rules = ["reader.wasm"]
+            pool_timeout_ms = 25
+            "#,
+        )
+        .unwrap();
+
+        let postgres = Postgres::new(config).expect("pool construction must not connect");
+        let request = QueryRequest {
+            connection: "unavailable".to_string(),
+            sql: "SELECT 1".to_string(),
+            parameters: vec![],
+        };
+
+        let error = postgres
+            .query(
+                &serde_json::to_string(&request).unwrap(),
+                test_module("reader.wasm"),
+            )
+            .await
+            .expect_err("the first query should attempt to connect");
+
+        assert!(matches!(
+            error,
+            ApiError::PostgresError(PostgresError::Pool(connection, _))
+                if connection == "unavailable"
+        ));
+    }
+
+    #[cfg(feature = "cranelift")]
     fn test_module(name: &str) -> Arc<PlaidModule> {
         let store = Store::default();
         let wasm = &[0, 97, 115, 109, 1, 0, 0, 0];
@@ -651,7 +673,7 @@ mod tests {
                 },
             )]),
         };
-        let postgres = Postgres::new(config).await.unwrap();
+        let postgres = Postgres::new(config).unwrap();
         let module = test_module("reader.wasm");
 
         let request = QueryRequest {
