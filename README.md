@@ -19,7 +19,7 @@ To run integration tests:
 ```
 
 For the feature-gated read-only PostgreSQL API, see the
-[production configuration and database-role guide](POSTGRES.md).
+[production configuration and database-role guide](runtime/plaid/src/apis/postgres/README.md).
 
 ## Releasing A New Version
 The version must be bumped in two places:

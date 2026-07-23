@@ -36,7 +36,7 @@ fixture data and a least-privilege `plaid_reader` role. The database is not
 published to the host; Plaid reaches it through the internal Compose network.
 This local example explicitly selects `tls.mode = "disable"`; production
 deployments should follow the verified TLS and database-role guidance in
-[`POSTGRES.md`](../POSTGRES.md).
+the [PostgreSQL API documentation](../runtime/plaid/src/apis/postgres/README.md).
 
 With the stack running, exercise the complete webhook → WASM rule → Plaid API
 → PostgreSQL path:

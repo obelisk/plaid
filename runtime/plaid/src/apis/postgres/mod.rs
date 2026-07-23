@@ -79,12 +79,14 @@ where
 
 /// Configuration for all named PostgreSQL connections.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PostgresConfig {
     connections: HashMap<ConnectionName, PostgresConnectionConfig>,
 }
 
 /// Configuration and safety limits for one PostgreSQL connection.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PostgresConnectionConfig {
     #[serde(
         rename = "connection_string",
@@ -119,7 +121,7 @@ struct PostgresConnectionConfig {
     max_response_size: NonZeroUsize,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PostgresTlsConfig {
     mode: PostgresTlsMode,
@@ -881,6 +883,44 @@ mod tests {
         .err()
         .expect("the TLS mode must be explicit");
         assert!(missing_mode.to_string().contains("missing field `mode`"));
+    }
+
+    #[test]
+    fn unknown_configuration_fields_are_rejected() {
+        let unknown_top_level = toml::from_str::<PostgresConfig>(
+            r#"
+            unexpected = true
+
+            [connections.local]
+            connection_string = "host=localhost user=reader"
+            allowed_rules = []
+
+            [connections.local.tls]
+            mode = "disable"
+            "#,
+        )
+        .err()
+        .expect("unknown top-level fields must fail during deserialization");
+        assert!(unknown_top_level
+            .to_string()
+            .contains("unknown field `unexpected`"));
+
+        let unknown_connection_field = toml::from_str::<PostgresConfig>(
+            r#"
+            [connections.local]
+            connection_string = "host=localhost user=reader"
+            allowed_rules = []
+            max_respose_size = 1024
+
+            [connections.local.tls]
+            mode = "disable"
+            "#,
+        )
+        .err()
+        .expect("unknown connection fields must fail during deserialization");
+        assert!(unknown_connection_field
+            .to_string()
+            .contains("unknown field `max_respose_size`"));
     }
 
     #[test]

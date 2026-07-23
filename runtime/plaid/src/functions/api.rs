@@ -164,7 +164,6 @@ macro_rules! impl_new_function_with_error_buffer {
 
                 if return_data.len() > ret_buffer_len as usize {
                     error!("{} could not receive data from {} because it provided a return buffer that was too small. Got {}, needed {}", env_data.module.name, stringify!([< $api _ $function_name >]), ret_buffer_len, return_data.len());
-                    trace!("Data: {}", return_data);
                     return Err(FunctionErrors::ReturnBufferTooSmall);
                 }
 

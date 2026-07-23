@@ -9,9 +9,11 @@ CREATE ROLE plaid_reader
     NOCREATEDB
     NOCREATEROLE
     NOREPLICATION
-    NOBYPASSRLS;
+    NOBYPASSRLS
+    NOINHERIT;
 
 ALTER ROLE plaid_reader SET default_transaction_read_only = on;
+ALTER ROLE plaid_reader IN DATABASE plaid_local SET search_path = pg_catalog;
 
 CREATE SCHEMA demo AUTHORIZATION plaid_admin;
 
@@ -27,6 +29,7 @@ INSERT INTO demo.people (id, name, active, profile) VALUES
     (2, 'Grace Hopper', FALSE, '{"team": "platform"}'),
     (3, 'Linus Torvalds', TRUE, '{"team": "infrastructure"}');
 
+REVOKE CONNECT, TEMPORARY ON DATABASE plaid_local FROM PUBLIC;
 GRANT CONNECT ON DATABASE plaid_local TO plaid_reader;
 GRANT USAGE ON SCHEMA demo TO plaid_reader;
 GRANT SELECT ON TABLE demo.people TO plaid_reader;
