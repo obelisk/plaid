@@ -157,7 +157,7 @@ pub struct Postgres {
     connections: HashMap<ConnectionName, PostgresConnection>,
 }
 
-#[derive(Debug, Error)]
+#[derive(Error)]
 pub enum PostgresError {
     #[error("invalid PostgreSQL configuration for connection [{0}]: {1}")]
     Configuration(String, String),
@@ -193,6 +193,18 @@ pub enum PostgresError {
     Database(#[from] tokio_postgres::Error),
     #[error("could not serialize PostgreSQL response: {0}")]
     Serialization(#[from] serde_json::Error),
+}
+
+impl fmt::Debug for PostgresError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // PostgreSQL diagnostics can contain parameter or row values (for
+            // example, a failed cast). The generic API boundary logs errors
+            // with `Debug`, so do not expose the driver's diagnostic fields.
+            Self::Database(_) => formatter.write_str("PostgresError::Database(<redacted>)"),
+            _ => fmt::Display::fmt(self, formatter),
+        }
+    }
 }
 
 impl PostgresError {
@@ -1096,5 +1108,22 @@ mod tests {
         assert!(BoundParameter(QueryParameter::Integer(42))
             .to_sql_checked(&Type::TEXT, &mut output)
             .is_err());
+    }
+
+    #[test]
+    fn database_error_debug_output_is_redacted() {
+        let secret_marker = "SHOULD-NOT-APPEAR";
+        let driver_error = tokio_postgres::Config::from_str(&format!(
+            "host=localhost password={secret_marker} invalid-option"
+        ))
+        .expect_err("the connection string must be invalid");
+        let error = ApiError::from(PostgresError::Database(driver_error));
+        let debug_output = format!("{error:?}");
+
+        assert_eq!(
+            debug_output,
+            "PostgresError(PostgresError::Database(<redacted>))"
+        );
+        assert!(!debug_output.contains(secret_marker));
     }
 }

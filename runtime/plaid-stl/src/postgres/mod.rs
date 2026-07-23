@@ -119,4 +119,23 @@ mod tests {
             response
         );
     }
+
+    #[test]
+    fn json_numbers_preserve_arbitrary_precision() {
+        let number = "0.123456789012345678901234567890123456789";
+        let value = serde_json::from_str::<Value>(number).unwrap();
+        let response = QueryResponse {
+            columns: vec![QueryColumn {
+                name: "document".to_string(),
+                postgres_type: "jsonb".to_string(),
+            }],
+            rows: vec![vec![value]],
+        };
+
+        let encoded = serde_json::to_string(&response).unwrap();
+        let decoded = serde_json::from_str::<QueryResponse>(&encoded).unwrap();
+
+        assert!(encoded.contains(number));
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), encoded);
+    }
 }

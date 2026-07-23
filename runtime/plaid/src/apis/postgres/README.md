@@ -60,9 +60,10 @@ transmitting one oversized row, so production queries must truncate, reject,
 or omit potentially large text, bytea, JSON, and aggregate columns.
 
 The API decodes null, boolean, integer, floating-point, text, bytea, JSON, and
-JSONB scalars. Curated SQL must explicitly cast UUID, numeric, temporal, array,
-enum, domain, and extension types to `text` or `jsonb`; Plaid intentionally does
-not make implicit precision or representation choices.
+JSONB scalars. JSON numeric tokens retain arbitrary precision through the
+runtime and rule-facing STL. Curated SQL must explicitly cast UUID, numeric,
+temporal, array, enum, domain, and extension types to `text` or `jsonb`; Plaid
+intentionally does not make implicit precision or representation choices.
 
 ## Database role
 
@@ -121,4 +122,6 @@ for database authorization.
 Operational query logs contain only connection name, calling module, elapsed
 time, row count, a SHA-256 SQL fingerprint, and categorized outcome. SQL,
 parameters, query results, passwords, DSNs, CA contents, certificates, and keys
-are not logged.
+are not logged. PostgreSQL server diagnostics are redacted at the generic API
+logging boundary because error messages and details can contain parameter or
+row values.
