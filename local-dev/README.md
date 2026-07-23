@@ -34,6 +34,9 @@ plaid  | [hello-world] parsed JSON with 1 keys
 The Compose stack includes an ephemeral PostgreSQL 17 database with seeded
 fixture data and a least-privilege `plaid_reader` role. The database is not
 published to the host; Plaid reaches it through the internal Compose network.
+This local example explicitly selects `tls.mode = "disable"`; production
+deployments should follow the verified TLS and database-role guidance in
+[`POSTGRES.md`](../POSTGRES.md).
 
 With the stack running, exercise the complete webhook → WASM rule → Plaid API
 → PostgreSQL path:

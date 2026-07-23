@@ -16,7 +16,13 @@ aws = [
 cranelift = ["wasmer/cranelift"]
 llvm = ["wasmer/llvm"]
 gcp = ["dep:gcloud-bigquery"]
-postgres = ["dep:deadpool-postgres", "dep:tokio-postgres"]
+postgres = [
+    "dep:deadpool-postgres",
+    "dep:rustls-native-certs",
+    "dep:rustls-pemfile",
+    "dep:tokio-postgres",
+    "dep:tokio-postgres-rustls",
+]
 
 [dependencies]
 aes = "0.7"
@@ -71,6 +77,8 @@ reqwest = { version = "0.13", features = [
 ] }
 reqwest_cookie_store = "0.10"
 rustls = { version = "0.23", features = ["ring"] }
+rustls-native-certs = { version = "0.8", optional = true }
+rustls-pemfile = { version = "2", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 serde_with = { version = "3", features = ["macros"] }
@@ -81,6 +89,7 @@ time = "0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.26"
 tokio-postgres = { version = "0.7", optional = true, features = ["with-serde_json-1"] }
+tokio-postgres-rustls = { version = "0.14", optional = true, features = ["ring"] }
 tokio-util = "0.7.12"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 toml = "0.5"

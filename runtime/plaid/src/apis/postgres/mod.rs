@@ -3,33 +3,34 @@ use std::{
     collections::{HashMap, HashSet},
     error::Error,
     fmt,
+    io::BufReader,
     num::{NonZeroU64, NonZeroUsize},
     str::FromStr,
     sync::Arc,
     time::Duration,
 };
 
-use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
+use deadpool_postgres::{
+    Client, Manager, ManagerConfig, Pool, PoolError, RecyclingMethod, Runtime, TimeoutType,
+    Timeouts,
+};
 use futures_util::{pin_mut, TryStreamExt};
 use plaid_stl::postgres::{QueryColumn, QueryParameter, QueryRequest, QueryResponse};
+use rustls::{pki_types::PrivateKeyDer, ClientConfig, RootCertStore};
+use rustls_pemfile::Item;
 use serde::{de::Error as _, Deserialize, Deserializer};
 use serde_json::Value;
 use thiserror::Error;
+use tokio::time::Instant;
 use tokio_postgres::{
+    config::SslMode,
     types::{to_sql_checked, IsNull, Json, ToSql, Type},
     NoTls, Row,
 };
+use tokio_postgres_rustls::MakeRustlsConnect;
 use tokio_util::bytes::BytesMut;
 
-use crate::{apis::ApiError, loader::PlaidModule};
-
-const CLEAN_CONNECTION: &str = "CLOSE ALL;\
-    SET SESSION AUTHORIZATION DEFAULT;\
-    RESET ALL;\
-    UNLISTEN *;\
-    SELECT pg_advisory_unlock_all();\
-    DISCARD TEMP;\
-    DISCARD SEQUENCES;";
+use crate::{apis::ApiError, cryptography::hash::sha256_hex, loader::PlaidModule};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ConnectionName(String);
@@ -72,7 +73,8 @@ where
     D: Deserializer<'de>,
 {
     let connection_string = String::deserialize(deserializer)?;
-    tokio_postgres::Config::from_str(&connection_string).map_err(D::Error::custom)
+    tokio_postgres::Config::from_str(&connection_string)
+        .map_err(|_| D::Error::custom("invalid PostgreSQL connection string"))
 }
 
 /// Configuration for all named PostgreSQL connections.
@@ -82,9 +84,6 @@ pub struct PostgresConfig {
 }
 
 /// Configuration and safety limits for one PostgreSQL connection.
-///
-/// The MVP uses `NoTls`; TLS connection support can be added without changing
-/// the rule-facing API. Credentials should be interpolated from Plaid secrets.
 #[derive(Deserialize)]
 struct PostgresConnectionConfig {
     #[serde(
@@ -93,14 +92,23 @@ struct PostgresConnectionConfig {
     )]
     postgres_config: tokio_postgres::Config,
     allowed_rules: HashSet<String>,
+    tls: PostgresTlsConfig,
     #[serde(default = "default_max_pool_size")]
     max_pool_size: NonZeroUsize,
     #[serde(default = "default_pool_timeout_ms")]
     pool_timeout_ms: NonZeroU64,
+    #[serde(default = "default_connection_timeout_ms")]
+    connection_timeout_ms: NonZeroU64,
+    #[serde(default = "default_recycle_timeout_ms")]
+    recycle_timeout_ms: NonZeroU64,
+    #[serde(default = "default_total_timeout_ms")]
+    total_timeout_ms: NonZeroU64,
     #[serde(default = "default_statement_timeout_ms")]
     statement_timeout_ms: NonZeroU64,
     #[serde(default = "default_lock_timeout_ms")]
     lock_timeout_ms: NonZeroU64,
+    #[serde(default = "default_idle_transaction_timeout_ms")]
+    idle_transaction_timeout_ms: NonZeroU64,
     #[serde(default = "default_max_query_size")]
     max_query_size: NonZeroUsize,
     #[serde(default = "default_max_parameters")]
@@ -111,12 +119,31 @@ struct PostgresConnectionConfig {
     max_response_size: NonZeroUsize,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PostgresTlsConfig {
+    mode: PostgresTlsMode,
+    #[serde(default = "default_use_system_roots")]
+    use_system_roots: bool,
+    ca_certificates_pem: Option<String>,
+    client_certificate_pem: Option<String>,
+    client_private_key_pem: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum PostgresTlsMode {
+    VerifyFull,
+    Disable,
+}
+
 struct PostgresConnection {
     pool: Pool,
     allowed_rules: HashSet<String>,
-    pool_timeout_ms: NonZeroU64,
+    total_timeout_ms: NonZeroU64,
     statement_timeout_ms: NonZeroU64,
     lock_timeout_ms: NonZeroU64,
+    idle_transaction_timeout_ms: NonZeroU64,
     max_query_size: NonZeroUsize,
     max_parameters: NonZeroUsize,
     max_rows: NonZeroUsize,
@@ -140,6 +167,10 @@ pub enum PostgresError {
     Pool(String, String),
     #[error("timed out waiting for PostgreSQL connection [{0}]")]
     PoolTimeout(String),
+    #[error("timed out creating PostgreSQL connection [{0}]")]
+    ConnectionTimeout(String),
+    #[error("timed out recycling PostgreSQL connection [{0}]")]
+    RecycleTimeout(String),
     #[error("PostgreSQL query exceeded its time limit")]
     QueryTimeout,
     #[error("PostgreSQL query is too large")]
@@ -162,6 +193,30 @@ pub enum PostgresError {
     Serialization(#[from] serde_json::Error),
 }
 
+impl PostgresError {
+    fn outcome(&self) -> &'static str {
+        match self {
+            Self::Configuration(_, _) => "configuration_error",
+            Self::UnknownConnection(_) => "unknown_connection",
+            Self::ModuleNotPermitted(_) => "unauthorized",
+            Self::Pool(_, _) => "pool_error",
+            Self::PoolTimeout(_) => "pool_timeout",
+            Self::ConnectionTimeout(_) => "connection_timeout",
+            Self::RecycleTimeout(_) => "recycle_timeout",
+            Self::QueryTimeout => "operation_timeout",
+            Self::QueryTooLarge => "query_limit",
+            Self::TooManyParameters => "parameter_limit",
+            Self::NoResultColumns => "no_result_columns",
+            Self::TooManyRows => "row_limit",
+            Self::ResponseTooLarge => "response_limit",
+            Self::UnsupportedType(_) => "unsupported_type",
+            Self::NonFiniteFloat => "non_finite_float",
+            Self::Database(_) => "database_error",
+            Self::Serialization(_) => "serialization_error",
+        }
+    }
+}
+
 impl Postgres {
     /// Build pools for all configured PostgreSQL connections without opening
     /// them. Connections are established lazily by [`Self::query`], so an
@@ -170,16 +225,31 @@ impl Postgres {
     pub fn new(config: PostgresConfig) -> Result<Self, PostgresError> {
         let mut connections = HashMap::new();
 
-        for (name, config) in config.connections {
-            let manager = Manager::from_config(
-                config.postgres_config,
-                NoTls,
-                ManagerConfig {
-                    recycling_method: RecyclingMethod::Clean,
-                },
-            );
+        for (name, mut config) in config.connections {
+            configure_postgres_connection(&name, &mut config.postgres_config, config.tls.mode);
+            let timeouts = pool_timeouts(&config);
+
+            let manager_config = ManagerConfig {
+                recycling_method: RecyclingMethod::Clean,
+            };
+            let manager = match config.tls.mode {
+                PostgresTlsMode::VerifyFull => Manager::from_config(
+                    config.postgres_config,
+                    build_tls_connector(&name, &config.tls)?,
+                    manager_config,
+                ),
+                PostgresTlsMode::Disable => {
+                    validate_disabled_tls(&name, &config.tls)?;
+                    warn!(
+                        "PostgreSQL connection [{name}] has TLS disabled; plaintext is intended for local development only"
+                    );
+                    Manager::from_config(config.postgres_config, NoTls, manager_config)
+                }
+            };
             let pool = Pool::builder(manager)
                 .max_size(config.max_pool_size.get())
+                .timeouts(timeouts)
+                .runtime(Runtime::Tokio1)
                 .build()
                 .map_err(|e| PostgresError::Configuration(name.to_string(), e.to_string()))?;
 
@@ -188,9 +258,10 @@ impl Postgres {
                 PostgresConnection {
                     pool,
                     allowed_rules: config.allowed_rules,
-                    pool_timeout_ms: config.pool_timeout_ms,
+                    total_timeout_ms: config.total_timeout_ms,
                     statement_timeout_ms: config.statement_timeout_ms,
                     lock_timeout_ms: config.lock_timeout_ms,
+                    idle_transaction_timeout_ms: config.idle_transaction_timeout_ms,
                     max_query_size: config.max_query_size,
                     max_parameters: config.max_parameters,
                     max_rows: config.max_rows,
@@ -206,113 +277,362 @@ impl Postgres {
     pub async fn query(&self, params: &str, module: Arc<PlaidModule>) -> Result<String, ApiError> {
         let request =
             serde_json::from_str::<QueryRequest>(params).map_err(|_| ApiError::BadRequest)?;
+        let started = Instant::now();
+        let connection_name = request.connection.clone();
+        let fingerprint = sha256_hex(request.sql.as_bytes());
+        let result = self.query_inner(request, &module.name).await;
+        let (outcome, row_count) = match &result {
+            Ok(success) => ("success", success.row_count),
+            Err(error) => (error.outcome(), 0),
+        };
+        info!(
+            "PostgreSQL query connection=[{}] module=[{}] elapsed_ms={} rows={} fingerprint={} outcome={}",
+            connection_name,
+            module.name,
+            started.elapsed().as_millis(),
+            row_count,
+            fingerprint,
+            outcome,
+        );
+
+        result
+            .map(|success| success.response)
+            .map_err(ApiError::from)
+    }
+
+    async fn query_inner(
+        &self,
+        request: QueryRequest,
+        module_name: &str,
+    ) -> Result<QuerySuccess, PostgresError> {
+        let connection_name = request.connection.clone();
         let connection = self
             .connections
-            .get(request.connection.as_str())
-            .ok_or_else(|| PostgresError::UnknownConnection(request.connection.clone()))?;
+            .get(connection_name.as_str())
+            .ok_or_else(|| PostgresError::UnknownConnection(connection_name.clone()))?;
 
-        if !module_is_allowed(&connection.allowed_rules, &module.name) {
+        if !module_is_allowed(&connection.allowed_rules, module_name) {
             warn!(
-                "[{module}] attempted to use PostgreSQL connection [{}] without permission",
-                request.connection
+                "module [{module_name}] attempted to use PostgreSQL connection [{connection_name}] without permission"
             );
-            return Err(PostgresError::ModuleNotPermitted(request.connection).into());
+            return Err(PostgresError::ModuleNotPermitted(connection_name));
         }
         if request.sql.len() > connection.max_query_size.get() {
-            return Err(PostgresError::QueryTooLarge.into());
+            return Err(PostgresError::QueryTooLarge);
         }
         if request.parameters.len() > connection.max_parameters.get() {
-            return Err(PostgresError::TooManyParameters.into());
+            return Err(PostgresError::TooManyParameters);
         }
 
-        let pool_timeout = Duration::from_millis(connection.pool_timeout_ms.get());
-        let mut client = tokio::time::timeout(pool_timeout, connection.pool.get())
+        let deadline = Instant::now() + Duration::from_millis(connection.total_timeout_ms.get());
+        let mut client = tokio::time::timeout_at(deadline, connection.pool.get())
             .await
-            .map_err(|_| PostgresError::PoolTimeout(request.connection.clone()))?
-            .map_err(|e| PostgresError::Pool(request.connection.clone(), e.to_string()))?;
+            .map_err(|_| PostgresError::QueryTimeout)?
+            .map_err(|error| map_pool_error(&connection_name, error))?;
 
-        let transaction = client
-            .build_transaction()
-            .read_only(true)
-            .start()
-            .await
-            .map_err(PostgresError::Database)?;
-
-        let operation = async {
-            transaction
-                .batch_execute(&format!(
-                    "SET LOCAL statement_timeout = '{}ms'; SET LOCAL lock_timeout = '{}ms';",
-                    connection.statement_timeout_ms.get(),
-                    connection.lock_timeout_ms.get()
-                ))
-                .await?;
-
-            let statement = transaction.prepare(&request.sql).await?;
-            if statement.columns().is_empty() {
-                return Err(PostgresError::NoResultColumns);
-            }
-
-            let parameters: Vec<BoundParameter> =
-                request.parameters.into_iter().map(BoundParameter).collect();
-            let stream = transaction.query_raw(&statement, parameters.iter()).await?;
-            pin_mut!(stream);
-
-            let columns = statement
-                .columns()
-                .iter()
-                .map(|column| QueryColumn {
-                    name: column.name().to_string(),
-                    postgres_type: column.type_().name().to_string(),
-                })
-                .collect::<Vec<_>>();
-            let mut response_size = serde_json::to_vec(&columns)?.len();
-            let mut rows = Vec::new();
-
-            while let Some(row) = stream.try_next().await? {
-                if rows.len() >= connection.max_rows.get() {
-                    return Err(PostgresError::TooManyRows);
-                }
-                let decoded = decode_row(&row)?;
-                response_size = response_size.saturating_add(serde_json::to_vec(&decoded)?.len());
-                if response_size > connection.max_response_size.get() {
-                    return Err(PostgresError::ResponseTooLarge);
-                }
-                rows.push(decoded);
-            }
-
-            let encoded = serde_json::to_string(&QueryResponse { columns, rows })?;
-            if encoded.len() > connection.max_response_size.get() {
-                return Err(PostgresError::ResponseTooLarge);
-            }
-            Ok(encoded)
-        };
-
-        // The server-side statement timeout is authoritative. The outer timeout
-        // also bounds client-side waiting if the connection becomes unhealthy.
-        let operation_result = tokio::time::timeout(
-            Duration::from_millis(connection.statement_timeout_ms.get())
-                .saturating_add(Duration::from_secs(1)),
-            operation,
+        match tokio::time::timeout_at(
+            deadline,
+            execute_read_only(&mut client, connection, request),
         )
         .await
-        .map_err(|_| PostgresError::QueryTimeout);
-
-        let rollback_result = transaction.rollback().await;
-        let cleanup_result =
-            tokio::time::timeout(pool_timeout, client.batch_execute(CLEAN_CONNECTION)).await;
-
-        let result = operation_result?;
-        if let Err(e) = rollback_result {
-            return Err(PostgresError::Database(e).into());
+        {
+            Ok(Ok(success)) => Ok(QuerySuccess {
+                response: success.response,
+                row_count: success.row_count,
+            }),
+            Ok(Err(failure)) => {
+                if failure.discard_connection {
+                    discard_connection(client);
+                }
+                Err(failure.error)
+            }
+            Err(_) => {
+                discard_connection(client);
+                Err(PostgresError::QueryTimeout)
+            }
         }
-        match cleanup_result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(PostgresError::Database(e).into()),
-            Err(_) => return Err(PostgresError::QueryTimeout.into()),
-        }
-
-        result.map_err(ApiError::from)
     }
+}
+
+fn pool_timeouts(config: &PostgresConnectionConfig) -> Timeouts {
+    Timeouts {
+        wait: Some(Duration::from_millis(config.pool_timeout_ms.get())),
+        create: Some(Duration::from_millis(config.connection_timeout_ms.get())),
+        recycle: Some(Duration::from_millis(config.recycle_timeout_ms.get())),
+    }
+}
+
+fn configure_postgres_connection(
+    name: &ConnectionName,
+    postgres_config: &mut tokio_postgres::Config,
+    tls_mode: PostgresTlsMode,
+) {
+    postgres_config.application_name(format!("plaid:postgres:{name}"));
+    postgres_config.ssl_mode(match tls_mode {
+        PostgresTlsMode::VerifyFull => SslMode::Require,
+        PostgresTlsMode::Disable => SslMode::Disable,
+    });
+}
+
+struct QuerySuccess {
+    response: String,
+    row_count: usize,
+}
+
+struct OperationFailure {
+    error: PostgresError,
+    discard_connection: bool,
+}
+
+async fn execute_read_only(
+    client: &mut Client,
+    connection: &PostgresConnection,
+    request: QueryRequest,
+) -> Result<QuerySuccess, OperationFailure> {
+    let transaction = client
+        .build_transaction()
+        .read_only(true)
+        .start()
+        .await
+        .map_err(|error| OperationFailure {
+            error: PostgresError::Database(error),
+            discard_connection: false,
+        })?;
+
+    let operation = async {
+        transaction
+            .batch_execute(&format!(
+                "SET LOCAL statement_timeout = '{}ms';\
+                 SET LOCAL lock_timeout = '{}ms';\
+                 SET LOCAL idle_in_transaction_session_timeout = '{}ms';",
+                connection.statement_timeout_ms.get(),
+                connection.lock_timeout_ms.get(),
+                connection.idle_transaction_timeout_ms.get(),
+            ))
+            .await?;
+
+        let statement = transaction.prepare(&request.sql).await?;
+        if statement.columns().is_empty() {
+            return Err(PostgresError::NoResultColumns);
+        }
+
+        let parameters: Vec<BoundParameter> =
+            request.parameters.into_iter().map(BoundParameter).collect();
+        let stream = transaction.query_raw(&statement, parameters.iter()).await?;
+        pin_mut!(stream);
+
+        let columns = statement
+            .columns()
+            .iter()
+            .map(|column| QueryColumn {
+                name: column.name().to_string(),
+                postgres_type: column.type_().name().to_string(),
+            })
+            .collect::<Vec<_>>();
+        let mut response_size = serde_json::to_vec(&columns)?.len();
+        let mut rows = Vec::new();
+
+        while let Some(row) = stream.try_next().await? {
+            if rows.len() >= connection.max_rows.get() {
+                return Err(PostgresError::TooManyRows);
+            }
+            let decoded = decode_row(&row)?;
+            response_size = response_size.saturating_add(serde_json::to_vec(&decoded)?.len());
+            if response_size > connection.max_response_size.get() {
+                return Err(PostgresError::ResponseTooLarge);
+            }
+            rows.push(decoded);
+        }
+
+        let row_count = rows.len();
+        let response = serde_json::to_string(&QueryResponse { columns, rows })?;
+        if response.len() > connection.max_response_size.get() {
+            return Err(PostgresError::ResponseTooLarge);
+        }
+        Ok((response, row_count))
+    }
+    .await;
+
+    if let Err(error) = transaction.rollback().await {
+        return Err(OperationFailure {
+            error: PostgresError::Database(error),
+            discard_connection: true,
+        });
+    }
+
+    operation
+        .map(|(response, row_count)| QuerySuccess {
+            response,
+            row_count,
+        })
+        .map_err(|error| OperationFailure {
+            error,
+            discard_connection: false,
+        })
+}
+
+fn discard_connection(client: Client) {
+    drop(Client::take(client));
+}
+
+fn map_pool_error(connection: &str, error: PoolError) -> PostgresError {
+    match error {
+        PoolError::Timeout(TimeoutType::Wait) => PostgresError::PoolTimeout(connection.to_string()),
+        PoolError::Timeout(TimeoutType::Create) => {
+            PostgresError::ConnectionTimeout(connection.to_string())
+        }
+        PoolError::Timeout(TimeoutType::Recycle) => {
+            PostgresError::RecycleTimeout(connection.to_string())
+        }
+        error => PostgresError::Pool(connection.to_string(), error.to_string()),
+    }
+}
+
+fn validate_disabled_tls(
+    name: &ConnectionName,
+    tls: &PostgresTlsConfig,
+) -> Result<(), PostgresError> {
+    if tls.ca_certificates_pem.is_some()
+        || tls.client_certificate_pem.is_some()
+        || tls.client_private_key_pem.is_some()
+    {
+        return Err(configuration_error(
+            name,
+            "certificate fields are not allowed when TLS mode is disable",
+        ));
+    }
+    Ok(())
+}
+
+fn build_tls_connector(
+    name: &ConnectionName,
+    tls: &PostgresTlsConfig,
+) -> Result<MakeRustlsConnect, PostgresError> {
+    let mut roots = RootCertStore::empty();
+    if tls.use_system_roots {
+        let native = rustls_native_certs::load_native_certs();
+        if !native.errors.is_empty() {
+            warn!(
+                "encountered {} non-fatal error(s) while loading system roots for PostgreSQL connection [{name}]",
+                native.errors.len()
+            );
+        }
+        for certificate in native.certs {
+            roots.add(certificate).map_err(|_| {
+                configuration_error(
+                    name,
+                    "the system trust store contains an invalid certificate",
+                )
+            })?;
+        }
+    }
+
+    if let Some(pem) = &tls.ca_certificates_pem {
+        for certificate in parse_certificate_bundle(name, pem, "CA certificate bundle")? {
+            roots.add(certificate).map_err(|_| {
+                configuration_error(
+                    name,
+                    "the CA certificate bundle contains an invalid certificate",
+                )
+            })?;
+        }
+    }
+    if roots.is_empty() {
+        return Err(configuration_error(
+            name,
+            "verify_full requires at least one system or custom CA certificate",
+        ));
+    }
+
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let builder = ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|_| configuration_error(name, "could not initialize the TLS protocol versions"))?
+        .with_root_certificates(roots);
+
+    let client_config = match (&tls.client_certificate_pem, &tls.client_private_key_pem) {
+        (None, None) => builder.with_no_client_auth(),
+        (Some(certificate_pem), Some(private_key_pem)) => builder
+            .with_client_auth_cert(
+                parse_certificate_bundle(name, certificate_pem, "client certificate bundle")?,
+                parse_private_key(name, private_key_pem)?,
+            )
+            .map_err(|_| {
+                configuration_error(
+                    name,
+                    "the client certificate and private key are invalid or do not match",
+                )
+            })?,
+        _ => {
+            return Err(configuration_error(
+                name,
+                "client_certificate_pem and client_private_key_pem must be configured together",
+            ))
+        }
+    };
+
+    Ok(MakeRustlsConnect::new(client_config))
+}
+
+fn parse_certificate_bundle(
+    name: &ConnectionName,
+    pem: &str,
+    description: &str,
+) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>, PostgresError> {
+    let mut reader = BufReader::new(pem.as_bytes());
+    let items = rustls_pemfile::read_all(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| configuration_error(name, &format!("malformed {description}")))?;
+    let mut certificates = Vec::new();
+    for item in items {
+        match item {
+            Item::X509Certificate(certificate) => certificates.push(certificate),
+            _ => {
+                return Err(configuration_error(
+                    name,
+                    &format!("{description} contains non-certificate PEM material"),
+                ))
+            }
+        }
+    }
+    if certificates.is_empty() {
+        return Err(configuration_error(name, &format!("empty {description}")));
+    }
+    Ok(certificates)
+}
+
+fn parse_private_key(
+    name: &ConnectionName,
+    pem: &str,
+) -> Result<PrivateKeyDer<'static>, PostgresError> {
+    let mut reader = BufReader::new(pem.as_bytes());
+    let items = rustls_pemfile::read_all(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| configuration_error(name, "malformed client private key"))?;
+    let mut keys = items.into_iter().map(|item| match item {
+        Item::Pkcs1Key(key) => Ok(PrivateKeyDer::Pkcs1(key)),
+        Item::Pkcs8Key(key) => Ok(PrivateKeyDer::Pkcs8(key)),
+        Item::Sec1Key(key) => Ok(PrivateKeyDer::Sec1(key)),
+        _ => Err(configuration_error(
+            name,
+            "client private key contains unsupported PEM material",
+        )),
+    });
+    let key = keys
+        .next()
+        .transpose()?
+        .ok_or_else(|| configuration_error(name, "empty or unsupported client private key"))?;
+    if keys.next().transpose()?.is_some() {
+        return Err(configuration_error(
+            name,
+            "client_private_key_pem must contain exactly one private key",
+        ));
+    }
+    Ok(key)
+}
+
+fn configuration_error(name: &ConnectionName, message: &str) -> PostgresError {
+    PostgresError::Configuration(name.to_string(), message.to_string())
 }
 
 fn module_is_allowed(allowed_rules: &HashSet<String>, module_name: &str) -> bool {
@@ -451,12 +771,32 @@ fn default_pool_timeout_ms() -> NonZeroU64 {
     NonZeroU64::new(1_000).expect("default PostgreSQL pool timeout must be non-zero")
 }
 
+fn default_connection_timeout_ms() -> NonZeroU64 {
+    NonZeroU64::new(3_000).expect("default PostgreSQL connection timeout must be non-zero")
+}
+
+fn default_recycle_timeout_ms() -> NonZeroU64 {
+    NonZeroU64::new(1_000).expect("default PostgreSQL recycle timeout must be non-zero")
+}
+
+fn default_total_timeout_ms() -> NonZeroU64 {
+    NonZeroU64::new(7_000).expect("default PostgreSQL total timeout must be non-zero")
+}
+
 fn default_statement_timeout_ms() -> NonZeroU64 {
     NonZeroU64::new(5_000).expect("default PostgreSQL statement timeout must be non-zero")
 }
 
 fn default_lock_timeout_ms() -> NonZeroU64 {
     NonZeroU64::new(1_000).expect("default PostgreSQL lock timeout must be non-zero")
+}
+
+fn default_idle_transaction_timeout_ms() -> NonZeroU64 {
+    NonZeroU64::new(5_000).expect("default PostgreSQL idle transaction timeout must be non-zero")
+}
+
+fn default_use_system_roots() -> bool {
+    true
 }
 
 fn default_max_query_size() -> NonZeroUsize {
@@ -479,14 +819,6 @@ fn default_max_response_size() -> NonZeroUsize {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "cranelift")]
-    use crate::loader::LimitValue;
-    #[cfg(feature = "cranelift")]
-    use wasmer::{
-        sys::{Cranelift, EngineBuilder},
-        Module, Store,
-    };
-
     #[test]
     fn configuration_defaults_and_permissions() {
         let config: PostgresConfig = toml::from_str(
@@ -494,6 +826,9 @@ mod tests {
             [connections.local]
             connection_string = "host=localhost user=reader"
             allowed_rules = ["reader.wasm"]
+
+            [connections.local.tls]
+            mode = "disable"
             "#,
         )
         .unwrap();
@@ -501,8 +836,148 @@ mod tests {
 
         assert_eq!(local.max_pool_size, default_max_pool_size());
         assert_eq!(local.max_rows, default_max_rows());
+        assert!(local.tls.use_system_roots);
         assert!(module_is_allowed(&local.allowed_rules, "reader.wasm"));
         assert!(!module_is_allowed(&local.allowed_rules, "other.wasm"));
+
+        let timeouts = pool_timeouts(local);
+        assert_eq!(
+            timeouts.wait,
+            Some(Duration::from_millis(default_pool_timeout_ms().get()))
+        );
+        assert_eq!(
+            timeouts.create,
+            Some(Duration::from_millis(default_connection_timeout_ms().get()))
+        );
+        assert_eq!(
+            timeouts.recycle,
+            Some(Duration::from_millis(default_recycle_timeout_ms().get()))
+        );
+    }
+
+    #[test]
+    fn tls_stanza_and_mode_are_required() {
+        let missing_tls = toml::from_str::<PostgresConfig>(
+            r#"
+            [connections.local]
+            connection_string = "host=localhost user=reader"
+            allowed_rules = []
+            "#,
+        )
+        .err()
+        .expect("the TLS stanza must be explicit");
+        assert!(missing_tls.to_string().contains("missing field `tls`"));
+
+        let missing_mode = toml::from_str::<PostgresConfig>(
+            r#"
+            [connections.local]
+            connection_string = "host=localhost user=reader"
+            allowed_rules = []
+
+            [connections.local.tls]
+            use_system_roots = true
+            "#,
+        )
+        .err()
+        .expect("the TLS mode must be explicit");
+        assert!(missing_mode.to_string().contains("missing field `mode`"));
+    }
+
+    #[test]
+    fn tls_stanza_overrides_dsn_sslmode_and_sets_application_name() {
+        let name = ConnectionName::new("corporate".to_string()).unwrap();
+        let mut plaintext_dsn =
+            tokio_postgres::Config::from_str("host=localhost sslmode=require").unwrap();
+        configure_postgres_connection(&name, &mut plaintext_dsn, PostgresTlsMode::Disable);
+        assert_eq!(plaintext_dsn.get_ssl_mode(), SslMode::Disable);
+        assert_eq!(
+            plaintext_dsn.get_application_name(),
+            Some("plaid:postgres:corporate")
+        );
+
+        let mut verified_dsn =
+            tokio_postgres::Config::from_str("host=localhost sslmode=disable").unwrap();
+        configure_postgres_connection(&name, &mut verified_dsn, PostgresTlsMode::VerifyFull);
+        assert_eq!(verified_dsn.get_ssl_mode(), SslMode::Require);
+    }
+
+    #[test]
+    fn plaintext_rejects_certificate_fields() {
+        let name = ConnectionName::new("local".to_string()).unwrap();
+        let tls = PostgresTlsConfig {
+            mode: PostgresTlsMode::Disable,
+            use_system_roots: true,
+            ca_certificates_pem: Some(String::new()),
+            client_certificate_pem: None,
+            client_private_key_pem: None,
+        };
+        let error = validate_disabled_tls(&name, &tls).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("certificate fields are not allowed"));
+    }
+
+    #[test]
+    fn verify_full_requires_roots_and_validates_client_pair() {
+        let name = ConnectionName::new("production".to_string()).unwrap();
+        let no_roots = PostgresTlsConfig {
+            mode: PostgresTlsMode::VerifyFull,
+            use_system_roots: false,
+            ca_certificates_pem: None,
+            client_certificate_pem: None,
+            client_private_key_pem: None,
+        };
+        assert!(build_tls_connector(&name, &no_roots)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("requires at least one"));
+
+        let rcgen::CertifiedKey { cert, key_pair } =
+            rcgen::generate_simple_self_signed(["postgres.example.com".to_string()]).unwrap();
+        let cert_pem = cert.pem();
+        let key_pem = key_pair.serialize_pem();
+        let missing_key = PostgresTlsConfig {
+            mode: PostgresTlsMode::VerifyFull,
+            use_system_roots: false,
+            ca_certificates_pem: Some(cert_pem.clone()),
+            client_certificate_pem: Some(cert_pem.clone()),
+            client_private_key_pem: None,
+        };
+        assert!(build_tls_connector(&name, &missing_key)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("must be configured together"));
+
+        let valid_mtls = PostgresTlsConfig {
+            mode: PostgresTlsMode::VerifyFull,
+            use_system_roots: false,
+            ca_certificates_pem: Some(cert_pem.clone()),
+            client_certificate_pem: Some(cert_pem),
+            client_private_key_pem: Some(key_pem),
+        };
+        build_tls_connector(&name, &valid_mtls).unwrap();
+    }
+
+    #[test]
+    fn malformed_or_ambiguous_pem_is_rejected_without_echoing_it() {
+        let name = ConnectionName::new("production".to_string()).unwrap();
+        let secret_marker = "SHOULD-NOT-APPEAR";
+        let error = parse_certificate_bundle(
+            &name,
+            &format!("-----BEGIN CERTIFICATE-----\n{secret_marker}\n"),
+            "CA certificate bundle",
+        )
+        .unwrap_err();
+        assert!(!error.to_string().contains(secret_marker));
+
+        let rcgen::CertifiedKey { key_pair, .. } =
+            rcgen::generate_simple_self_signed(["client".to_string()]).unwrap();
+        let key = key_pair.serialize_pem();
+        let error = parse_private_key(&name, &format!("{key}\n{key}"))
+            .expect_err("multiple keys must be rejected");
+        assert!(error.to_string().contains("exactly one"));
     }
 
     #[test]
@@ -513,6 +988,9 @@ mod tests {
             connection_string = "host=localhost user=reader"
             allowed_rules = ["reader.wasm"]
             max_rows = 0
+
+            [connections.local.tls]
+            mode = "disable"
             "#,
         )
         .err()
@@ -528,6 +1006,9 @@ mod tests {
             [connections.""]
             connection_string = "host=localhost user=reader"
             allowed_rules = []
+
+            [connections."".tls]
+            mode = "disable"
             "#,
         )
         .err()
@@ -541,6 +1022,9 @@ mod tests {
             [connections.local]
             connection_string = "not a valid connection option"
             allowed_rules = []
+
+            [connections.local.tls]
+            mode = "disable"
             "#,
         )
         .err()
@@ -572,140 +1056,5 @@ mod tests {
         assert!(BoundParameter(QueryParameter::Integer(42))
             .to_sql_checked(&Type::TEXT, &mut output)
             .is_err());
-    }
-
-    #[cfg(feature = "cranelift")]
-    #[tokio::test]
-    async fn unavailable_database_is_only_reported_when_queried() {
-        // A nonexistent Unix socket makes connection attempts fail without
-        // requiring network access. The lazy pool should still construct and
-        // report the unavailable service only when queried.
-        let config: PostgresConfig = toml::from_str(
-            r#"
-            [connections.unavailable]
-            connection_string = "host=/nonexistent/plaid-postgres-test user=reader"
-            allowed_rules = ["reader.wasm"]
-            pool_timeout_ms = 25
-            "#,
-        )
-        .unwrap();
-
-        let postgres = Postgres::new(config).expect("pool construction must not connect");
-        let request = QueryRequest {
-            connection: "unavailable".to_string(),
-            sql: "SELECT 1".to_string(),
-            parameters: vec![],
-        };
-
-        let error = postgres
-            .query(
-                &serde_json::to_string(&request).unwrap(),
-                test_module("reader.wasm"),
-            )
-            .await
-            .expect_err("the first query should attempt to connect");
-
-        assert!(matches!(
-            error,
-            ApiError::PostgresError(PostgresError::Pool(connection, _))
-                if connection == "unavailable"
-        ));
-    }
-
-    #[cfg(feature = "cranelift")]
-    fn test_module(name: &str) -> Arc<PlaidModule> {
-        let store = Store::default();
-        let wasm = &[0, 97, 115, 109, 1, 0, 0, 0];
-        let engine = EngineBuilder::new(Cranelift::default());
-
-        Arc::new(PlaidModule {
-            name: name.to_string(),
-            logtype: "test".to_string(),
-            module: Module::new(&store, wasm).unwrap(),
-            engine: engine.into(),
-            computation_limit: 0,
-            page_limit: 0,
-            storage_current: Default::default(),
-            storage_limit: LimitValue::Unlimited,
-            accessory_data: None,
-            secrets: None,
-            persistent_response: None,
-            test_mode: true,
-        })
-    }
-
-    /// Optional live smoke test. The supplied role must be able to create the
-    /// fixture table outside the API; the API itself still executes in a
-    /// read-only transaction.
-    #[cfg(feature = "cranelift")]
-    #[tokio::test]
-    #[ignore = "requires PLAID_TEST_POSTGRES_URL"]
-    async fn live_query_and_read_only_enforcement() {
-        let connection_string = std::env::var("PLAID_TEST_POSTGRES_URL")
-            .expect("PLAID_TEST_POSTGRES_URL must be set for this ignored test");
-        let (admin, connection) = tokio_postgres::connect(&connection_string, NoTls)
-            .await
-            .unwrap();
-        let connection_task = tokio::spawn(async move { connection.await.unwrap() });
-        admin
-            .batch_execute(
-                "DROP TABLE IF EXISTS plaid_postgres_api_test;\
-                 CREATE TABLE plaid_postgres_api_test (id bigint PRIMARY KEY, payload jsonb);\
-                 INSERT INTO plaid_postgres_api_test VALUES (1, '{\"ok\": true}');",
-            )
-            .await
-            .unwrap();
-
-        let config = PostgresConfig {
-            connections: HashMap::from([(
-                ConnectionName::new("test".to_string()).unwrap(),
-                PostgresConnectionConfig {
-                    postgres_config: tokio_postgres::Config::from_str(&connection_string).unwrap(),
-                    allowed_rules: HashSet::from(["reader.wasm".to_string()]),
-                    max_pool_size: NonZeroUsize::new(2).unwrap(),
-                    pool_timeout_ms: NonZeroU64::new(2_000).unwrap(),
-                    statement_timeout_ms: NonZeroU64::new(2_000).unwrap(),
-                    lock_timeout_ms: NonZeroU64::new(1_000).unwrap(),
-                    max_query_size: default_max_query_size(),
-                    max_parameters: default_max_parameters(),
-                    max_rows: default_max_rows(),
-                    max_response_size: default_max_response_size(),
-                },
-            )]),
-        };
-        let postgres = Postgres::new(config).unwrap();
-        let module = test_module("reader.wasm");
-
-        let request = QueryRequest {
-            connection: "test".to_string(),
-            sql: "SELECT id, payload FROM plaid_postgres_api_test WHERE id = $1::bigint"
-                .to_string(),
-            parameters: vec![QueryParameter::Integer(1)],
-        };
-        let response = postgres
-            .query(&serde_json::to_string(&request).unwrap(), module.clone())
-            .await
-            .unwrap();
-        let response: QueryResponse = serde_json::from_str(&response).unwrap();
-        assert_eq!(response.rows[0][0], Value::from(1));
-        assert_eq!(response.rows[0][1], serde_json::json!({"ok": true}));
-
-        let write = QueryRequest {
-            connection: "test".to_string(),
-            sql: "INSERT INTO plaid_postgres_api_test VALUES (2, '{}') RETURNING id".to_string(),
-            parameters: vec![],
-        };
-        assert!(postgres
-            .query(&serde_json::to_string(&write).unwrap(), module)
-            .await
-            .is_err());
-
-        drop(postgres);
-        admin
-            .batch_execute("DROP TABLE plaid_postgres_api_test")
-            .await
-            .unwrap();
-        drop(admin);
-        connection_task.await.unwrap();
     }
 }

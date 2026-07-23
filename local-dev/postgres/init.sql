@@ -7,7 +7,9 @@ CREATE ROLE plaid_reader
     PASSWORD 'plaid_reader'
     NOSUPERUSER
     NOCREATEDB
-    NOCREATEROLE;
+    NOCREATEROLE
+    NOREPLICATION
+    NOBYPASSRLS;
 
 ALTER ROLE plaid_reader SET default_transaction_read_only = on;
 

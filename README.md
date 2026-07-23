@@ -18,6 +18,9 @@ To run integration tests:
 ./testing/integration.sh [compiler]
 ```
 
+For the feature-gated read-only PostgreSQL API, see the
+[production configuration and database-role guide](POSTGRES.md).
+
 ## Releasing A New Version
 The version must be bumped in two places:
 * `runtime/plaid/Cargo.toml`
