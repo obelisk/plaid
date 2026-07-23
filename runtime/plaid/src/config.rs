@@ -70,7 +70,7 @@ pub struct GetMode {
 
 /// How a webhook should respond to a POST request.
 ///
-/// Unlike [`GetMode`], POST responses are never cached. A rule response is
+/// Unlike [`GetMode`], POST responses are never cached. Rule responses are
 /// generated synchronously while normal webhook fan-out continues separately.
 #[derive(Clone)]
 pub enum PostResponseMode {
@@ -78,6 +78,8 @@ pub enum PostResponseMode {
     Rule(String),
     /// Return a static response body.
     Static(String),
+    /// Handle Slack URL verification requests in the runtime.
+    Slack,
 }
 
 /// Configuration for an optional POST response.
@@ -311,9 +313,13 @@ where
     D: de::Deserializer<'de>,
 {
     let mode = String::deserialize(deserializer)?;
+    if matches!(mode.as_str(), "Slack" | "slack") {
+        return Ok(PostResponseMode::Slack);
+    }
+
     let (mode, data) = mode.split_once(':').ok_or_else(|| {
         serde::de::Error::custom(
-            "Must provide a post response mode and context, for example 'rule:module.wasm'",
+            "Must provide a post response mode and context, for example 'rule:module.wasm', or use 'slack'",
         )
     })?;
 
@@ -327,7 +333,7 @@ where
         "Rule" | "rule" => Ok(PostResponseMode::Rule(data.to_owned())),
         "Static" | "static" => Ok(PostResponseMode::Static(data.to_owned())),
         x => Err(serde::de::Error::custom(format!(
-            "{x} is an unknown post response mode. Must be 'rule' or 'static'"
+            "{x} is an unknown post response mode. Must be 'rule', 'static', or 'slack'"
         ))),
     }
 }
@@ -370,6 +376,25 @@ mod tests {
         );
 
         assert!(config.is_err());
+    }
+
+    #[test]
+    fn deserializes_slack_post_mode() {
+        let config: WebhookConfig = toml::from_str(
+            r#"
+            log_type = "slack"
+            headers = []
+
+            [post_mode]
+            response_mode = "slack"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.post_mode.unwrap().response_mode,
+            PostResponseMode::Slack
+        ));
     }
 }
 

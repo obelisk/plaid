@@ -22,6 +22,7 @@ use executor::metrics::{ModuleExecutionMetrics, QueueMetrics};
 use executor::*;
 use plaid::metrics::MetricsHandle;
 use plaid_stl::messages::LogSource;
+use serde::Deserialize;
 use storage::Storage;
 use tokio::{
     signal::{
@@ -69,6 +70,7 @@ impl std::error::Error for Errors {}
 
 enum PostResponseAction {
     Static(String),
+    Slack(Option<String>),
     Rule {
         name: String,
         receiver: tokio::sync::oneshot::Receiver<Option<ResponseMessage>>,
@@ -76,6 +78,22 @@ enum PostResponseAction {
         timeout_seconds: u64,
     },
     MissingRule(String),
+}
+
+#[derive(Deserialize)]
+struct SlackWebhookRequest {
+    #[serde(rename = "type")]
+    request_type: String,
+    challenge: Option<String>,
+}
+
+fn slack_challenge(body: &[u8]) -> Option<String> {
+    let request: SlackWebhookRequest = serde_json::from_slice(body).ok()?;
+    if request.request_type == "url_verification" {
+        request.challenge
+    } else {
+        None
+    }
 }
 
 async fn post_handler(
@@ -139,6 +157,9 @@ async fn post_handler(
     let post_response = match webhook_configuration.post_mode.as_ref() {
         Some(post_mode) => match &post_mode.response_mode {
             PostResponseMode::Static(body) => Some(PostResponseAction::Static(body.clone())),
+            PostResponseMode::Slack => {
+                Some(PostResponseAction::Slack(slack_challenge(&message.data)))
+            }
             PostResponseMode::Rule(name) => match modules.get(name) {
                 Some(rule) => {
                     let (response_sender, response_receiver) = tokio::sync::oneshot::channel();
@@ -185,6 +206,10 @@ async fn post_handler(
         Some(PostResponseAction::Static(body)) => {
             return warp::reply::with_status(body, StatusCode::OK).into_response();
         }
+        Some(PostResponseAction::Slack(Some(challenge))) => {
+            return warp::reply::with_status(challenge, StatusCode::OK).into_response();
+        }
+        Some(PostResponseAction::Slack(None)) => {}
         Some(PostResponseAction::MissingRule(name)) => {
             error!("Got a POST request to {webhook} but the response rule [{name}] does not exist");
             return warp::reply::with_status(warp::reply(), StatusCode::BAD_GATEWAY)
@@ -210,7 +235,9 @@ async fn post_handler(
 
             match tokio::time::timeout(Duration::from_secs(timeout_seconds), receiver).await {
                 Ok(Ok(Some(response))) => match StatusCode::from_u16(response.code) {
-                    Ok(status) => return warp::reply::with_status(response.body, status).into_response(),
+                    Ok(status) => {
+                        return warp::reply::with_status(response.body, status).into_response()
+                    }
                     Err(e) => {
                         error!("Response rule [{name}] for webhook {webhook} returned an invalid status: {e}");
                         return warp::reply::with_status(warp::reply(), StatusCode::BAD_GATEWAY)
