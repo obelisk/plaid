@@ -3,17 +3,18 @@ use std::collections::HashMap;
 use crossbeam_channel::Sender;
 use prometheus::core::{Collector, Desc};
 use prometheus::proto::MetricFamily;
-use prometheus::{GaugeVec, HistogramOpts, HistogramVec, IntGaugeVec, Opts};
+use prometheus::{GaugeVec, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts};
 
 use crate::metrics::MetricsHandle;
 
 use super::thread_pools::ExecutionThreadPools;
 use super::Message;
 
-/// Histograms for per-module execution stats, updated after each successful run.
+/// Metrics for per-module execution stats
 pub struct ModuleExecutionMetrics {
     computation_percentage: HistogramVec,
     execution_duration_seconds: HistogramVec,
+    module_failures: IntCounterVec,
 }
 
 impl ModuleExecutionMetrics {
@@ -37,16 +38,29 @@ impl ModuleExecutionMetrics {
         )
         .expect("valid metric definition");
 
+        let module_failures = IntCounterVec::new(
+            Opts::new(
+                "plaid_module_failures_total",
+                "Total number of module executions that returned a non-zero status",
+            ),
+            &["module"],
+        )
+        .expect("valid metric definition");
+
         handle
             .register(Box::new(computation_percentage.clone()))
             .expect("expected unique collector");
         handle
             .register(Box::new(execution_duration_seconds.clone()))
             .expect("expected unique collector");
+        handle
+            .register(Box::new(module_failures.clone()))
+            .expect("expected unique collector");
 
         Self {
             computation_percentage,
             execution_duration_seconds,
+            module_failures,
         }
     }
 
@@ -62,6 +76,10 @@ impl ModuleExecutionMetrics {
         self.execution_duration_seconds
             .with_label_values(&[module])
             .observe(duration.as_secs_f64());
+    }
+
+    pub fn record_module_failure(&self, module: &str) {
+        self.module_failures.with_label_values(&[module]).inc();
     }
 }
 
