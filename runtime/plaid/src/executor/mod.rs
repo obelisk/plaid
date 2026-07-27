@@ -605,6 +605,9 @@ fn process_message_with_module(
     }
 
     if let Some(invalid_status) = env.as_ref(&store).invalid_response_status {
+        if let Some(sender) = message.response_sender {
+            let _ = sender.send(None);
+        }
         els.log_module_error(
             module.name.clone(),
             format!("Invalid HTTP response status: {invalid_status}"),
