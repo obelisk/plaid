@@ -34,6 +34,7 @@ pub enum FunctionErrors {
     TimeoutElapsed = -14,
     FailedToLogBack = -15,
     LogbackBudgetExhausted = -16,
+    InvalidHttpResponseStatus = -17,
 }
 
 #[derive(Debug)]

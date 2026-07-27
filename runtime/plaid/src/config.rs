@@ -68,6 +68,34 @@ pub struct GetMode {
     pub response_mode: ResponseMode,
 }
 
+/// How a webhook should respond to a POST request.
+///
+/// Unlike [`GetMode`], POST responses are never cached. Rule responses are
+/// generated synchronously while normal webhook fan-out continues separately.
+#[derive(Clone)]
+pub enum PostResponseMode {
+    /// Respond by running a Plaid WASM module.
+    Rule(String),
+    /// Return a static response body.
+    Static(String),
+    /// Handle Slack URL verification requests in the runtime.
+    Slack,
+}
+
+/// Configuration for an optional POST response.
+#[derive(Deserialize, Clone)]
+pub struct PostMode {
+    /// How the webhook should respond to a POST request.
+    #[serde(deserialize_with = "post_response_mode_deserializer")]
+    pub response_mode: PostResponseMode,
+    /// Maximum time to wait for a response rule before returning a gateway timeout.
+    #[serde(
+        default = "default_post_response_timeout_seconds",
+        deserialize_with = "validate_post_response_timeout_seconds"
+    )]
+    pub response_timeout_seconds: u64,
+}
+
 /// Configuration for a particular webhook within a WebhookServer to accept
 /// logs and send them to a logging channel
 #[derive(Deserialize, Clone)]
@@ -85,6 +113,8 @@ pub struct WebhookConfig {
     pub max_body_size: usize,
     /// See GetMode
     pub get_mode: Option<GetMode>,
+    /// See PostMode. When unset, POST requests retain the legacy empty 200 response.
+    pub post_mode: Option<PostMode>,
     /// An optional label for the webhook. If this is populated, it will be
     /// passed as the source to to the modules instead of the webhook address.
     /// You may want to do this to reduce the secrets modules have access to.
@@ -183,6 +213,23 @@ fn default_webhook_body_size() -> usize {
     1024 * 256
 }
 
+fn default_post_response_timeout_seconds() -> u64 {
+    10
+}
+
+fn validate_post_response_timeout_seconds<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(serde::de::Error::custom(
+            "Webhook POST response timeout must not be 0",
+        ));
+    }
+    Ok(value)
+}
+
 /// Validate that the webhook body size limit is not zero.
 fn validate_webhook_body_size<'de, D>(deserializer: D) -> Result<usize, D::Error>
 where
@@ -258,6 +305,97 @@ where
             )))
         }
     })
+}
+
+/// Deserialized for a webhook's POST response mode.
+fn post_response_mode_deserializer<'de, D>(deserializer: D) -> Result<PostResponseMode, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let mode = String::deserialize(deserializer)?;
+    if matches!(mode.as_str(), "Slack" | "slack") {
+        return Ok(PostResponseMode::Slack);
+    }
+
+    let (mode, data) = mode.split_once(':').ok_or_else(|| {
+        serde::de::Error::custom(
+            "Must provide a post response mode and context, for example 'rule:module.wasm', or use 'slack'",
+        )
+    })?;
+
+    if data.is_empty() {
+        return Err(serde::de::Error::custom(
+            "Must provide context for the post response mode",
+        ));
+    }
+
+    match mode {
+        "Rule" | "rule" => Ok(PostResponseMode::Rule(data.to_owned())),
+        "Static" | "static" => Ok(PostResponseMode::Static(data.to_owned())),
+        x => Err(serde::de::Error::custom(format!(
+            "{x} is an unknown post response mode. Must be 'rule', 'static', or 'slack'"
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_rule_post_mode() {
+        let config: WebhookConfig = toml::from_str(
+            r#"
+            log_type = "example"
+            headers = []
+
+            [post_mode]
+            response_mode = "rule:response.wasm"
+            "#,
+        )
+        .unwrap();
+
+        let post_mode = config.post_mode.unwrap();
+        assert_eq!(post_mode.response_timeout_seconds, 10);
+        assert!(matches!(
+            post_mode.response_mode,
+            PostResponseMode::Rule(ref name) if name == "response.wasm"
+        ));
+    }
+
+    #[test]
+    fn rejects_get_only_post_mode() {
+        let config = toml::from_str::<WebhookConfig>(
+            r#"
+            log_type = "example"
+            headers = []
+
+            [post_mode]
+            response_mode = "facebook:token"
+            "#,
+        );
+
+        assert!(config.is_err());
+    }
+
+    #[test]
+    fn deserializes_slack_post_mode() {
+        let config: WebhookConfig = toml::from_str(
+            r#"
+            log_type = "slack"
+            headers = []
+
+            [post_mode]
+            response_mode = "slack"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.post_mode.unwrap().response_mode,
+            PostResponseMode::Slack
+        ));
+    }
 }
 
 /// Configure Plaid with config file and secrets read from arguments (or use default values).
