@@ -529,7 +529,7 @@ async fn update_dg_from_storage<T: DataGenerator>(dg: &mut T, storage: Option<Ar
             // Ensure we are not going too far back in time. If we are, warn and cap the look-back window.
             let now = OffsetDateTime::now_utc();
             if (now - last_seen).whole_seconds() as u64 > dg.get_max_catchup_time() {
-                warn!("Trying to catch up DG logs for {} seconds, which is higher than the limit ({} seconds). We are capping the look-back window. WARNING - This likely means we are going to miss logs!", (now - last_seen).whole_seconds() as u64, dg.get_max_catchup_time());
+                warn!("Trying to catch up {} DG logs for {} seconds, which is higher than the limit ({} seconds). We are capping the look-back window. WARNING - This likely means we are going to miss logs!", dg.get_name(), (now - last_seen).whole_seconds() as u64, dg.get_max_catchup_time());
                 last_seen =
                     now.saturating_sub(time::Duration::seconds(dg.get_max_catchup_time() as i64));
             }
