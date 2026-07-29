@@ -531,6 +531,7 @@ pub struct SlackUser {
 
 #[derive(Serialize, Deserialize)]
 pub struct SlackUserProfile {
+    pub email: String,
     pub status_text: String,
     pub status_emoji: String,
 }
