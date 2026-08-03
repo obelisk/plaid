@@ -1,4 +1,5 @@
 mod actions;
+mod code;
 mod copilot;
 mod deploy_keys;
 mod enterprise;
@@ -17,6 +18,7 @@ mod team;
 mod types;
 
 pub use actions::*;
+pub use code::*;
 pub use copilot::*;
 pub use deploy_keys::*;
 pub use enterprise::*;
