@@ -33,4 +33,4 @@ mkdir -p compiled_modules
 cp modules/target/wasm32-unknown-unknown/release/just_run_please.wasm compiled_modules/just_run_please.wasm
 
 cd runtime
-RUST_LOG=plaid=debug cargo run --bin=plaid --no-default-features --features=${COMPILER_BACKEND} -- --config ${CONFIG_WORKING_PATH} --secrets ${SECRETS_WORKING_PATH}
+RUST_LOG=plaid=trace cargo run --bin=plaid --no-default-features --features=${COMPILER_BACKEND} -- --config ${CONFIG_WORKING_PATH} --secrets ${SECRETS_WORKING_PATH}
