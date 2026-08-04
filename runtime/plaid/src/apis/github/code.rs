@@ -123,7 +123,7 @@ impl Github {
         let request: GithubApiWrapper<CreateInstallationAccessTokenParams> =
             serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
 
-        let installation_id = &request.params.installation_id.to_string();
+        let installation_id = request.params.installation_id;
 
         info!(
             "Creating installation access token for installation [{installation_id}] on behalf of {module}"

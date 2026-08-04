@@ -236,26 +236,33 @@ impl Github {
             )))
         })?;
 
-        let mut request = client
-            .build_request(
-                http::Request::builder()
-                    .method(http::Method::POST)
-                    .uri(&uri),
-                Some(&body),
-            )
-            .map_err(|e| ApiError::GitHubError(GitHubError::ClientError(e)))?;
+        let response = match headers {
+            // No custom headers: use the client's built-in POST helper so we don't change the
+            // transport path for the existing POST-based GitHub API wrappers.
+            None => client._post(uri, Some(&body)).await,
+            // Custom headers provided (e.g. app-level JWT auth): build the request manually so we
+            // can override headers such as Authorization before sending.
+            Some(headers) => {
+                let mut request = client
+                    .build_request(
+                        http::Request::builder()
+                            .method(http::Method::POST)
+                            .uri(&uri),
+                        Some(&body),
+                    )
+                    .map_err(|e| ApiError::GitHubError(GitHubError::ClientError(e)))?;
 
-        if let Some(headers) = headers {
-            for (name, value) in headers {
-                if let Some(name) = name {
-                    request.headers_mut().insert(name, value);
+                for (name, value) in headers {
+                    if let Some(name) = name {
+                        request.headers_mut().insert(name, value);
+                    }
                 }
+
+                client.send(request).await
             }
-        }
+        };
 
-        let request = client.send(request).await;
-
-        match request {
+        match response {
             Ok(r) => {
                 let status = r.status().as_u16();
                 let body = client.body_to_string(r).await.map_err(|e| {
