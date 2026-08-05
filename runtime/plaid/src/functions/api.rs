@@ -467,6 +467,7 @@ impl_new_function_with_error_buffer!(
     create_installation_access_token,
     DISALLOW_IN_TEST_MODE
 );
+impl_new_function!(github, revoke_installation_access_token, DISALLOW_IN_TEST_MODE);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
@@ -923,6 +924,7 @@ define_api_functions! {
         "github_remove_repo_access_from_org_installation" => github_remove_repo_access_from_org_installation,
         "github_get_enterprise_license_status"                 => github_get_enterprise_license_status,
         "github_create_installation_access_token"                 => github_create_installation_access_token,
+        "github_revoke_installation_access_token"                 => github_revoke_installation_access_token,
 
         // Slack Calls
         "slack_post_to_named_webhook"     => slack_post_to_named_webhook,

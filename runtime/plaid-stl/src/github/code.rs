@@ -13,6 +13,13 @@ pub struct CreateInstallationAccessTokenParams {
     pub body: CreateInstallationAccessTokenBody,
 }
 
+/// Parameters sent to the runtime when revoking a GitHub App installation access token.
+/// See https://docs.github.com/en/rest/apps/installations?apiVersion=2022-11-28#revoke-an-installation-access-token
+#[derive(Serialize, Deserialize)]
+pub struct RevokeInstallationAccessTokenParams {
+    pub token: String,
+}
+
 /// Body sent to the GitHub API when creating an installation access token.
 #[derive(Serialize, Deserialize)]
 pub struct CreateInstallationAccessTokenBody {
@@ -75,4 +82,37 @@ pub fn create_installation_access_token(
     // to mess with us, this came from a String in the API module.
     let response = String::from_utf8(return_buffer).unwrap();
     Ok(serde_json::from_str(&response).map_err(|_| PlaidFunctionError::InternalApiError)?)
+}
+
+/// Revoke a GitHub App installation access token.
+/// See https://docs.github.com/en/rest/apps/installations?apiVersion=2022-11-28#revoke-an-installation-access-token for more details
+/// The token to revoke must be provided because this endpoint authenticates with the token
+/// that is being deleted.
+///
+/// # Arguments
+/// * `token` - The installation access token to revoke.
+pub fn revoke_installation_access_token(token: impl Display) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, revoke_installation_access_token);
+    }
+
+    let params = RevokeInstallationAccessTokenParams {
+        token: token.to_string(),
+    };
+
+    let request = serde_json::to_string(&params).unwrap();
+    let res = unsafe {
+        github_revoke_installation_access_token(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
 }

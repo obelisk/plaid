@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use plaid_stl::github::{
     CreateInstallationAccessTokenParams, GithubApiWrapper, InstallationAccessTokenCreationResponse,
-    SearchCodeParams,
+    RevokeInstallationAccessTokenParams, SearchCodeParams,
 };
 
 use super::Github;
@@ -145,6 +145,43 @@ impl Github {
                     let response: InstallationAccessTokenCreationResponse =
                         serde_json::from_str(&body).map_err(|_| ApiError::BadRequest)?;
                     Ok(serde_json::to_string(&response).map_err(|_| ApiError::BadRequest)?)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Revoke an installation access token for a GitHub App installation.
+    /// See https://docs.github.com/en/rest/apps/installations?apiVersion=2022-11-28#revoke-an-installation-access-token for more details
+    /// The token to revoke must be provided because this endpoint authenticates with the token
+    /// that is being deleted. A standalone reqwest client is used so that no configured GitHub
+    /// client is required.
+    pub async fn revoke_installation_access_token(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request: RevokeInstallationAccessTokenParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let token = &request.token;
+
+        info!("Revoking installation access token on behalf of {module}");
+
+        let address = "https://api.github.com/installation/token".to_string();
+
+        match self
+            .make_delete_request_with_token(address, None::<&String>, token.clone(), module)
+            .await
+        {
+            Ok((status, Ok(_))) => {
+                if status == 204 {
+                    Ok(0)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,

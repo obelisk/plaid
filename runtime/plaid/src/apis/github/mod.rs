@@ -404,6 +404,38 @@ impl Github {
             Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
         }
     }
+
+    /// Make a DELETE request to the GitHub API with a custom `Authorization: Bearer <token>`
+    /// header using a standalone reqwest client. This is needed for endpoints that require
+    /// authenticating with a token that is different from the configured client, such as
+    /// revoking an installation access token.
+    async fn make_delete_request_with_token<T: Serialize>(
+        &self,
+        uri: String,
+        body: Option<&T>,
+        token: String,
+        module: Arc<PlaidModule>,
+    ) -> Result<(u16, Result<String, ApiError>), ApiError> {
+        info!("Making a delete request to {uri} on behalf of {module} with provided token");
+
+        let client = reqwest::Client::new();
+        let mut request = client
+            .delete(&uri)
+            .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(USER_AGENT, format!("Rust/Plaid{}", env!("CARGO_PKG_VERSION")));
+
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+
+        let response = request.send().await.map_err(|e| ApiError::NetworkError(e))?;
+
+        let status = response.status().as_u16();
+        let body = response.text().await.map_err(|e| {
+            ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
+        });
+        Ok((status, body))
+    }
 }
 
 /// Builds an instance of a Github API client
