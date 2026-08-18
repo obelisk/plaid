@@ -1,0 +1,25 @@
+# Quick Prometheus config for testing Plaid metrics.
+#
+# Start everything from local-dev/:
+#   docker compose up --build
+#
+# Prometheus UI: http://localhost:9090
+# Plaid metrics: http://localhost:9464/metrics
+#
+# Example queries:
+#   plaid_execution_queue_depth
+#   plaid_execution_queue_capacity_percentage
+#   plaid_github_logs_fetched_total
+
+global:
+  scrape_interval: 1s
+  evaluation_interval: 1s
+
+scrape_configs:
+  - job_name: plaid
+    metrics_path: /metrics
+    static_configs:
+      # Use "plaid:9464" when both services run via `docker compose up` (shared network).
+      # Use "host.docker.internal:9464" when Prometheus runs in Docker but Plaid runs on the host (`cargo run`).
+      # Use "localhost:9464" if Prometheus runs directly on the host.
+      - targets: ["plaid:9464"]

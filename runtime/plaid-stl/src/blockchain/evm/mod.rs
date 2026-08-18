@@ -8,8 +8,8 @@ pub use utils::{parse_basic_rpc_response, parse_detailed_rpc_response, EvmError}
 use crate::{
     blockchain::evm::types::{
         BasicRpcResponse, BlockTag, ChainId, DetailedRpcResponse, EstimateGasRequest,
-        EthCallRequest, GetAddressMetadataRequest, GetBlockRequest, GetGasPriceRequest,
-        GetLogsRequest, GetTransactionRequest,
+        EthCallRequest, GetAddressMetadataRequest, GetBlockRequest, GetFeeHistoryRequest,
+        GetGasPriceRequest, GetLogsRequest, GetTransactionRequest,
     },
     PlaidFunctionError,
 };
@@ -417,6 +417,54 @@ pub fn get_block(
 
     let res = unsafe {
         blockchain_evm_get_block(
+            request.as_ptr(),
+            request.len(),
+            return_buffer.as_mut_ptr(),
+            DETAILED_RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match std::str::from_utf8(&return_buffer) {
+        Ok(x) => Ok(serde_json::from_str(x).map_err(|_| PlaidFunctionError::InternalApiError)?),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
+/// Returns historical fee market data for up to `block_count` blocks ending at `block_tag`.
+/// The response includes base fee per gas and gas-used ratio for each block, and effective
+/// priority fee percentiles when `reward_percentiles` is provided.
+///
+/// See https://www.alchemy.com/docs/chains/abstract/abstract-api-endpoints/eth-fee-history for more details.
+pub fn get_fee_history(
+    chain_id: impl Into<ChainId>,
+    block_count: u16,
+    block_tag: BlockTag,
+    reward_percentiles: Option<Vec<u8>>,
+) -> Result<DetailedRpcResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(blockchain_evm, get_fee_history);
+    }
+
+    let request = GetFeeHistoryRequest {
+        chain_id: chain_id.into(),
+        block_count,
+        block_tag,
+        reward_percentiles,
+    };
+
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    let mut return_buffer = vec![0; DETAILED_RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        blockchain_evm_get_fee_history(
             request.as_ptr(),
             request.len(),
             return_buffer.as_mut_ptr(),

@@ -404,6 +404,7 @@ impl_new_function!(
     DISALLOW_IN_TEST_MODE
 );
 impl_new_function!(github, delete_deploy_key, DISALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, create_deploy_key, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, require_signed_commits, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, add_repo_to_team, DISALLOW_IN_TEST_MODE);
 impl_new_function!(github, remove_repo_from_team, DISALLOW_IN_TEST_MODE);
@@ -434,6 +435,7 @@ impl_new_function!(
     pull_request_request_reviewers,
     DISALLOW_IN_TEST_MODE
 );
+impl_new_function!(github, submit_pull_request_review, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_weekly_commit_count, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_reference, ALLOW_IN_TEST_MODE);
 impl_new_function!(github, create_reference, DISALLOW_IN_TEST_MODE);
@@ -458,6 +460,13 @@ impl_new_function!(
     remove_repo_access_from_org_installation,
     DISALLOW_IN_TEST_MODE
 );
+impl_new_function_with_error_buffer!(github, get_enterprise_license_status, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(
+    github,
+    create_installation_access_token,
+    DISALLOW_IN_TEST_MODE
+);
+impl_new_function!(github, revoke_installation_access_token, DISALLOW_IN_TEST_MODE);
 
 // GitHub Functions only available with GitHub App authentication
 impl_new_function!(github, review_fpat_requests_for_org, DISALLOW_IN_TEST_MODE);
@@ -588,6 +597,9 @@ impl_new_function_with_error_buffer!(rustica, new_mtls_cert, DISALLOW_IN_TEST_MO
 impl_new_function!(slack, views_open, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, post_message, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, update_message, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, schedule_message, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, delete_scheduled_message, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(slack, conversations_history, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(slack, get_id_from_email, ALLOW_IN_TEST_MODE);
 impl_new_function!(slack, post_to_arbitrary_webhook, ALLOW_IN_TEST_MODE);
 impl_new_function!(slack, post_to_named_webhook, ALLOW_IN_TEST_MODE);
@@ -638,6 +650,117 @@ impl_new_sub_module_function_with_error_buffer!(blockchain, evm, eth_call, ALLOW
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, gas_price, ALLOW_IN_TEST_MODE);
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_logs, ALLOW_IN_TEST_MODE);
 impl_new_sub_module_function_with_error_buffer!(blockchain, evm, get_block, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    get_fee_history,
+    ALLOW_IN_TEST_MODE
+);
+
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    send_signed_transaction,
+    DISALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_balance,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_account_info,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(blockchain, solana, get_slot, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_latest_blockhash,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_transaction_count,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_transaction,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_signature_statuses,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(blockchain, solana, get_block, ALLOW_IN_TEST_MODE);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_multiple_accounts,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_program_accounts,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_token_accounts_by_owner,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_token_account_balance,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_token_supply,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_minimum_balance_for_rent_exemption,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_fee_for_message,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_recent_prioritization_fees,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    simulate_transaction,
+    ALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    solana,
+    get_signatures_for_address,
+    ALLOW_IN_TEST_MODE
+);
 
 // Bloom filter functions
 impl_new_function_with_error_buffer!(bloom_filter, build_with_items, ALLOW_IN_TEST_MODE);
@@ -707,6 +830,7 @@ define_api_functions! {
         // so are broken out into their own module.
         "get_response"             => super::response::get_response,
         "set_response"             => super::response::set_response,
+        "set_response_status"      => super::response::set_response_status,
         "set_error_context"        => super::internal::set_error_context,
         "print_debug_string"       => super::internal::print_debug_string,
         "storage_insert"           => super::storage::insert,
@@ -776,7 +900,9 @@ define_api_functions! {
         "github_check_org_membership_of_user"              => github_check_org_membership_of_user,
         "github_comment_on_pull_request"                   => github_comment_on_pull_request,
         "github_delete_deploy_key"                         => github_delete_deploy_key,
+        "github_create_deploy_key"                         => github_create_deploy_key,
         "github_pull_request_request_reviewers"            => github_pull_request_request_reviewers,
+        "github_submit_pull_request_review"                => github_submit_pull_request_review,
         "github_require_signed_commits"                    => github_require_signed_commits,
         "github_get_weekly_commit_count"                   => github_get_weekly_commit_count,
         "github_add_repo_to_team"                          => github_add_repo_to_team,
@@ -799,6 +925,9 @@ define_api_functions! {
         "github_list_org_secrets_for_repo"                 => github_list_org_secrets_for_repo,
         "github_grant_repo_access_to_org_installation"    => github_grant_repo_access_to_org_installation,
         "github_remove_repo_access_from_org_installation" => github_remove_repo_access_from_org_installation,
+        "github_get_enterprise_license_status"                 => github_get_enterprise_license_status,
+        "github_create_installation_access_token"                 => github_create_installation_access_token,
+        "github_revoke_installation_access_token"                 => github_revoke_installation_access_token,
 
         // Slack Calls
         "slack_post_to_named_webhook"     => slack_post_to_named_webhook,
@@ -813,6 +942,9 @@ define_api_functions! {
         "slack_invite_to_channel"         => slack_invite_to_channel,
         "slack_update_message"            => slack_update_message,
         "slack_remove_from_channel"       => slack_remove_from_channel,
+        "slack_schedule_message"          => slack_schedule_message,
+        "slack_delete_scheduled_message"  => slack_delete_scheduled_message,
+        "slack_conversations_history"     => slack_conversations_history,
 
         // General Calls
         "general_simple_json_post_request"          => general_simple_json_post_request,
@@ -885,6 +1017,27 @@ define_api_functions! {
         "blockchain_evm_gas_price"               => blockchain_evm_gas_price,
         "blockchain_evm_get_logs"                => blockchain_evm_get_logs,
         "blockchain_evm_get_block"               => blockchain_evm_get_block,
+        "blockchain_evm_get_fee_history"         => blockchain_evm_get_fee_history,
+
+        "blockchain_solana_send_signed_transaction"        => blockchain_solana_send_signed_transaction,
+        "blockchain_solana_get_balance"                    => blockchain_solana_get_balance,
+        "blockchain_solana_get_account_info"               => blockchain_solana_get_account_info,
+        "blockchain_solana_get_slot"                       => blockchain_solana_get_slot,
+        "blockchain_solana_get_latest_blockhash"           => blockchain_solana_get_latest_blockhash,
+        "blockchain_solana_get_transaction_count"          => blockchain_solana_get_transaction_count,
+        "blockchain_solana_get_transaction"                => blockchain_solana_get_transaction,
+        "blockchain_solana_get_signature_statuses"         => blockchain_solana_get_signature_statuses,
+        "blockchain_solana_get_block"                      => blockchain_solana_get_block,
+        "blockchain_solana_get_multiple_accounts"          => blockchain_solana_get_multiple_accounts,
+        "blockchain_solana_get_program_accounts"           => blockchain_solana_get_program_accounts,
+        "blockchain_solana_get_token_accounts_by_owner"    => blockchain_solana_get_token_accounts_by_owner,
+        "blockchain_solana_get_token_account_balance"      => blockchain_solana_get_token_account_balance,
+        "blockchain_solana_get_token_supply"               => blockchain_solana_get_token_supply,
+        "blockchain_solana_get_minimum_balance_for_rent_exemption" => blockchain_solana_get_minimum_balance_for_rent_exemption,
+        "blockchain_solana_get_fee_for_message"            => blockchain_solana_get_fee_for_message,
+        "blockchain_solana_get_recent_prioritization_fees" => blockchain_solana_get_recent_prioritization_fees,
+        "blockchain_solana_simulate_transaction"           => blockchain_solana_simulate_transaction,
+        "blockchain_solana_get_signatures_for_address"     => blockchain_solana_get_signatures_for_address,
 
         // Bloomfilter calls
         "bloom_filter_build_with_items" => bloom_filter_build_with_items,

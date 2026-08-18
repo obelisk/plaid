@@ -131,3 +131,51 @@ pub fn remove_repo_access_from_org_installation(
 
     Ok(())
 }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ConsumedLicensesResponse {
+    pub total_seats_consumed: u64,
+    pub total_seats_purchased: u64,
+}
+
+/// Get the number of consumed licenses for an enterprise
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `enterprise` - The enterprise name
+pub fn get_enterprise_license_status(
+    client_id: impl Display,
+    enterprise: impl Display,
+) -> Result<ConsumedLicensesResponse, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_enterprise_license_status);
+    }
+
+    const RETURN_BUFFER_SIZE: usize = 64 * 1024; // 64 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: enterprise.to_string(),
+    };
+    let request = serde_json::to_string(&wrapped).unwrap();
+
+    let res = unsafe {
+        github_get_enterprise_license_status(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(serde_json::from_slice(&return_buffer).unwrap())
+}

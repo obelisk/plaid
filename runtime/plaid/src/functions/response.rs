@@ -82,3 +82,21 @@ pub fn set_response(
     let data = env.data_mut();
     data.response = Some(message);
 }
+
+/// Set the HTTP status to return when a module is serving a webhook response.
+pub fn set_response_status(mut env: FunctionEnvMut<Env>, status: u32) -> i32 {
+    let status = match u16::try_from(status) {
+        Ok(status) if (100..=599).contains(&status) => status,
+        _ => {
+            error!(
+                "{}: Invalid HTTP response status: {status}",
+                env.data().module.name
+            );
+            env.as_mut().data_mut().invalid_response_status = Some(status);
+            return FunctionErrors::InvalidHttpResponseStatus as i32;
+        }
+    };
+
+    env.as_mut().data_mut().response_status = Some(status);
+    0
+}

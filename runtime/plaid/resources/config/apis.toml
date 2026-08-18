@@ -23,7 +23,8 @@ allowed_rules = [
     "test_dynamodb.wasm",
     "test_mnr_return_cert.wasm",
     "test_tls_cert_with_sni.wasm",
-    "test_gh_id_conversion.wasm"
+    "test_gh_id_conversion.wasm",
+    "test_graceful_shutdown.wasm"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
@@ -252,6 +253,26 @@ secret_key = ""
 # [[apis."blockchain"."evm".chains.1.nodes]]
 # uri = "https://some-other-node"
 # name = "Node 2"
+
+# BLOCKCHAIN SOLANA EXAMPLE CONFIGURATION
+# [apis."blockchain"."solana"]
+# max_retries = 5
+# timeout_millis = 10000
+# Commitment applied to every Solana RPC call: "processed", "confirmed", or
+# "finalized". Optional; defaults to "confirmed".
+# commitment = "finalized"
+
+# Cluster keys are parsed by name: "mainnet", "devnet", or "testnet".
+# [apis."blockchain"."solana".chains.devnet]
+# selection_strategy = "RoundRobin"
+
+# [[apis."blockchain"."solana".chains.devnet.nodes]]
+# uri = "https://api.devnet.solana.com"
+# name = "Solana Devnet RPC 1"
+
+# [[apis."blockchain"."solana".chains.devnet.nodes]]
+# uri = "https://some-other-solana-node"
+# name = "Solana Devnet RPC 2"
 
 
 # KMS USING IAM

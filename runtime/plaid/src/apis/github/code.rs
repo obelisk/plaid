@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use plaid_stl::github::{GithubApiWrapper, SearchCodeParams};
+use plaid_stl::github::{
+    CreateInstallationAccessTokenParams, GithubApiWrapper, InstallationAccessTokenCreationResponse,
+    RevokeInstallationAccessTokenParams, SearchCodeParams,
+};
 
 use super::Github;
 use crate::{
@@ -98,6 +101,87 @@ impl Github {
             Ok((status, Ok(body))) => {
                 if status == 200 {
                     Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Create an installation access token for a GitHub App installation.
+    /// See https://docs.github.com/en/rest/apps/apps?apiVersion=2026-03-10#create-an-installation-access-token-for-an-app for more details
+    /// Note that this endpoint is only available to GitHub Apps, and not to OAuth apps or personal access tokens.
+    pub async fn create_installation_access_token(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: GithubApiWrapper<CreateInstallationAccessTokenParams> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let installation_id = request.params.installation_id;
+
+        info!(
+            "Creating installation access token for installation [{installation_id}] on behalf of {module}"
+        );
+
+        let address = format!("/app/installations/{installation_id}/access_tokens");
+
+        match self
+            .make_app_authenticated_post_request(
+                &request.client_id,
+                address,
+                &request.params.body,
+                module,
+            )
+            .await
+        {
+            Ok((status, Ok(body))) => {
+                if status == 201 {
+                    let response: InstallationAccessTokenCreationResponse =
+                        serde_json::from_str(&body).map_err(|_| ApiError::BadRequest)?;
+                    Ok(serde_json::to_string(&response).map_err(|_| ApiError::BadRequest)?)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Revoke an installation access token for a GitHub App installation.
+    /// See https://docs.github.com/en/rest/apps/installations?apiVersion=2022-11-28#revoke-an-installation-access-token for more details
+    /// The token to revoke must be provided because this endpoint authenticates with the token
+    /// that is being deleted. A standalone reqwest client is used so that no configured GitHub
+    /// client is required.
+    pub async fn revoke_installation_access_token(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request: RevokeInstallationAccessTokenParams =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let token = &request.token;
+
+        info!("Revoking installation access token on behalf of {module}");
+
+        let address = "https://api.github.com/installation/token".to_string();
+
+        match self
+            .make_delete_request_with_token(address, None::<&String>, token.clone(), module)
+            .await
+        {
+            Ok((status, Ok(_))) => {
+                if status == 204 {
+                    Ok(0)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,

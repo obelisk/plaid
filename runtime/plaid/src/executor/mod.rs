@@ -1,8 +1,10 @@
+pub mod metrics;
 pub mod thread_pools;
 
 use crate::apis::Api;
 
 use crate::cache::Cache;
+use crate::data::DelayedMessage;
 use crate::functions::{
     create_bindgen_externref_xform, create_bindgen_placeholder, link_functions_to_module, LinkError,
 };
@@ -11,9 +13,11 @@ use crate::logging::{Logger, LoggingError, Severity};
 use crate::performance::ModulePerformanceMetadata;
 use crate::storage::Storage;
 
-use crossbeam_channel::{Receiver, Sender, TrySendError};
+use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
+use metrics::ModuleExecutionMetrics;
 use thread_pools::ExecutionThreadPools;
 use tokio::sync::oneshot::Sender as OneShotSender;
+use tokio_util::sync::CancellationToken;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -22,18 +26,17 @@ use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedF
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Weak};
+use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
-/// When a rule is used to generate a response to a GET request, this structure
-/// is what is passed from the executor to the async webhook runtime.
+/// When a rule is used to generate a webhook response, this structure is what
+/// is passed from the executor to the async webhook runtime.
 #[derive(Serialize, Deserialize)]
 pub struct ResponseMessage {
-    /// Currently unused because there is no API to set this and how it should
-    /// treated by the higher level cache is still to be defined.
+    /// The HTTP status selected by the response rule.
     pub code: u16,
-    /// The data the rule intends to return in the serviced GET request.
+    /// The data the rule intends to return in the serviced webhook request.
     pub body: String,
 }
 
@@ -202,10 +205,23 @@ pub struct Env {
     /// Memory for host-guest communication
     pub memory: Option<Memory>,
     // A special value that can be filled to leave a string response available after
-    // the module has execute. Generally this is used for GET mode responses.
+    // the module has executed. Generally this is used for webhook responses.
     pub response: Option<String>,
+    /// The HTTP status selected by a response rule.
+    pub response_status: Option<u16>,
+    /// An invalid status supplied by a rule. This turns the invocation into a
+    /// response failure even when the rule ignores the host function result.
+    pub invalid_response_status: Option<u32>,
     // Context about error encountered by the module during its execution
     pub execution_error_context: Option<String>,
+    /// Available for immediate logback during normal operation; `None` during shutdown drain.
+    pub immediate_sender: Option<Sender<Message>>,
+    /// Sender for delayed logbacks (`delay > 0`), and for immediate logbacks coerced
+    /// during shutdown. Messages are persisted by the internal logback listener and
+    /// injected into the executor queue once their delay elapses.
+    pub delayed_log_sender: Sender<DelayedMessage>,
+    /// Shared with async tasks; set when shutdown begins.
+    pub cancellation_token: CancellationToken,
 }
 
 /// The executor that processes messages
@@ -213,23 +229,38 @@ pub struct Executor {
     thread_pools: ExecutionThreadPools,
 }
 
+/// Join handles for executor worker threads.
+pub struct ExecutorThreads {
+    thread_handles: Vec<JoinHandle<()>>,
+}
+
+impl ExecutorThreads {
+    /// Wait for worker threads to exit after all executor ingress senders have been dropped.
+    pub fn join(self) {
+        for handle in self.thread_handles {
+            if let Err(e) = handle.join() {
+                error!("Execution thread panicked during shutdown: {e:?}");
+            }
+        }
+    }
+}
+
 /// Errors encountered by the executor while trying to execute a module
 pub enum ExecutorError {
     ExternalLoggingError(LoggingError),
-    IncomingLogError,
     LinkError(LinkError),
     InstantiationError(String),
     MemoryError(String),
     NoEntrypoint,
     InvalidEntrypoint,
     ModuleExecutionError(ModuleExecutionError),
+    IncomingLogError(RecvError),
 }
 
 impl std::fmt::Display for ExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ExecutorError::ExternalLoggingError(e) => write!(f, "External Logging Error: {e}"),
-            ExecutorError::IncomingLogError => write!(f, "Incoming Log Error"),
             ExecutorError::LinkError(e) => write!(f, "Link Error: {e}"),
             ExecutorError::InstantiationError(e) => write!(f, "Instantiation Error: {e}"),
             ExecutorError::MemoryError(e) => write!(f, "Memory Error: {e}"),
@@ -239,6 +270,7 @@ impl std::fmt::Display for ExecutorError {
                 "Entrypoint is not a function or not the correct prototype"
             ),
             ExecutorError::ModuleExecutionError(e) => write!(f, "Module Execution Error: {e}"),
+            ExecutorError::IncomingLogError(e) => write!(f, "Error reading log from channel: {e}"),
         }
     }
 }
@@ -309,6 +341,9 @@ fn prepare_for_execution(
     cache: Option<Arc<Cache>>,
     els: Logger,
     response: Option<String>,
+    immediate_sender: Option<Sender<Message>>,
+    delayed_log_sender: Sender<DelayedMessage>,
+    cancellation_token: CancellationToken,
 ) -> Result<(Store, Instance, TypedFunction<(), i32>, FunctionEnv<Env>), ExecutorError> {
     // Prepare the structure for functions the module will use
     // AKA: Host Functions
@@ -327,7 +362,12 @@ fn prepare_for_execution(
         external_logging_system: els.clone(),
         memory: None,
         response,
+        response_status: None,
+        invalid_response_status: None,
         execution_error_context: None,
+        immediate_sender,
+        delayed_log_sender,
+        cancellation_token,
     };
 
     let env = FunctionEnv::new(&mut store, env);
@@ -399,26 +439,12 @@ fn update_persistent_response(
     plaid_module: &Arc<PlaidModule>,
     env: &FunctionEnv<Env>,
     mut store: &mut Store,
-    response_sender: Option<OneShotSender<Option<ResponseMessage>>>,
 ) -> Result<(), ExecutorError> {
     match (
         env.as_mut(&mut store).response.clone(),
         &plaid_module.persistent_response,
     ) {
         (None, _) => {
-            // We need to check if there might be a tokio task serving a GET
-            // that is waiting on this response. If the rule doesn't give one, we
-            // need to ensure we send a None to wake up that task and complete it
-            if let Some(sender) = response_sender {
-                if let Err(_) = sender.send(None) {
-                    error!("[{}] was servicing a request that returned no response and failed to send!", plaid_module.name);
-                } else {
-                    error!(
-                        "[{}] was servicing a request that returned no response!",
-                        plaid_module.name
-                    );
-                }
-            }
             // There was no response to save
             return Ok(());
         }
@@ -435,17 +461,6 @@ fn update_persistent_response(
                 match pr.data.write() {
                     Ok(mut data) => {
                         *data = Some(response.clone());
-                        if let Some(sender) = response_sender {
-                            if let Err(_) = sender.send(Some(ResponseMessage {
-                                code: 200,
-                                body: response,
-                            })) {
-                                error!(
-                                    "[{}] was servicing a request but sending the response failed!",
-                                    plaid_module.name
-                                );
-                            }
-                        }
                         info!("{} updated its persistent response", plaid_module.name);
                         Ok(())
                     }
@@ -476,6 +491,10 @@ fn process_message_with_module(
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
+    module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
+    immediate_sender: Option<Sender<Message>>,
+    delayed_log_sender: Sender<DelayedMessage>,
+    cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
     // TODO @obelisk: This will quietly swallow locking errors on the persistent response
     // This will eventually be caught if something tries to update the response but I don't
@@ -491,6 +510,9 @@ fn process_message_with_module(
         cache.clone(),
         els.clone(),
         persistent_response,
+        immediate_sender,
+        delayed_log_sender,
+        cancellation_token,
     ) {
         Ok((store, instance, ep, env)) => (store, instance, ep, env),
         Err(e) => {
@@ -509,6 +531,10 @@ fn process_message_with_module(
     let error = match entrypoint.call(&mut store) {
         Ok(n) => {
             if n != 0 {
+                if let Some(metrics) = &module_execution_metrics {
+                    metrics.record_module_failure(&module.name);
+                }
+
                 Some(ModuleExecutionError::ModuleError(
                     env.as_ref(&store)
                         .execution_error_context
@@ -524,14 +550,14 @@ fn process_message_with_module(
                     let computation_remaining_percentage =
                         (remaining as f32 / computation_limit as f32) * 100.0;
                     let computation_used = 100.0 - computation_remaining_percentage;
-                    els.log_ts(
-                        format!("{}_computation_percentage_used", module.name),
-                        computation_used as i64,
-                    )?;
-                    els.log_ts(
-                        format!("{}_execution_duration", module.name),
-                        begin.elapsed().as_micros() as i64,
-                    )?;
+
+                    if let Some(metrics) = &module_execution_metrics {
+                        metrics.record_successful_execution(
+                            &module.name,
+                            computation_used as f64,
+                            begin.elapsed(),
+                        );
+                    }
 
                     // If performance monitoring is enabled, log data to the monitoring system
                     if let Some(ref sender) = performance_mode {
@@ -578,8 +604,33 @@ fn process_message_with_module(
         );
     }
 
+    if let Some(invalid_status) = env.as_ref(&store).invalid_response_status {
+        if let Some(sender) = message.response_sender {
+            let _ = sender.send(None);
+        }
+        els.log_module_error(
+            module.name.clone(),
+            format!("Invalid HTTP response status: {invalid_status}"),
+            message.data.clone(),
+        )?;
+        return Ok(());
+    }
+
+    if let Some(sender) = message.response_sender {
+        let response = env.as_ref(&store).response.clone().map(|body| ResponseMessage {
+            code: env.as_ref(&store).response_status.unwrap_or(200),
+            body,
+        });
+        if sender.send(response).is_err() {
+            error!(
+                "[{}] was servicing a request but sending the response failed!",
+                module.name
+            );
+        }
+    }
+
     // Update the persistent response
-    if let Err(e) = update_persistent_response(&module, &env, &mut store, message.response_sender) {
+    if let Err(e) = update_persistent_response(&module, &env, &mut store) {
         let _ = els.log_module_error(
             module.name.clone(),
             format!("Failed to update persistent response: {e}"),
@@ -598,9 +649,23 @@ fn execution_loop(
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
+    module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
+    immediate_sender: Weak<Sender<Message>>,
+    delayed_log_sender: Sender<DelayedMessage>,
+    cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
-    // Wait on our receiver for logs to come in
-    while let Ok(message) = receiver.recv() {
+    loop {
+        let message = match receiver.recv() {
+            Ok(message) => message,
+            Err(RecvError) => return Ok(()),
+        };
+
+        let immediate_sender = if cancellation_token.is_cancelled() {
+            None
+        } else {
+            immediate_sender.upgrade().map(|sender| (*sender).clone())
+        };
+
         // Check that we know what modules to send this new log to
         match (&message.module, modules.get(&message.type_)) {
             // If this message has a response sender, we only
@@ -616,6 +681,10 @@ fn execution_loop(
                     cache.clone(),
                     els.clone(),
                     performance_monitoring_mode.clone(),
+                    module_execution_metrics.clone(),
+                    immediate_sender.clone(),
+                    delayed_log_sender.clone(),
+                    cancellation_token.clone(),
                 )?;
             }
             (None, Some(modules)) => {
@@ -629,6 +698,10 @@ fn execution_loop(
                         cache.clone(),
                         els.clone(),
                         performance_monitoring_mode.clone(),
+                        module_execution_metrics.clone(),
+                        immediate_sender.clone(),
+                        delayed_log_sender.clone(),
+                        cancellation_token.clone(),
                     )?;
                 }
             }
@@ -641,7 +714,6 @@ fn execution_loop(
             }
         };
     }
-    Err(ExecutorError::IncomingLogError)
 }
 
 fn determine_error(
@@ -675,7 +747,13 @@ impl Executor {
         cache: Option<Arc<Cache>>,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
-    ) -> Self {
+        module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
+        immediate_sender: Weak<Sender<Message>>,
+        delayed_log_sender: Sender<DelayedMessage>,
+        cancellation_token: CancellationToken,
+    ) -> (Self, ExecutorThreads) {
+        let mut thread_handles = Vec::new();
+
         // General processing
         for i in 0..thread_pools.general_pool.num_threads {
             info!("Starting Execution Thread {i} Dedicated to General Processing");
@@ -686,7 +764,11 @@ impl Executor {
             let modules = modules.clone();
             let els = els.clone();
             let performance_sender = performance_monitoring_mode.clone();
-            thread::spawn(move || loop {
+            let module_execution_metrics = module_execution_metrics.clone();
+            let immediate_sender = immediate_sender.clone();
+            let delayed_log_sender = delayed_log_sender.clone();
+            let cancellation_token = cancellation_token.clone();
+            let handle = thread::spawn(move || {
                 if let Err(e) = execution_loop(
                     receiver.clone(),
                     modules.clone(),
@@ -695,11 +777,15 @@ impl Executor {
                     cache.clone(),
                     els.clone(),
                     performance_sender.clone(),
+                    module_execution_metrics.clone(),
+                    immediate_sender.clone(),
+                    delayed_log_sender.clone(),
+                    cancellation_token.clone(),
                 ) {
-                    error!("Execution thread exited with error: {e}");
+                    error!("General execution thread {i} exited with error: {e}");
                 }
-                thread::sleep(Duration::from_secs(10));
             });
+            thread_handles.push(handle);
         }
 
         // Dedicated processing
@@ -713,7 +799,12 @@ impl Executor {
                 let modules = modules.clone();
                 let els = els.clone();
                 let performance_sender = performance_monitoring_mode.clone();
-                thread::spawn(move || loop {
+                let module_execution_metrics = module_execution_metrics.clone();
+                let log_type = log_type.clone();
+                let immediate_sender = immediate_sender.clone();
+                let delayed_log_sender = delayed_log_sender.clone();
+                let cancellation_token = cancellation_token.clone();
+                let handle = thread::spawn(move || {
                     if let Err(e) = execution_loop(
                         receiver.clone(),
                         modules.clone(),
@@ -722,14 +813,18 @@ impl Executor {
                         cache.clone(),
                         els.clone(),
                         performance_sender.clone(),
+                        module_execution_metrics.clone(),
+                        immediate_sender.clone(),
+                        delayed_log_sender.clone(),
+                        cancellation_token.clone(),
                     ) {
-                        error!("Execution thread exited with error: {e}");
+                        error!("{log_type} dedicated execution thread {i} exited with error: {e}");
                     }
-                    thread::sleep(Duration::from_secs(10));
                 });
+                thread_handles.push(handle);
             }
         }
-        Self { thread_pools }
+        (Self { thread_pools }, ExecutorThreads { thread_handles })
     }
 
     /// Execute a message coming from a webhook, by sending it to the appropriate thread pool.

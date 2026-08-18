@@ -392,3 +392,42 @@ pub enum BlockTransactions {
     /// Full transaction objects
     Full(Vec<Transaction>),
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct GetFeeHistoryRequest {
+    /// Chain to query
+    pub chain_id: ChainId,
+    /// The number of blocks in the requested range. Must be greater than zero.
+    /// Clients may return fewer blocks if not all blocks are available.
+    pub block_count: u16,
+    /// Block tag to query
+    pub block_tag: BlockTag,
+    /// An optional array of percentile values (between 0 and 100) in ascending order.
+    /// For each block in the requested range, the transactions are sorted by effective priority fee per gas,
+    /// and the corresponding effective priority fee per gas at each percentile is returned.
+    pub reward_percentiles: Option<Vec<u8>>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct FeeHistory {
+    /// The block number of the oldest block in the returned range.
+    #[serde(rename = "oldestBlock")]
+    pub oldest_block: String,
+    /// An array of block base fees per gas in wei. This includes the next block after the newest of the returned range,
+    /// because this value can be derived from the newest block. Zeroes are returned for pre-EIP-1559 blocks.
+    #[serde(rename = "baseFeePerGas")]
+    pub base_fee_per_gas: Vec<String>,
+    /// An array of block gas used ratios. These are calculated as the ratio of gasUsed and gasLimit.
+    #[serde(rename = "gasUsedRatio")]
+    pub gas_used_ratio: Vec<f64>,
+    /// A two-dimensional array of effective priority fees per gas at the requested reward percentiles.
+    /// This property is omitted if rewardPercentiles was not specified.
+    pub reward: Option<Vec<Vec<String>>>,
+    /// An array of block base fees per blob gas in wei. This includes the next block after the newest of the returned range,
+    /// because this value can be derived from the newest block. Zeroes are returned for pre-EIP-4844 blocks.
+    #[serde(rename = "baseFeePerBlobGas")]
+    pub base_fee_per_blob_gas: Option<Vec<String>>,
+    /// An array of block blob gas used ratios. These are calculated as the ratio of blobGasUsed and the maximum blob gas per block.
+    #[serde(rename = "blobGasUsedRatio")]
+    pub blob_gas_used_ratio: Option<Vec<f64>>,
+}

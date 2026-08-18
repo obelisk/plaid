@@ -1,15 +1,11 @@
 mod cert_sni;
-mod logback;
 mod network;
 mod random;
 
-use crossbeam_channel::Sender;
 use reqwest::{redirect, Client};
 use ring::rand::SystemRandom;
 use serde::Deserialize;
 use std::{collections::HashMap, time::Duration};
-
-use crate::{data::DelayedMessage, executor::Message};
 
 use super::default_timeout_seconds;
 
@@ -29,10 +25,6 @@ pub struct General {
     config: GeneralConfig,
     /// Client to make requests with
     clients: Clients,
-    /// Sender object for messages
-    log_sender: Sender<Message>,
-    /// Sender object for messages that must be processed with a delay
-    delayed_log_sender: Sender<DelayedMessage>,
     /// Secure random generator
     system_random: SystemRandom,
 }
@@ -118,19 +110,13 @@ impl Clients {
 }
 
 impl General {
-    pub fn new(
-        config: GeneralConfig,
-        log_sender: Sender<Message>,
-        delayed_log_sender: Sender<DelayedMessage>,
-    ) -> Self {
+    pub fn new(config: GeneralConfig) -> Self {
         let clients = Clients::new(&config);
         let system_random = SystemRandom::new();
 
         Self {
             config,
             clients,
-            log_sender,
-            delayed_log_sender,
             system_random,
         }
     }

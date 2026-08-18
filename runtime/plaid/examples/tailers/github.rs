@@ -56,7 +56,7 @@ async fn main() {
 
     let (logger_tx, logger_rx) = bounded(2048);
 
-    let mut gh = Github::new(config, logger_tx).unwrap();
+    let mut gh = Github::new(config, logger_tx, None).unwrap();
 
     loop {
         //println!("Start of log group");

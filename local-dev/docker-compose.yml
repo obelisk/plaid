@@ -24,6 +24,8 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+      - "8081:8081"
+      - "9464:9464"
     volumes:
       # Config files — edit these to configure APIs, webhooks, etc.
       - ./config:/config:ro
@@ -37,11 +39,20 @@ services:
     stop_grace_period: 5s
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/webhook/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/live"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - plaid
 
 volumes:
   plaid-data:

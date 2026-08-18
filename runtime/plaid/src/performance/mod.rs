@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::time::Duration;
-use tokio_util::sync::CancellationToken;
 
 /// The performance monitoring system, which collects execution data about modules.
 #[derive(Deserialize)]
@@ -78,14 +77,9 @@ impl AggregatePerformanceData {
 }
 
 impl PerformanceMonitoring {
-    /// Start the performance monitoring
-    pub async fn start(
-        &self,
-        receiver: Receiver<ModulePerformanceMetadata>,
-        cancellation_token: CancellationToken,
-    ) {
-        let aggregate_performance_metadata =
-            performance_monitoring_loop(receiver, cancellation_token).await;
+    /// Starts the performance monitoring listening loop
+    pub async fn start(&self, receiver: Receiver<ModulePerformanceMetadata>) {
+        let aggregate_performance_metadata = performance_monitoring_loop(receiver).await;
 
         if let Err(e) =
             generate_report(&aggregate_performance_metadata, &self.output_file_path).await
@@ -100,13 +94,12 @@ impl PerformanceMonitoring {
 /// The loop continues until the server is shut down.
 async fn performance_monitoring_loop(
     receiver: Receiver<ModulePerformanceMetadata>,
-    cancellation_token: CancellationToken,
 ) -> HashMap<String, AggregatePerformanceData> {
     let mut aggregate_performance_metadata = HashMap::new();
 
-    // Performance monitoring loop runs until the server is shutdown
-    while !cancellation_token.is_cancelled() {
-        match receiver.recv_timeout(Duration::from_secs(5)) {
+    let timeout = Duration::from_secs(10);
+    loop {
+        match receiver.recv_timeout(timeout) {
             Ok(message) => {
                 aggregate_performance_metadata
                     .entry(message.module.clone())

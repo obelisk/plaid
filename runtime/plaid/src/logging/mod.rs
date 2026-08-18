@@ -40,10 +40,6 @@ pub enum Log {
         function: String,
         test_mode: bool,
     },
-    TimeseriesPoint {
-        measurement: String,
-        value: i64,
-    },
     ModuleExecutionError {
         module: String,
         error: String,
@@ -143,12 +139,6 @@ pub struct Logger {
 }
 
 impl Logger {
-    pub fn log_ts(&self, measurement: String, value: i64) -> Result<(), LoggingError> {
-        self.sender
-            .send(Log::TimeseriesPoint { measurement, value })
-            .map_err(|_| LoggingError::LoggingSystemDead)
-    }
-
     pub fn log_function_call(
         &self,
         module: String,
@@ -202,9 +192,8 @@ impl Logger {
     /// This is the entry point of our logging thread started from main. This
     /// should be running in its own thread waiting for logs to come in from
     /// the tonic server. If it does not receive a message in 300 seconds it
-    /// will send a heartbeat message instead. For stdout, and influx, this is
-    /// a noop and will not actually be sent to the backend (or logged to the
-    /// screen).
+    /// will send a heartbeat message instead. For stdout, this is a noop and
+    /// will not actually be sent to the backend (or logged to the screen).
     fn logging_thread_loop(
         config: LoggingConfiguration,
         log_receiver: Receiver<Log>,
