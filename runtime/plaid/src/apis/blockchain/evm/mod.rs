@@ -45,13 +45,10 @@ impl BlockchainClient<Evm> {
             .map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(chain_id)?;
-
         let params = Value::Array(vec![Value::String(request.hash)]);
         let request = JsonRpcRequest::new(RpcMethods::GetTransactionByHash, Some(params));
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 
     /// Returns the receipt of a transaction by transaction hash.
@@ -66,13 +63,10 @@ impl BlockchainClient<Evm> {
             .map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(chain_id)?;
-
         let params = Value::Array(vec![Value::String(request.hash)]);
         let request = JsonRpcRequest::new(RpcMethods::GetTransactionReceipt, Some(params));
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 
     /// Creates new message call transaction or a contract creation for signed transactions.
@@ -85,13 +79,10 @@ impl BlockchainClient<Evm> {
             .map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(chain_id)?;
-
         let params = Value::Array(vec![Value::String(request.signed_tx)]);
         let request = JsonRpcRequest::new(RpcMethods::SendRawTransaction, Some(params));
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 
     /// Returns the number of transactions sent from an address.
@@ -104,16 +95,13 @@ impl BlockchainClient<Evm> {
             .map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(chain_id)?;
-
         let params = Value::Array(vec![
             Value::String(request.address),
             Value::String(request.block_tag.to_string()),
         ]);
         let request = JsonRpcRequest::new(RpcMethods::GetTransactionCount, Some(params));
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 
     /// Returns the balance of the account at a given address.
@@ -126,16 +114,13 @@ impl BlockchainClient<Evm> {
             .map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(chain_id)?;
-
         let params = Value::Array(vec![
             Value::String(request.address),
             Value::String(request.block_tag.to_string()),
         ]);
         let request = JsonRpcRequest::new(RpcMethods::GetBalance, Some(params));
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 
     /// Generates and returns an estimate of how much gas is necessary to allow the transaction to complete.
@@ -147,8 +132,6 @@ impl BlockchainClient<Evm> {
         let request = serde_json::from_str::<EstimateGasRequest>(params)
             .map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
-
-        let node_selector = self.get_node_selector(chain_id)?;
 
         let mut object = serde_json::Map::new();
         if let Some(from) = request.from {
@@ -170,8 +153,7 @@ impl BlockchainClient<Evm> {
         ]);
         let request = JsonRpcRequest::new(RpcMethods::EstimateGas, Some(params));
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 
     /// Executes a new message call immediately without creating a transaction on the blockchain.
@@ -185,14 +167,11 @@ impl BlockchainClient<Evm> {
             serde_json::from_str::<EthCallRequest>(params).map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(chain_id)?;
-
         let object = json!({ "to": request.to, "data": request.data });
         let params = Value::Array(vec![object, Value::String(request.block_tag.to_string())]);
         let request = JsonRpcRequest::new(RpcMethods::Call, Some(params));
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 
     /// Returns an estimate of the current price per gas in wei. For example, the Besu client examines the last 100 blocks and returns the median gas unit price by default.
@@ -205,12 +184,9 @@ impl BlockchainClient<Evm> {
             .map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(chain_id)?;
-
         let request = JsonRpcRequest::<_, ()>::new(RpcMethods::GasPrice, None);
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 
     /// Returns an array of all logs matching a given filter object.
@@ -222,8 +198,6 @@ impl BlockchainClient<Evm> {
         let request =
             serde_json::from_str::<GetLogsRequest>(params).map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
-
-        let node_selector = self.get_node_selector(chain_id)?;
 
         let mut object = serde_json::Map::new();
         object.insert(
@@ -262,8 +236,7 @@ impl BlockchainClient<Evm> {
 
         let request = JsonRpcRequest::new(RpcMethods::GetLogs, Some(params));
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 
     /// Returns information about a block by block number or tag.
@@ -276,16 +249,13 @@ impl BlockchainClient<Evm> {
             serde_json::from_str::<GetBlockRequest>(params).map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
 
-        let node_selector = self.get_node_selector(chain_id)?;
-
         let params = serde_json::Value::Array(vec![
             Value::String(request.block_tag.to_string()),
             Value::Bool(request.hydrated_transactions),
         ]);
         let request = JsonRpcRequest::new(RpcMethods::GetBlock, Some(params));
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 
     /// Returns transaction base fee per gas and effective priority fee per gas for the requested block range.
@@ -297,8 +267,6 @@ impl BlockchainClient<Evm> {
         let request = serde_json::from_str::<GetFeeHistoryRequest>(params)
             .map_err(BlockchainError::SerdeError)?;
         let chain_id = request.chain_id;
-
-        let node_selector = self.get_node_selector(chain_id)?;
 
         let percentiles = request
             .reward_percentiles
@@ -316,7 +284,6 @@ impl BlockchainClient<Evm> {
         let params = Value::Array(params);
         let request = JsonRpcRequest::new(RpcMethods::GetFeeHistory, Some(params));
 
-        self.execute_rpc_call(node_selector, chain_id, request, module)
-            .await
+        self.execute_rpc_call(chain_id, request, module).await
     }
 }
