@@ -85,7 +85,11 @@ impl BlockchainError {
 ///   with the chain identifier appended as a path segment. Works out of the box
 ///   for arbitrary chain identifiers — no per-chain config required.
 #[derive(Deserialize)]
-#[serde(tag = "type", bound(deserialize = "V: Deserialize<'de>"))]
+#[serde(
+    rename_all = "lowercase",
+    tag = "type",
+    bound(deserialize = "V: Deserialize<'de>")
+)]
 pub enum RoutingMode<C: ChainFamily, V> {
     /// Per-chain node pools (the original behavior).
     Nodes {
@@ -164,13 +168,19 @@ where
         .collect()
 }
 
-/// Deserializes a string into a [`Url`]
+/// Deserializes a string into a hierarchical [`Url`].
 fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
 where
     D: de::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    Url::parse(&s).map_err(de::Error::custom)
+    let url = Url::parse(&s).map_err(de::Error::custom)?;
+    if url.cannot_be_a_base() {
+        return Err(de::Error::custom(format!(
+            "proxy URL must be hierarchical (support path segments), got: {s}"
+        )));
+    }
+    Ok(url)
 }
 
 #[derive(Deserialize)]

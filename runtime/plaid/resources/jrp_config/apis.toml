@@ -153,9 +153,9 @@ secret_key = ""
 
 # [apis."blockchain"."evm".routing]
 # type = "nodes"
+# max_retries = 5
 
 # [apis."blockchain"."evm".routing.chains.1] # Ethereum
-# max_retries = 5
 # selection_strategy = "RoundRobin"
 
 # [[apis."blockchain"."evm".routing.chains.1.nodes]]
@@ -187,9 +187,9 @@ secret_key = ""
 # Cluster keys are parsed by name: "mainnet", "devnet", or "testnet".
 # [apis."blockchain"."solana".routing]
 # type = "nodes"
+# max_retries = 5
 
 # [apis."blockchain"."solana".routing.chains.devnet]
-# max_retries = 5
 # selection_strategy = "RoundRobin"
 
 # [[apis."blockchain"."solana".routing.chains.devnet.nodes]]

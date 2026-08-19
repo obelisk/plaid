@@ -597,7 +597,6 @@ mod tests {
             timeout_millis: Duration::from_secs(10),
             options: SolanaOptions { commitment },
         })
-        .unwrap()
     }
 
     /// Boot an embedded, offline (no mainnet fork) surfnet with a funded payer.
