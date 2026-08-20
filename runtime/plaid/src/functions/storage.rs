@@ -182,9 +182,11 @@ pub fn insert(
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let storage = if let Some(storage) = &env_data.storage {
-        storage
-    } else {
+    let Some(storage) = &env_data.storage else {
+        return FunctionErrors::ApiNotConfigured as i32;
+    };
+
+    let Some(counter) = &env_data.module.storage_current else {
         return FunctionErrors::ApiNotConfigured as i32;
     };
 
@@ -212,7 +214,7 @@ pub fn insert(
         data_buffer,
         data_buffer_len,
         env_data.module.storage_limit.clone(),
-        &env_data.module.storage_current,
+        counter,
     )
 }
 
@@ -712,9 +714,11 @@ pub fn delete(
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let storage = if let Some(storage) = &env_data.storage {
-        storage
-    } else {
+    let Some(storage) = &env_data.storage else {
+        return FunctionErrors::ApiNotConfigured as i32;
+    };
+
+    let Some(counter) = &env_data.module.storage_current else {
         return FunctionErrors::ApiNotConfigured as i32;
     };
 
@@ -740,7 +744,7 @@ pub fn delete(
         data_buffer,
         data_buffer_len,
         env_data.module.storage_limit.clone(),
-        &env_data.module.storage_current,
+        counter,
     )
 }
 
