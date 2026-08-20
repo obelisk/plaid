@@ -164,7 +164,6 @@ macro_rules! impl_new_function_with_error_buffer {
 
                 if return_data.len() > ret_buffer_len as usize {
                     error!("{} could not receive data from {} because it provided a return buffer that was too small. Got {}, needed {}", env_data.module.name, stringify!([< $api _ $function_name >]), ret_buffer_len, return_data.len());
-                    trace!("Data: {}", return_data);
                     return Err(FunctionErrors::ReturnBufferTooSmall);
                 }
 
@@ -587,6 +586,10 @@ impl_new_function_with_error_buffer!(okta, get_user_data, ALLOW_IN_TEST_MODE);
 impl_new_function!(pagerduty, trigger_incident, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(pagerduty, get_incident_alerts, ALLOW_IN_TEST_MODE);
 
+// PostgreSQL functions
+#[cfg(feature = "postgres")]
+impl_new_function_with_error_buffer!(postgres, query, ALLOW_IN_TEST_MODE);
+
 // Rustica Functions
 impl_new_function_with_error_buffer!(rustica, new_mtls_cert, DISALLOW_IN_TEST_MODE);
 
@@ -987,6 +990,9 @@ define_api_functions! {
         // PagerDuty Calls
         "pagerduty_trigger_incident" => pagerduty_trigger_incident,
         "pagerduty_get_incident_alerts" => pagerduty_get_incident_alerts,
+
+        // PostgreSQL calls
+        #[cfg(feature = "postgres")] "postgres_query" => postgres_query,
 
         // Rustica Calls
         "rustica_new_mtls_cert" => rustica_new_mtls_cert,
