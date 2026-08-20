@@ -321,7 +321,9 @@ pub struct PlaidModule {
     /// The maximum number of memory pages allowed to be mapped for the module
     pub page_limit: u32,
     /// The number of bytes the module is currently saving in persistent storage
-    pub storage_current: Arc<RwLock<u64>>,
+    /// 
+    /// `None` when the module is not using any storage APIs 
+    pub storage_current: Option<Arc<RwLock<u64>>>,
     /// The maximum number of bytes the module can save in persistent storage
     pub storage_limit: LimitValue,
     /// Any additional data the module is given at loading time
@@ -407,9 +409,15 @@ impl PlaidModule {
         let mut module = Module::new(&engine, module_bytes).map_err(Errors::CompileError)?;
         module.set_name(&filename);
 
-        // Validate that every import the module requires can be satisfied
+        // Check if the module uses storage and validate that every import the module requires
+        // can be satisfied
+        let mut uses_storage = false;
         for import in module.imports() {
             let function_name = import.name();
+
+            if function_name.starts_with("storage") {
+                uses_storage = true;
+            }
 
             // Before 0.2.102, it's __wbingen*
             // From wasm-bindgen 0.2.102 to 0.2.104, it's __wbg_wbindgen*
@@ -426,7 +434,11 @@ impl PlaidModule {
             }
         }
 
-        let storage_current = Arc::new(RwLock::new(0));
+        let storage_current = if uses_storage {
+            Some(Arc::new(RwLock::new(0)))
+        } else {
+            None
+        };
 
         Ok(Self {
             name: filename.to_string(),
@@ -445,13 +457,17 @@ impl PlaidModule {
     }
 
     fn log_load_info(&self) {
-        let storage_current_bytes = *self.storage_current.read().unwrap();
+        let storage_current_bytes = self
+            .storage_current
+            .as_ref()
+            .map(|counter| *counter.read().unwrap())
+            .unwrap_or(0);
+        
         info!(
-            "Name: [{}] Computation Limit: [{}] Memory Limit: [{} pages] Storage: [{}/{} bytes used] Log Type: [{}]. Test Mode: [{}]",
+            "Name: [{}] Computation Limit: [{}] Memory Limit: [{} pages] Storage: [{storage_current_bytes}/{} bytes used] Log Type: [{}]. Test Mode: [{}]",
             self.name,
             self.computation_limit,
             self.page_limit,
-            storage_current_bytes,
             self.storage_limit,
             self.logtype,
             self.test_mode,
@@ -516,13 +532,17 @@ async fn populate_storage_sizes(
     stream::iter(modules.into_iter().map(|module| {
         let storage = storage.clone();
         async move {
+            let Some(counter) = &module.storage_current else {
+                return Some(module)
+            };
+
             match storage
                 .get_namespace_byte_size(&module.name)
                 .await
                 .map_err(Errors::StorageError)
             {
                 Ok(bytes) => {
-                    *module.storage_current.write().unwrap() = bytes;
+                    *counter.write().unwrap() = bytes;
                     Some(module)
                 }
                 Err(e) => {
