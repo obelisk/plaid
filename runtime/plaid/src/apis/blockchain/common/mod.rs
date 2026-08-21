@@ -99,6 +99,7 @@ pub enum RoutingMode<C: ChainFamily, V> {
         chains: HashMap<C::Identifier, V>,
         /// The maximum number of retries across nodes for each RPC call.
         #[serde(default = "default_max_retries")]
+        #[serde(deserialize_with = "deserialize_non_zero_u8")]
         max_retries: u8,
     },
     /// A single proxy endpoint; the chain identifier is appended as a path segment.
@@ -107,6 +108,18 @@ pub enum RoutingMode<C: ChainFamily, V> {
         #[serde(deserialize_with = "deserialize_url")]
         url: Url,
     },
+}
+
+fn deserialize_non_zero_u8<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let retries = u8::deserialize(deserializer)?;
+    if retries == 0 {
+        return Err(de::Error::custom("max_retries must be greater than 0"));
+    }
+
+    Ok(retries)
 }
 
 pub struct BlockchainClient<C: ChainFamily> {
