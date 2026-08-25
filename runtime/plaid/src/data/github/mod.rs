@@ -420,7 +420,7 @@ impl DataGenerator for Github {
         self.config.max_catchup
     }
 
-    fn get_time_granularity(&self) -> u64 {
-        self.config.time_granularity
+    fn get_time_granularity(&self) -> time::Duration {
+        Duration::nanoseconds(self.config.time_granularity as i64)
     }
 }

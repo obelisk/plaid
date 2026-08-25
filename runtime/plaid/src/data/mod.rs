@@ -405,7 +405,7 @@ pub trait DataGenerator {
     fn get_max_catchup_time(&self) -> u64;
 
     /// Get the time granularity provided by the data source API, in nanoseconds.
-    fn get_time_granularity(&self) -> u64;
+    fn get_time_granularity(&self) -> time::Duration;
 }
 
 /// Get the system time in seconds from the Epoch
@@ -572,9 +572,7 @@ pub async fn get_and_process_dg_logs(
         // with time granularity. E.g., events happening in the same second could be missed.
         // Overlapping queries will prevent this problem from happening.
         // We would introduce the issue of seeing the same log multiple times, but this is handled later.
-        let since = dg
-            .get_last_seen()
-            .saturating_add(time::Duration::nanoseconds(dg.get_time_granularity() as i64));
+        let since = dg.get_last_seen().saturating_add(dg.get_time_granularity());
 
         // Get the logs until canon_time seconds ago
         let mut until = get_time() - dg.get_canon_time();
