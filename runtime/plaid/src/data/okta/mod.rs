@@ -51,6 +51,9 @@ pub struct OktaConfig {
     /// Max number of seconds for the look-back window
     #[serde(default = "default_max_catchup")]
     max_catchup: u64,
+    /// Time granularity for the Okta API, in nanoseconds.
+    #[serde(default = "default_time_granularity")]
+    time_granularity: u64,
 }
 
 /// Custom parser for limit. Returns an error if a limit = 0 or limit > 1000 is given
@@ -93,6 +96,11 @@ fn default_max_catchup() -> u64 {
 /// This function provides the default size of the LRU cache.
 fn default_lru_cache_size() -> usize {
     4096
+}
+
+/// This function provides the default time granularity for the Okta API, in nanoseconds.
+fn default_time_granularity() -> u64 {
+    1_000_000 // 1 millisecond in nanoseconds
 }
 
 fn default_canon_time() -> u64 {
@@ -361,6 +369,6 @@ impl DataGenerator for Okta {
     }
 
     fn get_time_granularity(&self) -> u64 {
-        1_000_000 // 1 millisecond in nanoseconds
+        self.config.time_granularity
     }
 }
