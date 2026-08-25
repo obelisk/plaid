@@ -403,6 +403,9 @@ pub trait DataGenerator {
     /// we will catch up these many seconds and _lose_ older logs. This is to enforce an upper bound
     /// and avoid unpleasant edge cases where Plaid would try to catch up months of missed logs.
     fn get_max_catchup_time(&self) -> u64;
+
+    /// Get the time granularity provided by the data source API, in nanoseconds.
+    fn get_time_granularity(&self) -> u64;
 }
 
 /// Get the system time in seconds from the Epoch
@@ -571,7 +574,7 @@ pub async fn get_and_process_dg_logs(
         // We would introduce the issue of seeing the same log multiple times, but this is handled later.
         let since = dg
             .get_last_seen()
-            .saturating_sub(time::Duration::seconds(1));
+            .saturating_add(time::Duration::nanoseconds(dg.get_time_granularity() as i64));
 
         // Get the logs until canon_time seconds ago
         let mut until = get_time() - dg.get_canon_time();

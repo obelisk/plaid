@@ -359,4 +359,8 @@ impl DataGenerator for Okta {
     fn get_max_catchup_time(&self) -> u64 {
         self.config.max_catchup
     }
+
+    fn get_time_granularity(&self) -> u64 {
+        1_000_000 // 1 millisecond in nanoseconds
+    }
 }
