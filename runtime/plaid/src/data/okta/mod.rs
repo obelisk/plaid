@@ -369,6 +369,6 @@ impl DataGenerator for Okta {
     }
 
     fn get_time_granularity(&self) -> time::Duration {
-        Duration::nanoseconds(self.config.time_granularity as i64)
+        time::Duration::nanoseconds(self.config.time_granularity as i64)
     }
 }

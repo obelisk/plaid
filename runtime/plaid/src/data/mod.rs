@@ -568,10 +568,8 @@ pub async fn get_and_process_dg_logs(
 
     loop {
         // Get logs that happened since `last_seen`.
-        // Walk back a second from the actual value of `last_seen`, to account for problems
-        // with time granularity. E.g., events happening in the same second could be missed.
-        // Overlapping queries will prevent this problem from happening.
-        // We would introduce the issue of seeing the same log multiple times, but this is handled later.
+        // Walk forward by the smallest time granularity the API provides, because we have
+        // already seen all the logs up to `last_seen`.
         let since = dg.get_last_seen().saturating_add(dg.get_time_granularity());
 
         // Get the logs until canon_time seconds ago
