@@ -403,6 +403,9 @@ pub trait DataGenerator {
     /// we will catch up these many seconds and _lose_ older logs. This is to enforce an upper bound
     /// and avoid unpleasant edge cases where Plaid would try to catch up months of missed logs.
     fn get_max_catchup_time(&self) -> u64;
+
+    /// Get the time granularity provided by the data source API, in nanoseconds.
+    fn get_time_granularity(&self) -> time::Duration;
 }
 
 /// Get the system time in seconds from the Epoch
@@ -565,13 +568,9 @@ pub async fn get_and_process_dg_logs(
 
     loop {
         // Get logs that happened since `last_seen`.
-        // Walk back a second from the actual value of `last_seen`, to account for problems
-        // with time granularity. E.g., events happening in the same second could be missed.
-        // Overlapping queries will prevent this problem from happening.
-        // We would introduce the issue of seeing the same log multiple times, but this is handled later.
-        let since = dg
-            .get_last_seen()
-            .saturating_sub(time::Duration::seconds(1));
+        // Walk forward by the smallest time granularity the API provides, because we have
+        // already seen all the logs up to `last_seen`.
+        let since = dg.get_last_seen().saturating_add(dg.get_time_granularity());
 
         // Get the logs until canon_time seconds ago
         let mut until = get_time() - dg.get_canon_time();
@@ -590,13 +589,13 @@ pub async fn get_and_process_dg_logs(
             }
         };
 
-        if until < dg.get_last_seen() {
+        if until <= dg.get_last_seen() {
             // We are in a strange situation. E.g., we have just booted, so
             // last_seen = now and until = now - canon_time, which makes until < last_seen.
             // This does not make sense, but it's not really an error. We return and, at some
             // point, we will run again with a 'sensible' set of parameters.
             debug!(
-                "[{}] Waiting for canonicalization: {until} (until) < {} (last seen).",
+                "[{}] Waiting for canonicalization: {until} (until) <= {} (last seen).",
                 dg.get_name(),
                 dg.get_last_seen(),
             );
@@ -618,6 +617,9 @@ pub async fn get_and_process_dg_logs(
                 dg.get_name(),
                 dg.get_last_seen()
             );
+            dg.set_last_seen(until);
+            // We do not persist the state in the DB. It will be persisted automatically
+            // next time we send a log for processing.
             return Ok(());
         }
 

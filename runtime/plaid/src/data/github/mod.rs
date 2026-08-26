@@ -93,6 +93,9 @@ pub struct GithubConfig {
     /// Max number of seconds for the look-back window
     #[serde(default = "default_max_catchup")]
     max_catchup: u64,
+    /// Time granularity for the GitHub API, in nanoseconds.
+    #[serde(default = "default_time_granularity")]
+    time_granularity: u64,
 }
 
 impl GithubConfig {
@@ -108,6 +111,7 @@ impl GithubConfig {
             lru_cache_size: default_lru_cache_size(),
             max_since_until: default_since_until(),
             max_catchup: default_max_catchup(),
+            time_granularity: default_time_granularity(),
         }
     }
 }
@@ -138,6 +142,10 @@ fn default_lru_cache_size() -> usize {
 
 fn default_canon_time() -> u64 {
     20
+}
+
+fn default_time_granularity() -> u64 {
+    1_000_000 // 1 millisecond in nanoseconds
 }
 
 /// Custom parser for log type
@@ -410,5 +418,9 @@ impl DataGenerator for Github {
 
     fn get_max_catchup_time(&self) -> u64 {
         self.config.max_catchup
+    }
+
+    fn get_time_granularity(&self) -> time::Duration {
+        time::Duration::nanoseconds(self.config.time_granularity as i64)
     }
 }
