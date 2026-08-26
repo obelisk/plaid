@@ -617,6 +617,9 @@ pub async fn get_and_process_dg_logs(
                 dg.get_name(),
                 dg.get_last_seen()
             );
+            dg.set_last_seen(until);
+            // We do not persist the state in the DB. It will be persisted automatically
+            // next time we send a log for processing.
             return Ok(());
         }
 
