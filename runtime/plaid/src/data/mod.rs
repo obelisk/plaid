@@ -589,13 +589,13 @@ pub async fn get_and_process_dg_logs(
             }
         };
 
-        if until < dg.get_last_seen() {
+        if until <= dg.get_last_seen() {
             // We are in a strange situation. E.g., we have just booted, so
             // last_seen = now and until = now - canon_time, which makes until < last_seen.
             // This does not make sense, but it's not really an error. We return and, at some
             // point, we will run again with a 'sensible' set of parameters.
             debug!(
-                "[{}] Waiting for canonicalization: {until} (until) < {} (last seen).",
+                "[{}] Waiting for canonicalization: {until} (until) <= {} (last seen).",
                 dg.get_name(),
                 dg.get_last_seen(),
             );
