@@ -716,7 +716,8 @@ pub struct MergePrRequest {
     pub merge_action: MergeAction,
 }
 
-/// Merges a pull request in a repository.
+/// Asynchronously merges a pull request in a repository.
+/// This returns the full response body from GitHub.
 pub fn merge_pr(
     client_id: impl Display,
     request: MergePrRequest,
