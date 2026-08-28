@@ -682,6 +682,81 @@ pub struct AddLabelsRequest {
     pub labels: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeAction {
+    DirectMerge,
+    MergeQueue,
+    Default,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MergePrRequest {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the `.git` extension. The name is not case sensitive.
+    pub repo: String,
+    /// The number of the pull request to merge.
+    pub number: u32,
+    /// The title of the commit
+    pub commit_title: Option<String>,
+    /// The commit message for the merge commit.
+    pub commit_message: Option<String>,
+    /// The merge method to use. Can be one of `merge`, `squash`, or `rebase`.
+    pub merge_method: Option<MergeMethod>,
+    /// The merge action to use. Can be one of `direct_merge`, `merge_queue`, or `default`.
+    pub merge_action: MergeAction,
+}
+
+/// Asynchronously merges a pull request in a repository.
+/// This returns the full response body from GitHub.
+pub fn merge_pr(
+    client_id: impl Display,
+    request: MergePrRequest,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, merge_pr);
+    }
+
+    let wrapped = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params: request,
+    };
+
+    let params = serde_json::to_string(&wrapped).unwrap();
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024 * 5; // 5 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_merge_pr(
+            params.as_bytes().as_ptr(),
+            params.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+    // There was an error with the Plaid system. Maybe the API is not
+    // configured.
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    Ok(String::from_utf8(return_buffer).unwrap())
+}
+
 /// Adds labels to a pull request or issue. If you provide an empty array of labels, all labels are removed from the issue.
 ///
 /// See the [GitHub API docs](https://docs.github.com/en/rest/issues/labels?apiVersion=2022-11-28#add-labels-to-an-issue)
