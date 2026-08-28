@@ -535,7 +535,7 @@ impl Github {
             .await
         {
             Ok((status, _)) => {
-                if status == 200 {
+                if status == 201 {
                     Ok(0)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(

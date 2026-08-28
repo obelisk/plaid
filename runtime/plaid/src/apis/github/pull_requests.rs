@@ -1,7 +1,7 @@
 use plaid_stl::github::{
     AddLabelsRequest, CreatePullRequestRequest, GetPullRequestOptions, GetPullRequestRequest,
-    GithubApiWrapper, PullRequestRequestReviewers, PullRequestReviewEvent,
-    SubmitPullRequestReviewRequest,
+    GithubApiWrapper, MergeAction, MergeMethod, MergePrRequest, PullRequestRequestReviewers,
+    PullRequestReviewEvent, SubmitPullRequestReviewRequest,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -42,7 +42,7 @@ impl Github {
             self.validate_team_slug(&team)?;
         }
 
-        info!("Requesting reviews from users: [{}] and teams: [{}] on [{owner}/{repo}/{pull_number}] org on behalf of {module}", request.params.reviewers.join(", "), request.params.team_reviewers.join(", "));
+        info!("Requesting reviews from users: [{}] and teams: [{}] on [{owner}/{repo}/{pull_number}] on behalf of {module}", request.params.reviewers.join(", "), request.params.team_reviewers.join(", "));
 
         let address = format!("/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers");
 
@@ -149,7 +149,7 @@ impl Github {
 
         let address = format!("/repos/{owner}/{repo}/pulls");
 
-        info!("Creating pull request in [{owner}/{repo}] org on behalf of {module}");
+        info!("Creating pull request in [{owner}/{repo}] on behalf of {module}");
 
         match self
             .make_generic_post_request(&request.client_id, address, request_body, module)
@@ -190,7 +190,7 @@ impl Github {
             .options
             .map_or(Default::default(), query_string_from_options);
 
-        info!("Listing pull requests in [{owner}/{repo}] org on behalf of {module}",);
+        info!("Listing pull requests in [{owner}/{repo}] on behalf of {module}",);
         let address = format!("/repos/{owner}/{repo}/pulls?{options}");
 
         match self
@@ -224,7 +224,7 @@ impl Github {
         let repo = self.validate_repository_name(&request.params.repo)?;
 
         info!(
-            "Adding labels to issue/PR #{} in [{owner}/{repo}] org on behalf of {module}",
+            "Adding labels to issue/PR #{} in [{owner}/{repo}] on behalf of {module}",
             request.params.number
         );
 
@@ -241,6 +241,63 @@ impl Github {
             Ok((status, Ok(_))) => {
                 if status == 200 {
                     Ok(0)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Merge a pull request asynchronously. For more info, see https://docs.github.com/en/rest/pulls/pulls?apiVersion=2026-03-10#merge-a-pull-request-asynchronously
+    pub async fn merge_pr(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: GithubApiWrapper<MergePrRequest> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_org(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        // We do not validate the PR number because we are deserializing to a u32, which is all the validation we need.
+        let pull_number = request.params.number;
+
+        info!("Merging PR #{pull_number} in [{owner}/{repo}] on behalf of {module}",);
+
+        let address = format!("/repos/{owner}/{repo}/pulls/{pull_number}/merge-async");
+
+        #[derive(Serialize)]
+        struct Body {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            commit_title: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            commit_message: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            merge_method: Option<MergeMethod>,
+            merge_action: MergeAction,
+        }
+
+        let body = Body {
+            commit_title: request.params.commit_title,
+            commit_message: request.params.commit_message,
+            merge_method: request.params.merge_method,
+            merge_action: request.params.merge_action,
+        };
+
+        match self
+            .make_generic_put_request(&request.client_id, address, Some(&body), module)
+            .await
+        {
+            Ok((status, Ok(data))) => {
+                if status == 200 || status == 202 {
+                    // Just return the full body to the rule. This allows us not to
+                    // have to parse the body and return a specific field, which is
+                    // more flexible for future changes to the API.
+                    Ok(data)
                 } else {
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status,
