@@ -149,40 +149,67 @@ secret_key = ""
 # BLOCKCHAIN EVM EXAMPLE CONFIGURATION
 # [apis."blockchain"]
 # [apis."blockchain"."evm"]
-# max_retries = 5
 # timeout_millis = 10000
 
-# [apis."blockchain"."evm".chains.1] # Ethereum 
+# [apis."blockchain"."evm".routing]
+# type = "nodes"
+# max_retries = 5
+
+# [apis."blockchain"."evm".routing.chains.1] # Ethereum
 # selection_strategy = "RoundRobin"
 
-# [[apis."blockchain"."evm".chains.1.nodes]]
+# [[apis."blockchain"."evm".routing.chains.1.nodes]]
 # uri = "https://some-node"
 # name = "Node 1"
 
-# [[apis."blockchain"."evm".chains.1.nodes]]
+# [[apis."blockchain"."evm".routing.chains.1.nodes]]
 # uri = "https://some-other-node"
 # name = "Node 2"
 
+# BLOCKCHAIN EVM PROXY MODE EXAMPLE CONFIGURATION
+# Routes every EVM chain through a single proxy, with the chain ID appended as a
+# path segment (e.g. https://some.rpc.proxy/1 for Ethereum). Works out of the box
+# for arbitrary chain IDs — no per-chain config required. Mutually exclusive with
+# the `nodes` routing mode above: configure exactly one.
+# [apis."blockchain"."evm"]
+# timeout_millis = 10000
+# [apis."blockchain"."evm".routing]
+# type = "proxy"
+# url = "https://some.rpc.proxy"
+
 # BLOCKCHAIN SOLANA EXAMPLE CONFIGURATION
 # [apis."blockchain"."solana"]
-# max_retries = 5
 # timeout_millis = 10000
 # Commitment applied to every Solana RPC call: "processed", "confirmed", or
 # "finalized". Optional; defaults to "confirmed".
 # commitment = "finalized"
 
 # Cluster keys are parsed by name: "mainnet", "devnet", or "testnet".
-# [apis."blockchain"."solana".chains.devnet]
+# [apis."blockchain"."solana".routing]
+# type = "nodes"
+# max_retries = 5
+
+# [apis."blockchain"."solana".routing.chains.devnet]
 # selection_strategy = "RoundRobin"
 
-# [[apis."blockchain"."solana".chains.devnet.nodes]]
+# [[apis."blockchain"."solana".routing.chains.devnet.nodes]]
 # uri = "https://api.devnet.solana.com"
 # name = "Solana Devnet RPC 1"
 
-# [[apis."blockchain"."solana".chains.devnet.nodes]]
+# [[apis."blockchain"."solana".routing.chains.devnet.nodes]]
 # uri = "https://some-other-solana-node"
 # name = "Solana Devnet RPC 2"
 
+# BLOCKCHAIN SOLANA PROXY MODE EXAMPLE CONFIGURATION
+# Routes every Solana cluster through a single proxy, with the cluster name
+# appended as a path segment (e.g. https://some.rpc.proxy/devnet). Mutually
+# exclusive with the `nodes` routing mode above: configure exactly one.
+# [apis."blockchain"."solana"]
+# timeout_millis = 10000
+# commitment = "finalized"
+# [apis."blockchain"."solana".routing]
+# type = "proxy"
+# url = "https://some.rpc.proxy"
 
 # KMS USING IAM
 

@@ -84,8 +84,6 @@ impl BlockchainClient<Solana> {
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         // [base64Tx, { "encoding": "base64", "preflightCommitment": <configured> }]
         let params = (
             request.transaction,
@@ -93,8 +91,7 @@ impl BlockchainClient<Solana> {
         );
         let request = JsonRpcRequest::new(RpcMethods::SendTransaction, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns the lamport balance of an account.
@@ -107,16 +104,13 @@ impl BlockchainClient<Solana> {
             serde_json::from_str::<PubkeyRequest>(params).map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = (
             request.pubkey,
             json!({ "commitment": self.options.commitment }),
         );
         let request = JsonRpcRequest::new(RpcMethods::GetBalance, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns all information associated with an account.
@@ -132,8 +126,6 @@ impl BlockchainClient<Solana> {
             serde_json::from_str::<PubkeyRequest>(params).map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         // base64 encoding handles account data of any size (base58, the default, caps out).
         let params = (
             request.pubkey,
@@ -141,8 +133,7 @@ impl BlockchainClient<Solana> {
         );
         let request = JsonRpcRequest::new(RpcMethods::GetAccountInfo, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns the slot that has reached the default commitment level.
@@ -155,13 +146,10 @@ impl BlockchainClient<Solana> {
             serde_json::from_str::<ClusterRequest>(params).map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = Value::Array(vec![json!({ "commitment": self.options.commitment })]);
         let request = JsonRpcRequest::new(RpcMethods::GetSlot, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns the latest blockhash, used as the recent blockhash when building transactions.
@@ -174,13 +162,10 @@ impl BlockchainClient<Solana> {
             serde_json::from_str::<ClusterRequest>(params).map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = Value::Array(vec![json!({ "commitment": self.options.commitment })]);
         let request = JsonRpcRequest::new(RpcMethods::GetLatestBlockhash, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns the current cluster-wide transaction count.
@@ -197,13 +182,10 @@ impl BlockchainClient<Solana> {
             serde_json::from_str::<ClusterRequest>(params).map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = Value::Array(vec![json!({ "commitment": self.options.commitment })]);
         let request = JsonRpcRequest::new(RpcMethods::GetTransactionCount, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns details for a confirmed transaction by signature.
@@ -219,16 +201,13 @@ impl BlockchainClient<Solana> {
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = (
             request.signature,
             json!({ "commitment": self.options.commitment, "maxSupportedTransactionVersion": 0 }),
         );
         let request = JsonRpcRequest::new(RpcMethods::GetTransaction, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns the processing statuses of a batch of transaction signatures.
@@ -244,16 +223,13 @@ impl BlockchainClient<Solana> {
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = (
             request.signatures,
             json!({ "searchTransactionHistory": request.search_transaction_history }),
         );
         let request = JsonRpcRequest::new(RpcMethods::GetSignatureStatuses, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns identity and transaction information about a confirmed block.
@@ -268,8 +244,6 @@ impl BlockchainClient<Solana> {
             serde_json::from_str::<GetBlockRequest>(params).map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = (
             json!(request.slot),
             json!({
@@ -282,8 +256,7 @@ impl BlockchainClient<Solana> {
         );
         let request = JsonRpcRequest::new(RpcMethods::GetBlock, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Reads multiple accounts in a single call.
@@ -299,15 +272,13 @@ impl BlockchainClient<Solana> {
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
         let params = (
             request.pubkeys,
             json!({ "encoding": "base64", "commitment": self.options.commitment }),
         );
         let request = JsonRpcRequest::new(RpcMethods::GetMultipleAccounts, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Enumerates all accounts owned by a program.
@@ -322,8 +293,6 @@ impl BlockchainClient<Solana> {
         let request = serde_json::from_str::<GetProgramAccountsRequest>(params)
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
-
-        let node_selector = self.get_node_selector(cluster)?;
 
         let mut config = serde_json::Map::new();
         config.insert("encoding".to_string(), json!("base64"));
@@ -358,8 +327,7 @@ impl BlockchainClient<Solana> {
         let params = (request.program_id, Value::Object(config));
         let request = JsonRpcRequest::new(RpcMethods::GetProgramAccounts, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Lists the SPL token accounts owned by a wallet, filtered by mint or token program.
@@ -371,8 +339,6 @@ impl BlockchainClient<Solana> {
         let request = serde_json::from_str::<GetTokenAccountsByOwnerRequest>(params)
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
-
-        let node_selector = self.get_node_selector(cluster)?;
 
         // Prefer a mint filter when given; otherwise scope to a token program
         // (defaulting to SPL Token).
@@ -392,8 +358,7 @@ impl BlockchainClient<Solana> {
         );
         let request = JsonRpcRequest::new(RpcMethods::GetTokenAccountsByOwner, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns the token balance of an SPL token account.
@@ -406,16 +371,13 @@ impl BlockchainClient<Solana> {
             serde_json::from_str::<PubkeyRequest>(params).map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = (
             request.pubkey,
             json!({ "commitment": self.options.commitment }),
         );
         let request = JsonRpcRequest::new(RpcMethods::GetTokenAccountBalance, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns the total supply of an SPL mint.
@@ -428,16 +390,13 @@ impl BlockchainClient<Solana> {
             serde_json::from_str::<PubkeyRequest>(params).map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = (
             request.pubkey,
             json!({ "commitment": self.options.commitment }),
         );
         let request = JsonRpcRequest::new(RpcMethods::GetTokenSupply, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns the lamports required for an account of a given size to be rent-exempt.
@@ -452,8 +411,6 @@ impl BlockchainClient<Solana> {
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = (
             json!(request.data_length),
             json!({ "commitment": self.options.commitment }),
@@ -461,8 +418,7 @@ impl BlockchainClient<Solana> {
         let request =
             JsonRpcRequest::new(RpcMethods::GetMinimumBalanceForRentExemption, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns the fee the cluster would charge for a serialized message.
@@ -477,16 +433,13 @@ impl BlockchainClient<Solana> {
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = (
             request.message,
             json!({ "commitment": self.options.commitment }),
         );
         let request = JsonRpcRequest::new(RpcMethods::GetFeeForMessage, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns recent prioritization (priority) fees, optionally scoped to accounts.
@@ -501,13 +454,10 @@ impl BlockchainClient<Solana> {
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = (!request.addresses.is_empty()).then_some(request.addresses);
         let request = JsonRpcRequest::new(RpcMethods::GetRecentPrioritizationFees, params);
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Simulates a signed transaction without submitting it.
@@ -523,16 +473,13 @@ impl BlockchainClient<Solana> {
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let params = (
             request.transaction,
             json!({ "encoding": "base64", "commitment": self.options.commitment }),
         );
         let request = JsonRpcRequest::new(RpcMethods::SimulateTransaction, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 
     /// Returns signatures for transactions involving an address, most recent first.
@@ -547,8 +494,6 @@ impl BlockchainClient<Solana> {
             .map_err(BlockchainError::SerdeError)?;
         let cluster = request.cluster;
 
-        let node_selector = self.get_node_selector(cluster)?;
-
         let mut config = serde_json::Map::new();
         config.insert(
             "commitment".to_string(),
@@ -560,8 +505,7 @@ impl BlockchainClient<Solana> {
         let params = (request.address, Value::Object(config));
         let request = JsonRpcRequest::new(RpcMethods::GetSignaturesForAddress, Some(params));
 
-        self.execute_rpc_call(node_selector, cluster, request, module)
-            .await
+        self.execute_rpc_call(cluster, request, module).await
     }
 }
 
@@ -592,7 +536,7 @@ mod tests {
 
     use crate::apis::blockchain::common::{
         node_selection::SelectionStrategy, BlockchainClient, ChainConfig, ChainFamilyConfig,
-        NodeConfig,
+        NodeConfig, RoutingMode,
     };
     use crate::loader::{LimitValue, PlaidModule};
 
@@ -646,9 +590,11 @@ mod tests {
         )]);
 
         BlockchainClient::new(ChainFamilyConfig {
-            chains,
+            routing: RoutingMode::Nodes {
+                chains,
+                max_retries: 3,
+            },
             timeout_millis: Duration::from_secs(10),
-            max_retries: 3,
             options: SolanaOptions { commitment },
         })
     }

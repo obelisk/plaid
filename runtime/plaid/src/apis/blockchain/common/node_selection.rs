@@ -49,7 +49,12 @@ impl NodeSelector {
 }
 
 impl NodeSelector {
-    /// Select a node based on the selection strategy
+    /// Select a node based on the selection strategy.
+    ///
+    /// RoundRobin returns the current node without advancing the index — the
+    /// index only advances on failure (see [`Self::mark_current_node_failed`]),
+    /// so concurrent calls stay "sticky" to the same node until it fails. Random
+    /// picks a node independently each call.
     pub fn select_node(&self) -> Option<NodeConfig> {
         if self.nodes.is_empty() {
             return None;

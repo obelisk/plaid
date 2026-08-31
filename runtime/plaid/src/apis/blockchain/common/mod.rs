@@ -24,6 +24,7 @@ use serde::{de, Deserialize, Serialize};
 use std::{
     collections::HashMap, fmt::Display, hash::Hash, str::FromStr, sync::Arc, time::Duration,
 };
+use url::Url;
 
 /// Identifies a chain family which can be interacted with through Json-RPC 2.0. This trait is
 /// mainly used as a type parameter to BlockchainClient.
@@ -75,10 +76,55 @@ impl BlockchainError {
     }
 }
 
+/// How a [`BlockchainClient`] routes RPC calls to a chain.
+///
+/// Two mutually exclusive modes, selected per chain family via config:
+/// - [`RoutingMode::Nodes`]: each chain is explicitly configured with its own
+///   node pool and selection strategy. Only configured chains are reachable.
+/// - [`RoutingMode::Proxy`]: all chains route through a single proxy endpoint,
+///   with the chain identifier appended as a path segment. Works out of the box
+///   for arbitrary chain identifiers — no per-chain config required.
+#[derive(Deserialize)]
+#[serde(
+    rename_all = "lowercase",
+    tag = "type",
+    bound(deserialize = "V: Deserialize<'de>")
+)]
+pub enum RoutingMode<C: ChainFamily, V> {
+    /// Per-chain node pools (the original behavior).
+    Nodes {
+        /// Per-chain configuration, keyed by the family's identifier.
+        /// TOML keys arrive as strings and are parsed via `Identifier: FromStr`.
+        #[serde(deserialize_with = "deserialize_chains")]
+        chains: HashMap<C::Identifier, V>,
+        /// The maximum number of retries across nodes for each RPC call.
+        #[serde(default = "default_max_retries")]
+        #[serde(deserialize_with = "deserialize_non_zero_u8")]
+        max_retries: u8,
+    },
+    /// A single proxy endpoint; the chain identifier is appended as a path segment.
+    Proxy {
+        /// The proxy base URL
+        #[serde(deserialize_with = "deserialize_url")]
+        url: Url,
+    },
+}
+
+fn deserialize_non_zero_u8<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let retries = u8::deserialize(deserializer)?;
+    if retries == 0 {
+        return Err(de::Error::custom("max_retries must be greater than 0"));
+    }
+
+    Ok(retries)
+}
+
 pub struct BlockchainClient<C: ChainFamily> {
-    pub node_selector: HashMap<C::Identifier, NodeSelector>,
+    pub routing: RoutingMode<C, NodeSelector>,
     pub client: Client,
-    pub max_retries: u8,
     pub options: C::Options,
 }
 
@@ -108,17 +154,13 @@ pub struct NodeConfig {
 // `C::Options` are), so constrain the derive's synthesized bound to just `C::Options`.
 #[serde(bound(deserialize = "C::Options: serde::Deserialize<'de>"))]
 pub struct ChainFamilyConfig<C: ChainFamily> {
-    /// Per-chain configuration, keyed by the family's identifier.
-    /// TOML keys arrive as strings and are parsed via `Identifier: FromStr`.
-    #[serde(deserialize_with = "deserialize_chains")]
-    pub chains: HashMap<C::Identifier, ChainConfig>,
+    /// How RPC calls are routed: either explicit per-chain node pools, or a
+    /// single proxy endpoint
+    pub routing: RoutingMode<C, ChainConfig>,
     /// Timeout duration for client requests in milliseconds
     #[serde(default = "default_timeout")]
     #[serde(deserialize_with = "parse_duration")]
     pub timeout_millis: Duration,
-    /// The maximum number of retries for client requests
-    #[serde(default = "default_max_retries")]
-    pub max_retries: u8,
     /// Family-specific options (e.g. Solana commitment), read from the same table.
     #[serde(flatten, default)]
     pub options: C::Options,
@@ -127,15 +169,31 @@ pub struct ChainFamilyConfig<C: ChainFamily> {
 /// Deserializes the `chains` map by reading string TOML keys and parsing each
 /// into the family's identifier via `FromStr`. `K` is inferred as `C::Identifier`
 /// from the field type at the call site.
-fn deserialize_chains<'de, D, K>(deserializer: D) -> Result<HashMap<K, ChainConfig>, D::Error>
+fn deserialize_chains<'de, D, K, V>(deserializer: D) -> Result<HashMap<K, V>, D::Error>
 where
     D: de::Deserializer<'de>,
     K: FromStr<Err: Display> + Eq + Hash,
+    V: de::Deserialize<'de>,
 {
-    HashMap::<String, ChainConfig>::deserialize(deserializer)?
+    HashMap::<String, V>::deserialize(deserializer)?
         .into_iter()
         .map(|(key, config)| Ok((key.parse().map_err(de::Error::custom)?, config)))
         .collect()
+}
+
+/// Deserializes a string into a hierarchical [`Url`].
+fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    let url = Url::parse(&s).map_err(de::Error::custom)?;
+    if url.cannot_be_a_base() {
+        return Err(de::Error::custom(format!(
+            "proxy URL must be hierarchical (support path segments), got: {s}"
+        )));
+    }
+    Ok(url)
 }
 
 #[derive(Deserialize)]
@@ -160,88 +218,110 @@ impl<C: ChainFamily> BlockchainClient<C> {
             .build()
             .expect("Failed to build blockchain reqwest client");
 
-        let node_selector = config
-            .chains
-            .into_iter()
-            .map(|(chain_id, config)| {
-                let selector = NodeSelector::new(config.nodes, config.selection_strategy);
-                (chain_id, selector)
-            })
-            .collect();
+        let routing = match config.routing {
+            RoutingMode::Nodes {
+                chains,
+                max_retries,
+            } => RoutingMode::Nodes {
+                chains: chains
+                    .into_iter()
+                    .map(|(chain_id, config)| {
+                        let selector = NodeSelector::new(config.nodes, config.selection_strategy);
+                        (chain_id, selector)
+                    })
+                    .collect::<HashMap<_, _>>(),
+                max_retries,
+            },
+            RoutingMode::Proxy { url } => RoutingMode::Proxy { url },
+        };
 
         Self {
             client,
-            node_selector,
-            max_retries: config.max_retries,
+            routing,
             options: config.options,
         }
     }
 
-    /// Look up the node selector for a chain identifier, erroring if none is configured.
-    pub fn get_node_selector(&self, identifier: C::Identifier) -> Result<&NodeSelector, ApiError> {
-        self.node_selector.get(&identifier).ok_or_else(|| {
-            BlockchainError::NoNodes {
-                identifier: identifier.to_string(),
-            }
-            .into()
-        })
-    }
-
     /// Execute a JSON-RPC call with automatic retry and failure handling.
     ///
-    /// This handles:
-    /// - Retry logic up to `max_retries` attempts
-    /// - Automatic failure marking to deprioritize bad nodes
+    /// Behavior depends on the routing mode:
+    /// - **Proxy mode**: a single attempt against the proxy URL (proxies are
+    ///   expected to handle retry internally).
+    /// - **Node mode**: retries up to `max_retries` attempts across the chain's
+    ///   node pool, advancing past failing nodes.
     ///
     /// It is generic over the method type `M`, so each chain family reuses this
-    /// loop with its own set of RPC method names.
+    /// with its own set of RPC method names.
     pub async fn execute_rpc_call<M: Serialize + Display, P: Serialize>(
         &self,
-        selector: &NodeSelector,
         identifier: C::Identifier,
         json_rpc_request: JsonRpcRequest<'_, M, P>,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let mut last_error = BlockchainError::AllNodesFailed;
-
         debug!(
             "Module [{module}] is attempting to call [{}] on chain [{}]",
             json_rpc_request.method, identifier,
         );
-        for attempt in 1..=self.max_retries {
-            // Get the next node to try
-            let Some(node) = selector.select_node() else {
-                return Err(BlockchainError::NoNodes {
-                    identifier: identifier.to_string(),
-                }
-                .into());
-            };
 
-            trace!(
-                "Attempt {attempt}/{} for RPC call [{}] using node [{}] on behalf of module [{module}]",
-                self.max_retries,
-                json_rpc_request.method,
-                node.name
-            );
-
-            // Make the RPC call using the existing utility
-            match json_rpc_request.execute(&self.client, &node.uri).await {
-                Ok(response) => {
-                    return Ok(response);
-                }
-                Err(e) => {
-                    // If the error is not retryable, return immediately
-                    if !e.is_retryable() {
-                        return Err(e.into());
+        match &self.routing {
+            // Proxy mode: route every chain through the single proxy URL, with the
+            // chain identifier appended as a path segment.
+            RoutingMode::Proxy { url } => {
+                // Append the chain identifier as a path segment
+                let rpc = format!("{}/{identifier}", url.as_str().trim_end_matches('/'));
+                trace!(
+                    "RPC call [{}] via proxy on behalf of module [{module}]",
+                    json_rpc_request.method,
+                );
+                json_rpc_request
+                    .execute(&self.client, &rpc)
+                    .await
+                    .map_err(Into::into)
+            }
+            // Node mode: look up the chain's node pool and rotate through it,
+            // retrying across nodes and deprioritizing failing ones.
+            RoutingMode::Nodes {
+                chains: node_selector,
+                max_retries,
+            } => {
+                let Some(selector) = node_selector.get(&identifier) else {
+                    return Err(BlockchainError::NoNodes {
+                        identifier: identifier.to_string(),
                     }
+                    .into());
+                };
 
-                    // Call failed, mark node as failed and try next
-                    selector.mark_current_node_failed();
-                    last_error = e;
+                let mut last_error = BlockchainError::AllNodesFailed;
+                for attempt in 1..=*max_retries {
+                    let Some(node) = selector.select_node() else {
+                        return Err(BlockchainError::NoNodes {
+                            identifier: identifier.to_string(),
+                        }
+                        .into());
+                    };
+
+                    trace!(
+                        "Attempt {attempt}/{max_retries} for RPC call [{}] using node [{}] on behalf of module [{module}]",
+                        json_rpc_request.method,
+                        node.name
+                    );
+
+                    match json_rpc_request.execute(&self.client, &node.uri).await {
+                        Ok(response) => return Ok(response),
+                        Err(e) => {
+                            // If the error is not retryable, return immediately.
+                            if !e.is_retryable() {
+                                return Err(e.into());
+                            }
+                            // Call failed, mark node as failed and try next.
+                            selector.mark_current_node_failed();
+                            last_error = e;
+                        }
+                    }
                 }
+
+                Err(last_error.into())
             }
         }
-
-        Err(last_error.into())
     }
 }
