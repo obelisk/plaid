@@ -448,14 +448,15 @@ pub fn list_objects(
     let request =
         serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
 
-    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+    let return_buff_size = 1024 * 1000;
+    let mut return_buffer = vec![0; return_buff_size];
 
     let res = unsafe {
         aws_s3_list_objects(
             request.as_ptr(),
             request.len(),
             return_buffer.as_mut_ptr(),
-            RETURN_BUFFER_SIZE,
+            return_buff_size,
         )
     };
 
