@@ -34,6 +34,7 @@ test_mode_exemptions = [
     "test_tls_cert_with_sni.wasm",
     "test_gh_id_conversion.wasm",
     "test_graceful_shutdown.wasm",
+    "test_async.wasm",
 ]
 
 [loading.persistent_response_size]
@@ -120,6 +121,7 @@ mzh3oDpBzoXSf9cv8S2WF3nlEiaPMlCyovXmb6FjSun0VrZLr0NHscHjnCrNOjCN
 "test_tls_cert_with_sni.wasm" = "test_tls_cert_with_sni"
 "test_gh_id_conversion.wasm" = "test_gh_id_conversion"
 "test_graceful_shutdown.wasm" = "test_graceful_shutdown"
+"test_async.wasm" = "test_async"
 
 # Configure the computation amount. See the loader module for more
 # information on how computation cost is calculated.

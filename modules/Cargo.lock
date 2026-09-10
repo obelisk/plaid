@@ -208,7 +208,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "plaid_stl"
-version = "47.1.0"
+version = "48.0.0"
 dependencies = [
  "base64 0.13.1",
  "chrono",
@@ -359,6 +359,15 @@ dependencies = [
 
 [[package]]
 name = "test_aes_enc_dec"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "test_async"
 version = "0.1.0"
 dependencies = [
  "plaid_stl",

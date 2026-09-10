@@ -88,13 +88,13 @@ impl Display for LimitValue {
 #[derive(Deserialize)]
 pub struct LimitableAmount {
     /// The limit's default value
-    default: LimitValue,
+    pub default: LimitValue,
     /// Override values based on log type
     #[serde(default)]
-    log_type: HashMap<String, LimitValue>,
+    pub log_type: HashMap<String, LimitValue>,
     /// Override values based on module names
     #[serde(default)]
-    module_overrides: HashMap<String, LimitValue>,
+    pub module_overrides: HashMap<String, LimitValue>,
 }
 
 /// The compiler backend to use for the modules
@@ -475,6 +475,32 @@ impl PlaidModule {
         for import in self.module.imports() {
             info!("\tImport: {}", import.name());
         }
+    }
+
+    /// Test-only variant of [`Self::compile`] so integration-style unit
+    /// tests in other modules can build a `PlaidModule` handle without
+    /// going through the full config-loading path.
+    #[cfg(test)]
+    pub(crate) fn compile_for_tests(
+        filename: &str,
+        computation_amount: &LimitedAmount,
+        memory_page_count: &LimitedAmount,
+        storage_amount: &LimitableAmount,
+        module_bytes: Vec<u8>,
+        log_type: &str,
+        test_mode: bool,
+        compiler_backend: &CompilerBackend,
+    ) -> Result<Self, Errors> {
+        Self::compile(
+            filename,
+            computation_amount,
+            memory_page_count,
+            storage_amount,
+            module_bytes,
+            log_type,
+            test_mode,
+            compiler_backend,
+        )
     }
 }
 

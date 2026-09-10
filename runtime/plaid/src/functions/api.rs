@@ -848,6 +848,12 @@ define_api_functions! {
         "log_back"                 => super::internal::log_back,
         "log_back_unlimited"       => super::internal::log_back_unlimited,
 
+        // Async ticket system
+        "async_spawn"              => super::async_ops::async_spawn,
+        "ticket_status"            => super::async_ops::ticket_status,
+        "ticket_claim"             => super::async_ops::ticket_claim,
+        "ticket_cancel"            => super::async_ops::ticket_cancel,
+
         // Npm Calls
         "npm_publish_empty_stub"                  => npm_publish_empty_stub,
         "npm_set_team_permission_on_package"      => npm_set_team_permission_on_package,

@@ -33,6 +33,7 @@ members = [
     "tests/test_tls_cert_with_sni",
     "tests/test_gh_id_conversion",
     "tests/test_graceful_shutdown",
+    "tests/test_async",
 ]
 
 [profile.release]

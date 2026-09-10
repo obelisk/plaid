@@ -24,7 +24,8 @@ allowed_rules = [
     "test_mnr_return_cert.wasm",
     "test_tls_cert_with_sni.wasm",
     "test_gh_id_conversion.wasm",
-    "test_graceful_shutdown.wasm"
+    "test_graceful_shutdown.wasm",
+    "test_async.wasm"
 ]
 root_certificate = """
 {plaid-secret{integration-test-root-ca}}
@@ -76,6 +77,17 @@ root_certificate = """
 {plaid-secret{integration-test-root-ca}}
 """
 [apis."general"."network"."web_requests"."test-response-mnr-vars"."headers"]
+
+[apis."general"."network"."web_requests"."test-async"]
+verb = "post"
+uri = "https://localhost:8998/async_echo"
+return_body = true
+return_code = true
+allowed_rules = ["test_async.wasm"]
+root_certificate = """
+{plaid-secret{integration-test-root-ca}}
+"""
+[apis."general"."network"."web_requests"."test-async"."headers"]
 
 [apis."general"."network"."web_requests"."google_test"]
 verb = "get"

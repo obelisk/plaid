@@ -582,6 +582,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Workers upgrade this weak ref per message so idle threads hold no Message senders.
     let immediate_dispatch = Arc::new(exec_thread_pools.general_pool.sender.clone());
 
+    // The async ticket registry: lets rules run API calls without blocking
+    // an execution thread. Completions are delivered as messages targeted
+    // at the spawning rule.
+    let ticket_config = plaid::async_ops::TicketConfig::from(
+        config.executor.async_tickets.clone().unwrap_or_default(),
+    );
+    info!(
+        "Async ticket system enabled: max {} outstanding tickets per rule, completed tickets expire after {}s",
+        ticket_config.max_tickets_per_module, ticket_config.completed_ttl_secs
+    );
+    let ticket_registry = Arc::new(plaid::async_ops::TicketRegistry::new(ticket_config));
+
+    // Evict completed-but-unclaimed tickets once their TTL elapses.
+    let ticket_sweeper = plaid::functions::start_ticket_sweeper(
+        ticket_registry.clone(),
+        cancellation_token.clone(),
+    );
+
     // Create the executor that will handle all the logs that come in and immediate
     // requests for handling some configured get requests.
     let (executor, executor_threads) = Executor::new(
@@ -595,6 +613,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         module_execution_metrics.clone(),
         Arc::downgrade(&immediate_dispatch),
         delayed_log_sender.clone(),
+        Some(ticket_registry.clone()),
         cancellation_token.clone(),
     );
 
@@ -856,6 +875,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Flushing delayed logbacks to storage...");
     delayed_log_persister.flush_pending().await;
     drop(delayed_log_sender);
+
+    // The ticket sweeper exits with the cancellation token; join it so it
+    // does not outlive the runtime teardown.
+    if let Err(e) = ticket_sweeper.await {
+        error!("Ticket sweeper task failed during shutdown: {e}");
+    }
 
     // Performance loop exits the final sender disconnects.
     drop(performance_sender);

@@ -162,6 +162,41 @@ pub struct ExecutorConfig {
     /// This is a mapping {log type --> num threads}.
     #[serde(default)]
     pub dedicated_threads: HashMap<String, DedicatedThreadsConfig>,
+    /// Configuration for the async ticket system that lets rules run API
+    /// calls without blocking an execution thread. If absent, the ticket
+    /// system is enabled with defaults.
+    #[serde(default)]
+    pub async_tickets: Option<AsyncTicketsConfig>,
+}
+
+/// Configuration for the async ticket system.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AsyncTicketsConfig {
+    /// Maximum outstanding (pending + completed, unclaimed) tickets per
+    /// rule. Defaults to 64.
+    #[serde(default = "default_max_tickets_per_module")]
+    pub max_tickets_per_module: usize,
+    /// Time-to-live, in seconds, for completed-but-unclaimed tickets.
+    /// Defaults to 15 minutes.
+    #[serde(default = "default_completed_ttl_secs")]
+    pub completed_ttl_secs: u64,
+}
+
+impl Default for AsyncTicketsConfig {
+    fn default() -> Self {
+        Self {
+            max_tickets_per_module: default_max_tickets_per_module(),
+            completed_ttl_secs: default_completed_ttl_secs(),
+        }
+    }
+}
+
+fn default_max_tickets_per_module() -> usize {
+    64
+}
+
+fn default_completed_ttl_secs() -> u64 {
+    15 * 60
 }
 
 /// The full configuration of Plaid
