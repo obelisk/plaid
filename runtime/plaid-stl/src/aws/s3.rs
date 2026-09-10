@@ -448,14 +448,18 @@ pub fn list_objects(
     let request =
         serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
 
-    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+    // A max-sized ListObjectsV2 response (1,000 keys) plus JSON encoding overhead
+    // (field names, quotes, commas) and the continuation token can exceed smaller
+    // buffers
+    let return_buffer_size = 1024 * 1024 * 4; // 4 MiB
+    let mut return_buffer = vec![0; return_buffer_size];
 
     let res = unsafe {
         aws_s3_list_objects(
             request.as_ptr(),
             request.len(),
             return_buffer.as_mut_ptr(),
-            RETURN_BUFFER_SIZE,
+            return_buffer_size,
         )
     };
 
