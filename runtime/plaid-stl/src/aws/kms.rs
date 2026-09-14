@@ -83,6 +83,8 @@ pub enum SigningAlgorithm {
     RsassaPssSha256,
     RsassaPssSha384,
     RsassaPssSha512,
+    Ed25519PhSha512,
+    Ed25519Sha512,
 }
 
 impl Serialize for SigningAlgorithm {
@@ -100,6 +102,8 @@ impl Serialize for SigningAlgorithm {
             Self::RsassaPssSha256 => serializer.serialize_str("RSASSA_PSS_SHA_256"),
             Self::RsassaPssSha384 => serializer.serialize_str("RSASSA_PSS_SHA_384"),
             Self::RsassaPssSha512 => serializer.serialize_str("RSASSA_PSS_SHA_512"),
+            Self::Ed25519PhSha512 => serializer.serialize_str("ED25519_PH_SHA_512"),
+            Self::Ed25519Sha512 => serializer.serialize_str("ED25519_SHA_512"),
         }
     }
 }
