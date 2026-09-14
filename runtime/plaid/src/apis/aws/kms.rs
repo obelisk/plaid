@@ -98,9 +98,11 @@ where
         "RSASSA_PSS_SHA_256" => Ok(SigningAlgorithmSpec::RsassaPssSha256),
         "RSASSA_PSS_SHA_384" => Ok(SigningAlgorithmSpec::RsassaPssSha384),
         "RSASSA_PSS_SHA_512" => Ok(SigningAlgorithmSpec::RsassaPssSha512),
+        "ED25519_PH_SHA_512" => Ok(SigningAlgorithmSpec::Ed25519PhSha512),
+        "ED25519_SHA_512" => Ok(SigningAlgorithmSpec::Ed25519Sha512),
         "SM2DSA" => Ok(SigningAlgorithmSpec::Sm2Dsa),
         _ => Err(serde::de::Error::custom(
-            "Invalid signing algorithm provided. Accepted values are ECDSA_SHA_256, ECDSA_SHA_384, ECDSA_SHA_512, RSASSA_PKCS1_V1_5_SHA_256, RSASSA_PKCS1_V1_5_SHA_384, RSASSA_PKCS1_V1_5_SHA_512, RSASSA_PSS_SHA_256, RSASSA_PSS_SHA_384, RSASSA_PSS_SHA_512, and SM2DSA.",
+            "Invalid signing algorithm provided. Accepted values are ECDSA_SHA_256, ECDSA_SHA_384, ECDSA_SHA_512, RSASSA_PKCS1_V1_5_SHA_256, RSASSA_PKCS1_V1_5_SHA_384, RSASSA_PKCS1_V1_5_SHA_512, RSASSA_PSS_SHA_256, RSASSA_PSS_SHA_384, RSASSA_PSS_SHA_512, ED25519_PH_SHA_512, ED25519_SHA_512, and SM2DSA.",
         )),
     }
 }
