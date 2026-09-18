@@ -142,6 +142,8 @@ pub enum ApiError {
     WebError(web::WebError),
     BlockchainError(blockchain::BlockchainError),
     TestMode,
+    #[cfg(feature = "aws")]
+    IdentityStoreError(String),
     JiraError(jira::JiraError),
     NetworkResponseTooLarge,
     TlsError(String),
