@@ -6,7 +6,7 @@ use std::borrow::Cow;
 pub use utils::{parse_rpc_response, SolanaError};
 
 use crate::blockchain::solana::types::{
-    Cluster, ClusterRequest, GetBlockRequest, GetFeeForMessageRequest,
+    Cluster, ClusterRequest, ConfirmTransactionRequest, GetBlockRequest, GetFeeForMessageRequest,
     GetMinimumBalanceForRentExemptionRequest, GetMultipleAccountsRequest,
     GetProgramAccountsRequest, GetRecentPrioritizationFeesRequest, GetSignatureStatusesRequest,
     GetSignaturesForAddressRequest, GetTokenAccountsByOwnerRequest, GetTransactionRequest,
@@ -478,6 +478,45 @@ pub fn get_signatures_for_address(
         )
     };
     finish(res, buffer)
+}
+
+/// Ask the runtime to broadcast a signed transaction and re-invoke this rule
+/// with a logback once the transaction reaches a durable commitment level
+/// (`confirmed` or `finalized`).
+///
+/// Returns the transaction signature immediately; the confirmation arrives
+/// later as a logback with source `LogSource::System(SystemFunction::ConfirmTransaction)`
+/// and payload [`types::ConfirmTransactionResult`], echoing the signature for
+/// correlation.
+pub fn confirm_transaction(
+    request: ConfirmTransactionRequest<'_>,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(blockchain_solana, confirm_transaction);
+    }
+
+    let request = serialize_request(&request)?;
+
+    let mut buffer = vec![0; RETURN_BUFFER_SIZE];
+    let res = unsafe {
+        blockchain_solana_confirm_transaction(
+            request.as_ptr(),
+            request.len(),
+            buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    buffer.truncate(res as usize);
+
+    match std::str::from_utf8(&buffer) {
+        Ok(x) => Ok(x.to_string()),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
 }
 
 /// Serialize a request type to the JSON the host expects.

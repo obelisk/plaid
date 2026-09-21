@@ -218,6 +218,90 @@ pub struct GetSignatureStatusesRequest<'a> {
     pub search_transaction_history: bool,
 }
 
+/// Request structure for asking the runtime to broadcast a transaction and
+/// re-invoke the rule with a logback once the transaction reaches a durable
+/// commitment level (`confirmed` or `finalized`).
+///
+/// The poll/timeout knobs are required on the wire and populated by the STL
+/// wrapper, but the runtime never trusts them: it clamps them into sane
+/// bounds after parsing, since a module can be built against a modified STL
+/// or issue the host call by hand.
+#[derive(Serialize, Deserialize)]
+pub struct ConfirmTransactionRequest<'a> {
+    /// Target cluster.
+    pub cluster: Cluster,
+    /// Base64-encoded, fully-signed transaction.
+    pub transaction: Cow<'a, str>,
+    /// Opaque data echoed back in the logback payload.
+    pub additional_data: Option<serde_json::Value>,
+    /// Poll cadence in ms.
+    pub poll_interval_ms: u64,
+    /// Give up and report an error logback after this long, in seconds.
+    pub timeout_secs: u64,
+}
+
+impl<'a> ConfirmTransactionRequest<'a> {
+    /// Create a new builder for `ConfirmTransactionRequest`
+    pub fn builder(
+        transaction: impl Into<Cow<'a, str>>,
+        cluster: Cluster,
+    ) -> ConfirmTransactionRequestBuilder<'a> {
+        ConfirmTransactionRequestBuilder::new(transaction, cluster)
+    }
+}
+
+/// Builder for `ConfirmTransactionRequest`. Poll interval and timeout
+/// default to 3000 ms and 600 s respectively (the runtime clamps both).
+pub struct ConfirmTransactionRequestBuilder<'a> {
+    cluster: Cluster,
+    transaction: Cow<'a, str>,
+    additional_data: Option<serde_json::Value>,
+    poll_interval_ms: u64,
+    timeout_secs: u64,
+}
+
+impl<'a> ConfirmTransactionRequestBuilder<'a> {
+    fn new(transaction: impl Into<Cow<'a, str>>, cluster: Cluster) -> Self {
+        Self {
+            cluster,
+            transaction: transaction.into(),
+            additional_data: None,
+            poll_interval_ms: 3000,
+            timeout_secs: 600,
+        }
+    }
+
+    /// Attach opaque data to be echoed back in the logback payload
+    pub fn additional_data(mut self, additional_data: serde_json::Value) -> Self {
+        self.additional_data = Some(additional_data);
+        self
+    }
+
+    /// Set the poll cadence in ms (clamped by the runtime to [500, 10_000])
+    pub fn poll_interval_ms(mut self, poll_interval_ms: u64) -> Self {
+        self.poll_interval_ms = poll_interval_ms;
+        self
+    }
+
+    /// Set the confirmation timeout in seconds (clamped by the runtime to
+    /// [1, 3_600])
+    pub fn timeout_secs(mut self, timeout_secs: u64) -> Self {
+        self.timeout_secs = timeout_secs;
+        self
+    }
+
+    /// Build the `ConfirmTransactionRequest`
+    pub fn build(self) -> ConfirmTransactionRequest<'a> {
+        ConfirmTransactionRequest {
+            cluster: self.cluster,
+            transaction: self.transaction,
+            additional_data: self.additional_data,
+            poll_interval_ms: self.poll_interval_ms,
+            timeout_secs: self.timeout_secs,
+        }
+    }
+}
+
 /// Fetches a confirmed block by slot number.
 #[derive(Serialize, Deserialize)]
 pub struct GetBlockRequest {

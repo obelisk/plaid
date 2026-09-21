@@ -3,11 +3,11 @@ mod utils;
 use std::sync::Arc;
 
 use plaid_stl::blockchain::solana::types::{
-    Cluster, ClusterRequest, GetBlockRequest, GetFeeForMessageRequest,
+    Cluster, ClusterRequest, ConfirmTransactionRequest, GetBlockRequest, GetFeeForMessageRequest,
     GetMinimumBalanceForRentExemptionRequest, GetMultipleAccountsRequest,
     GetProgramAccountsRequest, GetRecentPrioritizationFeesRequest, GetSignatureStatusesRequest,
     GetSignaturesForAddressRequest, GetTokenAccountsByOwnerRequest, GetTransactionRequest,
-    PubkeyRequest, SendTransactionRequest,
+    PubkeyRequest, SendTransactionRequest, SolanaRpcResponse,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -15,13 +15,21 @@ use serde_json::{json, Value};
 use crate::{
     apis::{
         blockchain::{
-            common::{rpc::JsonRpcRequest, BlockchainClient, BlockchainError, ChainFamily},
+            common::{
+                rpc::JsonRpcRequest, BlockchainClient, BlockchainError, ChainFamily, PollOutcome,
+                PollerKnobs, MAX_CONSECUTIVE_POLL_ERRORS,
+            },
             solana::utils::RpcMethods,
         },
         ApiError,
     },
+    functions::CallbackContext,
     loader::PlaidModule,
 };
+use plaid_stl::blockchain::solana::parse_rpc_response;
+use plaid_stl::blockchain::{ConfirmOutcome, ConfirmTransactionResult};
+use plaid_stl::messages::{LogSource, SystemFunction};
+use tokio::time::Instant;
 
 /// SPL Token program id — the default filter for token-account queries.
 const SPL_TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -61,17 +69,47 @@ pub struct SolanaOptions {
 
 pub struct Solana;
 
+/// The `result` payload of a `getSignatureStatuses` response.
+#[derive(Deserialize)]
+struct StatusesResult {
+    value: Vec<Option<StatusInfo>>,
+}
+
+/// A single entry of the `getSignatureStatuses` response `value` array.
+///
+/// The Solana RPC wire format is camelCase (`confirmationStatus`); without the
+/// rename, serde silently yields `None` for the missing key and every poll
+/// reads as pending.
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct StatusInfo {
+    err: Option<serde_json::Value>,
+    confirmation_status: Option<Commitment>,
+}
+
+impl StatusInfo {
+    /// Classify a status entry the way the on-chain rules do: `err` means the
+    /// transaction failed on-chain; only a durable commitment level
+    /// (`confirmed`/`finalized`) counts as confirmed — `processed` can still
+    /// be dropped from a forked block.
+    fn classify(&self) -> PollOutcome {
+        if self.err.is_some() {
+            return PollOutcome::Done(ConfirmOutcome::Failure);
+        }
+        match self.confirmation_status {
+            Some(Commitment::Confirmed | Commitment::Finalized) => {
+                PollOutcome::Done(ConfirmOutcome::Success)
+            }
+            // `processed` or missing: not yet durable.
+            _ => PollOutcome::Pending,
+        }
+    }
+}
+
 impl ChainFamily for Solana {
     type Identifier = Cluster;
     type Options = SolanaOptions;
 }
-
-/// Solana-specific error conditions, carried by [`BlockchainError::Solana`].
-///
-/// Currently a placeholder: shared failure modes live on `BlockchainError` directly.
-/// Add variants here if Solana-specific errors emerge.
-#[derive(Debug)]
-pub enum SolanaError {}
 
 impl BlockchainClient<Solana> {
     /// Submits a fully-signed, b64 encoded transaction to the cluster's `sendTransaction` RPC.
@@ -208,6 +246,107 @@ impl BlockchainClient<Solana> {
         let request = JsonRpcRequest::new(RpcMethods::GetTransaction, Some(params));
 
         self.execute_rpc_call(cluster, request, module).await
+    }
+
+    /// Ask the runtime to broadcast a signed transaction and re-invoke the
+    /// rule with a logback once the transaction reaches a durable commitment
+    /// level (`confirmed` or `finalized`).
+    ///
+    /// Mirrors the EVM `confirm_transaction`: broadcast synchronously, then
+    /// poll on a detached task. The timeout starts at mempool acceptance.
+    pub async fn confirm_transaction(
+        self: &Arc<Self>,
+        params: &str,
+        module: Arc<PlaidModule>,
+        callback: CallbackContext,
+    ) -> Result<String, ApiError> {
+        let request = serde_json::from_str::<ConfirmTransactionRequest>(params)
+            .map_err(BlockchainError::SerdeError)?;
+        let cluster = request.cluster;
+
+        // Never trust guest-provided knobs: clamp into safe bounds.
+        let knobs = PollerKnobs::from_guest(request.poll_interval_ms, request.timeout_secs);
+
+        // Broadcast synchronously so the rule learns the signature (and any
+        // broadcast failure) immediately.
+        let rpc_params = (
+            request.transaction.as_ref(),
+            json!({ "encoding": "base64", "preflightCommitment": self.options.commitment }),
+        );
+        let rpc_request = JsonRpcRequest::new(RpcMethods::SendTransaction, Some(rpc_params));
+
+        let response = self
+            .execute_rpc_call(cluster, rpc_request, module.clone())
+            .await?;
+
+        let parsed = serde_json::from_str::<SolanaRpcResponse>(&response)
+            .map_err(BlockchainError::SerdeError)?;
+        let signature = parse_rpc_response::<String>(parsed)?;
+
+        // Detached poller: polls the status until a durable commitment level
+        // or the timeout elapses, then dispatches a logback to the rule. The
+        // timeout starts at mempool acceptance, not task start.
+        let deadline = Instant::now() + knobs.timeout;
+        let poller_client = self.clone();
+        let signature_clone = signature.clone();
+        tokio::spawn(async move {
+            let mut consecutive_errors = 0u32;
+            let outcome = loop {
+                if Instant::now() >= deadline {
+                    break ConfirmOutcome::Error(format!(
+                        "confirmation timed out after {}s",
+                        knobs.timeout.as_secs()
+                    ));
+                }
+
+                match poller_client
+                    .poll_status(cluster, &signature_clone, module.clone())
+                    .await
+                {
+                    PollOutcome::Done(outcome) => break outcome,
+                    PollOutcome::Error => {
+                        consecutive_errors += 1;
+                        if consecutive_errors >= MAX_CONSECUTIVE_POLL_ERRORS {
+                            break ConfirmOutcome::Error(format!(
+                                "status polling failed {consecutive_errors} times in a row; giving up"
+                            ));
+                        }
+                    }
+                    PollOutcome::Pending => {}
+                }
+
+                tokio::time::sleep(knobs.poll_interval).await;
+            };
+
+            let result = ConfirmTransactionResult {
+                outcome,
+                additional_data: request.additional_data,
+                tx_id: signature_clone.clone(),
+            };
+
+            let payload = match serde_json::to_vec(&result) {
+                Ok(payload) => payload,
+                Err(e) => {
+                    error!("Failed to serialize confirmation result for {signature_clone}: {e}");
+                    return;
+                }
+            };
+
+            // Route the logback to the rule's own log type so the executor
+            // re-invokes it.
+            if let Err(e) = callback.send_logback(
+                module.logtype.clone(),
+                payload,
+                LogSource::System(SystemFunction::ConfirmTransaction),
+            ) {
+                error!(
+                    "Failed to dispatch confirmation logback for {signature_clone} to {}: {e:?}",
+                    module.name
+                );
+            }
+        });
+
+        Ok(signature)
     }
 
     /// Returns the processing statuses of a batch of transaction signatures.
@@ -506,6 +645,55 @@ impl BlockchainClient<Solana> {
         let request = JsonRpcRequest::new(RpcMethods::GetSignaturesForAddress, Some(params));
 
         self.execute_rpc_call(cluster, request, module).await
+    }
+
+    /// Perform a single `getSignatureStatuses` poll for `signature` and
+    /// classify the result, mirroring the rule-side confirmation logic:
+    /// `err` means failed on-chain; only a durable commitment level
+    /// (`confirmed`/`finalized`) counts as confirmed.
+    async fn poll_status(
+        &self,
+        cluster: Cluster,
+        signature: &str,
+        module: Arc<PlaidModule>,
+    ) -> PollOutcome {
+        let params = (
+            json!([signature]),
+            json!({ "searchTransactionHistory": false }),
+        );
+        let rpc_request = JsonRpcRequest::new(RpcMethods::GetSignatureStatuses, Some(params));
+
+        let response = match self.execute_rpc_call(cluster, rpc_request, module).await {
+            Ok(response) => response,
+            Err(e) => {
+                warn!("Status poll for {signature} errored: {e:?}.");
+                return PollOutcome::Error;
+            }
+        };
+        let parsed = match serde_json::from_str::<SolanaRpcResponse>(&response) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                return PollOutcome::Done(ConfirmOutcome::Error(format!(
+                    "failed to parse status response: {e}"
+                )))
+            }
+        };
+
+        let statuses: StatusesResult = match parse_rpc_response(parsed) {
+            Ok(statuses) => statuses,
+            Err(e) => {
+                return PollOutcome::Done(ConfirmOutcome::Error(format!(
+                    "failed to parse statuses: {e:?}"
+                )))
+            }
+        };
+
+        match statuses.value.first().cloned().flatten() {
+            Some(status) => status.classify(),
+            // Signature not in the status cache yet — the transaction may
+            // still be propagating. Keep polling.
+            None => PollOutcome::Pending,
+        }
     }
 }
 

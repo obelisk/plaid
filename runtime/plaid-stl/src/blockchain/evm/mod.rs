@@ -7,9 +7,9 @@ pub use utils::{parse_basic_rpc_response, parse_detailed_rpc_response, EvmError}
 
 use crate::{
     blockchain::evm::types::{
-        BasicRpcResponse, BlockTag, ChainId, DetailedRpcResponse, EstimateGasRequest,
-        EthCallRequest, GetAddressMetadataRequest, GetBlockRequest, GetFeeHistoryRequest,
-        GetGasPriceRequest, GetLogsRequest, GetTransactionRequest,
+        BasicRpcResponse, BlockTag, ChainId, ConfirmTransactionRequest, DetailedRpcResponse,
+        EstimateGasRequest, EthCallRequest, GetAddressMetadataRequest, GetBlockRequest,
+        GetFeeHistoryRequest, GetGasPriceRequest, GetLogsRequest, GetTransactionRequest,
     },
     PlaidFunctionError,
 };
@@ -121,6 +121,46 @@ pub fn send_raw_transaction(
 
     let res = unsafe {
         blockchain_evm_send_raw_transaction(
+            request.as_ptr(),
+            request.len(),
+            return_buffer.as_mut_ptr(),
+            BASIC_RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match std::str::from_utf8(&return_buffer) {
+        Ok(x) => Ok(serde_json::from_str(x).map_err(|_| PlaidFunctionError::InternalApiError)?),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
+/// Ask the runtime to broadcast a signed transaction and re-invoke this rule
+/// with a logback once the transaction reaches a terminal status.
+///
+/// Returns the transaction hash immediately; the confirmation arrives later
+/// as a logback with source `LogSource::System(SystemFunction::ConfirmTransaction)`
+/// and payload [`types::ConfirmTransactionResult`], echoing the tx hash for
+/// correlation.
+pub fn confirm_transaction(
+    request: ConfirmTransactionRequest,
+) -> Result<String, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(blockchain_evm, confirm_transaction);
+    }
+
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    let mut return_buffer = vec![0; BASIC_RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        blockchain_evm_confirm_transaction(
             request.as_ptr(),
             request.len(),
             return_buffer.as_mut_ptr(),

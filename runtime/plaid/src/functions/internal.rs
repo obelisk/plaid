@@ -1,6 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
+use tokio_util::sync::CancellationToken;
 use wasmer::{AsStoreRef, FunctionEnvMut, WasmPtr};
 
 use crate::{
@@ -10,6 +11,45 @@ use crate::{
 };
 
 use super::{calculate_max_buffer_size, safely_get_memory, safely_write_data_back, FunctionErrors};
+use crossbeam_channel::Sender;
+
+/// Handle that lets a detached API task dispatch a logback to
+/// the rule that requested it.
+///
+/// The calling rule is required to have an unlimited logback budget (checked
+/// by the callback macro in `functions/api.rs`), so the callback message is
+/// stamped `Unlimited` and the rule can chain logbacks freely from the
+/// callback.
+#[derive(Clone)]
+pub struct CallbackContext {
+    /// Available for immediate logback during normal operation; `None` during shutdown drain.
+    pub immediate_sender: Option<Sender<Message>>,
+    /// Sender for delayed logbacks (`delay > 0`), and for immediate logbacks
+    /// coerced during shutdown.
+    pub delayed_log_sender: Sender<DelayedMessage>,
+    /// Shared with async tasks; set when shutdown begins.
+    pub cancellation_token: CancellationToken,
+}
+
+impl CallbackContext {
+    /// Send a logback to the rule whose log type is `type_`. The resulting
+    /// invocation has an unlimited logback budget.
+    pub fn send_logback(
+        &self,
+        type_: String,
+        payload: Vec<u8>,
+        source: LogSource,
+    ) -> Result<(), FunctionErrors> {
+        let msg = Message::new(type_, payload, source, LogbacksAllowed::Unlimited);
+        route_logback(
+            msg,
+            &self.immediate_sender,
+            &self.delayed_log_sender,
+            &self.cancellation_token,
+            0,
+        )
+    }
+}
 
 /// Implement a way for a module to print to env_logger
 pub fn print_debug_string(env: FunctionEnvMut<Env>, log_buffer: WasmPtr<u8>, log_buffer_size: u32) {
@@ -214,17 +254,32 @@ pub fn log_back_detailed(
     };
 
     let msg = Message::new(type_, log, LogSource::Logback(name), assigned_budget);
-    match dispatch_logback(env.data(), delay, msg) {
+    match route_logback(
+        msg,
+        &env_data.immediate_sender,
+        &env_data.delayed_log_sender,
+        &env_data.cancellation_token,
+        delay,
+    ) {
         Ok(()) => 0,
         Err(e) => e as i32,
     }
 }
 
-fn dispatch_logback(env: &Env, delay: u32, msg: Message) -> Result<(), FunctionErrors> {
-    let cancelled = env.cancellation_token.is_cancelled();
+/// Route a logback message to the executor: immediate queue when not
+/// shutting down and `delay == 0`, delayed queue otherwise. Shared by the
+/// guest host functions and [`CallbackContext`].
+fn route_logback(
+    msg: Message,
+    immediate_sender: &Option<Sender<Message>>,
+    delayed_log_sender: &Sender<DelayedMessage>,
+    cancellation_token: &CancellationToken,
+    delay: u32,
+) -> Result<(), FunctionErrors> {
+    let cancelled = cancellation_token.is_cancelled();
 
     // Happy path: not shutting down, zero delay, immediate sender available.
-    if let (false, 0, Some(sender)) = (cancelled, delay, &env.immediate_sender) {
+    if let (false, 0, Some(sender)) = (cancelled, delay, immediate_sender) {
         if let Err(e) = sender.try_send(msg) {
             let err = e.to_string();
             let source = e.into_inner().source;
@@ -241,10 +296,7 @@ fn dispatch_logback(env: &Env, delay: u32, msg: Message) -> Result<(), FunctionE
     }
 
     let actual_delay = std::cmp::max(delay as u64, 1);
-    if let Err(e) = env
-        .delayed_log_sender
-        .try_send(DelayedMessage::new(actual_delay, msg))
-    {
+    if let Err(e) = delayed_log_sender.try_send(DelayedMessage::new(actual_delay, msg)) {
         let err = e.to_string();
         let source = e.into_inner().message.source;
         error!("Delayed logback dispatch from {source} failed; message dropped. Error: {err}");

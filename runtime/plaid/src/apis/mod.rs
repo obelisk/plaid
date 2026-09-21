@@ -155,6 +155,18 @@ impl From<BlockchainError> for ApiError {
     }
 }
 
+impl From<plaid_stl::blockchain::evm::EvmError> for ApiError {
+    fn from(e: plaid_stl::blockchain::evm::EvmError) -> Self {
+        ApiError::BlockchainError(BlockchainError::Evm(e))
+    }
+}
+
+impl From<plaid_stl::blockchain::solana::SolanaError> for ApiError {
+    fn from(e: plaid_stl::blockchain::solana::SolanaError) -> Self {
+        ApiError::BlockchainError(BlockchainError::Solana(e))
+    }
+}
+
 #[cfg(feature = "aws")]
 impl From<S3Errors> for ApiError {
     fn from(e: S3Errors) -> Self {

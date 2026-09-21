@@ -11,6 +11,7 @@ use memory::*;
 
 pub use api::is_known_api_function;
 use api::to_api_function;
+pub use internal::CallbackContext;
 use wasmer::{Exports, Function, FunctionEnv, Module, Store};
 
 use crate::executor::Env;

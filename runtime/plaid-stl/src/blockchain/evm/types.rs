@@ -3,6 +3,7 @@ use std::{
     str::FromStr,
 };
 
+use crate::blockchain::ConfirmOutcome;
 use serde::{de, Deserialize, Serialize};
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -170,10 +171,28 @@ pub struct TransactionReceipt {
 }
 
 /// Represents the statuses a tx on chain can have
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum TransactionStatus {
     Success,
     Failure,
+}
+
+impl Display for TransactionStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TransactionStatus::Success => write!(f, "success"),
+            TransactionStatus::Failure => write!(f, "failure"),
+        }
+    }
+}
+
+impl From<TransactionStatus> for ConfirmOutcome {
+    fn from(status: TransactionStatus) -> Self {
+        match status {
+            TransactionStatus::Success => ConfirmOutcome::Success,
+            TransactionStatus::Failure => ConfirmOutcome::Failure,
+        }
+    }
 }
 
 fn deserialize_transaction_status<'de, D>(deserializer: D) -> Result<TransactionStatus, D::Error>
@@ -220,6 +239,89 @@ pub struct SendRawTransactionRequest {
     pub chain_id: ChainId,
     /// The signed transaction data
     pub signed_tx: String,
+}
+
+/// Request structure for asking the runtime to broadcast a transaction and
+/// re-invoke the rule with a logback once the transaction reaches a terminal
+/// status.
+///
+/// The poll/timeout knobs are required on the wire and populated by the STL
+/// wrapper, but the runtime never trusts them: it clamps them into sane
+/// bounds after parsing, since a module can be built against a modified STL
+/// or issue the host call by hand.
+#[derive(Deserialize, Serialize)]
+pub struct ConfirmTransactionRequest {
+    /// The chain ID to send the transaction to
+    pub chain_id: ChainId,
+    /// The signed transaction data
+    pub signed_tx: String,
+    /// Opaque data echoed back in the logback payload
+    pub additional_data: Option<serde_json::Value>,
+    /// Poll cadence in ms.
+    pub poll_interval_ms: u64,
+    /// Give up and report an error logback after this long, in seconds.
+    pub timeout_secs: u64,
+}
+
+impl ConfirmTransactionRequest {
+    /// Create a new builder for `ConfirmTransactionRequest`
+    pub fn builder(
+        signed_tx: impl Into<String>,
+        chain_id: impl Into<ChainId>,
+    ) -> ConfirmTransactionRequestBuilder {
+        ConfirmTransactionRequestBuilder::new(signed_tx, chain_id)
+    }
+}
+
+/// Builder for `ConfirmTransactionRequest`
+pub struct ConfirmTransactionRequestBuilder {
+    chain_id: ChainId,
+    signed_tx: String,
+    additional_data: Option<serde_json::Value>,
+    poll_interval_ms: u64,
+    timeout_secs: u64,
+}
+
+impl ConfirmTransactionRequestBuilder {
+    fn new(signed_tx: impl Into<String>, chain_id: impl Into<ChainId>) -> Self {
+        Self {
+            chain_id: chain_id.into(),
+            signed_tx: signed_tx.into(),
+            additional_data: None,
+            poll_interval_ms: 3000,
+            timeout_secs: 600,
+        }
+    }
+
+    /// Attach opaque data to be echoed back in the logback payload
+    pub fn additional_data(mut self, additional_data: serde_json::Value) -> Self {
+        self.additional_data = Some(additional_data);
+        self
+    }
+
+    /// Set the poll cadence in ms (clamped by the runtime to [500, 10_000])
+    pub fn poll_interval_ms(mut self, poll_interval_ms: u64) -> Self {
+        self.poll_interval_ms = poll_interval_ms;
+        self
+    }
+
+    /// Set the confirmation timeout in seconds (clamped by the runtime to
+    /// [1, 3_600])
+    pub fn timeout_secs(mut self, timeout_secs: u64) -> Self {
+        self.timeout_secs = timeout_secs;
+        self
+    }
+
+    /// Build the `ConfirmTransactionRequest`
+    pub fn build(self) -> ConfirmTransactionRequest {
+        ConfirmTransactionRequest {
+            chain_id: self.chain_id,
+            signed_tx: self.signed_tx,
+            additional_data: self.additional_data,
+            poll_interval_ms: self.poll_interval_ms,
+            timeout_secs: self.timeout_secs,
+        }
+    }
 }
 
 /// Request structure for getting basic metadata about an address.

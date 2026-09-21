@@ -3,15 +3,9 @@ pub mod rpc;
 
 use crate::{
     apis::{
-        blockchain::{
-            common::{
-                node_selection::{
-                    selection_strategy_deserializer, NodeSelector, SelectionStrategy,
-                },
-                rpc::JsonRpcRequest,
-            },
-            evm::EvmError,
-            solana::SolanaError,
+        blockchain::common::{
+            node_selection::{selection_strategy_deserializer, NodeSelector, SelectionStrategy},
+            rpc::JsonRpcRequest,
         },
         ApiError,
     },
@@ -19,6 +13,7 @@ use crate::{
     parse_duration,
 };
 use http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
+use plaid_stl::blockchain::ConfirmOutcome;
 use reqwest::Client;
 use serde::{de, Deserialize, Serialize};
 use std::{
@@ -46,6 +41,8 @@ pub trait ChainFamily {
 pub struct NoOptions {}
 
 /// Errors common to all blockchain families, plus a chain-specific variant per family.
+/// The family variants carry the STL's parse error types, so response-parsing
+/// helpers (`parse_basic_rpc_response` etc.) convert into this error via `?`.
 #[derive(Debug)]
 pub enum BlockchainError {
     SerdeError(serde_json::Error),
@@ -60,8 +57,20 @@ pub enum BlockchainError {
         identifier: String,
     },
     AllNodesFailed,
-    Evm(EvmError),
-    Solana(SolanaError),
+    Evm(plaid_stl::blockchain::evm::EvmError),
+    Solana(plaid_stl::blockchain::solana::SolanaError),
+}
+
+impl From<plaid_stl::blockchain::evm::EvmError> for BlockchainError {
+    fn from(e: plaid_stl::blockchain::evm::EvmError) -> Self {
+        Self::Evm(e)
+    }
+}
+
+impl From<plaid_stl::blockchain::solana::SolanaError> for BlockchainError {
+    fn from(e: plaid_stl::blockchain::solana::SolanaError) -> Self {
+        Self::Solana(e)
+    }
 }
 
 impl BlockchainError {
@@ -75,6 +84,53 @@ impl BlockchainError {
         }
     }
 }
+
+/// Clamp bounds for guest-provided confirmation knobs. Security boundary:
+/// must live in the trusted runtime, not the STL.
+const MIN_POLL_INTERVAL_MS: u64 = 500;
+const MAX_POLL_INTERVAL_MS: u64 = 10_000;
+const MIN_TIMEOUT_SECS: u64 = 1;
+const MAX_TIMEOUT_SECS: u64 = 3_600;
+
+/// Validated polling knobs for a transaction-confirmation poller, clamped
+/// from guest-provided values. Shared by every chain family implementing
+/// `confirm_transaction`.
+#[derive(Debug, Clone, Copy)]
+pub struct PollerKnobs {
+    pub poll_interval: Duration,
+    pub timeout: Duration,
+}
+
+impl PollerKnobs {
+    /// Clamp guest-provided knobs into safe bounds.
+    pub fn from_guest(poll_interval_ms: u64, timeout_secs: u64) -> Self {
+        Self {
+            poll_interval: Duration::from_millis(
+                poll_interval_ms.clamp(MIN_POLL_INTERVAL_MS, MAX_POLL_INTERVAL_MS),
+            ),
+            timeout: Duration::from_secs(timeout_secs.clamp(MIN_TIMEOUT_SECS, MAX_TIMEOUT_SECS)),
+        }
+    }
+}
+
+/// Outcome of a single confirmation-status poll. Shared by every chain
+/// family implementing `confirm_transaction`.
+pub enum PollOutcome {
+    /// A terminal state was reached; the poller stops with this result.
+    Done(ConfirmOutcome),
+    /// The poll itself failed
+    Error,
+    /// The transaction is still pending (no receipt yet /
+    /// not yet durable).
+    Pending,
+}
+
+/// How many consecutive failed polls a confirmation poller tolerates before
+/// giving up with the last error. Poll errors are usually transient (rate
+/// limiting, node blips), so a few in a row are fine — but a persistent
+/// failure should surface promptly with its real cause rather than burn the
+/// whole timeout and report a generic "timed out".
+pub const MAX_CONSECUTIVE_POLL_ERRORS: u32 = 5;
 
 /// How a [`BlockchainClient`] routes RPC calls to a chain.
 ///

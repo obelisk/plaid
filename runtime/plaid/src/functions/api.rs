@@ -1,11 +1,110 @@
 use super::{safely_write_data_back, FunctionErrors};
 use crate::apis::ApiError;
 use crate::executor::Env;
-use crate::functions::{get_memory, safely_get_string};
+use crate::functions::{get_memory, internal::CallbackContext, safely_get_string};
+use plaid_stl::messages::LogbacksAllowed;
 use wasmer::{AsStoreRef, Function, FunctionEnv, FunctionEnvMut, Store, WasmPtr};
 
 const ALLOW_IN_TEST_MODE: bool = true;
 const DISALLOW_IN_TEST_MODE: bool = false;
+
+/// Macro to implement a function in a specific API's submodule, passing a
+/// [`CallbackContext`] so the implementation can dispatch logbacks from
+/// detached tasks.
+///
+/// Identical to [`impl_new_sub_module_function_with_error_buffer`] except
+/// that the generated `_impl` builds a `CallbackContext` from the environment
+/// and calls `sub_module.$function_name(&params, module, callback).await`.
+macro_rules! impl_new_sub_module_function_with_callback {
+    ($api:ident, $sub_module:ident, $function_name:ident, $allow_in_test_mode:expr) => {
+        paste::item! {
+            fn [< $api _ $sub_module _ $function_name _impl>] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> Result<i32, FunctionErrors> {
+                let store = env.as_store_ref();
+                let env_data = env.data();
+
+                // Log function call by module
+                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $sub_module _ $function_name >]).to_string(), env_data.module.test_mode) {
+                    error!("Logging system is not working!!: {e:?}");
+                    return Err(FunctionErrors::InternalApiError);
+                }
+
+                // Disallow this function call from continuing if the module is in test mode
+                if !$allow_in_test_mode && env_data.module.test_mode {
+                    return Err(FunctionErrors::TestMode);
+                }
+
+                // Callback APIs re-invoke the rule via logback, so the rule
+                // must be running with an unlimited logback budget. This
+                // guarantees the callback invocation can chain logbacks
+                // without any configuration coupling.
+                if env_data.message.logbacks_allowed != LogbacksAllowed::Unlimited {
+                    error!("{} attempted to call {} without an unlimited logback budget", env_data.module.name, stringify!([< $api _ $sub_module _ $function_name >]));
+                    return Err(FunctionErrors::LogbackBudgetExhausted);
+                }
+
+                let memory_view = match get_memory(&env, &store) {
+                    Ok(memory_view) => memory_view,
+                    Err(e) => {
+                        error!("{}: Memory error in {}: {:?}", env_data.module.name, stringify!([< $api _ $sub_module _ $function_name >]), e);
+                        return Err(FunctionErrors::InternalApiError);
+                    },
+                };
+
+                let params = safely_get_string(&memory_view, params_buffer, params_buffer_len)?;
+
+                // Check that the API is configured
+                let api = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
+                let sub_module = api.$sub_module.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
+
+                // Clone the APIs Arc to use in Tokio closure
+                let env_api = env_data.api.clone();
+                let module = env_data.module.clone();
+                let callback = super::api::CallbackContext {
+                    immediate_sender: env_data.immediate_sender.clone(),
+                    delayed_log_sender: env_data.delayed_log_sender.clone(),
+                    cancellation_token: env_data.cancellation_token.clone(),
+                };
+                // Run the function on the Tokio runtime and wait for the result
+                let result = env_api.runtime.block_on(async move {
+                    sub_module.$function_name(&params, module, callback).await
+                });
+
+                let return_data = match result {
+                    Ok(return_data) => return_data,
+                    Err(ApiError::TestMode) => {
+                        return Err(FunctionErrors::TestMode);
+                    }
+                    Err(e) => {
+                        error!("{} experienced an issue calling {}: {:?}", env_data.module.name, stringify!([< $api _ $sub_module _ $function_name >]), e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+                };
+
+                if return_data.len() > ret_buffer_len as usize {
+                    error!("{} could not receive data from {} because it provided a return buffer that was too small. Got {}, needed {}", env_data.module.name,  stringify!([< $api _ $sub_module _ $function_name >]), ret_buffer_len, return_data.len());
+                    trace!("Data: {}", return_data);
+                    return Err(FunctionErrors::ReturnBufferTooSmall);
+                }
+
+                safely_write_data_back(&memory_view, return_data.as_bytes(), ret_buffer, ret_buffer_len)?;
+
+                trace!("{} is calling {} got a return data length of {}", env_data.module.name,  stringify!([< $api _ $sub_module _ $function_name >]), return_data.len());
+                return Ok(return_data.len() as i32);
+            }
+
+            fn [< $api _ $sub_module _ $function_name >] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> i32 {
+                let name = env.data().module.name.clone();
+                match [< $api _ $sub_module _ $function_name _impl>](env, params_buffer, params_buffer_len, ret_buffer, ret_buffer_len) {
+                    Ok(res) => res,
+                    Err(e) => {
+                        error!("{name} experienced an issue calling {}: {e:?}",  stringify!([< $api _ $sub_module _ $function_name >]));
+                        e as i32
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Macro to implement a new host function in a given API. The function does not fill a data buffer with returned values.
 ///
@@ -640,6 +739,12 @@ impl_new_sub_module_function_with_error_buffer!(
     send_raw_transaction,
     DISALLOW_IN_TEST_MODE
 );
+impl_new_sub_module_function_with_callback!(
+    blockchain,
+    evm,
+    confirm_transaction,
+    DISALLOW_IN_TEST_MODE
+);
 impl_new_sub_module_function_with_error_buffer!(
     blockchain,
     evm,
@@ -663,6 +768,12 @@ impl_new_sub_module_function_with_error_buffer!(
     blockchain,
     solana,
     send_signed_transaction,
+    DISALLOW_IN_TEST_MODE
+);
+impl_new_sub_module_function_with_callback!(
+    blockchain,
+    solana,
+    confirm_transaction,
     DISALLOW_IN_TEST_MODE
 );
 impl_new_sub_module_function_with_error_buffer!(
@@ -1010,6 +1121,7 @@ define_api_functions! {
         "blockchain_evm_get_transaction_by_hash" => blockchain_evm_get_transaction_by_hash,
         "blockchain_evm_get_transaction_receipt" => blockchain_evm_get_transaction_receipt,
         "blockchain_evm_send_raw_transaction"    => blockchain_evm_send_raw_transaction,
+        "blockchain_evm_confirm_transaction"     => blockchain_evm_confirm_transaction,
         "blockchain_evm_get_transaction_count"   => blockchain_evm_get_transaction_count,
         "blockchain_evm_get_balance"             => blockchain_evm_get_balance,
         "blockchain_evm_estimate_gas"            => blockchain_evm_estimate_gas,
@@ -1020,6 +1132,7 @@ define_api_functions! {
         "blockchain_evm_get_fee_history"         => blockchain_evm_get_fee_history,
 
         "blockchain_solana_send_signed_transaction"        => blockchain_solana_send_signed_transaction,
+        "blockchain_solana_confirm_transaction"            => blockchain_solana_confirm_transaction,
         "blockchain_solana_get_balance"                    => blockchain_solana_get_balance,
         "blockchain_solana_get_account_info"               => blockchain_solana_get_account_info,
         "blockchain_solana_get_slot"                       => blockchain_solana_get_slot,
