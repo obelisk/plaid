@@ -22,6 +22,10 @@ pub fn insert_batch(env: FunctionEnvMut<Env>, items_buf: WasmPtr<u8>, items_buf_
         return FunctionErrors::ApiNotConfigured as i32;
     };
 
+    let Some(counter) = env_data.module.storage_current.clone() else {
+        return FunctionErrors::ApiNotConfigured as i32;
+    };
+
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
@@ -41,7 +45,7 @@ pub fn insert_batch(env: FunctionEnvMut<Env>, items_buf: WasmPtr<u8>, items_buf_
         env_data.module.name.clone(),
         items_json,
         env_data.module.storage_limit.clone(),
-        env_data.module.storage_current.clone(),
+        counter,
     ) {
         Ok(code) => code,
         Err(e) => e as i32,
