@@ -4,7 +4,10 @@ use async_trait::async_trait;
 
 use serde::Deserialize;
 
-use sled::Db;
+use sled::{
+    transaction::{ConflictableTransactionError, TransactionError},
+    Db,
+};
 
 use super::{Item, StorageError, StorageProvider};
 
@@ -33,15 +36,29 @@ impl StorageProvider for Sled {
         true
     }
 
-    async fn insert_batch(
-        &self,
-        _namespace: String,
-        _items: Vec<Item>,
-    ) -> Result<(), StorageError> {
-        Err(StorageError::Unimplemented {
-            operation: "insert_batch".to_string(),
-            provider: "Sled".to_string(),
+    async fn insert_batch(&self, namespace: String, items: Vec<Item>) -> Result<(), StorageError> {
+        let tree = self
+            .db
+            .open_tree(namespace.as_bytes())
+            .map_err(|_| StorageError::Access(format!("Could not open Sled tree {namespace}")))?;
+
+        // Sled transactions are atomic and serializable: either every insert in the closure
+        // is applied or none of them are. If a concurrent transaction conflicts with this
+        // one, sled automatically retries the closure, so it must only borrow its captures.
+        tree.transaction(|tx: &sled::transaction::TransactionalTree| {
+            for item in items.iter() {
+                tx.insert(item.key.as_bytes(), item.value.as_slice())?;
+            }
+            Ok::<(), ConflictableTransactionError<()>>(())
         })
+        .map_err(|e| match e {
+            TransactionError::Abort(_) => {
+                StorageError::BatchWriteError("Transaction aborted".to_string())
+            }
+            TransactionError::Storage(e) => StorageError::BatchWriteError(e.to_string()),
+        })?;
+
+        Ok(())
     }
 
     async fn insert(
