@@ -837,6 +837,8 @@ define_api_functions! {
         "print_debug_string"       => super::internal::print_debug_string,
         "storage_insert"           => super::storage::insert,
         "storage_insert_shared"    => super::storage::insert_shared,
+        "storage_insert_batch"     => super::storage::insert_batch,
+        "storage_insert_batch_shared" => super::storage::insert_batch_shared,
         "storage_get"              => super::storage::get,
         "storage_get_shared"       => super::storage::get_shared,
         "storage_delete"           => super::storage::delete,
