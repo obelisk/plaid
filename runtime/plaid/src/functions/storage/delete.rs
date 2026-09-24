@@ -21,6 +21,10 @@ pub fn delete(
         return FunctionErrors::ApiNotConfigured as i32;
     };
 
+    let Some(counter) = env_data.module.storage_current.clone() else {
+        return FunctionErrors::ApiNotConfigured as i32;
+    };
+
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
@@ -43,7 +47,7 @@ pub fn delete(
         data_buffer,
         data_buffer_len,
         env_data.module.storage_limit.clone(),
-        env_data.module.storage_current.clone(),
+        counter,
     )
 }
 
