@@ -17,10 +17,28 @@ pub enum ObjectFetchMode {
 /// Represents the response returned from the `get_object` function.
 #[derive(Deserialize, Serialize, Debug)]
 pub enum GetObjectResponse {
-    /// The full object data.
-    Object(Vec<u8>),
+    /// The full object data, along with metadata captured from the
+    /// same `GetObject` response.
+    Object {
+        object: Vec<u8>,
+        object_metadata: ObjectMetadata,
+    },
     /// A presigned URI for accessing the object.
     PresignedUri(String),
+}
+
+/// Metadata about an object, returned alongside its data by `get_object`.
+#[derive(Deserialize, Serialize, Debug)]
+pub struct ObjectMetadata {
+    /// The object's ETag as returned by S3. Pass this to
+    /// [`ObjectMatchCondition::Matches`] to update the object only if it has
+    /// not changed since this fetch. Note that for objects uploaded via
+    /// multipart upload the ETag is not an MD5 checksum of the content, but it
+    /// remains valid for conditional-put matching.
+    pub etag: String,
+    /// The version ID of the object fetched, if the bucket has versioning
+    /// enabled.
+    pub version_id: Option<String>,
 }
 
 /// Request payload for retrieving an object from S3.

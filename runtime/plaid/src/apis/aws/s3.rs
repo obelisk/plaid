@@ -11,7 +11,7 @@ use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client};
 use plaid_stl::aws::s3::{
     DeleteObjectRequest, GetObjectRequest, GetObjectResponse, ListObjectVersionsRequest,
     ListObjectVersionsResponse, ListObjectsRequest, ListObjectsResponse, ObjectAttributes,
-    ObjectMatchCondition, ObjectVersion, PutObjectRequest, PutObjectTagRequest,
+    ObjectMatchCondition, ObjectMetadata, ObjectVersion, PutObjectRequest, PutObjectTagRequest,
 };
 use serde::Deserialize;
 
@@ -35,6 +35,7 @@ pub enum S3Errors {
     BytesStreamError(aws_sdk_s3::primitives::ByteStreamError),
     PresignError(aws_sdk_s3::presigning::PresigningConfigError),
     NoContentLengthReturned,
+    NoEtagReturned,
     ObjectTooLarge,
 }
 
@@ -336,7 +337,13 @@ impl S3 {
                 .map_err(S3Errors::BytesStreamError)?
                 .into_bytes();
 
-            GetObjectResponse::Object(object_bytes.to_vec())
+            GetObjectResponse::Object {
+                object: object_bytes.to_vec(),
+                object_metadata: ObjectMetadata {
+                    etag: response.e_tag.ok_or_else(|| S3Errors::NoEtagReturned)?,
+                    version_id: response.version_id,
+                },
+            }
         };
 
         let serialized = serde_json::to_string(&response).map_err(|_| ApiError::BadRequest)?;
