@@ -1,12 +1,12 @@
 use aws_sdk_sqs::Client;
-use crossbeam_channel::Sender;
 use lru::LruCache;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use serde::Deserialize;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use crate::{executor::Message, get_aws_sdk_config, parse_duration, AwsAuthentication};
+use crate::{executor::MessageSender, get_aws_sdk_config, parse_duration, AwsAuthentication};
+use crate::executor::Message;
 
 #[derive(Deserialize)]
 pub struct SQSConfig {
@@ -53,8 +53,9 @@ pub struct SQS {
     pub config: SQSConfig,
     /// API client
     client: Client,
-    /// The logger used to send logs to the execution system for processing
-    logger: Sender<Message>,
+    /// The logger used to send logs to the execution system for processing.
+    /// Routes each log to the pool dedicated to its log type, when one exists.
+    logger: MessageSender,
     /// SQS sends messages 'at least once' so we use this cache to dedup messages
     /// An LRU where we store the UUIDs of messages that we have already seen and sent into the logging system.
     /// This LRU has a limited capacity: when this is reached, the least-recently-used item is removed to make space for a new insertion.
@@ -63,7 +64,7 @@ pub struct SQS {
 }
 
 impl SQS {
-    pub async fn new(config: SQSConfig, logger: Sender<Message>) -> Self {
+    pub async fn new(config: SQSConfig, logger: MessageSender) -> Self {
         let sdk_config = get_aws_sdk_config(&config.authentication).await;
         let client = aws_sdk_sqs::Client::new(&sdk_config);
 

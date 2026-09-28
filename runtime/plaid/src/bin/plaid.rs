@@ -395,8 +395,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // For convenience, keep a sender for the general channel, so that we can quickly clone it around
-    let log_sender = exec_thread_pools.general_pool.sender.clone();
+    // For convenience, keep a routing sender so that we can quickly clone it around.
+    // It routes each message to the pool dedicated to its log type, when one exists.
+    let log_sender = exec_thread_pools.message_sender();
 
     info!("Starting logging subsystem");
     let (els, logging_handler) = Logger::start(config.logging);
@@ -580,7 +581,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api = Arc::new(api);
 
     // Workers upgrade this weak ref per message so idle threads hold no Message senders.
-    let immediate_dispatch = Arc::new(exec_thread_pools.general_pool.sender.clone());
+    // Routing-aware so immediate logbacks honor dedicated thread pools.
+    let immediate_dispatch = Arc::new(exec_thread_pools.message_sender());
 
     // Create the executor that will handle all the logs that come in and immediate
     // requests for handling some configured get requests.
@@ -635,7 +637,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .and(with(modules_by_name.clone()))
                 .and(with(get_cache.clone()))
                 .and(with(webhook_server_get_log_sender.clone()))
-                .and_then(|webhook: String, query: HashMap<String, String>, body, headers: HeaderMap, webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: crossbeam_channel::Sender<Message>| async move {
+                .and_then(|webhook: String, query: HashMap<String, String>, body, headers: HeaderMap, webhook_config: Arc<WebhookServerConfiguration>, modules: Arc<HashMap<String, Arc<PlaidModule>>>, get_cache: Arc<RwLock<HashMap<String, (u64, String)>>>, log_sender: MessageSender| async move {
                     if let Some(webhook_configuration) = webhook_config.webhooks.get(&webhook) {
                         match &webhook_configuration.get_mode {
                             // Note that CacheMode is elided here as there is no caching for static data

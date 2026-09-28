@@ -1,9 +1,11 @@
 use crossbeam_channel::bounded;
 use plaid::apis::github::Authentication;
+use plaid::executor::MessageSender;
 use serde::Deserialize;
 
 use plaid::data::{get_and_process_dg_logs, github::*};
 
+use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
 
@@ -56,7 +58,7 @@ async fn main() {
 
     let (logger_tx, logger_rx) = bounded(2048);
 
-    let mut gh = Github::new(config, logger_tx, None).unwrap();
+    let mut gh = Github::new(config, MessageSender::new(logger_tx, HashMap::new()), None).unwrap();
 
     loop {
         //println!("Start of log group");
