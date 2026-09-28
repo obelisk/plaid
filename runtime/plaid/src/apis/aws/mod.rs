@@ -1,10 +1,12 @@
 use dynamodb::{DynamoDb, DynamoDbConfig};
+use identity_store::{IdentityStore, IdentityStoreConfig};
 use kms::{Kms, KmsConfig};
 use s3::{S3Config, S3};
 use serde::Deserialize;
 
 pub mod dynamodb;
 pub mod dynamodb_utils;
+pub mod identity_store;
 pub mod kms;
 pub mod s3;
 
@@ -17,6 +19,8 @@ pub struct AwsConfig {
     pub s3: Option<S3Config>,
     /// Configuration for the DynamoDB API
     pub dynamodb: Option<DynamoDbConfig>,
+    /// Configuration for the Identity Store API
+    pub identity_store: Option<IdentityStoreConfig>,
 }
 
 /// Contains all AWS services that Plaid implements APIs for
@@ -27,6 +31,8 @@ pub struct Aws {
     pub s3: Option<S3>,
     /// AWS DynamoDB Service
     pub dynamodb: Option<DynamoDb>,
+    /// AWS Identity Store Service
+    pub identity_store: Option<IdentityStore>,
 }
 
 impl Aws {
@@ -43,7 +49,16 @@ impl Aws {
             Some(conf) => Some(DynamoDb::new(conf).await),
             None => None,
         };
+        let identity_store = match config.identity_store {
+            Some(conf) => Some(IdentityStore::new(conf).await),
+            None => None,
+        };
 
-        Aws { kms, s3, dynamodb }
+        Aws {
+            kms,
+            s3,
+            dynamodb,
+            identity_store,
+        }
     }
 }
