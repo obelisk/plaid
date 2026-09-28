@@ -1,7 +1,10 @@
 mod selector;
 
-use crate::{executor::Message, logging::Logger, parse_duration};
-use crossbeam_channel::Sender;
+use crate::{
+    executor::{Message, MessageSender},
+    logging::Logger,
+    parse_duration,
+};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -187,7 +190,7 @@ pub struct WebsocketGenerator {
 /// # Returns
 /// A new `WebsocketGenerator` instance.
 impl WebsocketGenerator {
-    pub fn new(config: WebSocketDataGenerator, sender: Sender<Message>, logger: Logger) -> Self {
+    pub fn new(config: WebSocketDataGenerator, sender: MessageSender, logger: Logger) -> Self {
         let clients = config
             .websockets
             .into_iter()
@@ -268,7 +271,8 @@ struct WebSocketClient {
     /// The configuration of the client
     configuration: WebSocket,
     /// The sending channel to send logs to the executor.
-    sender: Sender<Message>,
+    /// Routes each log to the pool dedicated to its log type, when one exists.
+    sender: MessageSender,
     /// The name of the WebSocket as defined in the configuration.
     name: String,
     /// Manages a list of URI entries and handles the selection and retry logic for connection attempts.
@@ -286,7 +290,7 @@ impl WebSocketClient {
     /// with the provided parameters.
     fn new(
         configuration: WebSocket,
-        sender: Sender<Message>,
+        sender: MessageSender,
         name: String,
         max_message_size: usize,
         max_frame_size: usize,

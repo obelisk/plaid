@@ -1,6 +1,6 @@
 use chrono::Utc;
 use cron::Schedule;
-use crossbeam_channel::{Sender, TrySendError};
+use crossbeam_channel::TrySendError;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use serde::Deserialize;
 use std::str::FromStr;
@@ -10,7 +10,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::executor::Message;
+use crate::executor::{Message, MessageSender};
 
 #[derive(Deserialize)]
 /// Defines the list of interval jobs to be processed
@@ -107,14 +107,14 @@ impl std::cmp::Ord for ScheduledJob {
 pub struct Interval {
     /// The original configuration. Not currently included but may be useful in the future
     // config: IntervalConfig,
-    /// Sends logs to executor
-    sender: Sender<Message>,
+    /// Sends logs to executor, routing them to the pool dedicated to their log type
+    sender: MessageSender,
     /// Stores jobs while they are waiting to be processed
     job_heap: BinaryHeap<Reverse<ScheduledJob>>,
 }
 
 impl Interval {
-    pub fn new(config: IntervalConfig, log_sender: Sender<Message>) -> Self {
+    pub fn new(config: IntervalConfig, log_sender: MessageSender) -> Self {
         let mut job_heap = BinaryHeap::new();
 
         // Initialize job heap
