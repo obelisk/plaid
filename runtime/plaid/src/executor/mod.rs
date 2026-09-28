@@ -15,7 +15,7 @@ use crate::storage::Storage;
 
 use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
 use metrics::ModuleExecutionMetrics;
-use thread_pools::ExecutionThreadPools;
+pub use thread_pools::{ExecutionThreadPools, MessageSender};
 use tokio::sync::oneshot::Sender as OneShotSender;
 use tokio_util::sync::CancellationToken;
 
@@ -214,8 +214,9 @@ pub struct Env {
     pub invalid_response_status: Option<u32>,
     // Context about error encountered by the module during its execution
     pub execution_error_context: Option<String>,
-    /// Available for immediate logback during normal operation; `None` during shutdown drain.
-    pub immediate_sender: Option<Sender<Message>>,
+    /// Available for immediate logback during normal operation; `None` during shutdown.
+    /// Routes messages to the pool dedicated to their log type, when one exists.
+    pub immediate_sender: Option<MessageSender>,
     /// Sender for delayed logbacks (`delay > 0`), and for immediate logbacks coerced
     /// during shutdown. Messages are persisted by the internal logback listener and
     /// injected into the executor queue once their delay elapses.
@@ -226,7 +227,9 @@ pub struct Env {
 
 /// The executor that processes messages
 pub struct Executor {
-    thread_pools: ExecutionThreadPools,
+    /// Routes every inbound message to the pool dedicated to its log type,
+    /// when one exists, or to the general pool otherwise.
+    message_sender: MessageSender,
 }
 
 /// Join handles for executor worker threads.
@@ -341,7 +344,7 @@ fn prepare_for_execution(
     cache: Option<Arc<Cache>>,
     els: Logger,
     response: Option<String>,
-    immediate_sender: Option<Sender<Message>>,
+    immediate_sender: Option<MessageSender>,
     delayed_log_sender: Sender<DelayedMessage>,
     cancellation_token: CancellationToken,
 ) -> Result<(Store, Instance, TypedFunction<(), i32>, FunctionEnv<Env>), ExecutorError> {
@@ -492,7 +495,7 @@ fn process_message_with_module(
     els: Logger,
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
     module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
-    immediate_sender: Option<Sender<Message>>,
+    immediate_sender: Option<MessageSender>,
     delayed_log_sender: Sender<DelayedMessage>,
     cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
@@ -617,10 +620,14 @@ fn process_message_with_module(
     }
 
     if let Some(sender) = message.response_sender {
-        let response = env.as_ref(&store).response.clone().map(|body| ResponseMessage {
-            code: env.as_ref(&store).response_status.unwrap_or(200),
-            body,
-        });
+        let response = env
+            .as_ref(&store)
+            .response
+            .clone()
+            .map(|body| ResponseMessage {
+                code: env.as_ref(&store).response_status.unwrap_or(200),
+                body,
+            });
         if sender.send(response).is_err() {
             error!(
                 "[{}] was servicing a request but sending the response failed!",
@@ -650,7 +657,7 @@ fn execution_loop(
     els: Logger,
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
     module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
-    immediate_sender: Weak<Sender<Message>>,
+    immediate_sender: Weak<MessageSender>,
     delayed_log_sender: Sender<DelayedMessage>,
     cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
@@ -748,7 +755,7 @@ impl Executor {
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
         module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
-        immediate_sender: Weak<Sender<Message>>,
+        immediate_sender: Weak<MessageSender>,
         delayed_log_sender: Sender<DelayedMessage>,
         cancellation_token: CancellationToken,
     ) -> (Self, ExecutorThreads) {
@@ -824,7 +831,8 @@ impl Executor {
                 thread_handles.push(handle);
             }
         }
-        (Self { thread_pools }, ExecutorThreads { thread_handles })
+        let message_sender = thread_pools.message_sender();
+        (Self { message_sender }, ExecutorThreads { thread_handles })
     }
 
     /// Execute a message coming from a webhook, by sending it to the appropriate thread pool.
@@ -834,16 +842,6 @@ impl Executor {
         self: &Self,
         message: Message,
     ) -> Result<(), TrySendError<Message>> {
-        let sender = match self.thread_pools.dedicated_pools.get(&message.type_) {
-            Some(tp) => {
-                // We have a dedicated thread pool for this type: send the log to that channel
-                &tp.sender
-            }
-            None => {
-                // We have no dedicated thread pool for this type: just send to the general one.
-                &self.thread_pools.general_pool.sender
-            }
-        };
-        sender.try_send(message)
+        self.message_sender.try_send(message)
     }
 }

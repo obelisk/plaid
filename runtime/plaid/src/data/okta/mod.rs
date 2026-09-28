@@ -1,5 +1,9 @@
-use crate::{data::DataGeneratorLog, executor::Message, metrics::MetricsHandle, parse_duration};
-use crossbeam_channel::Sender;
+use crate::{
+    data::DataGeneratorLog,
+    executor::{Message, MessageSender},
+    metrics::MetricsHandle,
+    parse_duration,
+};
 use lru::LruCache;
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
 use prometheus::IntCounter;
@@ -121,8 +125,9 @@ pub struct Okta {
     config: OktaConfig,
     /// Timestamp of the last seen log we have processed
     last_seen: OffsetDateTime,
-    /// Sending channel used to send logs into the execution system
-    logger: Sender<Message>,
+    /// Sending channel used to send logs into the execution system.
+    /// Routes each log to the pool dedicated to its log type, when one exists.
+    logger: MessageSender,
     /// An LRU where we store the UUIDs of Okta logs that we have already seen and sent into the logging system.
     /// This, together with some overlapping queries to the Okta API, helps us ensure that all Okta logs are processed
     /// exactly once.
@@ -136,7 +141,7 @@ pub struct Okta {
 impl Okta {
     pub fn new(
         config: OktaConfig,
-        logger: Sender<Message>,
+        logger: MessageSender,
         metrics: Option<Arc<MetricsHandle>>,
     ) -> Self {
         let client = reqwest::Client::builder()

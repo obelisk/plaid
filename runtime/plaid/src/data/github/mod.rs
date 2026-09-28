@@ -1,9 +1,8 @@
 use crate::apis::github::{build_github_clients, Authentication};
 use crate::apis::ApiError;
-use crate::executor::Message;
+use crate::executor::{Message, MessageSender};
 use crate::metrics::MetricsHandle;
 use crate::parse_duration;
-use crossbeam_channel::Sender;
 use lru::LruCache;
 use octocrab::{self, Octocrab};
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
@@ -173,8 +172,9 @@ pub struct Github {
     config: GithubConfig,
     /// Timestamp of the last seen log we have processed
     last_seen: OffsetDateTime,
-    /// The logger used to send logs to the execution system for processing
-    logger: Sender<Message>,
+    /// The logger used to send logs to the execution system for processing.
+    /// Routes each log to the pool dedicated to its log type, when one exists.
+    logger: MessageSender,
     /// An LRU where we store the UUIDs of logs that we have already seen and sent into the logging system.
     /// This, together with some overlapping queries to the GH API, helps us ensure that all logs are processed
     /// exactly once.
@@ -188,7 +188,7 @@ pub struct Github {
 impl Github {
     pub fn new(
         config: GithubConfig,
-        logger: Sender<Message>,
+        logger: MessageSender,
         metrics: Option<Arc<MetricsHandle>>,
     ) -> Result<Self, ApiError> {
         let default_client_auth: HashMap<String, Authentication> = [(

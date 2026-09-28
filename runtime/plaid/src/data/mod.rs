@@ -8,7 +8,7 @@ mod websocket;
 
 use crate::{
     apis::ApiError,
-    executor::Message,
+    executor::MessageSender,
     logging::Logger,
     metrics::MetricsHandle,
     storage::{Storage, StorageError},
@@ -82,7 +82,7 @@ impl std::error::Error for DataError {}
 impl DataInternal {
     async fn new(
         config: DataConfig,
-        logger: Sender<Message>,
+        logger: MessageSender,
         storage: Arc<Storage>,
         els: Logger,
         metrics: Option<Arc<MetricsHandle>>,
@@ -134,7 +134,7 @@ impl DataInternal {
 impl Data {
     pub async fn start(
         config: DataConfig,
-        sender: Sender<Message>,
+        sender: MessageSender,
         storage: Arc<Storage>,
         els: Logger,
         roles: &InstanceRoles,

@@ -1,3 +1,4 @@
+use crate::executor::MessageSender;
 use crate::{executor::Message, storage::Storage};
 
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
@@ -71,14 +72,16 @@ impl DelayedLogPersister {
 }
 
 pub struct Internal {
-    sender: Sender<Message>,
+    /// Sends fired logbacks to the executor, routing them to the pool
+    /// dedicated to their log type
+    sender: MessageSender,
     internal_sender: Sender<DelayedMessage>,
     storage: Arc<Storage>,
 }
 
 impl Internal {
     pub fn new(
-        log_sender: Sender<Message>,
+        log_sender: MessageSender,
         storage: Arc<Storage>,
     ) -> Result<(Self, DelayedLogPersister), DataError> {
         let (internal_sender, receiver) = bounded(CHANNEL_CAPACITY);

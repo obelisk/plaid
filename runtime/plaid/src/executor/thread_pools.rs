@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use crossbeam_channel::{bounded, Receiver, Sender};
+use crossbeam_channel::{bounded, Receiver, SendError, Sender, TrySendError};
 
 use crate::config::ExecutorConfig;
 
@@ -24,6 +25,49 @@ impl ThreadPool {
             sender,
             receiver,
         }
+    }
+}
+
+/// A routing-aware sender for messages entering the executor. Every data
+/// generator (interval jobs, logbacks, Github, Okta, SQS, WebSockets) should
+/// hold one of these instead of a raw `Sender<Message>` so that messages are
+/// always routed to the pool dedicated to their log type, when one exists.
+#[derive(Clone)]
+pub struct MessageSender {
+    general_sender: Sender<Message>,
+    dedicated_senders: Arc<HashMap<String, Sender<Message>>>,
+}
+
+impl MessageSender {
+    pub fn new(
+        general_sender: Sender<Message>,
+        dedicated_senders: HashMap<String, Sender<Message>>,
+    ) -> Self {
+        Self {
+            general_sender,
+            dedicated_senders: Arc::new(dedicated_senders),
+        }
+    }
+
+    /// The sender for the pool dedicated to `log_type`, if one exists, or the
+    /// general pool otherwise.
+    fn sender_for(&self, log_type: &str) -> &Sender<Message> {
+        match self.dedicated_senders.get(log_type) {
+            Some(sender) => sender,
+            None => &self.general_sender,
+        }
+    }
+
+    /// Send a message to the pool dedicated to its log type, if one exists, or
+    /// to the general pool otherwise. Blocks if the destination queue is full.
+    pub fn send(&self, message: Message) -> Result<(), SendError<Message>> {
+        self.sender_for(&message.type_).send(message)
+    }
+
+    /// Try to send a message to the pool dedicated to its log type, if one
+    /// exists, or to the general pool otherwise.
+    pub fn try_send(&self, message: Message) -> Result<(), TrySendError<Message>> {
+        self.sender_for(&message.type_).try_send(message)
     }
 }
 
@@ -60,5 +104,16 @@ impl ExecutionThreadPools {
             ),
             dedicated_pools,
         }
+    }
+
+    /// A routing-aware sender that routes each message to the pool dedicated to
+    /// its log type, if one exists, or to the general pool otherwise.
+    pub fn message_sender(&self) -> MessageSender {
+        let dedicated_senders = self
+            .dedicated_pools
+            .iter()
+            .map(|(log_type, tp)| (log_type.clone(), tp.sender.clone()))
+            .collect();
+        MessageSender::new(self.general_pool.sender.clone(), dedicated_senders)
     }
 }
