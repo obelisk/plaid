@@ -11,7 +11,7 @@ use aws_sdk_s3::{presigning::PresigningConfig, primitives::ByteStream, Client};
 use plaid_stl::aws::s3::{
     DeleteObjectRequest, GetObjectRequest, GetObjectResponse, ListObjectVersionsRequest,
     ListObjectVersionsResponse, ListObjectsRequest, ListObjectsResponse, ObjectAttributes,
-    ObjectVersion, PutObjectRequest, PutObjectTagRequest,
+    ObjectMatchCondition, ObjectMetadata, ObjectVersion, PutObjectRequest, PutObjectTagRequest,
 };
 use serde::Deserialize;
 
@@ -35,6 +35,7 @@ pub enum S3Errors {
     BytesStreamError(aws_sdk_s3::primitives::ByteStreamError),
     PresignError(aws_sdk_s3::presigning::PresigningConfigError),
     NoContentLengthReturned,
+    NoEtagReturned,
     ObjectTooLarge,
 }
 
@@ -336,7 +337,13 @@ impl S3 {
                 .map_err(S3Errors::BytesStreamError)?
                 .into_bytes();
 
-            GetObjectResponse::Object(object_bytes.to_vec())
+            GetObjectResponse::Object {
+                object: object_bytes.to_vec(),
+                object_metadata: ObjectMetadata {
+                    etag: response.e_tag.ok_or_else(|| S3Errors::NoEtagReturned)?,
+                    version_id: response.version_id,
+                },
+            }
         };
 
         let serialized = serde_json::to_string(&response).map_err(|_| ApiError::BadRequest)?;
@@ -368,11 +375,21 @@ impl S3 {
             request.object_key, request.bucket_id
         );
 
-        self.client
+        let mut request_builder = self
+            .client
             .put_object()
             .bucket(request.bucket_id)
             .body(ByteStream::from(request.object))
-            .key(request.object_key)
+            .key(request.object_key);
+
+        if let Some(condition) = request.match_condition {
+            request_builder = match condition {
+                ObjectMatchCondition::Matches(etag) => request_builder.if_match(etag),
+                ObjectMatchCondition::NotMatches(etag) => request_builder.if_none_match(etag),
+            };
+        }
+
+        request_builder
             .send()
             .await
             .map_err(S3Errors::PutObjectError)?;

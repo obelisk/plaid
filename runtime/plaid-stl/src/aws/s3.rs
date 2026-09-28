@@ -17,10 +17,28 @@ pub enum ObjectFetchMode {
 /// Represents the response returned from the `get_object` function.
 #[derive(Deserialize, Serialize, Debug)]
 pub enum GetObjectResponse {
-    /// The full object data.
-    Object(Vec<u8>),
+    /// The full object data, along with metadata captured from the
+    /// same `GetObject` response.
+    Object {
+        object: Vec<u8>,
+        object_metadata: ObjectMetadata,
+    },
     /// A presigned URI for accessing the object.
     PresignedUri(String),
+}
+
+/// Metadata about an object, returned alongside its data by `get_object`.
+#[derive(Deserialize, Serialize, Debug)]
+pub struct ObjectMetadata {
+    /// The object's ETag as returned by S3. Pass this to
+    /// [`ObjectMatchCondition::Matches`] to update the object only if it has
+    /// not changed since this fetch. Note that for objects uploaded via
+    /// multipart upload the ETag is not an MD5 checksum of the content, but it
+    /// remains valid for conditional-put matching.
+    pub etag: String,
+    /// The version ID of the object fetched, if the bucket has versioning
+    /// enabled.
+    pub version_id: Option<String>,
 }
 
 /// Request payload for retrieving an object from S3.
@@ -63,6 +81,20 @@ pub struct PutObjectRequest {
     pub object: Vec<u8>,
     /// Object key for which the `PUT` action was initiated.
     pub object_key: String,
+    pub match_condition: Option<ObjectMatchCondition>,
+}
+
+/// A precondition for a conditional `PUT` operation, evaluated by S3 before the
+/// object is written.
+///
+/// - `Matches(etag)` — only write if the object's current ETag matches the given
+///   value (concurrency-safe read-modify-write; S3 returns `412 Precondition Failed` on mismatch).
+/// - `NotMatches(etag)` — only write if the object's current ETag does not match
+///   the given value; pass `"*"` to write only if the key does not already exist.
+#[derive(Deserialize, Serialize)]
+pub enum ObjectMatchCondition {
+    Matches(String),
+    NotMatches(String),
 }
 
 /// Request payload for tagging an object in S3.
@@ -234,6 +266,53 @@ pub fn put_object(
         bucket_id: bucket_id.to_string(),
         object,
         object_key: object_key.to_string(),
+        match_condition: None,
+    };
+
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::InternalApiError)?;
+
+    let res = unsafe { aws_s3_put_object(request.as_ptr(), request.len()) };
+
+    if res < 0 {
+        Err(res.into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Uploads an object to S3 only if the specified [`ObjectMatchCondition`] holds.
+///
+/// The condition is evaluated atomically by S3 against the object's current ETag:
+/// - [`ObjectMatchCondition::Matches`] uploads only if the existing object's ETag matches,
+///   enabling concurrency-safe read-modify-write cycles.
+/// - [`ObjectMatchCondition::NotMatches`] uploads only if the existing object's ETag does not
+///   match; passing `"*"` uploads only if the key does not already exist.
+///
+/// If the condition fails, S3 returns `412 Precondition Failed`, which is surfaced
+/// as a [`PlaidFunctionError`].
+///
+/// # Arguments
+///
+/// * `bucket_id` - The name of the bucket to upload the object to.
+/// * `object_key` - The key to identify the object within the bucket.
+/// * `object` - The binary data of the object to upload.
+/// * `match_condition` - The precondition that must hold for the upload to succeed.
+pub fn put_object_conditionally(
+    bucket_id: &str,
+    object_key: &str,
+    object: Vec<u8>,
+    match_condition: ObjectMatchCondition,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(aws_s3, put_object);
+    }
+
+    let request = PutObjectRequest {
+        bucket_id: bucket_id.to_string(),
+        object,
+        object_key: object_key.to_string(),
+        match_condition: Some(match_condition),
     };
 
     let request =
