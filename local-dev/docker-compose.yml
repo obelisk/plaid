@@ -1,8 +1,27 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: plaid_local
+      POSTGRES_USER: plaid_admin
+      POSTGRES_PASSWORD: plaid_admin
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "plaid_admin", "-d", "plaid_local"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   plaid:
     build:
       context: ..
       dockerfile: local-dev/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8080:8080"
       - "8081:8081"

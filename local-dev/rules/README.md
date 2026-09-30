@@ -28,6 +28,7 @@ curl -s -X POST http://localhost:8080/webhook/echo \
 | [rate-limiter](rate-limiter/) | Cache-based per-key rate limiting | `cache::insert/get`, response entrypoint | Intermediate |
 | [request-logger](request-logger/) | Inspect HTTP headers and metadata | `get_headers`, `get_query_params` | Intermediate |
 | [todo-api](todo-api/) | Full CRUD API backed by storage | `storage::*`, `list_keys` | Intermediate |
+| [postgres-reader](postgres-reader/) | Parameterized reads from PostgreSQL | `postgres::query` | Intermediate |
 | [http-proxy](http-proxy/) | Outbound HTTP requests | `network::make_named_request` | Advanced |
 | [error-handling](error-handling/) | Production error patterns | `thiserror`, `set_error_context` | Advanced |
 
@@ -109,6 +110,19 @@ curl -s -X POST http://localhost:8080/webhook/proxy \
 curl -s -X POST http://localhost:8080/webhook/proxy \
   -H "Content-Type: application/json" \
   -d '{"method": "post", "body": "{\"hello\": \"world\"}"}'
+```
+
+### postgres-reader
+```sh
+curl -s -X POST http://localhost:8080/webhook/postgres \
+  -H "Content-Type: application/json" \
+  -d '{"minimum_id": 1, "active": true}'
+
+# POST webhooks enqueue work and return an empty body. Read the rule response:
+curl -s http://localhost:8080/webhook/postgres
+
+# Or run the assertion-based smoke test from local-dev/:
+./scripts/test-postgres.sh
 ```
 
 ### error-handling

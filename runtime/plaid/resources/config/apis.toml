@@ -387,3 +387,38 @@ rules_and_actions = { "some_rule.wasm"  = ["Encrypt", "Decrypt"] }
 # [apis.gcp.bigquery.schemas."<some-dataset>"."table1"]
 # column1 = "string"
 # colum2 = "float"
+
+# =============================================================================
+# PostgreSQL read-query API (requires the `postgres` runtime feature)
+# =============================================================================
+# The TLS stanza is mandatory. `verify_full` verifies both the trusted chain and
+# the configured host name; its settings override any sslmode in the secret DSN.
+# Password/SCRAM credentials may remain in the secret-interpolated DSN. Client
+# certificate authentication is optional and requires both PEM fields.
+#
+# [apis.postgres.connections.corporate]
+# connection_string = "{plaid-secret{postgres-corporate-url}}"
+# allowed_rules = ["postgres_reader.wasm"]
+# max_pool_size = 4
+# pool_timeout_ms = 1000
+# connection_timeout_ms = 3000
+# recycle_timeout_ms = 1000
+# total_timeout_ms = 7000
+# statement_timeout_ms = 5000
+# lock_timeout_ms = 1000
+# idle_transaction_timeout_ms = 5000
+# max_query_size = 65536
+# max_parameters = 100
+# max_rows = 1000
+# max_response_size = 1048576
+#
+# [apis.postgres.connections.corporate.tls]
+# mode = "verify_full"
+# use_system_roots = true
+# ca_certificates_pem = """{plaid-secret{postgres-corporate-ca}}"""
+# client_certificate_pem = """{plaid-secret{postgres-client-certificate}}"""
+# client_private_key_pem = """{plaid-secret{postgres-client-private-key}}"""
+#
+# Plaintext is accepted only when explicitly selected for local development:
+# [apis.postgres.connections.local.tls]
+# mode = "disable"
