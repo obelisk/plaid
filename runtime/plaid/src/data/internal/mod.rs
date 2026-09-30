@@ -1,22 +1,40 @@
 use crate::executor::MessageSender;
-use crate::{executor::Message, storage::Storage};
+use crate::{executor::Message, parse_duration, storage::Storage};
 
-use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
+use crossbeam_channel::TrySendError;
 
 use serde::{Deserialize, Serialize};
 
 use std::{
     cmp::Reverse,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use std::collections::BinaryHeap;
+
+use tokio::sync::mpsc;
 
 use super::DataError;
 
 const LOGBACK_NS: &str = "logback_internal";
 const CHANNEL_CAPACITY: usize = 4096;
+
+#[derive(Deserialize)]
+pub struct InternalConfig {
+    /// Maximum time to wait in between polls of the delayed-logback store,
+    /// in milliseconds. Also caps how far ahead the processor will sleep.
+    #[serde(deserialize_with = "parse_duration")]
+    pub maximum_poll_interval_ms: Duration,
+}
+
+impl Default for InternalConfig {
+    fn default() -> Self {
+        Self {
+            maximum_poll_interval_ms: Duration::from_secs(10),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct DelayedMessage {
@@ -50,24 +68,21 @@ impl std::cmp::Ord for DelayedMessage {
     }
 }
 
-/// Persists incoming delayed logbacks to storage. Holds no `Sender<Message>` so the
-/// perpetual listener task cannot keep executor ingress channels alive.
-#[derive(Clone)]
+/// Persists incoming delayed logbacks to storage as they arrive. Holds no
+/// `Sender<Message>` so the listener task cannot keep executor ingress channels alive.
+/// Owns the receiving end of the delayed-logback channel exclusively: it exits
+/// cleanly once every sender has been dropped.
 pub struct DelayedLogPersister {
-    receiver: Receiver<DelayedMessage>,
+    receiver: mpsc::Receiver<DelayedMessage>,
     storage: Arc<Storage>,
 }
 
 impl DelayedLogPersister {
-    pub async fn listen_for_incoming_logs(&self) {
-        while let Ok(log) = self.receiver.try_recv() {
+    /// Persist delayed logbacks as they arrive, until all senders are dropped.
+    pub async fn listen_for_incoming_logs(mut self) {
+        while let Some(log) = self.receiver.recv().await {
             persist_delayed_log(&self.storage, log).await;
         }
-    }
-
-    /// Drain any delayed logbacks still in the in-memory channel into storage.
-    pub async fn flush_pending(&self) {
-        self.listen_for_incoming_logs().await;
     }
 }
 
@@ -75,33 +90,46 @@ pub struct Internal {
     /// Sends fired logbacks to the executor, routing them to the pool
     /// dedicated to their log type
     sender: MessageSender,
-    internal_sender: Sender<DelayedMessage>,
+    internal_sender: mpsc::Sender<DelayedMessage>,
     storage: Arc<Storage>,
+    pub maximum_poll_interval: Duration,
 }
 
 impl Internal {
     pub fn new(
         log_sender: MessageSender,
         storage: Arc<Storage>,
+        maximum_poll_interval: Duration,
     ) -> Result<(Self, DelayedLogPersister), DataError> {
-        let (internal_sender, receiver) = bounded(CHANNEL_CAPACITY);
+        let (internal_sender, receiver) = mpsc::channel(CHANNEL_CAPACITY);
 
         Ok((
             Self {
                 sender: log_sender,
                 internal_sender,
                 storage: storage.clone(),
+                maximum_poll_interval,
             },
             DelayedLogPersister { receiver, storage },
         ))
     }
 
-    pub fn get_sender(&self) -> Sender<DelayedMessage> {
+    pub fn get_sender(&self) -> mpsc::Sender<DelayedMessage> {
         self.internal_sender.clone()
     }
 
-    pub async fn fetch_internal_logs(&mut self) -> Result<(), String> {
+    /// Drain all due delayed logbacks from storage into the executor.
+    ///
+    /// Returns the duration the caller should sleep before polling again:
+    /// the time until the next logback in storage is due, capped at the
+    /// configured poll interval. Also returned when nothing is pending, the
+    /// executor queue is full, or an error occurs.
+    pub async fn fetch_internal_logs(&mut self) -> Result<Duration, String> {
         let current_time = get_time();
+
+        // The sleep we will hand back to the caller. Defaults to the standard
+        // polling interval and is tightened below when a logback is due sooner.
+        let mut time_until_next_log = self.maximum_poll_interval;
 
         // Fill the heap with the content read from the DB.
         // This ensures that modifications which are made out-of-band to the DB are
@@ -117,9 +145,12 @@ impl Internal {
             let heap_top = &heap_top.0;
 
             if current_time < heap_top.delay {
+                // The top of the heap is the soonest-due logback: sleep exactly
+                // until it elapses (capped below, before returning).
+                time_until_next_log = Duration::from_secs(heap_top.delay - current_time);
                 info!(
                     "There are no logs that have elapsed their delay. Next log is in: {} seconds",
-                    heap_top.delay - current_time
+                    time_until_next_log.as_secs()
                 );
                 break;
             }
@@ -150,7 +181,7 @@ impl Internal {
         }
         debug!("Heap Size: {}", log_heap.len());
 
-        Ok(())
+        Ok(time_until_next_log.min(self.maximum_poll_interval))
     }
 }
 

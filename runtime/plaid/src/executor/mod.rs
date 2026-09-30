@@ -16,6 +16,7 @@ use crate::storage::Storage;
 use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
 use metrics::ModuleExecutionMetrics;
 pub use thread_pools::{ExecutionThreadPools, MessageSender};
+use tokio::sync::mpsc::Sender as AsyncSender;
 use tokio::sync::oneshot::Sender as OneShotSender;
 use tokio_util::sync::CancellationToken;
 
@@ -220,7 +221,7 @@ pub struct Env {
     /// Sender for delayed logbacks (`delay > 0`), and for immediate logbacks coerced
     /// during shutdown. Messages are persisted by the internal logback listener and
     /// injected into the executor queue once their delay elapses.
-    pub delayed_log_sender: Sender<DelayedMessage>,
+    pub delayed_log_sender: AsyncSender<DelayedMessage>,
     /// Shared with async tasks; set when shutdown begins.
     pub cancellation_token: CancellationToken,
 }
@@ -345,7 +346,7 @@ fn prepare_for_execution(
     els: Logger,
     response: Option<String>,
     immediate_sender: Option<MessageSender>,
-    delayed_log_sender: Sender<DelayedMessage>,
+    delayed_log_sender: AsyncSender<DelayedMessage>,
     cancellation_token: CancellationToken,
 ) -> Result<(Store, Instance, TypedFunction<(), i32>, FunctionEnv<Env>), ExecutorError> {
     // Prepare the structure for functions the module will use
@@ -496,7 +497,7 @@ fn process_message_with_module(
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
     module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
     immediate_sender: Option<MessageSender>,
-    delayed_log_sender: Sender<DelayedMessage>,
+    delayed_log_sender: AsyncSender<DelayedMessage>,
     cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
     // TODO @obelisk: This will quietly swallow locking errors on the persistent response
@@ -658,7 +659,7 @@ fn execution_loop(
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
     module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
     immediate_sender: Weak<MessageSender>,
-    delayed_log_sender: Sender<DelayedMessage>,
+    delayed_log_sender: AsyncSender<DelayedMessage>,
     cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
     loop {
@@ -756,7 +757,7 @@ impl Executor {
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
         module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
         immediate_sender: Weak<MessageSender>,
-        delayed_log_sender: Sender<DelayedMessage>,
+        delayed_log_sender: AsyncSender<DelayedMessage>,
         cancellation_token: CancellationToken,
     ) -> (Self, ExecutorThreads) {
         let mut thread_handles = Vec::new();

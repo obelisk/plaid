@@ -854,10 +854,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(executor);
     executor_threads.join();
 
-    // Persist any delayed logbacks still in the in-memory channel.
+    // Dropping the last delayed-logback sender closes the channel, letting the
+    // persister drain and exit on its own.
     info!("Flushing delayed logbacks to storage...");
-    delayed_log_persister.flush_pending().await;
     drop(delayed_log_sender);
+    if let Err(e) = delayed_log_persister.await {
+        error!("Delayed logback persister task failed during shutdown: {e}");
+    }
 
     // Performance loop exits the final sender disconnects.
     drop(performance_sender);
