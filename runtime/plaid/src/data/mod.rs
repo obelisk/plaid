@@ -8,6 +8,7 @@ mod websocket;
 
 use crate::{
     apis::ApiError,
+    data::internal::InternalConfig,
     executor::MessageSender,
     logging::Logger,
     metrics::MetricsHandle,
@@ -21,11 +22,12 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crossbeam_channel::Sender;
-
 use serde::Deserialize;
 use time::OffsetDateTime;
-use tokio::task::JoinSet;
+use tokio::{
+    sync::mpsc::Sender as AsyncSender,
+    task::{JoinHandle, JoinSet},
+};
 use tokio_util::sync::CancellationToken;
 
 pub use self::internal::{DelayedLogPersister, DelayedMessage};
@@ -44,6 +46,8 @@ pub struct DataConfig {
     #[cfg(feature = "aws")]
     sqs: Option<sqs::SQSConfig>,
     websocket: Option<websocket::WebSocketDataGenerator>,
+    #[serde(default)]
+    internal: InternalConfig,
 }
 
 struct DataInternal {
@@ -99,7 +103,11 @@ impl DataInternal {
             .okta
             .map(|okta| okta::Okta::new(okta, logger.clone(), metrics.clone()));
 
-        let (internal, persister) = internal::Internal::new(logger.clone(), storage.clone())?;
+        let (internal, persister) = internal::Internal::new(
+            logger.clone(),
+            storage.clone(),
+            config.internal.maximum_poll_interval_ms,
+        )?;
 
         let interval = config
             .interval
@@ -140,7 +148,7 @@ impl Data {
         roles: &InstanceRoles,
         cancellation_token: CancellationToken,
         metrics: Option<Arc<MetricsHandle>>,
-    ) -> Result<(Sender<DelayedMessage>, DelayedLogPersister, JoinSet<()>), DataError> {
+    ) -> Result<(AsyncSender<DelayedMessage>, JoinHandle<()>, JoinSet<()>), DataError> {
         let (mut di, delayed_log_persister) =
             DataInternal::new(config, sender, storage.clone(), els, metrics).await?;
 
@@ -279,48 +287,29 @@ impl Data {
             }
         }
 
-        // Spawns a listener for delayed logbacks.
-        //
-        // This can be improved upon with an async delayed message channel, but this
-        // models the current implementation so we will leave it for now and can revisit
-        // in a separate PR.
+        // Spawns a listener that persists delayed logbacks to storage as they
+        // arrive.
         let delayed_log_sender = di.internal.get_sender();
-        let persister = delayed_log_persister.clone();
-        let ct_clone = cancellation_token.clone();
-        join_set.spawn(async move {
-            let sleep_duration = Duration::from_secs(10);
-            loop {
-                if ct_clone.is_cancelled() {
-                    return;
-                }
-
-                persister.listen_for_incoming_logs().await;
-
-                tokio::select! {
-                    // Allow shutdown to interrupt the sleep immediately
-                    // instead of waiting for the polling interval.
-                    _ = ct_clone.cancelled() => {
-                        return;
-                    }
-
-                    _ = tokio::time::sleep(sleep_duration) => {}
-                }
-            }
-        });
+        let persister_handle = tokio::spawn(delayed_log_persister.listen_for_incoming_logs());
 
         // If running logbacks, start the internal processor.
         if roles.logbacks {
             let ct_clone = cancellation_token.clone();
             join_set.spawn(async move {
-                let sleep_duration = Duration::from_secs(10);
                 loop {
                     if ct_clone.is_cancelled() {
                         return;
                     }
 
-                    if let Err(e) = di.internal.fetch_internal_logs().await {
-                        error!("Internal Data Fetch Error: {e}");
-                    }
+                    // Sleep until the next persisted logback is due (capped
+                    // at the configured poll interval).
+                    let sleep_secs = match di.internal.fetch_internal_logs().await {
+                        Ok(secs) => secs,
+                        Err(e) => {
+                            error!("Internal Data Fetch Error: {e}");
+                            di.internal.maximum_poll_interval
+                        }
+                    };
 
                     tokio::select! {
                         // Allow shutdown to interrupt the sleep immediately
@@ -329,14 +318,14 @@ impl Data {
                             return;
                         }
 
-                        _ = tokio::time::sleep(sleep_duration) => {}
+                        _ = tokio::time::sleep(sleep_secs) => {}
                     }
                 }
             });
         }
 
         info!("Started Data Generators");
-        Ok((delayed_log_sender, delayed_log_persister, join_set))
+        Ok((delayed_log_sender, persister_handle, join_set))
     }
 }
 
