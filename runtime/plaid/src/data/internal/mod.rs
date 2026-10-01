@@ -1,5 +1,5 @@
 use crate::executor::MessageSender;
-use crate::{executor::Message, parse_duration, storage::Storage};
+use crate::{executor::Message, parse_non_zero_duration, storage::Storage};
 
 use crossbeam_channel::TrySendError;
 
@@ -24,7 +24,7 @@ const CHANNEL_CAPACITY: usize = 4096;
 pub struct InternalConfig {
     /// Maximum time to wait in between polls of the delayed-logback store,
     /// in milliseconds. Also caps how far ahead the processor will sleep.
-    #[serde(deserialize_with = "parse_duration")]
+    #[serde(deserialize_with = "parse_non_zero_duration")]
     pub maximum_poll_interval_ms: Duration,
 }
 
