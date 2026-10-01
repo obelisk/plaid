@@ -561,7 +561,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // This sender provides an internal route to sending logs. This is what
     // powers the logback functions.
-    let (delayed_log_sender, delayed_log_persister, mut dg_tasks) = Data::start(
+    let (delayed_log_sender, mut delayed_log_persister, mut dg_tasks) = Data::start(
         config.data,
         log_sender.clone(),
         internal_storage.clone(),
@@ -818,6 +818,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(result) = server_result {
                 log_join_result("webhook server", result);
             }
+        }
+
+        // Poll by reference so the handle stays owned here for the final
+        // drain-await after the executor threads have shut down.
+        _ = &mut delayed_log_persister => {
+            warn!("The delayed log persister exited before a shutdown signal was received")
         }
 
         dg_result = dg_tasks.join_next(), if !dg_tasks.is_empty() => {
