@@ -809,6 +809,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting servers, boot up complete");
     is_ready.store(true, Ordering::SeqCst);
 
+    // Set if the persister exits before shutdown. Winning the select below
+    // consumes the JoinHandle's output, so the final drain-await must be
+    // skipped: polling a completed JoinHandle again panics.
+    let mut persister_already_joined = false;
+
     // Block until SIGINT/SIGTERM, or until a server/data generator task exits unexpectedly.
     tokio::select! {
         _ = wait_for_shutdown_signal() => {}
@@ -820,10 +825,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Poll by reference so the handle stays owned here for the final
-        // drain-await after the executor threads have shut down.
-        _ = &mut delayed_log_persister => {
-            warn!("The delayed log persister exited before a shutdown signal was received")
+        // Poll by reference so the handle stays owned here, but note that a
+        // win here reads the task's output; the flag guards the final
+        // drain-await below against re-polling the completed handle.
+        result = &mut delayed_log_persister => {
+            persister_already_joined = true;
+            warn!("The delayed log persister exited before a shutdown signal was received");
+            log_join_result("delayed logback persister", result);
         }
 
         dg_result = dg_tasks.join_next(), if !dg_tasks.is_empty() => {
@@ -864,8 +872,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // persister drain and exit on its own.
     info!("Flushing delayed logbacks to storage...");
     drop(delayed_log_sender);
-    if let Err(e) = delayed_log_persister.await {
-        error!("Delayed logback persister task failed during shutdown: {e}");
+    if !persister_already_joined {
+        if let Err(e) = delayed_log_persister.await {
+            error!("Delayed logback persister task failed during shutdown: {e}");
+        }
     }
 
     // Performance loop exits the final sender disconnects.
