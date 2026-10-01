@@ -100,11 +100,14 @@ impl Default for InstanceRoles {
 }
 
 /// Custom parser to convert user provided duration (in milliseconds) to a `Duration`.
-/// Returns an error if deserialization to `u64` fails.
+/// Returns an error if deserialization to `u64` fails, or if a 0 ms duration is provided.
 fn parse_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
 where
     D: de::Deserializer<'de>,
 {
     let duration: u64 = de::Deserialize::deserialize(deserializer)?;
+    if duration == 0 {
+        return Err(de::Error::custom("Duration must be greater than 0"));
+    }
     Ok(Duration::from_millis(duration))
 }
