@@ -125,8 +125,6 @@ impl Internal {
     /// configured poll interval. Also returned when nothing is pending, the
     /// executor queue is full, or an error occurs.
     pub async fn fetch_internal_logs(&mut self) -> Result<Duration, String> {
-        let current_time = get_time();
-
         // The sleep we will hand back to the caller. Defaults to the standard
         // polling interval and is tightened below when a logback is due sooner.
         let mut time_until_next_log = self.maximum_poll_interval;
@@ -144,6 +142,7 @@ impl Internal {
         while let Some(heap_top) = log_heap.peek() {
             let heap_top = &heap_top.0;
 
+            let current_time = get_time();
             if current_time < heap_top.delay {
                 // The top of the heap is the soonest-due logback: sleep exactly
                 // until it elapses (capped below, before returning).
