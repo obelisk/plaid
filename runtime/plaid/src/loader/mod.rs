@@ -457,18 +457,23 @@ impl PlaidModule {
     }
 
     fn log_load_info(&self) {
-        let storage_current_bytes = self
-            .storage_current
-            .as_ref()
-            .map(|counter| *counter.read().unwrap())
-            .unwrap_or(0);
-        
+        let storage_info = match self.storage_limit {
+            LimitValue::Unlimited => "Unlimited".to_string(),
+            LimitValue::Limited(limit) => {
+                let storage_current_bytes = self
+                    .storage_current
+                    .as_ref()
+                    .map(|counter| *counter.read().unwrap())
+                    .unwrap_or(0);
+                format!("{storage_current_bytes}/{limit} bytes used")
+            }
+        };
+
         info!(
-            "Name: [{}] Computation Limit: [{}] Memory Limit: [{} pages] Storage: [{storage_current_bytes}/{} bytes used] Log Type: [{}]. Test Mode: [{}]",
+            "Name: [{}] Computation Limit: [{}] Memory Limit: [{} pages] Storage: [{storage_info}] Log Type: [{}]. Test Mode: [{}]",
             self.name,
             self.computation_limit,
             self.page_limit,
-            self.storage_limit,
             self.logtype,
             self.test_mode,
         );
@@ -522,7 +527,8 @@ const MAX_STORAGE_LOOKUP_CONCURRENCY: usize = 10;
 /// Concurrently populate each module's current storage byte usage from the backing store.
 ///
 /// Lookups run with bounded concurrency to avoid overwhelming the storage backend. Each byte count
-/// is written straight into its own module. Modules whose lookup fails are dropped (or the whole
+/// is written straight into its own module. Modules with unlimited storage are skipped since they
+/// never consult their byte count. Modules whose lookup fails are dropped (or the whole
 /// load panics) according to `config.panic_on_module_load_failure`.
 async fn populate_storage_sizes(
     modules: Vec<PlaidModule>,
@@ -535,6 +541,10 @@ async fn populate_storage_sizes(
             let Some(counter) = &module.storage_current else {
                 return Some(module)
             };
+
+            if module.storage_limit == LimitValue::Unlimited {
+                return Some(module)
+            }
 
             match storage
                 .get_namespace_byte_size(&module.name)
