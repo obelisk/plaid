@@ -130,6 +130,11 @@ log_type = "test_graceful_shutdown"
 headers = []
 logbacks_allowed = "Unlimited"
 
+[webhooks."internal".webhooks."testasync"]
+log_type = "test_async"
+logbacks_allowed = "Unlimited"
+headers = []
+
 # End webhooks for tests
 
 # Additional webhook examples

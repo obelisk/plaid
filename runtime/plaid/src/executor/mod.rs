@@ -3,6 +3,7 @@ pub mod thread_pools;
 
 use crate::apis::Api;
 
+use crate::async_ops::TicketRegistry;
 use crate::cache::Cache;
 use crate::data::DelayedMessage;
 use crate::functions::{
@@ -221,6 +222,9 @@ pub struct Env {
     /// during shutdown. Messages are persisted by the internal logback listener and
     /// injected into the executor queue once their delay elapses.
     pub delayed_log_sender: Sender<DelayedMessage>,
+    /// The async ticket registry, if the ticket system is enabled. Powers
+    /// the `async_spawn` / `ticket_*` host functions.
+    pub ticket_registry: Option<Arc<TicketRegistry>>,
     /// Shared with async tasks; set when shutdown begins.
     pub cancellation_token: CancellationToken,
 }
@@ -346,6 +350,7 @@ fn prepare_for_execution(
     response: Option<String>,
     immediate_sender: Option<MessageSender>,
     delayed_log_sender: Sender<DelayedMessage>,
+    ticket_registry: Option<Arc<TicketRegistry>>,
     cancellation_token: CancellationToken,
 ) -> Result<(Store, Instance, TypedFunction<(), i32>, FunctionEnv<Env>), ExecutorError> {
     // Prepare the structure for functions the module will use
@@ -370,6 +375,7 @@ fn prepare_for_execution(
         execution_error_context: None,
         immediate_sender,
         delayed_log_sender,
+        ticket_registry,
         cancellation_token,
     };
 
@@ -497,6 +503,7 @@ fn process_message_with_module(
     module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
     immediate_sender: Option<MessageSender>,
     delayed_log_sender: Sender<DelayedMessage>,
+    ticket_registry: Option<Arc<TicketRegistry>>,
     cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
     // TODO @obelisk: This will quietly swallow locking errors on the persistent response
@@ -515,6 +522,7 @@ fn process_message_with_module(
         persistent_response,
         immediate_sender,
         delayed_log_sender,
+        ticket_registry,
         cancellation_token,
     ) {
         Ok((store, instance, ep, env)) => (store, instance, ep, env),
@@ -659,6 +667,7 @@ fn execution_loop(
     module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
     immediate_sender: Weak<MessageSender>,
     delayed_log_sender: Sender<DelayedMessage>,
+    ticket_registry: Option<Arc<TicketRegistry>>,
     cancellation_token: CancellationToken,
 ) -> Result<(), ExecutorError> {
     loop {
@@ -691,6 +700,7 @@ fn execution_loop(
                     module_execution_metrics.clone(),
                     immediate_sender.clone(),
                     delayed_log_sender.clone(),
+                    ticket_registry.clone(),
                     cancellation_token.clone(),
                 )?;
             }
@@ -708,6 +718,7 @@ fn execution_loop(
                         module_execution_metrics.clone(),
                         immediate_sender.clone(),
                         delayed_log_sender.clone(),
+                        ticket_registry.clone(),
                         cancellation_token.clone(),
                     )?;
                 }
@@ -757,6 +768,7 @@ impl Executor {
         module_execution_metrics: Option<Arc<ModuleExecutionMetrics>>,
         immediate_sender: Weak<MessageSender>,
         delayed_log_sender: Sender<DelayedMessage>,
+        ticket_registry: Option<Arc<TicketRegistry>>,
         cancellation_token: CancellationToken,
     ) -> (Self, ExecutorThreads) {
         let mut thread_handles = Vec::new();
@@ -774,6 +786,7 @@ impl Executor {
             let module_execution_metrics = module_execution_metrics.clone();
             let immediate_sender = immediate_sender.clone();
             let delayed_log_sender = delayed_log_sender.clone();
+            let ticket_registry = ticket_registry.clone();
             let cancellation_token = cancellation_token.clone();
             let handle = thread::spawn(move || {
                 if let Err(e) = execution_loop(
@@ -787,6 +800,7 @@ impl Executor {
                     module_execution_metrics.clone(),
                     immediate_sender.clone(),
                     delayed_log_sender.clone(),
+                    ticket_registry.clone(),
                     cancellation_token.clone(),
                 ) {
                     error!("General execution thread {i} exited with error: {e}");
@@ -810,6 +824,7 @@ impl Executor {
                 let log_type = log_type.clone();
                 let immediate_sender = immediate_sender.clone();
                 let delayed_log_sender = delayed_log_sender.clone();
+                let ticket_registry = ticket_registry.clone();
                 let cancellation_token = cancellation_token.clone();
                 let handle = thread::spawn(move || {
                     if let Err(e) = execution_loop(
@@ -823,6 +838,7 @@ impl Executor {
                         module_execution_metrics.clone(),
                         immediate_sender.clone(),
                         delayed_log_sender.clone(),
+                        ticket_registry.clone(),
                         cancellation_token.clone(),
                     ) {
                         error!("{log_type} dedicated execution thread {i} exited with error: {e}");

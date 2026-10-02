@@ -1,0 +1,13 @@
+[package]
+name = "test_async"
+description = "Test rule that verifies the async ticket system: spawns an API call without blocking, and processes the result in a continuation handler."
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plaid_stl = { path = "../../../runtime/plaid-stl" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+crate-type = ["cdylib"]

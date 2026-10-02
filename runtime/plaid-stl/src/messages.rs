@@ -27,6 +27,9 @@ pub enum LogSource {
     WebhookPost(String),
     WebhookGet(String),
     Logback(String),
+    /// The completion of an async operation started by a rule via the
+    /// ticket system. The payload is the ticket ID in hex.
+    AsyncCompletion(String),
 }
 
 /// Represents how many logbacks can be triggered by the module that handles a message.
@@ -53,6 +56,7 @@ impl std::fmt::Display for LogSource {
             LogSource::WebhookPost(w) => write!(f, "webhookpost/{w}"),
             LogSource::WebhookGet(w) => write!(f, "webhookget/{w}"),
             LogSource::Logback(m) => write!(f, "logback/{m}"),
+            LogSource::AsyncCompletion(t) => write!(f, "asynccompletion/{t}"),
         }
     }
 }

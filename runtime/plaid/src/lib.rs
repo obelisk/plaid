@@ -9,6 +9,7 @@ use std::time::Duration;
 extern crate log;
 
 pub mod apis;
+pub mod async_ops;
 pub mod cache;
 pub mod config;
 pub mod cryptography;
@@ -20,6 +21,9 @@ pub mod logging;
 pub mod metrics;
 pub mod performance;
 pub mod storage;
+
+#[cfg(test)]
+pub mod tests;
 
 /// Defines methods to authenticate to AWS with
 #[cfg(feature = "aws")]

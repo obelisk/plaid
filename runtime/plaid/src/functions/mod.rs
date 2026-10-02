@@ -1,4 +1,5 @@
 mod api;
+mod async_ops;
 mod cache;
 mod internal;
 mod memory;
@@ -35,6 +36,9 @@ pub enum FunctionErrors {
     FailedToLogBack = -15,
     LogbackBudgetExhausted = -16,
     InvalidHttpResponseStatus = -17,
+    UnknownTicket = -18,
+    TooManyPendingTickets = -19,
+    AsyncStateTooLarge = -20,
 }
 
 #[derive(Debug)]
@@ -139,4 +143,13 @@ pub fn create_bindgen_externref_xform(mut store: &mut Store) -> Exports {
     );
 
     exports
+}
+
+/// Start the async ticket sweeper. Exposed so the main binary can launch it
+/// during startup and join the handle during shutdown.
+pub fn start_ticket_sweeper(
+    registry: std::sync::Arc<crate::async_ops::TicketRegistry>,
+    cancellation_token: tokio_util::sync::CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    async_ops::start_sweeper(registry, cancellation_token)
 }

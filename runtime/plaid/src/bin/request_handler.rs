@@ -64,6 +64,18 @@ async fn main() {
             },
         );
 
+    // The async route echoes the body back in both the response and the log
+    // so the test_async rule can verify the async ticket system's
+    // completion chain with real content.
+    let async_echo_route = warp::post()
+        .and(warp::path("async_echo"))
+        .and(warp::body::bytes())
+        .map(|body: warp::hyper::body::Bytes| {
+            let body_str = String::from_utf8(body.to_vec()).unwrap();
+            println!("{body_str} from /async_echo");
+            warp::reply::with_status(body_str, warp::http::StatusCode::OK)
+        });
+
     let cert = fs::read("/tmp/plaid_config/server.pem").expect("failed to read server.pem");
     let key = fs::read("/tmp/plaid_config/server.key").expect("failed to read server.key");
 
@@ -72,7 +84,8 @@ async fn main() {
         .or(cron_route)
         .or(mnr_vars_route)
         .or(mnr_headers_route)
-        .or(mnr_route);
+        .or(mnr_route)
+        .or(async_echo_route);
     warp::serve(routes)
         .tls()
         .cert(cert)
