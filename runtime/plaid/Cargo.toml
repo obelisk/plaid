@@ -13,8 +13,8 @@ aws = [
     "dep:aws-sdk-s3",
     "dep:aws-sdk-sqs",
 ]
-cranelift = ["wasmer/cranelift"]
-llvm = ["wasmer/llvm"]
+cranelift = ["wasmer/cranelift", "wasmer/experimental-async"]
+llvm = ["wasmer/llvm", "wasmer/experimental-async"]
 gcp = ["dep:gcloud-bigquery"]
 
 [dependencies]
@@ -86,8 +86,10 @@ uuid = { version = "1", features = ["v4"] }
 url = "2.5.2"
 urlencoding = "2.1.3"
 warp = { version = "0.3", features = ["tls"] }
-wasmer = { version = "7", default-features = false }
-wasmer-middlewares = "7"
+# Pinned exactly: the experimental-async API churns across 7.x releases.
+# Both crates must move in lockstep (wasmer-middlewares requires `=wasmer`).
+wasmer = { version = "=7.5.0", default-features = false }
+wasmer-middlewares = "=7.5.0"
 x509-parser = "0.18.0"
 thiserror = "2.0.17"
 pulldown-cmark = "0.13.0"

@@ -1,88 +1,42 @@
-use super::{safely_write_data_back, FunctionErrors};
+use super::{safely_get_string_async, safely_write_data_back_async, FunctionErrors};
 use crate::apis::ApiError;
 use crate::executor::Env;
-use crate::functions::{get_memory, safely_get_string};
-use wasmer::{AsStoreRef, Function, FunctionEnv, FunctionEnvMut, Store, WasmPtr};
+use wasmer::{AsyncFunctionEnvMut, Function, FunctionEnv, Store, WasmPtr};
 
 const ALLOW_IN_TEST_MODE: bool = true;
 const DISALLOW_IN_TEST_MODE: bool = false;
 
-/// Macro to implement a new host function in a given API. The function does not fill a data buffer with returned values.
+/// Macro to implement a new async host function in a given API. The function does not fill a data buffer with returned values.
 ///
-/// This macro generates two functions:
-/// - A private implementation function (`_impl`) that handles the actual logic:
-///   - Accessing and validating memory from the guest
-///   - Checking that the API is configured.
-///   - Running the function + returning the result (as an i32)
-/// - A public wrapper function that calls the implementation function and returns the result as an integer.
+/// This macro generates a single async host function that:
+/// - Accesses and validating memory from the guest (through a short-lived read guard)
+/// - Checks that the API is configured.
+/// - Awaits the function + returning the result (as an i32)
+///
+/// The function is registered with `Function::new_typed_with_env_async`, which
+/// means Wasmer parks the guest's stack while the host future is pending and
+/// resumes it with the result. The guest sees an ordinary synchronous call.
 ///
 /// # Parameters
 /// - `$api`: The name of the API (e.g., `github`).
 /// - `$function_name`: The name of the function to be implemented.
 ///
 /// # Error Handling
-/// The generated implementation function returns `FunctionErrors` in case of failures, which are then
-/// converted to int error codes by the wrapper function. These errors include:
+/// The generated function returns `Result<i32, FunctionErrors>` which is
+/// converted to an int error code by Wasmer's async host function machinery.
+/// These errors include:
 /// - `FunctionErrors::InternalApiError`: For internal API-related errors.
 /// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
 macro_rules! impl_new_function {
     ($api:ident, $function_name:ident, $allow_in_test_mode:expr) => {
         paste::item! {
-            fn [< $api _ $function_name _impl>] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> Result<i32, FunctionErrors> {
-                let store = env.as_store_ref();
-                let env_data = env.data();
-
-                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string(), env_data.module.test_mode) {
-                    error!("Logging system is not working!!: {:?}", e);
-                    return Err(FunctionErrors::InternalApiError);
-                }
-
-
-                // Disallow this function call from continuing if the module is in test mode
-                if !$allow_in_test_mode && env_data.module.test_mode {
-                    return Err(FunctionErrors::TestMode);
-                }
-
-                let memory_view = match get_memory(&env, &store) {
-                    Ok(memory_view) => memory_view,
-                    Err(e) => {
-                        error!("{}: Memory error in {}: {:?}", env_data.module.name, stringify!([< $api _ $function_name >]), e);
-                        return Err(FunctionErrors::InternalApiError);
-                    },
+            async fn [< $api _ $function_name >] (env: AsyncFunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> i32 {
+                // Snapshot the module name for error reporting (short guard).
+                let name = {
+                    let guard = env.read().await;
+                    guard.data().module.name.clone()
                 };
-
-                let params = safely_get_string(&memory_view, params_buffer, params_buffer_len)?;
-
-                // Check that the request API system is even configured.
-                // This is something like Okta, Slack, or GitHub
-                let api = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
-
-                // Clone the APIs Arc to use in Tokio closure
-                let env_api = env_data.api.clone();
-                let module = env_data.module.clone();
-                // Run the function on the Tokio runtime and wait for the result
-                let result = env_api.runtime.block_on(async move {
-                    api.$function_name(&params, module).await
-                });
-
-                let return_data = match result {
-                    Ok(return_data) => return_data,
-                    Err(ApiError::TestMode) => {
-                        return Err(FunctionErrors::TestMode);
-                    }
-                    Err(e) => {
-                        error!("{} experienced an issue calling {}: {:?}", env_data.module.name, stringify!([< $api _ $function_name >]), e);
-                        return Err(FunctionErrors::InternalApiError);
-                    }
-                };
-
-                trace!("{} is calling {} got a return data of {}", env_data.module.name, stringify!([< $api _ $function_name >]), return_data);
-                return Ok(return_data as i32);
-            }
-
-            fn [< $api _ $function_name >] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> i32 {
-                let name = env.data().module.name.clone();
-                match [< $api _ $function_name _impl>](env, params_buffer, params_buffer_len) {
+                match [< $api _ $function_name _impl >](&env, params_buffer, params_buffer_len).await {
                     Ok(res) => res,
                     Err(e) => {
                         error!("{} experienced an issue calling {}: {:?}", name, stringify!([< $api _ $function_name >]), e);
@@ -90,93 +44,94 @@ macro_rules! impl_new_function {
                     }
                 }
             }
+
+            async fn [< $api _ $function_name _impl >] (env: &AsyncFunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> Result<i32, FunctionErrors> {
+                // 1) Guard: log the call, check test mode, and snapshot the
+                //    handles we need (the Api Arc is a cheap clone). The guard
+                //    is dropped at the end of this block.
+                let (env_api, module) = {
+                    let guard = env.read().await;
+                    let env_data = guard.data();
+
+                    if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string(), env_data.module.test_mode) {
+                        error!("Logging system is not working!!: {:?}", e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+
+                    // Disallow this function call from continuing if the module is in test mode
+                    if !$allow_in_test_mode && env_data.module.test_mode {
+                        return Err(FunctionErrors::TestMode);
+                    }
+
+                    (env_data.api.clone(), env_data.module.clone())
+                };
+
+                // 2) Guard: read the params from guest memory (the helper
+                //    acquires and drops its own short-lived guard).
+                let params = safely_get_string_async(env, params_buffer, params_buffer_len).await?;
+
+                // Check that the request API system is even configured.
+                // This is something like Okta, Slack, or GitHub
+                let api = match env_api.$api.as_ref() {
+                    Some(api) => api,
+                    None => return Err(FunctionErrors::ApiNotConfigured),
+                };
+
+                // 3) NO guard held: the await below suspends the guest's stack
+                //    and the executor thread is free to run other guests.
+                let result = api.$function_name(&params, module.clone()).await;
+
+                // 4) Map the result exactly like the sync version did.
+                let return_data = match result {
+                    Ok(return_data) => return_data,
+                    Err(ApiError::TestMode) => {
+                        return Err(FunctionErrors::TestMode);
+                    }
+                    Err(e) => {
+                        error!("{} experienced an issue calling {}: {:?}", module.name, stringify!([< $api _ $function_name >]), e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+                };
+
+                trace!("{} is calling {} got a return data of {}", module.name, stringify!([< $api _ $function_name >]), return_data);
+                return Ok(return_data as i32);
+            }
         }
     }
 }
 
-/// Macro to implement a new host function in a given API.
+/// Macro to implement a new async host function in a given API.
 ///
-/// This macro generates two functions:
-/// - A private implementation function (`_impl`) that handles the actual logic:
-///   - Accessing and validating memory from the guest
-///   - Checking that the API is configured.
-///   - Running the function + returning the result and handling errors
-/// - A public wrapper function that calls the implementation function and returns the result as an integer.
+/// This macro generates a single async host function that:
+/// - Accesses and validating memory from the guest (through a short-lived read guard)
+/// - Checks that the API is configured.
+/// - Awaits the function + writes the result back into the guest's return buffer
+///
+/// The function is registered with `Function::new_typed_with_env_async`, which
+/// means Wasmer parks the guest's stack while the host future is pending and
+/// resumes it with the result. The guest sees an ordinary synchronous call.
 ///
 /// # Parameters
 /// - `$api`: The name of the API (e.g., `github`).
 /// - `$function_name`: The name of the function to be implemented.
 ///
 /// # Error Handling
-/// The generated implementation function returns `FunctionErrors` in case of failures, which are then
-/// converted to int error codes by the wrapper function. These errors include:
+/// The generated function returns `Result<i32, FunctionErrors>` which is
+/// converted to an int error code by Wasmer's async host function machinery.
+/// These errors include:
 /// - `FunctionErrors::InternalApiError`: For internal API-related errors.
 /// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
 /// - `FunctionErrors::ReturnBufferTooSmall`: If the provided return buffer is too small to hold the result.
 macro_rules! impl_new_function_with_error_buffer {
     ($api:ident, $function_name:ident, $allow_in_test_mode:expr) => {
         paste::item! {
-            fn [< $api _ $function_name _impl>] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> Result<i32, FunctionErrors> {
-                let store = env.as_store_ref();
-                let env_data = env.data();
-
-                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string(), env_data.module.test_mode) {
-                    error!("Logging system is not working!!: {:?}", e);
-                    return Err(FunctionErrors::InternalApiError);
-                }
-
-                // Disallow this function call from continuing if the module is in test mode
-                if !$allow_in_test_mode && env_data.module.test_mode {
-                    return Err(FunctionErrors::TestMode);
-                }
-
-                let memory_view = match get_memory(&env, &store) {
-                    Ok(memory_view) => memory_view,
-                    Err(e) => {
-                        error!("{}: Memory error in {}: {:?}", env_data.module.name, stringify!([< $api _ $function_name >]), e);
-                        return Err(FunctionErrors::InternalApiError);
-                    },
+            async fn [< $api _ $function_name >] (env: AsyncFunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> i32 {
+                // Snapshot the module name for error reporting (short guard).
+                let name = {
+                    let guard = env.read().await;
+                    guard.data().module.name.clone()
                 };
-
-                let params = safely_get_string(&memory_view, params_buffer, params_buffer_len)?;
-
-                // Check the requested API system is configured.
-                let api = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
-
-                // Clone the APIs Arc to use in Tokio closure
-                let env_api = env_data.api.clone();
-                let module = env_data.module.clone();
-                // Run the function on the Tokio runtime and wait for the result
-                let result = env_api.runtime.block_on(async move {
-                    api.$function_name(&params, module).await
-                });
-
-                let return_data = match result {
-                    Ok(return_data) => return_data,
-                    Err(ApiError::TestMode) => {
-                        return Err(FunctionErrors::TestMode);
-                    }
-                    Err(e) => {
-                        error!("{} experienced an issue calling {}: {:?}", env_data.module.name, stringify!([< $api _ $function_name >]), e);
-                        return Err(FunctionErrors::InternalApiError);
-                    }
-                };
-
-                if return_data.len() > ret_buffer_len as usize {
-                    error!("{} could not receive data from {} because it provided a return buffer that was too small. Got {}, needed {}", env_data.module.name, stringify!([< $api _ $function_name >]), ret_buffer_len, return_data.len());
-                    trace!("Data: {}", return_data);
-                    return Err(FunctionErrors::ReturnBufferTooSmall);
-                }
-
-                safely_write_data_back(&memory_view, return_data.as_bytes(), ret_buffer, ret_buffer_len)?;
-
-                trace!("{} is calling {} got a return data length of {}", env_data.module.name, stringify!([< $api _ $function_name >]), return_data.len());
-                return Ok(return_data.len() as i32);
-            }
-
-            fn [< $api _ $function_name >] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> i32 {
-                let name = env.data().module.name.clone();
-                match [< $api _ $function_name _impl>](env, params_buffer, params_buffer_len, ret_buffer, ret_buffer_len) {
+                match [< $api _ $function_name _impl >](&env, params_buffer, params_buffer_len, ret_buffer, ret_buffer_len).await {
                     Ok(res) => res,
                     Err(e) => {
                         error!("{} experienced an issue calling {}: {:?}", name, stringify!([< $api _ $function_name >]), e);
@@ -184,18 +139,80 @@ macro_rules! impl_new_function_with_error_buffer {
                     }
                 }
             }
+
+            async fn [< $api _ $function_name _impl >] (env: &AsyncFunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> Result<i32, FunctionErrors> {
+                // 1) Guard: log the call, check test mode, and snapshot the
+                //    handles we need (the Api Arc is a cheap clone). The guard
+                //    is dropped at the end of this block.
+                let (env_api, module) = {
+                    let guard = env.read().await;
+                    let env_data = guard.data();
+
+                    if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string(), env_data.module.test_mode) {
+                        error!("Logging system is not working!!: {:?}", e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+
+                    // Disallow this function call from continuing if the module is in test mode
+                    if !$allow_in_test_mode && env_data.module.test_mode {
+                        return Err(FunctionErrors::TestMode);
+                    }
+
+                    (env_data.api.clone(), env_data.module.clone())
+                };
+
+                // 2) Guard: read the params from guest memory (the helper
+                //    acquires and drops its own short-lived guard).
+                let params = safely_get_string_async(env, params_buffer, params_buffer_len).await?;
+
+                // Check the requested API system is configured.
+                let api = match env_api.$api.as_ref() {
+                    Some(api) => api,
+                    None => return Err(FunctionErrors::ApiNotConfigured),
+                };
+
+                // 3) NO guard held: the await below suspends the guest's stack
+                //    and the executor thread is free to run other guests.
+                let result = api.$function_name(&params, module.clone()).await;
+
+                // 4) Map the result exactly like the sync version did.
+                let return_data = match result {
+                    Ok(return_data) => return_data,
+                    Err(ApiError::TestMode) => {
+                        return Err(FunctionErrors::TestMode);
+                    }
+                    Err(e) => {
+                        error!("{} experienced an issue calling {}: {:?}", module.name, stringify!([< $api _ $function_name >]), e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+                };
+
+                if return_data.len() > ret_buffer_len as usize {
+                    error!("{} could not receive data from {} because it provided a return buffer that was too small. Got {}, needed {}", module.name, stringify!([< $api _ $function_name >]), ret_buffer_len, return_data.len());
+                    trace!("Data: {}", return_data);
+                    return Err(FunctionErrors::ReturnBufferTooSmall);
+                }
+
+                // 5) Re-acquire the guard to write the result back into guest memory.
+                safely_write_data_back_async(env, return_data.as_bytes(), ret_buffer, ret_buffer_len).await?;
+
+                trace!("{} is calling {} got a return data length of {}", module.name, stringify!([< $api _ $function_name >]), return_data.len());
+                return Ok(return_data.len() as i32);
+            }
         }
     }
 }
 
-/// Macro to implement a function in a specific API's submodule.
+/// Macro to implement an async host function in a specific API's submodule.
 ///
-/// This macro generates two functions:
-/// - A private implementation function (`_impl`) that handles the actual logic:
-///   - Accessing and validating memory from the guest
-///   - Checking that the API is configured.
-///   - Running the function + returning the result and handling errors
-/// - A public wrapper function that calls the implementation function and returns the result as an integer.
+/// This macro generates a single async host function that:
+/// - Accesses and validating memory from the guest (through a short-lived read guard)
+/// - Checks that the API and its submodule are configured.
+/// - Awaits the function + writes the result back into the guest's return buffer
+///
+/// The function is registered with `Function::new_typed_with_env_async`, which
+/// means Wasmer parks the guest's stack while the host future is pending and
+/// resumes it with the result. The guest sees an ordinary synchronous call.
 ///
 /// # Parameters
 /// - `$api`: The name of the API (e.g., `aws`).
@@ -203,8 +220,9 @@ macro_rules! impl_new_function_with_error_buffer {
 /// - `$function_name`: The name of the function to be implemented (e.g., `put_object`, `encrypt`).
 ///
 /// # Error Handling
-/// The generated implementation function returns `FunctionErrors` in case of failures, which are then
-/// converted to int error codes by the wrapper function. These errors include:
+/// The generated function returns `Result<i32, FunctionErrors>` which is
+/// converted to an int error code by Wasmer's async host function machinery.
+/// These errors include:
 /// - `FunctionErrors::InternalApiError`: For internal API-related errors.
 /// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
 /// - `FunctionErrors::ReturnBufferTooSmall`: If the provided return buffer is too small to hold the result.
@@ -212,70 +230,13 @@ macro_rules! impl_new_function_with_error_buffer {
 macro_rules! impl_new_sub_module_function_with_error_buffer {
     ($api:ident, $sub_module:ident, $function_name:ident, $allow_in_test_mode:expr) => {
         paste::item! {
-            fn [< $api _ $sub_module _ $function_name _impl>] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> Result<i32, FunctionErrors> {
-                let store = env.as_store_ref();
-                let env_data = env.data();
-
-                // Log function call by module
-                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $sub_module _ $function_name >]).to_string(), env_data.module.test_mode) {
-                    error!("Logging system is not working!!: {:?}", e);
-                    return Err(FunctionErrors::InternalApiError);
-                }
-
-
-                // Disallow this function call from continuing if the module is in test mode
-                if !$allow_in_test_mode && env_data.module.test_mode {
-                    return Err(FunctionErrors::TestMode);
-                }
-
-                let memory_view = match get_memory(&env, &store) {
-                    Ok(memory_view) => memory_view,
-                    Err(e) => {
-                        error!("{}: Memory error in {}: {:?}", env_data.module.name, stringify!([< $api _ $sub_module _ $function_name >]), e);
-                        return Err(FunctionErrors::InternalApiError);
-                    },
+            async fn [< $api _ $sub_module _ $function_name >] (env: AsyncFunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> i32 {
+                // Snapshot the module name for error reporting (short guard).
+                let name = {
+                    let guard = env.read().await;
+                    guard.data().module.name.clone()
                 };
-
-                let params = safely_get_string(&memory_view, params_buffer, params_buffer_len)?;
-
-                // Check that AWS API is configured
-                let aws = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
-                let sub_module = aws.$sub_module.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
-
-                // Clone the APIs Arc to use in Tokio closure
-                let env_api = env_data.api.clone();
-                let module = env_data.module.clone();
-                // Run the function on the Tokio runtime and wait for the result
-                let result = env_api.runtime.block_on(async move {
-                    sub_module.$function_name(&params, module).await
-                });
-
-                let return_data = match result {
-                    Ok(return_data) => return_data,
-                    Err(ApiError::TestMode) => {
-                        return Err(FunctionErrors::TestMode);
-                    }
-                    Err(e) => {
-                        error!("{} experienced an issue calling {}: {:?}", env_data.module.name, stringify!([< $api _ $sub_module _ $function_name >]), e);
-                        return Err(FunctionErrors::InternalApiError);
-                    }
-                };
-
-                if return_data.len() > ret_buffer_len as usize {
-                    error!("{} could not receive data from {} because it provided a return buffer that was too small. Got {}, needed {}", env_data.module.name,  stringify!([< $api _ $sub_module _ $function_name >]), ret_buffer_len, return_data.len());
-                    trace!("Data: {}", return_data);
-                    return Err(FunctionErrors::ReturnBufferTooSmall);
-                }
-
-                safely_write_data_back(&memory_view, return_data.as_bytes(), ret_buffer, ret_buffer_len)?;
-
-                trace!("{} is calling {} got a return data length of {}", env_data.module.name,  stringify!([< $api _ $sub_module _ $function_name >]), return_data.len());
-                return Ok(return_data.len() as i32);
-            }
-
-            fn [< $api _ $sub_module _ $function_name >] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> i32 {
-                let name = env.data().module.name.clone();
-                match [< $api _ $sub_module _ $function_name _impl>](env, params_buffer, params_buffer_len, ret_buffer, ret_buffer_len) {
+                match [< $api _ $sub_module _ $function_name _impl >](&env, params_buffer, params_buffer_len, ret_buffer, ret_buffer_len).await {
                     Ok(res) => res,
                     Err(e) => {
                         error!("{} experienced an issue calling {}: {:?}", name,  stringify!([< $api _ $sub_module _ $function_name >]), e);
@@ -283,18 +244,81 @@ macro_rules! impl_new_sub_module_function_with_error_buffer {
                     }
                 }
             }
+
+            async fn [< $api _ $sub_module _ $function_name _impl >] (env: &AsyncFunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32, ret_buffer: WasmPtr<u8>, ret_buffer_len: u32) -> Result<i32, FunctionErrors> {
+                // 1) Guard: log the call, check test mode, and snapshot the
+                //    handles we need (the Api Arc is a cheap clone). The guard
+                //    is dropped at the end of this block.
+                let (env_api, module) = {
+                    let guard = env.read().await;
+                    let env_data = guard.data();
+
+                    // Log function call by module
+                    if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $sub_module _ $function_name >]).to_string(), env_data.module.test_mode) {
+                        error!("Logging system is not working!!: {:?}", e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+
+                    // Disallow this function call from continuing if the module is in test mode
+                    if !$allow_in_test_mode && env_data.module.test_mode {
+                        return Err(FunctionErrors::TestMode);
+                    }
+
+                    (env_data.api.clone(), env_data.module.clone())
+                };
+
+                // 2) Guard: read the params from guest memory (the helper
+                //    acquires and drops its own short-lived guard).
+                let params = safely_get_string_async(env, params_buffer, params_buffer_len).await?;
+
+                // Check that the API and its submodule are configured
+                let sub_module = match env_api.$api.as_ref().and_then(|api| api.$sub_module.as_ref()) {
+                    Some(sub_module) => sub_module,
+                    None => return Err(FunctionErrors::ApiNotConfigured),
+                };
+
+                // 3) NO guard held: the await below suspends the guest's stack
+                //    and the executor thread is free to run other guests.
+                let result = sub_module.$function_name(&params, module.clone()).await;
+
+                // 4) Map the result exactly like the sync version did.
+                let return_data = match result {
+                    Ok(return_data) => return_data,
+                    Err(ApiError::TestMode) => {
+                        return Err(FunctionErrors::TestMode);
+                    }
+                    Err(e) => {
+                        error!("{} experienced an issue calling {}: {:?}", module.name, stringify!([< $api _ $sub_module _ $function_name >]), e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+                };
+
+                if return_data.len() > ret_buffer_len as usize {
+                    error!("{} could not receive data from {} because it provided a return buffer that was too small. Got {}, needed {}", module.name,  stringify!([< $api _ $sub_module _ $function_name >]), ret_buffer_len, return_data.len());
+                    trace!("Data: {}", return_data);
+                    return Err(FunctionErrors::ReturnBufferTooSmall);
+                }
+
+                // 5) Re-acquire the guard to write the result back into guest memory.
+                safely_write_data_back_async(env, return_data.as_bytes(), ret_buffer, ret_buffer_len).await?;
+
+                trace!("{} is calling {} got a return data length of {}", module.name,  stringify!([< $api _ $sub_module _ $function_name >]), return_data.len());
+                return Ok(return_data.len() as i32);
+            }
         }
     }
 }
 
-/// Macro to implement a new host function in a given API. The function does not fill a data buffer with returned values.
+/// Macro to implement a new async host function in a given API. The function does not fill a data buffer with returned values.
 ///
-/// This macro generates two functions:
-/// - A private implementation function (`_impl`) that handles the actual logic:
-///   - Accessing and validating memory from the guest
-///   - Checking that the API is configured.
-///   - Running the function + returning the result (as an i32)
-/// - A public wrapper function that calls the implementation function and returns the result as an integer.
+/// This macro generates a single async host function that:
+/// - Accesses and validating memory from the guest (through a short-lived read guard)
+/// - Checks that the API and its submodule are configured.
+/// - Awaits the function + returning the result (as an i32)
+///
+/// The function is registered with `Function::new_typed_with_env_async`, which
+/// means Wasmer parks the guest's stack while the host future is pending and
+/// resumes it with the result. The guest sees an ordinary synchronous call.
 ///
 /// # Parameters
 /// - `$api`: The name of the API (e.g., `aws`).
@@ -302,74 +326,79 @@ macro_rules! impl_new_sub_module_function_with_error_buffer {
 /// - `$function_name`: The name of the function to be implemented.
 ///
 /// # Error Handling
-/// The generated implementation function returns `FunctionErrors` in case of failures, which are then
-/// converted to int error codes by the wrapper function. These errors include:
+/// The generated function returns `Result<i32, FunctionErrors>` which is
+/// converted to an int error code by Wasmer's async host function machinery.
+/// These errors include:
 /// - `FunctionErrors::InternalApiError`: For internal API-related errors.
 /// - `FunctionErrors::ApiNotConfigured`: If the API is not configured.
+#[allow(unused_macros)] // not to have a warning when compiling without the `aws` feature
 macro_rules! impl_new_sub_module_function {
     ($api:ident, $sub_module:ident, $function_name:ident, $allow_in_test_mode:expr) => {
         paste::item! {
-            fn [< $api _ $sub_module _ $function_name _impl>] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> Result<i32, FunctionErrors> {
-                let store = env.as_store_ref();
-                let env_data = env.data();
-
-                if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string(), env_data.module.test_mode) {
-                    error!("Logging system is not working!!: {:?}", e);
-                    return Err(FunctionErrors::InternalApiError);
-                }
-
-
-                // Disallow this function call from continuing if the module is in test mode
-                if !$allow_in_test_mode && env_data.module.test_mode {
-                    return Err(FunctionErrors::TestMode);
-                }
-
-                let memory_view = match get_memory(&env, &store) {
-                    Ok(memory_view) => memory_view,
-                    Err(e) => {
-                        error!("{}: Memory error in {}: {:?}", env_data.module.name, stringify!([< $api _ $function_name >]), e);
-                        return Err(FunctionErrors::InternalApiError);
-                    },
+            async fn [< $api _ $sub_module _ $function_name >] (env: AsyncFunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> i32 {
+                // Snapshot the module name for error reporting (short guard).
+                let name = {
+                    let guard = env.read().await;
+                    guard.data().module.name.clone()
                 };
-
-                let params = safely_get_string(&memory_view, params_buffer, params_buffer_len)?;
-
-                // Check that API is configured
-                let api = env_data.api.$api.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
-                let sub_module = api.$sub_module.as_ref().ok_or(FunctionErrors::ApiNotConfigured)?;
-
-                // Clone the APIs Arc to use in Tokio closure
-                let env_api = env_data.api.clone();
-                let module = env_data.module.clone();
-                // Run the function on the Tokio runtime and wait for the result
-                let result = env_api.runtime.block_on(async move {
-                    sub_module.$function_name(&params, module).await
-                });
-
-                let return_data = match result {
-                    Ok(return_data) => return_data,
-                    Err(ApiError::TestMode) => {
-                        return Err(FunctionErrors::TestMode);
-                    }
-                    Err(e) => {
-                        error!("{} experienced an issue calling {}: {:?}", env_data.module.name, stringify!([< $api _ $function_name >]), e);
-                        return Err(FunctionErrors::InternalApiError);
-                    }
-                };
-
-                trace!("{} is calling {} got a return data of {}", env_data.module.name, stringify!([< $api _ $function_name >]), return_data);
-                return Ok(return_data as i32);
-            }
-
-            fn [< $api _ $sub_module _ $function_name >] (env: FunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> i32 {
-                let name = env.data().module.name.clone();
-                match [< $api _ $sub_module _ $function_name _impl>](env, params_buffer, params_buffer_len) {
+                match [< $api _ $sub_module _ $function_name _impl >](&env, params_buffer, params_buffer_len).await {
                     Ok(res) => res,
                     Err(e) => {
                         error!("{} experienced an issue calling {}: {:?}", name,  stringify!([< $api _ $sub_module _ $function_name >]), e);
                         e as i32
                     }
                 }
+            }
+
+            async fn [< $api _ $sub_module _ $function_name _impl >] (env: &AsyncFunctionEnvMut<Env>, params_buffer: WasmPtr<u8>, params_buffer_len: u32) -> Result<i32, FunctionErrors> {
+                // 1) Guard: log the call, check test mode, and snapshot the
+                //    handles we need (the Api Arc is a cheap clone). The guard
+                //    is dropped at the end of this block.
+                let (env_api, module) = {
+                    let guard = env.read().await;
+                    let env_data = guard.data();
+
+                    if let Err(e) = env_data.external_logging_system.log_function_call(env_data.module.name.clone(), stringify!([< $api _ $function_name >]).to_string(), env_data.module.test_mode) {
+                        error!("Logging system is not working!!: {:?}", e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+
+                    // Disallow this function call from continuing if the module is in test mode
+                    if !$allow_in_test_mode && env_data.module.test_mode {
+                        return Err(FunctionErrors::TestMode);
+                    }
+
+                    (env_data.api.clone(), env_data.module.clone())
+                };
+
+                // 2) Guard: read the params from guest memory (the helper
+                //    acquires and drops its own short-lived guard).
+                let params = safely_get_string_async(env, params_buffer, params_buffer_len).await?;
+
+                // Check that the API and its submodule are configured
+                let sub_module = match env_api.$api.as_ref().and_then(|api| api.$sub_module.as_ref()) {
+                    Some(sub_module) => sub_module,
+                    None => return Err(FunctionErrors::ApiNotConfigured),
+                };
+
+                // 3) NO guard held: the await below suspends the guest's stack
+                //    and the executor thread is free to run other guests.
+                let result = sub_module.$function_name(&params, module.clone()).await;
+
+                // 4) Map the result exactly like the sync version did.
+                let return_data = match result {
+                    Ok(return_data) => return_data,
+                    Err(ApiError::TestMode) => {
+                        return Err(FunctionErrors::TestMode);
+                    }
+                    Err(e) => {
+                        error!("{} experienced an issue calling {}: {:?}", module.name, stringify!([< $api _ $function_name >]), e);
+                        return Err(FunctionErrors::InternalApiError);
+                    }
+                };
+
+                trace!("{} is calling {} got a return data of {}", module.name, stringify!([< $api _ $function_name >]), return_data);
+                return Ok(return_data as i32);
             }
         }
     }
@@ -770,11 +799,17 @@ impl_new_function_with_error_buffer!(bloom_filter, build_with_items, ALLOW_IN_TE
 /// Generates `to_api_function` and `is_known_api_function` from a single source-of-truth list.
 ///
 /// `with_env` entries produce `Function::new_typed_with_env`
+/// `with_env_async` entries produce `Function::new_typed_with_env_async` (for
+/// host functions that await external services; Wasmer parks the guest's stack
+/// while the host future is pending)
 /// `without_env` entries produce `Function::new_typed` (for host functions that need no env, e.g. `get_time`).
 macro_rules! define_api_functions {
     (
         with_env: [
             $($(#[$we_attr:meta])* $we_name:literal => $we_fn:expr),* $(,)?
+        ],
+        with_env_async: [
+            $($(#[$wea_attr:meta])* $wea_name:literal => $wea_fn:expr),* $(,)?
         ],
         without_env: [
             $($(#[$woe_attr:meta])* $woe_name:literal => $woe_fn:expr),* $(,)?
@@ -791,6 +826,10 @@ macro_rules! define_api_functions {
                     $we_name => Function::new_typed_with_env(&mut store, &env, $we_fn),
                 )*
                 $(
+                    $(#[$wea_attr])*
+                    $wea_name => Function::new_typed_with_env_async(&mut store, &env, $wea_fn),
+                )*
+                $(
                     $(#[$woe_attr])*
                     $woe_name => Function::new_typed(&mut store, $woe_fn),
                 )*
@@ -804,6 +843,10 @@ macro_rules! define_api_functions {
                 $(
                     $(#[$we_attr])*
                     $we_name => true,
+                )*
+                $(
+                    $(#[$wea_attr])*
+                    $wea_name => true,
                 )*
                 $(
                     $(#[$woe_attr])*
@@ -835,6 +878,13 @@ define_api_functions! {
         "set_response_status"      => super::response::set_response_status,
         "set_error_context"        => super::internal::set_error_context,
         "print_debug_string"       => super::internal::print_debug_string,
+        "log_back"                 => super::internal::log_back,
+        "log_back_unlimited"       => super::internal::log_back_unlimited,
+    ],
+    with_env_async: [
+        // Storage and cache: these await the (potentially networked) backing
+        // systems, so they are async-registered and suspend the guest while
+        // the operation is in flight.
         "storage_insert"           => super::storage::insert,
         "storage_insert_shared"    => super::storage::insert_shared,
         "storage_insert_batch"     => super::storage::insert_batch,
@@ -847,8 +897,6 @@ define_api_functions! {
         "storage_list_keys_shared" => super::storage::list_keys_shared,
         "cache_insert"             => super::cache::insert,
         "cache_get"                => super::cache::get,
-        "log_back"                 => super::internal::log_back,
-        "log_back_unlimited"       => super::internal::log_back_unlimited,
 
         // Npm Calls
         "npm_publish_empty_stub"                  => npm_publish_empty_stub,
