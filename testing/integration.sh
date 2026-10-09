@@ -20,7 +20,11 @@ start_plaid() {
   PLAID_PID=$!
 
   local url="http://localhost:8081/ready"
-  local timeout=120
+  # The LLVM backend compiles every rule module at boot and is ~25x slower
+  # per module than cranelift (~300 CPU-seconds for the 25 test modules vs
+  # ~5). On a 4-vCPU CI runner that is 2-3 minutes of compilation before the
+  # readiness endpoint comes up, so the timeout must accommodate it.
+  local timeout=600
   local interval=5
   local deadline=$((SECONDS + timeout))
 
