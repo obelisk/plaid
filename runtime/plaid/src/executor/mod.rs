@@ -16,6 +16,7 @@ use crate::storage::Storage;
 use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
 use metrics::ModuleExecutionMetrics;
 pub use thread_pools::{ExecutionThreadPools, MessageSender};
+use tokio::runtime::Handle as TokioRuntimeHandle;
 use tokio::sync::oneshot::Sender as OneShotSender;
 use tokio_util::sync::CancellationToken;
 
@@ -612,14 +613,16 @@ async fn process_message_with_module(
                 None
             }
         }
-        Err(e) => Some(determine_error(
-            e,
-            computation_limit,
-            &prepared.instance,
-            &prepared.store_async,
-            &prepared.env,
-        )
-        .await),
+        Err(e) => Some(
+            determine_error(
+                e,
+                computation_limit,
+                &prepared.instance,
+                &prepared.store_async,
+                &prepared.env,
+            )
+            .await,
+        ),
     };
 
     // If there was an error then log that it happened to the els
@@ -670,11 +673,10 @@ async fn process_message_with_module(
     }
 
     if let Some(sender) = message.response_sender {
-        let response =
-            response.map(|body| ResponseMessage {
-                code: response_status.unwrap_or(200),
-                body,
-            });
+        let response = response.map(|body| ResponseMessage {
+            code: response_status.unwrap_or(200),
+            body,
+        });
         if sender.send(response).is_err() {
             error!(
                 "[{}] was servicing a request but sending the response failed!",
@@ -708,23 +710,31 @@ fn execution_loop(
     immediate_sender: Weak<MessageSender>,
     delayed_log_sender: Sender<DelayedMessage>,
     cancellation_token: CancellationToken,
+    runtime_handle: TokioRuntimeHandle,
 ) -> Result<(), ExecutorError> {
-    // Each worker thread owns a current-thread tokio runtime, created once
-    // at thread start. The entrypoint is invoked via `call_async` on this
-    // runtime: while a guest is suspended inside an async host import, the
-    // thread is free (it drives other work on the runtime).
+    // Worker threads drive each message with `runtime_handle.block_on(...)`
+    // on the process-wide tokio runtime (the one `#[tokio::main]` creates and
+    // that `Api`'s reqwest clients were built on).
     //
-    // SAFETY INVARIANT: never `rt.spawn` on this runtime. A current-thread
-    // runtime dropped with live tasks abandons them; since we only ever
-    // `block_on`, there are zero pending tasks when it drops at thread exit.
-    // This is what keeps the shutdown/drain semantics intact.
-    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        Ok(rt) => rt,
-        Err(e) => {
-            error!("Failed to create per-thread tokio runtime: {e}");
-            return Ok(());
-        }
-    };
+    // `Handle::block_on` polls the future on the *calling* thread, which is
+    // what wasmer's `call_async` requires: the guest's coroutine stack is
+    // thread-local (corosensei), so the entrypoint must be resumed on the
+    // thread that started it. Timers and I/O tasks the future spawns are
+    // driven by the shared runtime's worker threads.
+    //
+    // Why not a per-thread current-thread runtime: the reqwest clients held
+    // by `Api` are shared across all executor threads. A pooled connection's
+    // driver task lives on whichever runtime first established it. If each
+    // executor thread had its own runtime, a thread parked in `recv()` would
+    // never drive the connection another thread was trying to reuse, and
+    // that request would stall until the client timeout (observed as 5s
+    // `TimedOut`s in the cron integration test). Sharing one runtime keeps
+    // every connection driver on always-driven worker threads.
+    //
+    // SAFETY INVARIANT: never `runtime_handle.spawn` work that must complete
+    // for drain correctness. The executor only `block_on`s, so a worker
+    // thread only ever exits between messages, never mid-message — drain
+    // semantics are preserved.
 
     loop {
         let message = match receiver.recv() {
@@ -745,7 +755,7 @@ fn execution_loop(
             // channel.
             (Some(ref module), _) => {
                 let module = module.clone();
-                rt.block_on(process_message_with_module(
+                runtime_handle.block_on(process_message_with_module(
                     message,
                     module,
                     api.clone(),
@@ -762,7 +772,7 @@ fn execution_loop(
             (None, Some(modules)) => {
                 // For every module that operates on that log type
                 for module in modules {
-                    rt.block_on(process_message_with_module(
+                    runtime_handle.block_on(process_message_with_module(
                         message.create_duplicate(),
                         module.clone(),
                         api.clone(),
@@ -831,6 +841,7 @@ impl Executor {
         immediate_sender: Weak<MessageSender>,
         delayed_log_sender: Sender<DelayedMessage>,
         cancellation_token: CancellationToken,
+        runtime_handle: TokioRuntimeHandle,
     ) -> (Self, ExecutorThreads) {
         let mut thread_handles = Vec::new();
 
@@ -848,6 +859,7 @@ impl Executor {
             let immediate_sender = immediate_sender.clone();
             let delayed_log_sender = delayed_log_sender.clone();
             let cancellation_token = cancellation_token.clone();
+            let runtime_handle = runtime_handle.clone();
             let handle = thread::spawn(move || {
                 if let Err(e) = execution_loop(
                     receiver.clone(),
@@ -861,6 +873,7 @@ impl Executor {
                     immediate_sender.clone(),
                     delayed_log_sender.clone(),
                     cancellation_token.clone(),
+                    runtime_handle.clone(),
                 ) {
                     error!("General execution thread {i} exited with error: {e}");
                 }
@@ -884,6 +897,7 @@ impl Executor {
                 let immediate_sender = immediate_sender.clone();
                 let delayed_log_sender = delayed_log_sender.clone();
                 let cancellation_token = cancellation_token.clone();
+                let runtime_handle = runtime_handle.clone();
                 let handle = thread::spawn(move || {
                     if let Err(e) = execution_loop(
                         receiver.clone(),
@@ -897,6 +911,7 @@ impl Executor {
                         immediate_sender.clone(),
                         delayed_log_sender.clone(),
                         cancellation_token.clone(),
+                        runtime_handle.clone(),
                     ) {
                         error!("{log_type} dedicated execution thread {i} exited with error: {e}");
                     }

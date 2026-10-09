@@ -73,7 +73,7 @@ jobs:
 
     - name: Install LLVM
       if: matrix.compiler == 'llvm'
-      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 21 && sudo apt install -y libllvm21 llvm-21 llvm-21-dev llvm-21-runtime libpolly-21-dev libclang-common-21-dev
+      run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 22 && sudo apt install -y libllvm22 llvm-22 llvm-22-dev llvm-22-runtime libpolly-22-dev libclang-common-22-dev
 
     - uses: actions/checkout@v4
 

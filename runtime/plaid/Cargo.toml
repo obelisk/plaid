@@ -88,8 +88,11 @@ urlencoding = "2.1.3"
 warp = { version = "0.3", features = ["tls"] }
 # Pinned exactly: the experimental-async API churns across 7.x releases.
 # Both crates must move in lockstep (wasmer-middlewares requires `=wasmer`).
-wasmer = { version = "=7.5.0", default-features = false }
-wasmer-middlewares = "=7.5.0"
+# 7.4.2 is the newest release that satisfies the repo's dependency minimum-age
+# policy (14 days); the experimental-async API surface used by the executor is
+# identical between 7.4.2 and 7.5.0.
+wasmer = { version = "=7.4.2", default-features = false }
+wasmer-middlewares = "=7.4.2"
 x509-parser = "0.18.0"
 thiserror = "2.0.17"
 pulldown-cmark = "0.13.0"

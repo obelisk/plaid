@@ -9,7 +9,7 @@
 
 ### 1.1 `runtime/plaid/Cargo.toml` + `runtime/Cargo.lock` (§4.1)
 
-- `wasmer` pinned to **`=7.5.0`** (was floating `"7"` → resolved 7.0.1) and `wasmer-middlewares` pinned to **`=7.5.0`** in lockstep. The experimental-async API churns across 7.x; the POC verified signatures against 7.5.0 exactly.
+- `wasmer` pinned to **`=7.4.2`** (was floating `"7"` → resolved 7.0.1) and `wasmer-middlewares` pinned to **`=7.4.2`** in lockstep. The experimental-async API churns across 7.x; the POC verified signatures against 7.5.0 exactly, and the async API surface (`Store::into_async`, `StoreAsync` locks, `TypedFunction::call_async`, `Function::new_typed_with_env_async`, `AsyncFunctionEnvMut`) is byte-identical between 7.4.2 and 7.5.0 (the only upstream diff is a deprecated `Engine::with_opts` Plaid doesn't use). 7.4.2 is the newest release satisfying the repo's dependency minimum-age policy (14 days); 7.5.0 can be picked up in CI once it is two weeks old (published 2026-10-01).
 - `experimental-async` wired through the existing passthrough features:
   - `cranelift = ["wasmer/cranelift", "wasmer/experimental-async"]`
   - `llvm = ["wasmer/llvm", "wasmer/experimental-async"]`
@@ -63,8 +63,11 @@ All ten storage host fns converted: `insert`, `insert_shared`, `insert_batch`, `
 - **`PreparedExecution` bundle** replaces the old 4-tuple: `store_async: StoreAsync`, `instance`, `entrypoint: TypedFunction<(), i32>`, `env: FunctionEnv<Env>`. `Store::into_async()` consumes the `Store` at the end of `prepare_for_execution`; everything after goes through `StoreAsync` locks.
 - **`process_message_with_module` is now `async fn`** and invokes the entrypoint via `prepared.entrypoint.call_async(&prepared.store_async).await` — the async boundary. A synchronous `entrypoint.call()` of a rule that suspends would trap ("cannot yield when not in async context"), which is why this change is atomic with §1.3.
 - **Post-call bookkeeping behind locks:** response/`execution_error_context`/`invalid_response_status` reads via `store_async.read_lock().await` + `env.as_ref(&lock)`; metering (`get_remaining_points`) via `store_async.write_lock().await` (`StoreAsyncWriteLock: AsStoreMut`, so the wasmer-middlewares API composes unchanged). Metrics values identical to before.
-- **`execution_loop`:** each worker thread creates a **current-thread tokio runtime once at thread start** and drives each message via `rt.block_on(process_message_with_module(...))`. Blocking `recv()` → prepare → `rt.block_on` → loop. A thread only ever exits between messages, never mid-message — drain semantics preserved.
-- **SAFETY INVARIANT (documented in code):** never `rt.spawn` on the per-thread runtime. A current-thread runtime dropped with live tasks abandons them; since we only `block_on`, there are zero pending tasks at drop. This is what keeps shutdown/drain correct (§4.9).
+- **`execution_loop`:** each worker thread drives each message via `runtime_handle.block_on(process_message_with_module(...))`, where `runtime_handle` is a `tokio::runtime::Handle` to the process-wide runtime created by `#[tokio::main]` (the same runtime `Api`'s reqwest clients were built on). Blocking `recv()` → prepare → `block_on` → loop. A thread only ever exits between messages, never mid-message — drain semantics preserved.
+
+  **Why a shared handle and not a per-thread current-thread runtime:** `Handle::block_on` polls the future on the *calling* thread (which wasmer's `call_async` requires — the guest's corosensei stack is thread-local), while any I/O tasks the future spawns are driven by the shared runtime's worker threads. With per-thread runtimes, a pooled reqwest connection established on thread A has its driver task on A's runtime; when thread B (parked in `recv()` between messages) reuses that connection, nothing drives it and the request stalls until the client timeout. This was observed in CI as alternating 5-second `TimedOut`s in the cron integration test (requests to the local request handler), and is fixed by the shared handle.
+
+- **SAFETY INVARIANT (documented in code):** the executor only ever `block_on`s on the handle — it never spawns detached work that must complete for drain correctness. A worker thread only exits between messages, so there is no in-flight work at thread exit. This is what keeps shutdown/drain correct (§4.9).
 
 ### 1.7 `apis/mod.rs` — `Api::runtime` removed (§4.8)
 
