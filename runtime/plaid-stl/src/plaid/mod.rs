@@ -182,6 +182,31 @@ generate_string_getter!(secrets);
 generate_string_getter!(headers);
 generate_string_getter!(query_params);
 
+macro_rules! generate_string_getter_with_default {
+    ($what:ident) => {
+        paste::item! {
+            #[doc = "Retrieve an item from the `" $what "` which are associated to this request, specifying the item's name. If the item is not present, return the provided default value. Errors from the underlying getter are propagated."]
+            pub fn [<get_ $what _with_default>](name: &str, default: &str) -> Result<String, PlaidFunctionError> {
+                match [<get_ $what>](name) {
+                    Ok(value) => {
+                        if value.is_empty() {
+                            Ok(default.to_string())
+                        } else {
+                            Ok(value)
+                        }
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+        }
+    };
+}
+
+generate_string_getter_with_default!(accessory_data);
+generate_string_getter_with_default!(secrets);
+generate_string_getter_with_default!(headers);
+generate_string_getter_with_default!(query_params);
+
 /// Get the persistent response set by a previous invocation
 /// of the module
 pub fn get_response() -> Result<String, PlaidFunctionError> {
