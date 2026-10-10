@@ -22,7 +22,7 @@ use utils::{
     get_module_computation_limit, get_module_page_count, get_module_persistent_storage_limit,
     read_and_configure_secrets, read_and_parse_modules,
 };
-use wasmer::sys::{NativeEngineExt, Target};
+use wasmer::sys::NativeEngineExt;
 
 use wasmer::sys::CompilerConfig;
 
@@ -384,7 +384,7 @@ impl PlaidModule {
         let metering = Arc::new(Metering::new(computation_limit, cost_function));
 
         // Configure module tunables - this includes our computation limit and page count
-        let base = BaseTunables::for_target(&Target::default());
+        let base = BaseTunables::new();
         let tunables = LimitingTunables::new(base, Pages(page_limit));
 
         // Configure the compiler backend

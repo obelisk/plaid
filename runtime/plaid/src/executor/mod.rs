@@ -16,13 +16,17 @@ use crate::storage::Storage;
 use crossbeam_channel::{Receiver, RecvError, Sender, TrySendError};
 use metrics::ModuleExecutionMetrics;
 pub use thread_pools::{ExecutionThreadPools, MessageSender};
+use tokio::runtime::Handle as TokioRuntimeHandle;
 use tokio::sync::oneshot::Sender as OneShotSender;
 use tokio_util::sync::CancellationToken;
 
 use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, DeserializeAs, SerializeAs};
-use wasmer::{FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, TypedFunction};
+use wasmer::{
+    AsStoreAsync, FunctionEnv, Imports, Instance, Memory, RuntimeError, Store, StoreAsync,
+    TypedFunction,
+};
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use std::collections::HashMap;
@@ -334,6 +338,18 @@ impl From<LoggingError> for ExecutorError {
     }
 }
 
+/// Everything needed to run a module on a message via `call_async`.
+///
+/// `Store::into_async()` consumes the `Store`, so the bundle holds only the
+/// `StoreAsync` handle. All post-call access to the store (response reads,
+/// metering) goes through its read/write locks.
+pub struct PreparedExecution {
+    pub store_async: StoreAsync,
+    pub instance: Instance,
+    pub entrypoint: TypedFunction<(), i32>,
+    pub env: FunctionEnv<Env>,
+}
+
 /// Take a message, a module, and an executor and get an instance back that is ready to run
 /// the provided module.
 fn prepare_for_execution(
@@ -347,7 +363,7 @@ fn prepare_for_execution(
     immediate_sender: Option<MessageSender>,
     delayed_log_sender: Sender<DelayedMessage>,
     cancellation_token: CancellationToken,
-) -> Result<(Store, Instance, TypedFunction<(), i32>, FunctionEnv<Env>), ExecutorError> {
+) -> Result<PreparedExecution, ExecutorError> {
     // Prepare the structure for functions the module will use
     // AKA: Host Functions
     let mut imports = Imports::new();
@@ -434,19 +450,29 @@ fn prepare_for_execution(
         .typed::<(), i32>(&mut store)
         .map_err(|_| ExecutorError::InvalidEntrypoint)?;
 
-    Ok((store, instance, ep, envr))
+    // Convert the store into its async handle. This consumes the store:
+    // from here on, all access goes through StoreAsync's read/write locks.
+    let store_async = store.into_async();
+
+    Ok(PreparedExecution {
+        store_async,
+        instance,
+        entrypoint: ep,
+        env: envr,
+    })
 }
 
 /// Update a module's persistent response
-fn update_persistent_response(
+async fn update_persistent_response(
     plaid_module: &Arc<PlaidModule>,
     env: &FunctionEnv<Env>,
-    mut store: &mut Store,
+    store_async: &StoreAsync,
 ) -> Result<(), ExecutorError> {
-    match (
-        env.as_mut(&mut store).response.clone(),
-        &plaid_module.persistent_response,
-    ) {
+    let response = {
+        let lock = store_async.read_lock().await;
+        env.as_ref(&lock).response.clone()
+    };
+    match (response, &plaid_module.persistent_response) {
         (None, _) => {
             // There was no response to save
             return Ok(());
@@ -486,7 +512,7 @@ fn update_persistent_response(
 /// will stop Plaid. This means that a module should NEVER be able to cause such
 /// an error. The only time this should return an error is if the runtime itself
 /// encounters a critical, unrecoverable error.
-fn process_message_with_module(
+async fn process_message_with_module(
     message: Message,
     module: Arc<PlaidModule>,
     api: Arc<Api>,
@@ -505,7 +531,7 @@ fn process_message_with_module(
     let persistent_response = module.get_persistent_response_data();
     // Message needs to be cloned because of the logback budget
     // which is separate for every rule running the same message.
-    let (mut store, instance, entrypoint, env) = match prepare_for_execution(
+    let prepared = match prepare_for_execution(
         message.create_duplicate(),
         module.clone(),
         api.clone(),
@@ -517,7 +543,7 @@ fn process_message_with_module(
         delayed_log_sender,
         cancellation_token,
     ) {
-        Ok((store, instance, ep, env)) => (store, instance, ep, env),
+        Ok(prepared) => prepared,
         Err(e) => {
             els.log_module_error(
                 module.name.clone(),
@@ -529,61 +555,74 @@ fn process_message_with_module(
     };
 
     let computation_limit = module.computation_limit;
-    // Call the entrypoint
+    // Call the entrypoint via call_async: this is the async boundary. The
+    // guest's stack parks inside async host imports until their futures
+    // complete, and the executor thread is free while it is suspended.
     let begin = Instant::now();
-    let error = match entrypoint.call(&mut store) {
+    let error = match prepared.entrypoint.call_async(&prepared.store_async).await {
         Ok(n) => {
             if n != 0 {
                 if let Some(metrics) = &module_execution_metrics {
                     metrics.record_module_failure(&module.name);
                 }
 
-                Some(ModuleExecutionError::ModuleError(
-                    env.as_ref(&store)
+                let error_context = {
+                    let lock = prepared.store_async.read_lock().await;
+                    prepared
+                        .env
+                        .as_ref(&lock)
                         .execution_error_context
                         .clone()
-                        .unwrap_or("None".to_string()),
-                ))
+                        .unwrap_or("None".to_string())
+                };
+                Some(ModuleExecutionError::ModuleError(error_context))
             } else {
                 // This should always work because when computation is exhausted,
                 // we end up in the RuntimeError block.
-                if let MeteringPoints::Remaining(remaining) =
-                    get_remaining_points(&mut store, &instance)
-                {
-                    let computation_remaining_percentage =
-                        (remaining as f32 / computation_limit as f32) * 100.0;
-                    let computation_used = 100.0 - computation_remaining_percentage;
-
-                    if let Some(metrics) = &module_execution_metrics {
-                        metrics.record_successful_execution(
-                            &module.name,
-                            computation_used as f64,
-                            begin.elapsed(),
-                        );
+                let remaining = {
+                    let mut lock = prepared.store_async.write_lock().await;
+                    match get_remaining_points(&mut lock, &prepared.instance) {
+                        MeteringPoints::Remaining(remaining) => remaining,
+                        MeteringPoints::Exhausted => 0,
                     }
+                };
 
-                    // If performance monitoring is enabled, log data to the monitoring system
-                    if let Some(ref sender) = performance_mode {
-                        if let Err(e) = sender.send(ModulePerformanceMetadata {
-                            module: module.name.clone(),
-                            execution_time: begin.elapsed().as_micros(),
-                            computation_used: computation_limit - remaining,
-                        }) {
-                            error!("Failed to send rule execution metadata to performance monitoring system for {}. Error: {e}", module.name)
-                        }
+                let computation_remaining_percentage =
+                    (remaining as f32 / computation_limit as f32) * 100.0;
+                let computation_used = 100.0 - computation_remaining_percentage;
+
+                if let Some(metrics) = &module_execution_metrics {
+                    metrics.record_successful_execution(
+                        &module.name,
+                        computation_used as f64,
+                        begin.elapsed(),
+                    );
+                }
+
+                // If performance monitoring is enabled, log data to the monitoring system
+                if let Some(ref sender) = performance_mode {
+                    if let Err(e) = sender.send(ModulePerformanceMetadata {
+                        module: module.name.clone(),
+                        execution_time: begin.elapsed().as_micros(),
+                        computation_used: computation_limit - remaining,
+                    }) {
+                        error!("Failed to send rule execution metadata to performance monitoring system for {}. Error: {e}", module.name)
                     }
                 }
 
                 None
             }
         }
-        Err(e) => Some(determine_error(
-            e,
-            computation_limit,
-            &instance,
-            &mut store,
-            &env,
-        )),
+        Err(e) => Some(
+            determine_error(
+                e,
+                computation_limit,
+                &prepared.instance,
+                &prepared.store_async,
+                &prepared.env,
+            )
+            .await,
+        ),
     };
 
     // If there was an error then log that it happened to the els
@@ -600,14 +639,28 @@ fn process_message_with_module(
 
     // Check to see if there is data in the error context even if the module didn't report an error
     // Modules can do this to return warnings it wants to surface without affecting error metrics
-    if let Some(return_message) = &env.as_ref(&store).execution_error_context {
+    let return_message = {
+        let lock = prepared.store_async.read_lock().await;
+        prepared.env.as_ref(&lock).execution_error_context.clone()
+    };
+    if let Some(return_message) = &return_message {
         let _ = els.log_internal_message(
             Severity::Info,
             format!("Module [{}] returned: {}", module.name, return_message),
         );
     }
 
-    if let Some(invalid_status) = env.as_ref(&store).invalid_response_status {
+    let (invalid_status, response, response_status) = {
+        let lock = prepared.store_async.read_lock().await;
+        let env_ref = prepared.env.as_ref(&lock);
+        (
+            env_ref.invalid_response_status,
+            env_ref.response.clone(),
+            env_ref.response_status,
+        )
+    };
+
+    if let Some(invalid_status) = invalid_status {
         if let Some(sender) = message.response_sender {
             let _ = sender.send(None);
         }
@@ -620,14 +673,10 @@ fn process_message_with_module(
     }
 
     if let Some(sender) = message.response_sender {
-        let response = env
-            .as_ref(&store)
-            .response
-            .clone()
-            .map(|body| ResponseMessage {
-                code: env.as_ref(&store).response_status.unwrap_or(200),
-                body,
-            });
+        let response = response.map(|body| ResponseMessage {
+            code: response_status.unwrap_or(200),
+            body,
+        });
         if sender.send(response).is_err() {
             error!(
                 "[{}] was servicing a request but sending the response failed!",
@@ -637,7 +686,8 @@ fn process_message_with_module(
     }
 
     // Update the persistent response
-    if let Err(e) = update_persistent_response(&module, &env, &mut store) {
+    if let Err(e) = update_persistent_response(&module, &prepared.env, &prepared.store_async).await
+    {
         let _ = els.log_module_error(
             module.name.clone(),
             format!("Failed to update persistent response: {e}"),
@@ -660,7 +710,32 @@ fn execution_loop(
     immediate_sender: Weak<MessageSender>,
     delayed_log_sender: Sender<DelayedMessage>,
     cancellation_token: CancellationToken,
+    runtime_handle: TokioRuntimeHandle,
 ) -> Result<(), ExecutorError> {
+    // Worker threads drive each message with `runtime_handle.block_on(...)`
+    // on the process-wide tokio runtime (the one `#[tokio::main]` creates and
+    // that `Api`'s reqwest clients were built on).
+    //
+    // `Handle::block_on` polls the future on the *calling* thread, which is
+    // what wasmer's `call_async` requires: the guest's coroutine stack is
+    // thread-local (corosensei), so the entrypoint must be resumed on the
+    // thread that started it. Timers and I/O tasks the future spawns are
+    // driven by the shared runtime's worker threads.
+    //
+    // Why not a per-thread current-thread runtime: the reqwest clients held
+    // by `Api` are shared across all executor threads. A pooled connection's
+    // driver task lives on whichever runtime first established it. If each
+    // executor thread had its own runtime, a thread parked in `recv()` would
+    // never drive the connection another thread was trying to reuse, and
+    // that request would stall until the client timeout (observed as 5s
+    // `TimedOut`s in the cron integration test). Sharing one runtime keeps
+    // every connection driver on always-driven worker threads.
+    //
+    // SAFETY INVARIANT: never `runtime_handle.spawn` work that must complete
+    // for drain correctness. The executor only `block_on`s, so a worker
+    // thread only ever exits between messages, never mid-message — drain
+    // semantics are preserved.
+
     loop {
         let message = match receiver.recv() {
             Ok(message) => message,
@@ -680,7 +755,7 @@ fn execution_loop(
             // channel.
             (Some(ref module), _) => {
                 let module = module.clone();
-                process_message_with_module(
+                runtime_handle.block_on(process_message_with_module(
                     message,
                     module,
                     api.clone(),
@@ -692,12 +767,12 @@ fn execution_loop(
                     immediate_sender.clone(),
                     delayed_log_sender.clone(),
                     cancellation_token.clone(),
-                )?;
+                ))?;
             }
             (None, Some(modules)) => {
                 // For every module that operates on that log type
                 for module in modules {
-                    process_message_with_module(
+                    runtime_handle.block_on(process_message_with_module(
                         message.create_duplicate(),
                         module.clone(),
                         api.clone(),
@@ -709,7 +784,7 @@ fn execution_loop(
                         immediate_sender.clone(),
                         delayed_log_sender.clone(),
                         cancellation_token.clone(),
-                    )?;
+                    ))?;
                 }
             }
             (None, None) => {
@@ -723,26 +798,34 @@ fn execution_loop(
     }
 }
 
-fn determine_error(
+async fn determine_error(
     e: RuntimeError,
     computation_limit: u64,
     instance: &Instance,
-    mut store: &mut Store,
+    store_async: &StoreAsync,
     env: &FunctionEnv<Env>,
 ) -> ModuleExecutionError {
     // First check to see if we've exhausted computation
-    if let MeteringPoints::Exhausted = get_remaining_points(&mut store, &instance) {
+    let exhausted = {
+        let mut lock = store_async.write_lock().await;
+        matches!(
+            get_remaining_points(&mut lock, instance),
+            MeteringPoints::Exhausted
+        )
+    };
+    if exhausted {
         return ModuleExecutionError::ComputationExhausted(computation_limit);
     }
 
     // If all else fails, it's an unknown error
-    ModuleExecutionError::UnknownExecutionError(format!(
-        "{e}. Additional context: {}",
-        env.as_ref(&store)
+    let context = {
+        let lock = store_async.read_lock().await;
+        env.as_ref(&lock)
             .execution_error_context
             .clone()
             .unwrap_or("This is probably an OOM error".to_string())
-    ))
+    };
+    ModuleExecutionError::UnknownExecutionError(format!("{e}. Additional context: {context}"))
 }
 
 impl Executor {
@@ -758,6 +841,7 @@ impl Executor {
         immediate_sender: Weak<MessageSender>,
         delayed_log_sender: Sender<DelayedMessage>,
         cancellation_token: CancellationToken,
+        runtime_handle: TokioRuntimeHandle,
     ) -> (Self, ExecutorThreads) {
         let mut thread_handles = Vec::new();
 
@@ -775,6 +859,7 @@ impl Executor {
             let immediate_sender = immediate_sender.clone();
             let delayed_log_sender = delayed_log_sender.clone();
             let cancellation_token = cancellation_token.clone();
+            let runtime_handle = runtime_handle.clone();
             let handle = thread::spawn(move || {
                 if let Err(e) = execution_loop(
                     receiver.clone(),
@@ -788,6 +873,7 @@ impl Executor {
                     immediate_sender.clone(),
                     delayed_log_sender.clone(),
                     cancellation_token.clone(),
+                    runtime_handle.clone(),
                 ) {
                     error!("General execution thread {i} exited with error: {e}");
                 }
@@ -811,6 +897,7 @@ impl Executor {
                 let immediate_sender = immediate_sender.clone();
                 let delayed_log_sender = delayed_log_sender.clone();
                 let cancellation_token = cancellation_token.clone();
+                let runtime_handle = runtime_handle.clone();
                 let handle = thread::spawn(move || {
                     if let Err(e) = execution_loop(
                         receiver.clone(),
@@ -824,6 +911,7 @@ impl Executor {
                         immediate_sender.clone(),
                         delayed_log_sender.clone(),
                         cancellation_token.clone(),
+                        runtime_handle.clone(),
                     ) {
                         error!("{log_type} dedicated execution thread {i} exited with error: {e}");
                     }
