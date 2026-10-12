@@ -185,7 +185,7 @@ generate_string_getter!(query_params);
 macro_rules! generate_string_getter_with_default {
     ($what:ident) => {
         paste::item! {
-            #[doc = "Retrieve an item from the `" $what "` which are associated to this request, specifying the item's name. If the item is not present, return the provided default value. Errors from the underlying getter are propagated."]
+            #[doc = "Retrieve a named item from `" $what "` associated with this request. If the underlying getter returns an empty string (including a present empty value), return the provided default value. Errors from the underlying getter are propagated."]
             pub fn [<get_ $what _with_default>](name: &str, default: &str) -> Result<String, PlaidFunctionError> {
                 match [<get_ $what>](name) {
                     Ok(value) => {
