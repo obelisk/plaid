@@ -584,6 +584,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Routing-aware so immediate logbacks honor dedicated thread pools.
     let immediate_dispatch = Arc::new(exec_thread_pools.message_sender());
 
+    // Handle to the process-wide tokio runtime (created by #[tokio::main]).
+    // Executor threads drive each message with `handle.block_on`: the future
+    // is polled on the worker thread itself (required by wasmer's thread-local
+    // guest stacks) while the I/O tasks it spawns run on this runtime's
+    // workers. Sharing one runtime also keeps the reqwest connection pool
+    // (built on this runtime) driven at all times.
+    let runtime_handle = tokio::runtime::Handle::current();
+
     // Create the executor that will handle all the logs that come in and immediate
     // requests for handling some configured get requests.
     let (executor, executor_threads) = Executor::new(
@@ -598,6 +606,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::downgrade(&immediate_dispatch),
         delayed_log_sender.clone(),
         cancellation_token.clone(),
+        runtime_handle,
     );
 
     let executor = Arc::new(executor);

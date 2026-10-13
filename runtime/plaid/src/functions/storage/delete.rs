@@ -1,59 +1,86 @@
 use std::sync::{Arc, RwLock};
 
-use wasmer::{AsStoreRef, FunctionEnvMut, MemoryView, WasmPtr};
+use wasmer::{AsyncFunctionEnvMut, WasmPtr};
 
 use crate::{executor::Env, functions::FunctionErrors, loader::LimitValue, storage::Storage};
 
-use super::{get_memory, safely_get_string, safely_write_data_back};
+use super::{safely_get_string_async, safely_write_data_back_async};
 
 /// Delete data from the storage system if one is configured
-pub fn delete(
-    env: FunctionEnvMut<Env>,
+pub async fn delete(
+    env: AsyncFunctionEnvMut<Env>,
     key_buf: WasmPtr<u8>,
     key_buf_len: u32,
     data_buffer: WasmPtr<u8>,
     data_buffer_len: u32,
 ) -> i32 {
-    let store = env.as_store_ref();
-    let env_data = env.data();
-
-    let Some(storage) = &env_data.storage else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
-
-    let Some(counter) = env_data.module.storage_current.clone() else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
-
-    let memory_view = match get_memory(&env, &store) {
-        Ok(memory_view) => memory_view,
+    match delete_impl(&env, key_buf, key_buf_len, data_buffer, data_buffer_len).await {
+        Ok(res) => res,
         Err(e) => {
-            error!(
-                "{}: Memory error in storage_delete: {e:?}",
-                env_data.module.name,
-            );
-            return FunctionErrors::CouldNotGetAdequateMemory as i32;
+            error!("storage_delete experienced an issue: {:?}", e);
+            e as i32
         }
-    };
+    }
+}
 
-    safely_get_guest_string!(key, memory_view, key_buf, key_buf_len, env_data);
+async fn delete_impl(
+    env: &AsyncFunctionEnvMut<Env>,
+    key_buf: WasmPtr<u8>,
+    key_buf_len: u32,
+    data_buffer: WasmPtr<u8>,
+    data_buffer_len: u32,
+) -> Result<i32, FunctionErrors> {
+    // 1) Guard: snapshot what we need, read the key from guest memory. The
+    //    guard is dropped at the end of this block.
+    let (module_name, storage, key, storage_limit, counter) = {
+        let guard = env.read().await;
+        let env_data = guard.data();
+
+        let Some(storage) = &env_data.storage else {
+            return Err(FunctionErrors::ApiNotConfigured);
+        };
+
+        let Some(counter) = env_data.module.storage_current.clone() else {
+            return Err(FunctionErrors::ApiNotConfigured);
+        };
+
+        let key = match safely_get_string_async(env, key_buf, key_buf_len).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!(
+                    "{}: error while getting a string from guest memory: {:?}",
+                    env_data.module.name, e
+                );
+                return Err(FunctionErrors::ParametersNotUtf8);
+            }
+        };
+
+        (
+            env_data.module.name.clone(),
+            storage.clone(),
+            key,
+            env_data.module.storage_limit.clone(),
+            counter,
+        )
+    };
 
     delete_common(
-        env_data,
-        storage,
-        env_data.module.name.clone(),
+        &module_name,
+        &storage,
+        module_name.clone(),
         key,
-        memory_view,
+        env,
         data_buffer,
         data_buffer_len,
-        env_data.module.storage_limit.clone(),
+        storage_limit,
         counter,
     )
+    .await
 }
 
 /// Delete data from a shared namespace in the storage system, if one is configured
-pub fn delete_shared(
-    env: FunctionEnvMut<Env>,
+pub async fn delete_shared(
+    env: AsyncFunctionEnvMut<Env>,
     namespace_buf: WasmPtr<u8>,
     namespace_buf_len: u32,
     key_buf: WasmPtr<u8>,
@@ -61,95 +88,132 @@ pub fn delete_shared(
     data_buffer: WasmPtr<u8>,
     data_buffer_len: u32,
 ) -> i32 {
-    let store = env.as_store_ref();
-    let env_data = env.data();
-
-    let Some(storage) = &env_data.storage else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
-
-    // Check if we have shared DBs at all, otherwise we just stop
-    let Some(shared_dbs) = &storage.shared_dbs else {
-        return FunctionErrors::OperationNotAllowed as i32;
-    };
-
-    let memory_view = match get_memory(&env, &store) {
-        Ok(memory_view) => memory_view,
-        Err(e) => {
-            error!(
-                "{}: Memory error in storage_delete: {e:?}",
-                env_data.module.name,
-            );
-            return FunctionErrors::CouldNotGetAdequateMemory as i32;
-        }
-    };
-
-    safely_get_guest_string!(
-        namespace,
-        memory_view,
+    match delete_shared_impl(
+        &env,
         namespace_buf,
         namespace_buf_len,
-        env_data
-    );
-    safely_get_guest_string!(key, memory_view, key_buf, key_buf_len, env_data);
-
-    // Check if we can access this namespace, otherwise we just stop
-    // Get the shared DB, if it exists. Otherwise, exit with an error
-    let Some(db) = shared_dbs.get(&namespace) else {
-        return FunctionErrors::SharedDbError as i32;
-    };
-
-    // Check if calling module has permission to write to the DB
-    if !db.config.rw.contains(&env_data.module.name) {
-        return FunctionErrors::OperationNotAllowed as i32;
-    }
-
-    delete_common(
-        env_data,
-        storage,
-        namespace,
-        key,
-        memory_view,
+        key_buf,
+        key_buf_len,
         data_buffer,
         data_buffer_len,
-        db.config.size_limit.clone(),
-        db.used_storage.clone(),
     )
+    .await
+    {
+        Ok(res) => res,
+        Err(e) => {
+            error!("storage_delete_shared experienced an issue: {:?}", e);
+            e as i32
+        }
+    }
+}
+
+async fn delete_shared_impl(
+    env: &AsyncFunctionEnvMut<Env>,
+    namespace_buf: WasmPtr<u8>,
+    namespace_buf_len: u32,
+    key_buf: WasmPtr<u8>,
+    key_buf_len: u32,
+    data_buffer: WasmPtr<u8>,
+    data_buffer_len: u32,
+) -> Result<i32, FunctionErrors> {
+    // 1) Guard: snapshot what we need, read the namespace and key from guest
+    //    memory, and check namespace access permissions. The guard is
+    //    dropped at the end of this block.
+    let (module_name, storage, namespace, key, storage_limit, counter) = {
+        let guard = env.read().await;
+        let env_data = guard.data();
+
+        let Some(storage) = &env_data.storage else {
+            return Err(FunctionErrors::ApiNotConfigured);
+        };
+
+        // Check if we have shared DBs at all, otherwise we just stop
+        let Some(shared_dbs) = &storage.shared_dbs else {
+            return Err(FunctionErrors::OperationNotAllowed);
+        };
+
+        let namespace =
+            match safely_get_string_async(env, namespace_buf, namespace_buf_len).await {
+                Ok(s) => s,
+                Err(e) => {
+                    error!(
+                        "{}: error while getting a string from guest memory: {:?}",
+                        env_data.module.name, e
+                    );
+                    return Err(FunctionErrors::ParametersNotUtf8);
+                }
+            };
+
+        let key = match safely_get_string_async(env, key_buf, key_buf_len).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!(
+                    "{}: error while getting a string from guest memory: {:?}",
+                    env_data.module.name, e
+                );
+                return Err(FunctionErrors::ParametersNotUtf8);
+            }
+        };
+
+        // Check if we can access this namespace, otherwise we just stop
+        // Get the shared DB, if it exists. Otherwise, exit with an error
+        let Some(db) = shared_dbs.get(&namespace) else {
+            return Err(FunctionErrors::SharedDbError);
+        };
+
+        // Check if calling module has permission to write to the DB
+        if !db.config.rw.contains(&env_data.module.name) {
+            return Err(FunctionErrors::OperationNotAllowed);
+        }
+
+        (
+            env_data.module.name.clone(),
+            storage.clone(),
+            namespace,
+            key,
+            db.config.size_limit.clone(),
+            db.used_storage.clone(),
+        )
+    };
+
+    delete_common(
+        &module_name,
+        &storage,
+        namespace,
+        key,
+        env,
+        data_buffer,
+        data_buffer_len,
+        storage_limit,
+        counter,
+    )
+    .await
 }
 
 /// Code which is common to `delete` and `delete_shared`
-fn delete_common(
-    env_data: &Env,
+async fn delete_common(
+    module_name: &str,
     storage: &Arc<Storage>,
     namespace: String,
     key: String,
-    memory_view: MemoryView,
+    env: &AsyncFunctionEnvMut<Env>,
     data_buffer: WasmPtr<u8>,
     data_buffer_len: u32,
     storage_limit: LimitValue,
     storage_counter: Arc<RwLock<u64>>,
-) -> i32 {
+) -> Result<i32, FunctionErrors> {
+    // 2) NO guard held: the awaits below suspend the guest's stack and the
+    //    executor thread is free to run other guests.
     let deletion_result = match data_buffer_len {
         // This is a call just to get the size of the buffer, so we do storage.get and don't mess with storage counters
-        0 => env_data
-            .api
-            .clone()
-            .runtime
-            .block_on(async move { storage.get(&namespace, &key).await }),
+        0 => storage.get(&namespace, &key).await,
         // This is a call to delete the value, so we will do storage.delete, but first we need to check the storage limit
         _ => match storage_limit {
             LimitValue::Unlimited => {
                 // The storage is unlimited, so we don't update any counters and just proceed with the operation
-                env_data
-                    .api
-                    .clone()
-                    .runtime
-                    .block_on(async move { storage.delete(&namespace, &key).await })
+                storage.delete(&namespace, &key).await
             }
             LimitValue::Limited(_) => {
-                // for the "async move"
-                let storage_key = key.clone();
-
                 // The storage is limited, so we need to update counters (with locks)
 
                 // Get a lock on the storage counter.
@@ -159,15 +223,11 @@ fn delete_common(
                     Ok(g) => g,
                     Err(e) => {
                         error!("Critical error getting a lock on used storage: {:?}", e);
-                        return FunctionErrors::InternalApiError as i32;
+                        return Err(FunctionErrors::InternalApiError);
                     }
                 };
 
-                let result = env_data
-                    .api
-                    .clone()
-                    .runtime
-                    .block_on(async move { storage.delete(&namespace, &storage_key).await });
+                let result = storage.delete(&namespace, &key).await;
                 // If the deletion went well, update counter for used storage.
                 // If the deletion failed for some reason, we don't update the counter and release the lock: no harm done.
                 if let Ok(Some(ref data)) = result {
@@ -183,19 +243,17 @@ fn delete_common(
     match deletion_result {
         Ok(data) => match data {
             Some(data) => {
-                match safely_write_data_back(&memory_view, &data, data_buffer, data_buffer_len) {
-                    Ok(x) => x,
+                match safely_write_data_back_async(env, &data, data_buffer, data_buffer_len).await
+                {
+                    Ok(x) => Ok(x),
                     Err(e) => {
-                        error!(
-                            "{}: Data write error in storage_delete: {:?}",
-                            env_data.module.name, e
-                        );
-                        e as i32
+                        error!("{}: Data write error in storage_delete: {:?}", module_name, e);
+                        Err(e)
                     }
                 }
             }
-            None => 0,
+            None => Ok(0),
         },
-        Err(_) => FunctionErrors::InternalApiError as i32,
+        Err(_) => Err(FunctionErrors::InternalApiError),
     }
 }

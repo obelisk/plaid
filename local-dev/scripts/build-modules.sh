@@ -10,6 +10,12 @@ OUT_DIR="$SCRIPT_DIR/../compiled_modules"
 mkdir -p "$OUT_DIR"
 
 echo "Building WASM modules..."
+# Rules import host functions (storage_*, fetch_data, ...) that Plaid provides
+# at instantiation time, so the wasm link must allow undefined symbols
+# (a hard error on Rust >= 1.94). The env var is used because cargo discovers
+# .cargo/config.toml from the working directory, not the manifest path, and
+# this script may be invoked from anywhere.
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-C link-arg=--allow-undefined" \
 cargo build \
     --manifest-path "$RULES_DIR/Cargo.toml" \
     --release \

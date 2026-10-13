@@ -1,2 +1,7 @@
 [build]
 target = "wasm32-unknown-unknown"
+# Rules import host functions (storage_*, fetch_data, ...) that are provided by
+# the Plaid runtime at instantiation time, so the linker must tolerate
+# undefined symbols at build time. Rust >= 1.94 rejects them by default
+# (previously a warning), which is why this flag is required.
+rustflags = ["-C", "link-arg=--allow-undefined"]

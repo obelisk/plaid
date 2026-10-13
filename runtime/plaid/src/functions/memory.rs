@@ -1,4 +1,6 @@
-use wasmer::{FunctionEnvMut, MemoryView, StoreRef, WasmPtr};
+use wasmer::{
+    AsyncFunctionEnvMut, FunctionEnvMut, MemoryView, StoreRef, WasmPtr,
+};
 
 use crate::executor::Env;
 
@@ -100,6 +102,121 @@ pub fn safely_write_data_back(
         .map_err(|_| FunctionErrors::FailedToWriteGuestMemory)?;
 
     Ok(data.len() as i32)
+}
+
+// ---- Async variants ----
+//
+// These are used by async-registered host functions. Inside those, guest
+// memory is reached through `AsyncFunctionEnvMut<Env>` read-guards. The
+// discipline is always: acquire the guard, copy bytes in/out, drop the
+// guard. Never hold a guard across an `.await` of host services — the
+// guard holds the store lock, which would block other coroutines running
+// against the same store.
+
+/// Safely get a string from the guest's memory inside an async host
+/// function. Takes a pointer provided by the guest and reads the string
+/// through a short-lived read guard.
+pub async fn safely_get_string_async(
+    env: &AsyncFunctionEnvMut<Env>,
+    data_buffer: WasmPtr<u8>,
+    buffer_size: u32,
+) -> Result<String, FunctionErrors> {
+    let guard = env.read().await;
+    let (data, store) = guard.data_and_store();
+
+    let memory = match &data.memory {
+        Some(m) => m,
+        None => {
+            error!("Memory was not initialized for a function call!?");
+            return Err(FunctionErrors::InternalApiError);
+        }
+    };
+
+    let memory_view = memory.view(store);
+    match data_buffer.read_utf8_string(&memory_view, buffer_size) {
+        Ok(s) => Ok(s),
+        Err(e) => {
+            error!("Failed to read a UTF-8 string from the guest's memory: {e}");
+            Err(FunctionErrors::ParametersNotUtf8)
+        }
+    }
+}
+
+/// Safely write data back to the guest's memory inside an async host
+/// function. Takes a pointer provided by the guest, does bounds checking,
+/// and writes the data back through a short-lived read guard. Returns the
+/// number of bytes written or an error if the buffer is too small.
+pub async fn safely_write_data_back_async(
+    env: &AsyncFunctionEnvMut<Env>,
+    data: &[u8],
+    data_buffer: WasmPtr<u8>,
+    buffer_size: u32,
+) -> Result<i32, FunctionErrors> {
+    if buffer_size == 0 {
+        return Ok(data.len() as i32);
+    }
+
+    if data.len() > buffer_size as usize {
+        return Err(FunctionErrors::ReturnBufferTooSmall);
+    }
+
+    let guard = env.read().await;
+    let (env_data, store) = guard.data_and_store();
+
+    let memory = match &env_data.memory {
+        Some(m) => m,
+        None => {
+            error!("Memory was not initialized for a function call!?");
+            return Err(FunctionErrors::InternalApiError);
+        }
+    };
+
+    let memory_view = memory.view(store);
+    let values = data_buffer
+        .slice(&memory_view, data.len() as u32)
+        .map_err(|_| FunctionErrors::CouldNotGetAdequateMemory)?;
+
+    values
+        .write_slice(data)
+        .map_err(|_| FunctionErrors::FailedToWriteGuestMemory)?;
+
+    Ok(data.len() as i32)
+}
+
+/// Safely get a Vec<u8> from the guest's memory inside an async host
+/// function. Takes a pointer provided by the guest, then does a bounds
+/// checked read through a short-lived read guard. The buffer_size is
+/// validated against max_buffer_size to prevent malicious modules from
+/// requesting excessive memory allocations.
+pub async fn safely_get_memory_async(
+    env: &AsyncFunctionEnvMut<Env>,
+    data_buffer: WasmPtr<u8>,
+    buffer_size: u32,
+    max_buffer_size: u32,
+) -> Result<Vec<u8>, FunctionErrors> {
+    // Validate buffer size against the maximum allowed for this module
+    if buffer_size > max_buffer_size {
+        return Err(FunctionErrors::CouldNotGetAdequateMemory);
+    }
+
+    let guard = env.read().await;
+    let (env_data, store) = guard.data_and_store();
+
+    let memory = match &env_data.memory {
+        Some(m) => m,
+        None => {
+            error!("Memory was not initialized for a function call!?");
+            return Err(FunctionErrors::InternalApiError);
+        }
+    };
+
+    let memory_view = memory.view(store);
+    let mut buffer = vec![0; buffer_size as usize];
+    memory_view
+        .read(data_buffer.offset().into(), &mut buffer)
+        .map_err(|_| FunctionErrors::CouldNotGetAdequateMemory)?;
+
+    Ok(buffer)
 }
 
 #[cfg(test)]

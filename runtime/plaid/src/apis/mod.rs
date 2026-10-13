@@ -50,7 +50,6 @@ use plaid_stl::npm::shared_structs::NpmError;
 use serde::Deserialize;
 use slack::{Slack, SlackConfig};
 use splunk::{Splunk, SplunkConfig};
-use tokio::runtime::Runtime;
 use web::{Web, WebConfig};
 use yubikey::{Yubikey, YubikeyConfig};
 
@@ -59,7 +58,6 @@ use crate::apis::cryptography::{Cryptography, CryptographyConfig};
 
 /// All the APIs that Plaid can use
 pub struct Api {
-    pub runtime: Runtime,
     pub cryptography: Option<Cryptography>,
     #[cfg(feature = "aws")]
     pub aws: Option<Aws>,
@@ -146,7 +144,6 @@ pub enum ApiError {
     NetworkResponseTooLarge,
     TlsError(String),
     BloomFilterError(String),
-    CouldNotInstatiateRuntime(String),
 }
 
 impl From<BlockchainError> for ApiError {
@@ -273,9 +270,6 @@ impl Api {
         };
 
         Ok(Self {
-            runtime: Runtime::new().map_err(|e| {
-                ApiError::CouldNotInstatiateRuntime(format!("Failed to create runtime: {}", e))
-            })?,
             #[cfg(feature = "aws")]
             aws,
             #[cfg(feature = "gcp")]
