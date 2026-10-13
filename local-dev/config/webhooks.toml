@@ -73,3 +73,14 @@ logbacks_allowed = { Limited = 0 }
 log_type = "error_handling"
 headers = ["Content-Type"]
 logbacks_allowed = { Limited = 0 }
+
+# postgres-reader: Query the seeded local PostgreSQL database
+[webhooks."local".webhooks."postgres"]
+log_type = "postgres_reader"
+headers = ["Content-Type"]
+logbacks_allowed = { Limited = 0 }
+[webhooks."local".webhooks."postgres".get_mode]
+response_mode = "rule:postgres_reader.wasm"
+[webhooks."local".webhooks."postgres".get_mode.caching_mode]
+type = "UsePersistentResponse"
+call_on_none = false
