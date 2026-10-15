@@ -245,10 +245,6 @@ fn dispatch_logback(env: &Env, delay: u32, msg: Message) -> i32 {
 }
 
 fn persist_delayed_log(env: &Env, mut log: DelayedMessage) -> Result<(), FunctionErrors> {
-    let Some(ref storage) = env.storage else {
-        return Err(FunctionErrors::ApiNotConfigured);
-    };
-
     let current_time = get_time() as u64;
     log.delay += current_time;
 
@@ -265,7 +261,11 @@ fn persist_delayed_log(env: &Env, mut log: DelayedMessage) -> Result<(), Functio
 
     env.api
         .runtime
-        .block_on(async move { storage.insert(LOGBACK_NS.to_string(), id, db_item).await })
+        .block_on(async move {
+            env.storage
+                .insert(LOGBACK_NS.to_string(), id, db_item)
+                .await
+        })
         .map_err(|e| {
             error!("Failed to persist delayed message from {source}. Error: {e}");
             FunctionErrors::InternalApiError

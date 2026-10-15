@@ -195,8 +195,8 @@ pub struct Env {
     pub message: Message,
     // A handle to the API to make external calls
     pub api: Arc<Api>,
-    // A handle to the storage system if one is configured
-    pub storage: Option<Arc<Storage>>,
+    // A handle to the storage system
+    pub storage: Arc<Storage>,
     // A handle to the cache system if one is configured
     pub cache: Option<Arc<Cache>>,
     // A sender to the external logging system
@@ -335,7 +335,7 @@ fn prepare_for_execution(
     message: Message,
     plaid_module: Arc<PlaidModule>,
     api: Arc<Api>,
-    storage: Option<Arc<Storage>>,
+    storage: Arc<Storage>,
     cache: Option<Arc<Cache>>,
     els: Logger,
     response: Option<String>,
@@ -354,7 +354,7 @@ fn prepare_for_execution(
         module: plaid_module.clone(),
         message: message.create_duplicate(),
         api: api.clone(),
-        storage: storage.clone(),
+        storage,
         cache: cache.clone(),
         external_logging_system: els.clone(),
         memory: None,
@@ -483,7 +483,7 @@ fn process_message_with_module(
     message: Message,
     module: Arc<PlaidModule>,
     api: Arc<Api>,
-    storage: Option<Arc<Storage>>,
+    storage: Arc<Storage>,
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_mode: Option<Sender<ModulePerformanceMetadata>>,
@@ -643,7 +643,7 @@ fn execution_loop(
     receiver: Receiver<Message>,
     modules: HashMap<String, Vec<Arc<PlaidModule>>>,
     api: Arc<Api>,
-    storage: Option<Arc<Storage>>,
+    storage: Arc<Storage>,
     cache: Option<Arc<Cache>>,
     els: Logger,
     performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
@@ -738,7 +738,7 @@ impl Executor {
         thread_pools: ExecutionThreadPools,
         modules: HashMap<String, Vec<Arc<PlaidModule>>>,
         api: Arc<Api>,
-        storage: Option<Arc<Storage>>,
+        storage: Arc<Storage>,
         cache: Option<Arc<Cache>>,
         els: Logger,
         performance_monitoring_mode: Option<Sender<ModulePerformanceMetadata>>,
