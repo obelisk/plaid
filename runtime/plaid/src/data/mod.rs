@@ -24,13 +24,10 @@ use std::{
 
 use serde::Deserialize;
 use time::OffsetDateTime;
-use tokio::{
-    sync::mpsc::Sender as AsyncSender,
-    task::{JoinHandle, JoinSet},
-};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-pub use self::internal::{DelayedLogPersister, DelayedMessage};
+pub use self::internal::DelayedMessage;
 
 const DATA_GENERATOR_STORAGE_PREFIX: &str = "__DATA_GENERATOR";
 const LAST_SEEN_KEY: &str = "last_seen";
@@ -90,7 +87,7 @@ impl DataInternal {
         storage: Arc<Storage>,
         els: Logger,
         metrics: Option<Arc<MetricsHandle>>,
-    ) -> Result<(Self, internal::DelayedLogPersister), DataError> {
+    ) -> Result<Self, DataError> {
         let github = config
             .github
             .map(|gh| {
@@ -103,7 +100,7 @@ impl DataInternal {
             .okta
             .map(|okta| okta::Okta::new(okta, logger.clone(), metrics.clone()));
 
-        let (internal, persister) = internal::Internal::new(
+        let internal = internal::Internal::new(
             logger.clone(),
             storage.clone(),
             config.internal.maximum_poll_interval_ms,
@@ -124,18 +121,15 @@ impl DataInternal {
             .websocket
             .map(|ws| websocket::WebsocketGenerator::new(ws, logger.clone(), els));
 
-        Ok((
-            Self {
-                github,
-                okta,
-                internal,
-                interval,
-                #[cfg(feature = "aws")]
-                sqs,
-                websocket_external,
-            },
-            persister,
-        ))
+        Ok(Self {
+            github,
+            okta,
+            internal,
+            interval,
+            #[cfg(feature = "aws")]
+            sqs,
+            websocket_external,
+        })
     }
 }
 
@@ -148,9 +142,8 @@ impl Data {
         roles: &InstanceRoles,
         cancellation_token: CancellationToken,
         metrics: Option<Arc<MetricsHandle>>,
-    ) -> Result<(AsyncSender<DelayedMessage>, JoinHandle<()>, JoinSet<()>), DataError> {
-        let (mut di, delayed_log_persister) =
-            DataInternal::new(config, sender, storage.clone(), els, metrics).await?;
+    ) -> Result<JoinSet<()>, DataError> {
+        let mut di = DataInternal::new(config, sender, storage.clone(), els, metrics).await?;
 
         let mut join_set = JoinSet::new();
 
@@ -287,11 +280,6 @@ impl Data {
             }
         }
 
-        // Spawns a listener that persists delayed logbacks to storage as they
-        // arrive.
-        let delayed_log_sender = di.internal.get_sender();
-        let persister_handle = tokio::spawn(delayed_log_persister.listen_for_incoming_logs());
-
         // If running logbacks, start the internal processor.
         if roles.logbacks {
             let ct_clone = cancellation_token.clone();
@@ -325,7 +313,7 @@ impl Data {
         }
 
         info!("Started Data Generators");
-        Ok((delayed_log_sender, persister_handle, join_set))
+        Ok(join_set)
     }
 }
 
