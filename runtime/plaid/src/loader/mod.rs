@@ -579,10 +579,7 @@ async fn populate_storage_sizes(
 }
 
 /// Load all modules, according to Plaid's configuration
-pub async fn load(
-    config: &Configuration,
-    storage: Option<Arc<Storage>>,
-) -> Result<PlaidModules, ()> {
+pub async fn load(config: &Configuration, storage: Arc<Storage>) -> Result<PlaidModules, ()> {
     let module_paths = fs::read_dir(config.module_dir.clone())
         .unwrap()
         .collect::<Vec<_>>();
@@ -689,12 +686,10 @@ pub async fn load(
         .collect();
 
     // Counting the bytes already in storage requires a round trip to the backing store per
-    // module, so these lookups are performed concurrently rather than one at a time. Without a
-    // storage backend there is nothing to count, so every module keeps its default of zero.
-    let loaded_modules = match &storage {
-        Some(storage) => populate_storage_sizes(loaded_modules, storage.clone(), config).await,
-        None => loaded_modules,
-    };
+    // module, so these lookups are performed concurrently rather than one at a time. With the
+    // default in-memory backend there is nothing to count, so every module keeps its default of
+    // zero.
+    let loaded_modules = populate_storage_sizes(loaded_modules, storage.clone(), config).await;
 
     for module in loaded_modules {
         module.log_load_info();

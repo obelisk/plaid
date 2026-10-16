@@ -403,7 +403,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (els, logging_handler) = Logger::start(config.logging);
     info!("Logging subsystem started");
 
-    // Create the storage system if one is configured
+    // Create the storage system, defaulting to an in-memory store when nothing is configured.
+    // Per-module storage limits still apply, but data will not persist across reboots.
     let storage = match config.storage {
         Some(config) => {
             info!("Storage system configured");
@@ -436,18 +437,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             }
-            Some(s)
+            s
         }
         None => {
-            info!("No persistent storage system configured; unexecuted log backs will be lost on shutdown");
-            None
+            warn!(
+                "No storage system configured; defaulting to an in-memory store. Data will NOT persist across reboots"
+            );
+            Arc::new(Storage::new_in_memory())
         }
-    };
-
-    // The internal system always gets a storage: if we don't have a persistent one, we create an in-memory one
-    let internal_storage = match &storage {
-        Some(s) => s.clone(),
-        None => Arc::new(Storage::new_in_memory()),
     };
 
     // Graceful shutdown handling
@@ -561,10 +558,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // This sender provides an internal route to sending logs. This is what
     // powers the logback functions.
-    let (delayed_log_sender, mut delayed_log_persister, mut dg_tasks) = Data::start(
+    let mut dg_tasks = Data::start(
         config.data,
         log_sender.clone(),
-        internal_storage.clone(),
+        storage.clone(),
         els.clone(),
         &roles,
         cancellation_token.clone(),
@@ -596,7 +593,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         performance_sender.clone(),
         module_execution_metrics.clone(),
         Arc::downgrade(&immediate_dispatch),
-        delayed_log_sender.clone(),
         cancellation_token.clone(),
     );
 
@@ -809,11 +805,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting servers, boot up complete");
     is_ready.store(true, Ordering::SeqCst);
 
-    // Set if the persister exits before shutdown. Winning the select below
-    // consumes the JoinHandle's output, so the final drain-await must be
-    // skipped: polling a completed JoinHandle again panics.
-    let mut persister_already_joined = false;
-
     // Block until SIGINT/SIGTERM, or until a server/data generator task exits unexpectedly.
     tokio::select! {
         _ = wait_for_shutdown_signal() => {}
@@ -823,15 +814,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(result) = server_result {
                 log_join_result("webhook server", result);
             }
-        }
-
-        // Poll by reference so the handle stays owned here, but note that a
-        // win here reads the task's output; the flag guards the final
-        // drain-await below against re-polling the completed handle.
-        result = &mut delayed_log_persister => {
-            persister_already_joined = true;
-            warn!("The delayed log persister exited before a shutdown signal was received");
-            log_join_result("delayed logback persister", result);
         }
 
         dg_result = dg_tasks.join_next(), if !dg_tasks.is_empty() => {
@@ -867,16 +849,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(immediate_dispatch);
     drop(executor);
     executor_threads.join();
-
-    // Dropping the last delayed-logback sender closes the channel, letting the
-    // persister drain and exit on its own.
-    info!("Flushing delayed logbacks to storage...");
-    drop(delayed_log_sender);
-    if !persister_already_joined {
-        if let Err(e) = delayed_log_persister.await {
-            error!("Delayed logback persister task failed during shutdown: {e}");
-        }
-    }
 
     // Performance loop exits the final sender disconnects.
     drop(performance_sender);

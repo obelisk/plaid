@@ -1,8 +1,6 @@
-use std::sync::Arc;
-
 use wasmer::{AsStoreRef, FunctionEnvMut, MemoryView, WasmPtr};
 
-use crate::{executor::Env, functions::FunctionErrors, storage::Storage};
+use crate::{executor::Env, functions::FunctionErrors};
 
 use super::{get_memory, safely_get_string, safely_write_data_back};
 
@@ -17,10 +15,6 @@ pub fn list_keys(
 ) -> i32 {
     let store = env.as_store_ref();
     let env_data = env.data();
-
-    let Some(storage) = &env_data.storage else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
 
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
@@ -37,7 +31,6 @@ pub fn list_keys(
 
     list_keys_common(
         env_data,
-        storage,
         env_data.module.name.clone(),
         prefix,
         memory_view,
@@ -60,12 +53,8 @@ pub fn list_keys_shared(
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let Some(storage) = &env_data.storage else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
-
     // Check if we have shared DBs at all, otherwise we just stop
-    let Some(shared_dbs) = &storage.shared_dbs else {
+    let Some(shared_dbs) = &env_data.storage.shared_dbs else {
         return FunctionErrors::OperationNotAllowed as i32;
     };
 
@@ -104,7 +93,6 @@ pub fn list_keys_shared(
 
     list_keys_common(
         env_data,
-        storage,
         namespace,
         prefix,
         memory_view,
@@ -116,18 +104,18 @@ pub fn list_keys_shared(
 /// Code which is common to `list_keys` and `list_keys_shared`
 fn list_keys_common(
     env_data: &Env,
-    storage: &Arc<Storage>,
     namespace: String,
     prefix: String,
     memory_view: MemoryView,
     data_buffer: WasmPtr<u8>,
     data_buffer_len: u32,
 ) -> i32 {
-    let result = env_data
-        .api
-        .clone()
-        .runtime
-        .block_on(async move { storage.list_keys(&namespace, Some(prefix.as_str())).await });
+    let result = env_data.api.clone().runtime.block_on(async move {
+        env_data
+            .storage
+            .list_keys(&namespace, Some(prefix.as_str()))
+            .await
+    });
 
     match result {
         Ok(keys) => {

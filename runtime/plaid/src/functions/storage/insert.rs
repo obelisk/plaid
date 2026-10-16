@@ -18,10 +18,6 @@ pub fn insert_batch(env: FunctionEnvMut<Env>, items_buf: WasmPtr<u8>, items_buf_
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let Some(storage) = &env_data.storage else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
-
     let Some(counter) = env_data.module.storage_current.clone() else {
         return FunctionErrors::ApiNotConfigured as i32;
     };
@@ -41,7 +37,6 @@ pub fn insert_batch(env: FunctionEnvMut<Env>, items_buf: WasmPtr<u8>, items_buf_
 
     match insert_batch_common(
         env_data,
-        storage,
         env_data.module.name.clone(),
         items_json,
         env_data.module.storage_limit.clone(),
@@ -66,9 +61,7 @@ pub fn insert_batch_shared(
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let Some(storage) = &env_data.storage else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
+    let storage = &env_data.storage;
 
     let Some(shared_dbs) = &storage.shared_dbs else {
         return FunctionErrors::OperationNotAllowed as i32;
@@ -105,7 +98,6 @@ pub fn insert_batch_shared(
 
     match insert_batch_common(
         env_data,
-        storage,
         namespace,
         items_json,
         db.config.size_limit.clone(),
@@ -123,7 +115,6 @@ pub fn insert_batch_shared(
 /// existing data that would be overwritten.
 fn insert_batch_common(
     env_data: &Env,
-    storage: &Arc<Storage>,
     namespace: String,
     items_json: String,
     storage_limit: LimitValue,
@@ -154,7 +145,7 @@ fn insert_batch_common(
                 .api
                 .clone()
                 .runtime
-                .block_on(async move { storage.insert_batch(namespace, items).await });
+                .block_on(async move { env_data.storage.insert_batch(namespace, items).await });
 
             match result {
                 Ok(()) => Ok(0),
@@ -181,7 +172,7 @@ fn insert_batch_common(
             let mut net_delta: i64 = 0;
             for item in &items {
                 let key_len = item.key.as_bytes().len() as u64;
-                let existing = fetch_existing_data_size(env_data, storage, &namespace, &item.key)?;
+                let existing = fetch_existing_data_size(env_data, &namespace, &item.key)?;
 
                 // New contribution: key + value. Subtract what was already counted.
                 net_delta += (key_len + item.value.len() as u64) as i64 - existing as i64;
@@ -205,7 +196,7 @@ fn insert_batch_common(
                 .api
                 .clone()
                 .runtime
-                .block_on(async move { storage.insert_batch(namespace, items).await });
+                .block_on(async move { env_data.storage.insert_batch(namespace, items).await });
 
             match result {
                 Ok(()) => {
@@ -224,7 +215,7 @@ fn insert_batch_common(
     }
 }
 
-/// Store data in the storage system if one is configured
+/// Store data in the storage system
 pub fn insert(
     env: FunctionEnvMut<Env>,
     key_buf: WasmPtr<u8>,
@@ -237,9 +228,7 @@ pub fn insert(
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let Some(storage) = &env_data.storage else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
+    let storage = &env_data.storage;
 
     let Some(counter) = env_data.module.storage_current.clone() else {
         return FunctionErrors::ApiNotConfigured as i32;
@@ -276,7 +265,7 @@ pub fn insert(
     }
 }
 
-/// Store data in a shared namespace in the storage system, if one is configured
+/// Store data in a shared namespace in the storage system
 pub fn insert_shared(
     env: FunctionEnvMut<Env>,
     namespace_buf: WasmPtr<u8>,
@@ -291,9 +280,7 @@ pub fn insert_shared(
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let Some(storage) = &env_data.storage else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
+    let storage = &env_data.storage;
 
     // Check if we have shared DBs at all, otherwise we just stop
     let Some(shared_dbs) = &storage.shared_dbs else {
@@ -375,7 +362,7 @@ fn insert_common(
         LimitValue::Limited(limit) => {
             // The storage is limited, so we need to check / update counters (with locks) because the operation might have to be rejected.
 
-            let existing_data_size = fetch_existing_data_size(env_data, storage, &namespace, &key)?;
+            let existing_data_size = fetch_existing_data_size(env_data, &namespace, &key)?;
 
             // Get a lock on the storage counter.
             // This ensures no race conditions if multiple instances of the same module are running in parallel.
@@ -465,7 +452,6 @@ fn handle_insertion_result(
 /// or 0 if the key does not exist. Returns `Err(i32)` with a ready-to-return error code on failure.
 fn fetch_existing_data_size(
     env_data: &Env,
-    storage: &Arc<Storage>,
     namespace: &str,
     key: &str,
 ) -> Result<u64, FunctionErrors> {
@@ -474,7 +460,7 @@ fn fetch_existing_data_size(
         .api
         .clone()
         .runtime
-        .block_on(async { storage.get(namespace, key).await })
+        .block_on(async { env_data.storage.get(namespace, key).await })
     {
         Ok(None) => Ok(0u64),
         // If we have existing data, count the key length too since at the end of a possible

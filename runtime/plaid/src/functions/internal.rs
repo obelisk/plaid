@@ -4,7 +4,7 @@ use plaid_stl::messages::{LogSource, LogbacksAllowed};
 use wasmer::{AsStoreRef, FunctionEnvMut, WasmPtr};
 
 use crate::{
-    data::DelayedMessage,
+    data::{internal::LOGBACK_NS, DelayedMessage},
     executor::{Env, Message},
     functions::{get_memory, safely_get_string},
 };
@@ -189,10 +189,7 @@ pub fn log_back_detailed(
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
         Err(e) => {
-            error!(
-                "{}: Memory error in log_back: {:?}",
-                env_data.module.name, e
-            );
+            error!("{}: Memory error in log_back: {e:?}", env_data.module.name,);
             return FunctionErrors::InternalApiError as i32;
         }
     };
@@ -200,7 +197,7 @@ pub fn log_back_detailed(
     let type_ = match safely_get_string(&memory_view, type_buf, type_buf_len) {
         Ok(s) => s,
         Err(e) => {
-            error!("{}: Error in log_back: {:?}", env_data.module.name, e);
+            error!("{}: Error in log_back: {e:?}", env_data.module.name);
             return FunctionErrors::InternalApiError as i32;
         }
     };
@@ -208,19 +205,17 @@ pub fn log_back_detailed(
     let log = match safely_get_memory(&memory_view, log_buf, log_buf_len, max_buffer_size) {
         Ok(d) => d,
         Err(e) => {
-            error!("{}: Error in log_back: {:?}", env_data.module.name, e);
+            error!("{}: Error in log_back: {e:?}", env_data.module.name);
             return FunctionErrors::InternalApiError as i32;
         }
     };
 
     let msg = Message::new(type_, log, LogSource::Logback(name), assigned_budget);
-    match dispatch_logback(env.data(), delay, msg) {
-        Ok(()) => 0,
-        Err(e) => e as i32,
-    }
+
+    dispatch_logback(env.data(), delay, msg)
 }
 
-fn dispatch_logback(env: &Env, delay: u32, msg: Message) -> Result<(), FunctionErrors> {
+fn dispatch_logback(env: &Env, delay: u32, msg: Message) -> i32 {
     let cancelled = env.cancellation_token.is_cancelled();
 
     // Happy path: not shutting down, zero delay, immediate sender available.
@@ -229,10 +224,10 @@ fn dispatch_logback(env: &Env, delay: u32, msg: Message) -> Result<(), FunctionE
             let err = e.to_string();
             let source = e.into_inner().source;
             error!("Failed to log back immediate message from: {source}. Error: {err}");
-            return Err(FunctionErrors::FailedToLogBack);
+            return FunctionErrors::FailedToLogBack as i32;
         }
 
-        return Ok(());
+        return 0;
     }
 
     // Everything else falls through to the delayed queue.
@@ -241,15 +236,40 @@ fn dispatch_logback(env: &Env, delay: u32, msg: Message) -> Result<(), FunctionE
     }
 
     let actual_delay = std::cmp::max(delay as u64, 1);
-    if let Err(e) = env
-        .delayed_log_sender
-        .try_send(DelayedMessage::new(actual_delay, msg))
-    {
-        let err = e.to_string();
-        let source = e.into_inner().message.source;
-        error!("Delayed logback dispatch from {source} failed; message dropped. Error: {err}");
-        return Err(FunctionErrors::FailedToLogBack);
+    let delayed = DelayedMessage::new(actual_delay, msg);
+
+    match persist_delayed_log(env, delayed) {
+        Ok(()) => 0,
+        Err(e) => e as i32,
     }
+}
+
+fn persist_delayed_log(env: &Env, mut log: DelayedMessage) -> Result<(), FunctionErrors> {
+    let current_time = get_time() as u64;
+    log.delay += current_time;
+
+    let source = log.message.source.clone();
+    let id = log.message.id.clone();
+
+    let db_item = match serde_json::to_vec(&log) {
+        Ok(db_item) => db_item,
+        Err(e) => {
+            error!("Failed to serialize DelayedMessage from {source}. Error: {e}");
+            return Err(FunctionErrors::ErrorCouldNotSerialize);
+        }
+    };
+
+    env.api
+        .runtime
+        .block_on(async move {
+            env.storage
+                .insert(LOGBACK_NS.to_string(), id, db_item)
+                .await
+        })
+        .map_err(|e| {
+            error!("Failed to persist delayed message from {source}. Error: {e}");
+            FunctionErrors::InternalApiError
+        })?;
 
     Ok(())
 }

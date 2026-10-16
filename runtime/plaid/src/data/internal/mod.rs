@@ -13,12 +13,9 @@ use std::{
 
 use std::collections::BinaryHeap;
 
-use tokio::sync::mpsc;
-
 use super::DataError;
 
-const LOGBACK_NS: &str = "logback_internal";
-const CHANNEL_CAPACITY: usize = 4096;
+pub(crate) const LOGBACK_NS: &str = "logback_internal";
 
 #[derive(Deserialize)]
 pub struct InternalConfig {
@@ -68,29 +65,10 @@ impl std::cmp::Ord for DelayedMessage {
     }
 }
 
-/// Persists incoming delayed logbacks to storage as they arrive. Holds no
-/// `Sender<Message>` so the listener task cannot keep executor ingress channels alive.
-/// Owns the receiving end of the delayed-logback channel exclusively: it exits
-/// cleanly once every sender has been dropped.
-pub struct DelayedLogPersister {
-    receiver: mpsc::Receiver<DelayedMessage>,
-    storage: Arc<Storage>,
-}
-
-impl DelayedLogPersister {
-    /// Persist delayed logbacks as they arrive, until all senders are dropped.
-    pub async fn listen_for_incoming_logs(mut self) {
-        while let Some(log) = self.receiver.recv().await {
-            persist_delayed_log(&self.storage, log).await;
-        }
-    }
-}
-
 pub struct Internal {
     /// Sends fired logbacks to the executor, routing them to the pool
     /// dedicated to their log type
     sender: MessageSender,
-    internal_sender: mpsc::Sender<DelayedMessage>,
     storage: Arc<Storage>,
     pub maximum_poll_interval: Duration,
 }
@@ -100,22 +78,12 @@ impl Internal {
         log_sender: MessageSender,
         storage: Arc<Storage>,
         maximum_poll_interval: Duration,
-    ) -> Result<(Self, DelayedLogPersister), DataError> {
-        let (internal_sender, receiver) = mpsc::channel(CHANNEL_CAPACITY);
-
-        Ok((
-            Self {
-                sender: log_sender,
-                internal_sender,
-                storage: storage.clone(),
-                maximum_poll_interval,
-            },
-            DelayedLogPersister { receiver, storage },
-        ))
-    }
-
-    pub fn get_sender(&self) -> mpsc::Sender<DelayedMessage> {
-        self.internal_sender.clone()
+    ) -> Result<Self, DataError> {
+        Ok(Self {
+            sender: log_sender,
+            storage: storage.clone(),
+            maximum_poll_interval,
+        })
     }
 
     /// Drain all due delayed logbacks from storage into the executor.
@@ -212,33 +180,6 @@ async fn fill_heap_from_db(
     }
 
     Ok(log_heap)
-}
-
-async fn persist_delayed_log(storage: &Storage, log: DelayedMessage) {
-    let mut log = log;
-    let current_time = get_time();
-    log.delay += current_time;
-
-    let db_item = match serde_json::to_vec(&log) {
-        Ok(db_item) => db_item,
-        Err(e) => {
-            error!(
-                "Failed to serialize DelayedMessage from {}. Error: {e}",
-                log.message.source
-            );
-            return;
-        }
-    };
-
-    if let Err(e) = storage
-        .insert(LOGBACK_NS.to_string(), log.message.id.clone(), db_item)
-        .await
-    {
-        error!(
-            "Storage system could not persist delayed log from {}. Error: {e}",
-            log.message.source
-        );
-    }
 }
 
 fn get_time() -> u64 {

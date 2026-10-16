@@ -1,12 +1,10 @@
-use std::sync::Arc;
-
 use wasmer::{AsStoreRef, FunctionEnvMut, MemoryView, WasmPtr};
 
-use crate::{executor::Env, functions::FunctionErrors, storage::Storage};
+use crate::{executor::Env, functions::FunctionErrors};
 
 use super::{get_memory, safely_get_string, safely_write_data_back};
 
-/// Get data from the storage system if one is configured
+/// Get data from the storage system
 pub fn get(
     env: FunctionEnvMut<Env>,
     key_buf: WasmPtr<u8>,
@@ -16,10 +14,6 @@ pub fn get(
 ) -> i32 {
     let store = env.as_store_ref();
     let env_data = env.data();
-
-    let Some(storage) = &env_data.storage else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
 
     let memory_view = match get_memory(&env, &store) {
         Ok(memory_view) => memory_view,
@@ -36,7 +30,6 @@ pub fn get(
 
     get_common(
         env_data,
-        storage,
         &env_data.module.name,
         &key,
         memory_view,
@@ -45,7 +38,7 @@ pub fn get(
     )
 }
 
-/// Get data from a shared namespace in the storage system, if one is configured
+/// Get data from a shared namespace in the storage system
 pub fn get_shared(
     env: FunctionEnvMut<Env>,
     namespace_buf: WasmPtr<u8>,
@@ -58,9 +51,7 @@ pub fn get_shared(
     let store = env.as_store_ref();
     let env_data = env.data();
 
-    let Some(storage) = &env_data.storage else {
-        return FunctionErrors::ApiNotConfigured as i32;
-    };
+    let storage = &env_data.storage;
 
     // Check if we have shared DBs at all, otherwise we just stop
     let Some(shared_dbs) = &storage.shared_dbs else {
@@ -102,7 +93,6 @@ pub fn get_shared(
 
     get_common(
         env_data,
-        storage,
         &namespace,
         &key,
         memory_view,
@@ -114,7 +104,6 @@ pub fn get_shared(
 /// Code which is common to `get` and `get_shared`
 fn get_common(
     env_data: &Env,
-    storage: &Arc<Storage>,
     namespace: &str,
     key: &str,
     memory_view: MemoryView,
@@ -125,7 +114,7 @@ fn get_common(
         .api
         .clone()
         .runtime
-        .block_on(async move { storage.get(namespace, key).await });
+        .block_on(async move { env_data.storage.get(namespace, key).await });
 
     match result {
         Ok(Some(data)) => {
