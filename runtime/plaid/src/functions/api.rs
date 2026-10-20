@@ -658,6 +658,12 @@ impl_new_sub_module_function_with_error_buffer!(
     get_fee_history,
     ALLOW_IN_TEST_MODE
 );
+impl_new_sub_module_function_with_error_buffer!(
+    blockchain,
+    evm,
+    confirm_transaction,
+    DISALLOW_IN_TEST_MODE
+);
 
 impl_new_sub_module_function_with_error_buffer!(
     blockchain,
@@ -1020,6 +1026,7 @@ define_api_functions! {
         "blockchain_evm_get_logs"                => blockchain_evm_get_logs,
         "blockchain_evm_get_block"               => blockchain_evm_get_block,
         "blockchain_evm_get_fee_history"         => blockchain_evm_get_fee_history,
+        "blockchain_evm_confirm_transaction"     => blockchain_evm_confirm_transaction,
 
         "blockchain_solana_send_signed_transaction"        => blockchain_solana_send_signed_transaction,
         "blockchain_solana_get_balance"                    => blockchain_solana_get_balance,
