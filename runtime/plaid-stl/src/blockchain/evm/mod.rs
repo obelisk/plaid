@@ -494,6 +494,11 @@ pub fn get_fee_history(
 /// within `options.max_poll_attempts` polls (spaced `options.poll_interval_ms`
 /// apart), an error is returned — the transaction may still be mined later, so
 /// callers should not blindly re-broadcast.
+///
+/// NOTE: EIP-4844 blob transactions are not supported. The transaction hash is
+/// derived locally from the submitted bytes, which for blob transactions
+/// includes the blob sidecar and therefore does not match the on-chain
+/// transaction hash; confirmation would poll the wrong hash and time out.
 pub fn confirm_transaction(
     chain_id: impl Into<ChainId>,
     signed_tx: &str,

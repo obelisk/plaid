@@ -327,10 +327,10 @@ impl BlockchainClient<Evm> {
 
         let expected_hash = compute_transaction_hash(&tx_decoded);
 
-        // Broadcast the transaction
-        //
-        // A timeout here is ambiguous: the node may have received and gossiped the transaction before the response was
-        // lost, so fall through to polling rather than failing the request.
+        // Broadcast the transaction. An RPC-level error from the node is a
+        // definitive rejection; transport-level failures are ambiguous (the node
+        // may have received and gossiped the transaction before the response was
+        // lost) and fall through to polling.
         let broadcast_request = serde_json::to_string(&SendRawTransactionRequest {
             chain_id,
             signed_tx: signed_transaction,
@@ -349,9 +349,14 @@ impl BlockchainClient<Evm> {
                     return Err(BlockchainError::Evm(EvmError::BroadcastRejected(error)).into());
                 }
             }
-            Err(ApiError::BlockchainError(BlockchainError::NetworkError(e))) if e.is_timeout() => {
+            // Transport-level failures are ambiguous: the node may have received
+            // and gossiped the transaction before the response was lost, so fall
+            // through to polling rather than failing the request.
+            Err(ApiError::BlockchainError(
+                e @ (BlockchainError::NetworkError(_) | BlockchainError::AllNodesFailed),
+            )) => {
                 warn!(
-                    "Module [{module}] broadcasted transaction [{expected_hash}] on [{chain_id}] but the response timed out"
+                    "Module [{module}] broadcast transaction [{expected_hash}] on [{chain_id}] but the response was lost ({e:?}); polling for its receipt anyway"
                 );
             }
             Err(e) => return Err(e),
