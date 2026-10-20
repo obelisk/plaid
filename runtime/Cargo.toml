@@ -10,3 +10,7 @@ codegen-units = 1
 panic = "abort"
 incremental = false
 strip = "symbols"
+
+[patch.crates-io]
+webpki-roots = { git = "https://github.com/rustls/webpki-roots.git", tag = "v/1.0.10" }
+rustls-webpki = { git = "https://github.com/rustls/webpki.git", tag = "v/0.103.16" }
