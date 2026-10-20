@@ -95,6 +95,9 @@ gcloud-bigquery = { version = "1.6", optional = true }
 rayon = "1.12.0"
 prometheus = "0.14.0"
 
+[patch.crates-io]
+webpki-roots = { git = "https://github.com", tag = "v/1.0.10" }
+
 [[example]]
 name = "github-tailer"
 path = "examples/tailers/github.rs"
