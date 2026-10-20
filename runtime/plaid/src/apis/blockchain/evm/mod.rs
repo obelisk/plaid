@@ -6,19 +6,22 @@ use crate::{
             common::{
                 rpc::JsonRpcRequest, BlockchainClient, BlockchainError, ChainFamily, NoOptions,
             },
-            evm::utils::RpcMethods,
+            evm::utils::{compute_transaction_hash, RpcMethods},
         },
         ApiError,
     },
     loader::PlaidModule,
 };
+use log::{debug, warn};
 use plaid_stl::blockchain::evm::types::{
-    ChainId, EstimateGasRequest, EthCallRequest, GetAddressMetadataRequest, GetBlockRequest,
-    GetFeeHistoryRequest, GetGasPriceRequest, GetLogsRequest, GetTransactionRequest,
-    SendRawTransactionRequest,
+    BasicRpcResponse, ChainId, ConfirmTransactionOptions, ConfirmTransactionRequest,
+    DetailedRpcResponse, EstimateGasRequest, EthCallRequest, GetAddressMetadataRequest,
+    GetBlockRequest, GetFeeHistoryRequest, GetGasPriceRequest, GetLogsRequest,
+    GetTransactionRequest, JsonRpcError, SendRawTransactionRequest, TransactionReceipt,
 };
 use serde_json::{json, Number, Value};
 use std::sync::Arc;
+use std::time::Duration;
 
 pub struct Evm;
 
@@ -27,12 +30,28 @@ impl ChainFamily for Evm {
     type Options = NoOptions;
 }
 
+/// Minimum interval between receipt polls, so a misconfigured module cannot
+/// hammer the node pool in a tight loop.
+const MIN_POLL_INTERVAL_MS: u16 = 100;
+
+/// Upper bound on the total time a `confirm_transaction` call may spend sleeping
+/// (`max_poll_attempts * poll_interval_ms`). This host call blocks a runtime
+/// thread while the module waits, so the window must stay bounded.
+const MAX_CONFIRMATION_WINDOW_MS: u64 = 60_000;
+
 /// EVM-specific error conditions, carried by [`BlockchainError::Evm`].
-///
-/// Currently a placeholder: every failure mode the EVM client hits today is
-/// common to all supported chains and lives on `BlockchainError` directly.
 #[derive(Debug)]
-pub enum EvmError {}
+pub enum EvmError {
+    /// The node rejected the broadcast transaction with an RPC-level error.
+    BroadcastRejected(JsonRpcError),
+    /// The transaction was broadcast, but no receipt appeared within the poll window.
+    ConfirmationTimeout {
+        transaction_hash: String,
+        poll_attempts: u8,
+    },
+    /// The node returned an RPC-level error while polling for the transaction receipt.
+    ReceiptQueryFailed(JsonRpcError),
+}
 
 impl BlockchainClient<Evm> {
     /// Returns the information about a transaction requested by transaction hash.
@@ -286,4 +305,148 @@ impl BlockchainClient<Evm> {
 
         self.execute_rpc_call(chain_id, request, module).await
     }
+
+    /// Broadcasts a signed transaction and polls for its receipt until it is
+    /// mined or the poll budget is exhausted.
+    pub async fn confirm_transaction(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let ConfirmTransactionRequest {
+            chain_id,
+            signed_transaction,
+            options,
+        } = serde_json::from_str::<ConfirmTransactionRequest>(params)
+            .map_err(BlockchainError::SerdeError)?;
+
+        validate_poll_options(&module, &options)?;
+
+        let tx_decoded = hex::decode(signed_transaction.trim_start_matches("0x"))
+            .map_err(|_| ApiError::BadRequest)?;
+
+        let expected_hash = compute_transaction_hash(&tx_decoded);
+
+        // Broadcast the transaction
+        //
+        // A timeout here is ambiguous: the node may have received and gossiped the transaction before the response was
+        // lost, so fall through to polling rather than failing the request.
+        let broadcast_request = serde_json::to_string(&SendRawTransactionRequest {
+            chain_id,
+            signed_tx: signed_transaction,
+        })
+        .map_err(BlockchainError::SerdeError)?;
+
+        match self
+            .send_raw_transaction(&broadcast_request, module.clone())
+            .await
+        {
+            Ok(response) => {
+                let response = serde_json::from_str::<BasicRpcResponse>(&response)
+                    .map_err(BlockchainError::SerdeError)?;
+
+                if let Some(error) = response.error {
+                    return Err(BlockchainError::Evm(EvmError::BroadcastRejected(error)).into());
+                }
+            }
+            Err(ApiError::BlockchainError(BlockchainError::NetworkError(e))) if e.is_timeout() => {
+                warn!(
+                    "Module [{module}] broadcasted transaction [{expected_hash}] on [{chain_id}] but the response timed out"
+                );
+            }
+            Err(e) => return Err(e),
+        }
+
+        // Poll for transaction status. If we haven't gotten anything back from
+        // getTransactionReceipt, it stands to reason that it hasn't been
+        // processed. Keep attempting until we exhaust our retries.
+        let receipt_request = serde_json::to_string(&GetTransactionRequest {
+            chain_id,
+            hash: expected_hash.clone(),
+        })
+        .map_err(BlockchainError::SerdeError)?;
+
+        let sleep_duration = Duration::from_millis(u64::from(options.poll_interval_ms));
+        for attempt in 1..=options.max_poll_attempts {
+            tokio::time::sleep(sleep_duration).await;
+
+            match self
+                .get_transaction_receipt(&receipt_request, module.clone())
+                .await
+            {
+                Ok(response) => {
+                    let response = serde_json::from_str::<DetailedRpcResponse>(&response)
+                        .map_err(BlockchainError::SerdeError)?;
+
+                    match (response.error, response.result) {
+                        (Some(error), _) => {
+                            return Err(
+                                BlockchainError::Evm(EvmError::ReceiptQueryFailed(error)).into()
+                            );
+                        }
+                        // The transaction has not been mined yet (`result: null`).
+                        (None, None) => {
+                            debug!(
+                                "Transaction [{expected_hash}] on [{chain_id}] not yet mined (poll attempt {attempt}/{})",
+                                options.max_poll_attempts
+                            );
+                        }
+                        (None, Some(receipt)) => {
+                            // Validate the receipt shape before handing it back to the module; the guest deserializes this string
+                            // into a `TransactionReceipt`.
+                            serde_json::from_value::<TransactionReceipt>(receipt.clone())
+                                .map_err(BlockchainError::SerdeError)?;
+
+                            return serde_json::to_string(&receipt)
+                                .map_err(BlockchainError::SerdeError)
+                                .map_err(ApiError::from);
+                        }
+                    }
+                }
+                // Transient failure (network error, 5xx, 429): the transaction
+                // may still be mined, so keep polling.
+                Err(ApiError::BlockchainError(e)) if e.is_retryable() => continue,
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err(BlockchainError::Evm(EvmError::ConfirmationTimeout {
+            transaction_hash: expected_hash,
+            poll_attempts: options.max_poll_attempts,
+        })
+        .into())
+    }
+}
+
+/// Validates the polling options for [`BlockchainClient::confirm_transaction`].
+///
+/// Returns an error if the options would either hammer the node pool or block a runtime thread
+/// for an unbounded amount of time.
+fn validate_poll_options(
+    module: &PlaidModule,
+    options: &ConfirmTransactionOptions,
+) -> Result<(), ApiError> {
+    if options.max_poll_attempts == 0 {
+        warn!("Module [{module}] requested confirm_transaction with max_poll_attempts = 0");
+        return Err(ApiError::BadRequest);
+    }
+
+    if options.poll_interval_ms < MIN_POLL_INTERVAL_MS {
+        warn!(
+            "Module [{module}] requested confirm_transaction with poll_interval_ms = {} (minimum {MIN_POLL_INTERVAL_MS})",
+            options.poll_interval_ms
+        );
+        return Err(ApiError::BadRequest);
+    }
+
+    let confirmation_window_ms =
+        u64::from(options.max_poll_attempts) * u64::from(options.poll_interval_ms);
+    if confirmation_window_ms > MAX_CONFIRMATION_WINDOW_MS {
+        warn!(
+            "Module [{module}] requested confirm_transaction window of {confirmation_window_ms}ms (maximum {MAX_CONFIRMATION_WINDOW_MS}ms)"
+        );
+        return Err(ApiError::BadRequest);
+    }
+
+    Ok(())
 }

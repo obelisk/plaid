@@ -7,9 +7,10 @@ pub use utils::{parse_basic_rpc_response, parse_detailed_rpc_response, EvmError}
 
 use crate::{
     blockchain::evm::types::{
-        BasicRpcResponse, BlockTag, ChainId, DetailedRpcResponse, EstimateGasRequest,
-        EthCallRequest, GetAddressMetadataRequest, GetBlockRequest, GetFeeHistoryRequest,
-        GetGasPriceRequest, GetLogsRequest, GetTransactionRequest,
+        BasicRpcResponse, BlockTag, ChainId, ConfirmTransactionOptions, ConfirmTransactionRequest,
+        DetailedRpcResponse, EstimateGasRequest, EthCallRequest, GetAddressMetadataRequest,
+        GetBlockRequest, GetFeeHistoryRequest, GetGasPriceRequest, GetLogsRequest,
+        GetTransactionRequest, TransactionReceipt,
     },
     PlaidFunctionError,
 };
@@ -465,6 +466,54 @@ pub fn get_fee_history(
 
     let res = unsafe {
         blockchain_evm_get_fee_history(
+            request.as_ptr(),
+            request.len(),
+            return_buffer.as_mut_ptr(),
+            DETAILED_RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+
+    match std::str::from_utf8(&return_buffer) {
+        Ok(x) => Ok(serde_json::from_str(x).map_err(|_| PlaidFunctionError::InternalApiError)?),
+        Err(_) => Err(PlaidFunctionError::InternalApiError),
+    }
+}
+
+/// Broadcasts a signed transaction and polls for its receipt until it is mined
+/// or the poll budget in `options` is exhausted.
+///
+/// Unlike [`send_raw_transaction`], which returns as soon as the node accepts
+/// the broadcast, this call blocks until the transaction is included in a block
+/// and returns the resulting [`TransactionReceipt`]. If no receipt appears
+/// within `options.max_poll_attempts` polls (spaced `options.poll_interval_ms`
+/// apart), an error is returned — the transaction may still be mined later, so
+/// callers should not blindly re-broadcast.
+pub fn confirm_transaction(
+    chain_id: impl Into<ChainId>,
+    signed_tx: &str,
+    options: ConfirmTransactionOptions,
+) -> Result<TransactionReceipt, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(blockchain_evm, confirm_transaction);
+    }
+
+    let request = ConfirmTransactionRequest {
+        chain_id: chain_id.into(),
+        signed_transaction: signed_tx.to_string(),
+        options,
+    };
+    let request =
+        serde_json::to_string(&request).map_err(|_| PlaidFunctionError::ErrorCouldNotSerialize)?;
+
+    let mut return_buffer = vec![0; DETAILED_RETURN_BUFFER_SIZE];
+    let res = unsafe {
+        blockchain_evm_confirm_transaction(
             request.as_ptr(),
             request.len(),
             return_buffer.as_mut_ptr(),

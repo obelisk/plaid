@@ -4081,6 +4081,7 @@ dependencies = [
  "tar",
  "thiserror 2.0.18",
  "time",
+ "tiny-keccak",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-tungstenite 0.24.0",

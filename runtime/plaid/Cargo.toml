@@ -73,6 +73,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 serde_with = { version = "3", features = ["macros"] }
 sled = { version = "0.34.7", optional = true }
+tiny-keccak = { version = "2.0.2", default-features = false, features = ["keccak"] }
 sshcerts = { version = "0.13.2", default-features = false }
 tar = "0.4"
 time = "0.3"

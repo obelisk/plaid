@@ -65,7 +65,7 @@ pub enum BlockchainError {
 }
 
 impl BlockchainError {
-    fn is_retryable(&self) -> bool {
+    pub fn is_retryable(&self) -> bool {
         match self {
             Self::CallFailed { status, .. } => {
                 status.is_server_error() || *status == StatusCode::TOO_MANY_REQUESTS
