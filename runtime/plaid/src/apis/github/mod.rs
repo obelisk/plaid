@@ -6,15 +6,17 @@ mod enterprise;
 mod environments;
 mod graphql;
 mod members;
+pub(crate) mod metrics;
 mod pats;
 mod pull_requests;
+mod rate_limit;
 mod refs;
 mod repos;
 mod secrets;
 mod teams;
 mod validators;
 
-use http::{header::USER_AGENT, HeaderMap};
+use http::{header::USER_AGENT, HeaderMap, StatusCode};
 use jsonwebtoken::EncodingKey;
 use octocrab::{auth::create_jwt, NoAuth, Octocrab};
 
@@ -23,6 +25,11 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use crate::loader::PlaidModule;
+
+use metrics::GithubMetrics;
+use rate_limit::RateLimitSnapshot;
+
+use crate::metrics::MetricsHandle;
 
 use super::ApiError;
 
@@ -75,6 +82,8 @@ pub struct Github {
     app_auth: HashMap<String, AppAuth>,
     /// Validators used to check parameters passed by modules
     validators: HashMap<&'static str, regex::Regex>,
+    /// Rate-limit collectors, present only when the metrics endpoint is configured.
+    metrics: Option<Arc<GithubMetrics>>,
 }
 
 /// Minimal information needed to authenticate as a GitHub App via JWT.
@@ -99,6 +108,16 @@ pub enum GitHubError {
 
 impl Github {
     pub fn new(config: GithubConfig) -> Result<Self, ApiError> {
+        Self::with_metrics(config, None)
+    }
+
+    pub(crate) fn with_metrics(
+        config: GithubConfig,
+        metrics: Option<Arc<MetricsHandle>>,
+    ) -> Result<Self, ApiError> {
+        // The GitHub module owns its quota collectors: registration happens
+        // here, exactly once per runtime, from the shared handle.
+        let metrics = metrics.map(|handle| Arc::new(GithubMetrics::register(handle.as_ref())));
         let clients = build_github_clients(&config.authentication)?;
         let app_auth = build_app_auth(&config.authentication)?;
 
@@ -111,7 +130,79 @@ impl Github {
             clients,
             app_auth,
             validators,
+            metrics,
         })
+    }
+
+    fn observe_headers(
+        &self,
+        client: &str,
+        method: &str,
+        status: StatusCode,
+        headers: &HeaderMap,
+    ) {
+        if let Some(metrics) = &self.metrics {
+            metrics.record_headers(client, method, status, headers);
+        }
+    }
+
+    fn observe<B>(
+        &self,
+        client: &str,
+        method: &str,
+        response: &http::Response<B>,
+    ) {
+        self.observe_headers(client, method, response.status(), response.headers());
+    }
+
+    fn observe_graphql(
+        &self,
+        client: &str,
+        status: StatusCode,
+        snapshot: &RateLimitSnapshot,
+        rate_limited: bool,
+    ) {
+        if let Some(metrics) = &self.metrics {
+            metrics.record_graphql(client, status, snapshot, rate_limited);
+        }
+    }
+
+    fn observe_transport_error(&self, client: &str, method: &str) {
+        if let Some(metrics) = &self.metrics {
+            metrics.record_transport_error(client, method);
+        }
+    }
+
+    fn observe_unreadable_body(
+        &self,
+        client: &str,
+        method: &str,
+        status: StatusCode,
+        snapshot: &RateLimitSnapshot,
+    ) {
+        if let Some(metrics) = &self.metrics {
+            metrics.record_unreadable_body(client, method, status, snapshot);
+        }
+    }
+
+    /// Shared head for the octocrab request helpers: observe the response
+    /// state before the body is consumed, and count send failures.
+    fn observe_response<B>(
+        &self,
+        client_id: &str,
+        verb: &str,
+        request: octocrab::Result<http::Response<B>>,
+    ) -> Result<http::Response<B>, ApiError> {
+        match request {
+            Ok(r) => {
+                self.observe(client_id, verb, &r);
+                Ok(r)
+            }
+            Err(e) => {
+                self.observe_transport_error(client_id, verb);
+                Err(ApiError::GitHubError(GitHubError::ClientError(e)))
+            }
+        }
     }
 
     /// Make a generic get request to the GitHub API using the GitHub app library. This exists
@@ -152,7 +243,8 @@ impl Github {
             }
         );
 
-        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+        let client_id = client_id.to_string();
+        let client = self.clients.get(&client_id).ok_or_else(|| {
             ApiError::GitHubError(GitHubError::InvalidInput(format!(
                 "Client ID not found: {}",
                 client_id
@@ -160,17 +252,12 @@ impl Github {
         })?;
 
         let request = client._get_with_headers(uri, headers).await;
-
-        match request {
-            Ok(r) => {
-                let status = r.status().as_u16();
-                let body = client.body_to_string(r).await.map_err(|e| {
-                    ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                });
-                Ok((status, body))
-            }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
-        }
+        let r = self.observe_response(&client_id, "get", request)?;
+        let status = r.status().as_u16();
+        let body = client.body_to_string(r).await.map_err(|e| {
+            ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
+        });
+        Ok((status, body))
     }
 
     /// Make a generic post request to the GitHub API using the GitHub app library. This exists
@@ -262,16 +349,12 @@ impl Github {
             }
         };
 
-        match response {
-            Ok(r) => {
-                let status = r.status().as_u16();
-                let body = client.body_to_string(r).await.map_err(|e| {
-                    ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                });
-                Ok((status, body))
-            }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
-        }
+        let r = self.observe_response(&client_id, "post", response)?;
+        let status = r.status().as_u16();
+        let body = client.body_to_string(r).await.map_err(|e| {
+            ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
+        });
+        Ok((status, body))
     }
 
     /// Build an `Authorization: Bearer <JWT>` header for a GitHub App client identified by
@@ -316,7 +399,8 @@ impl Github {
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a put request to {uri} on behalf of {module}");
 
-        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+        let client_id = client_id.to_string();
+        let client = self.clients.get(&client_id).ok_or_else(|| {
             ApiError::GitHubError(GitHubError::InvalidInput(format!(
                 "Client ID not found: {}",
                 client_id
@@ -324,17 +408,12 @@ impl Github {
         })?;
 
         let request = client._put(uri, body).await;
-
-        match request {
-            Ok(r) => {
-                let status = r.status().as_u16();
-                let body = client.body_to_string(r).await.map_err(|e| {
-                    ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                });
-                Ok((status, body))
-            }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
-        }
+        let r = self.observe_response(&client_id, "put", request)?;
+        let status = r.status().as_u16();
+        let body = client.body_to_string(r).await.map_err(|e| {
+            ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
+        });
+        Ok((status, body))
     }
 
     /// Make a generic patch request to the GitHub API using the GitHub app library. This exists
@@ -350,7 +429,8 @@ impl Github {
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a patch request to {uri} on behalf of {module}");
 
-        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+        let client_id = client_id.to_string();
+        let client = self.clients.get(&client_id).ok_or_else(|| {
             ApiError::GitHubError(GitHubError::InvalidInput(format!(
                 "Client ID not found: {}",
                 client_id
@@ -358,17 +438,12 @@ impl Github {
         })?;
 
         let request = client._patch(uri, body).await;
-
-        match request {
-            Ok(r) => {
-                let status = r.status().as_u16();
-                let body = client.body_to_string(r).await.map_err(|e| {
-                    ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                });
-                Ok((status, body))
-            }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
-        }
+        let r = self.observe_response(&client_id, "patch", request)?;
+        let status = r.status().as_u16();
+        let body = client.body_to_string(r).await.map_err(|e| {
+            ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
+        });
+        Ok((status, body))
     }
 
     /// Make a generic delete request to the GitHub API using the GitHub app library. This exists
@@ -384,7 +459,8 @@ impl Github {
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
         info!("Making a delete request to {uri} on behalf of {module}");
 
-        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+        let client_id = client_id.to_string();
+        let client = self.clients.get(&client_id).ok_or_else(|| {
             ApiError::GitHubError(GitHubError::InvalidInput(format!(
                 "Client ID not found: {}",
                 client_id
@@ -392,17 +468,12 @@ impl Github {
         })?;
 
         let request = client._delete(uri, body).await;
-
-        match request {
-            Ok(r) => {
-                let status = r.status().as_u16();
-                let body = client.body_to_string(r).await.map_err(|e| {
-                    ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                });
-                Ok((status, body))
-            }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
-        }
+        let r = self.observe_response(&client_id, "delete", request)?;
+        let status = r.status().as_u16();
+        let body = client.body_to_string(r).await.map_err(|e| {
+            ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
+        });
+        Ok((status, body))
     }
 
     /// Make a DELETE request to the GitHub API with a custom `Authorization: Bearer <token>`
@@ -428,7 +499,20 @@ impl Github {
             request = request.json(body);
         }
 
-        let response = request.send().await.map_err(|e| ApiError::NetworkError(e))?;
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(e) => {
+                self.observe_transport_error("unattributed", "delete");
+                return Err(ApiError::NetworkError(e));
+            }
+        };
+
+        self.observe_headers(
+            "unattributed",
+            "delete",
+            response.status(),
+            response.headers(),
+        );
 
         let status = response.status().as_u16();
         let body = response.text().await.map_err(|e| {

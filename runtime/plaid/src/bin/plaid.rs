@@ -570,7 +570,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(config.apis)
+    let api = Api::with_metrics(config.apis, metrics.clone())
         .await
         .map_err(|e| Errors::FailedToStartApiSystem(e))?;
 

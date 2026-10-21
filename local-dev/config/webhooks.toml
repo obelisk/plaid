@@ -22,6 +22,11 @@ headers = []
 [webhooks."local".webhooks."health".get_mode]
 response_mode = "static:ok"
 
+# GitHub rate-limit probe — calls GitHub twice so /metrics shows quota state
+[webhooks."local".webhooks."github-rate-limit"]
+log_type = "github_rate_limit"
+headers = []
+
 # ──────────────────────────────────────────────────────────────
 # Examples
 # ──────────────────────────────────────────────────────────────

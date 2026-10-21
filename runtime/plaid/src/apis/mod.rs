@@ -17,6 +17,8 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
+use std::sync::Arc;
+
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
 use crate::apis::blockchain::{Blockchain, BlockchainConfig, BlockchainError};
@@ -56,6 +58,7 @@ use yubikey::{Yubikey, YubikeyConfig};
 
 use self::rustica::{Rustica, RusticaConfig};
 use crate::apis::cryptography::{Cryptography, CryptographyConfig};
+use crate::metrics::MetricsHandle;
 
 /// All the APIs that Plaid can use
 pub struct Api {
@@ -178,6 +181,13 @@ impl From<gcp::bigquery::BigQueryError> for ApiError {
 
 impl Api {
     pub async fn new(config: ApiConfigs) -> Result<Self, ApiError> {
+        Self::with_metrics(config, None).await
+    }
+
+    pub async fn with_metrics(
+        config: ApiConfigs,
+        metrics: Option<Arc<MetricsHandle>>,
+    ) -> Result<Self, ApiError> {
         let cryptography = match config.cryptography {
             Some(cryptography) => Some(Cryptography::new(cryptography)),
             _ => None,
@@ -211,7 +221,7 @@ impl Api {
         };
 
         let github = match config.github {
-            Some(gh) => Some(Github::new(gh)?),
+            Some(gh) => Some(Github::with_metrics(gh, metrics.clone())?),
             _ => None,
         };
 

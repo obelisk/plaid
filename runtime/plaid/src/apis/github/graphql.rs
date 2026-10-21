@@ -8,7 +8,7 @@ use crate::{
     loader::PlaidModule,
 };
 
-use super::Github;
+use super::{rate_limit::RateLimitSnapshot, Github};
 
 /// A GraphQL query ready to be executed.
 #[derive(Serialize)]
@@ -48,6 +48,20 @@ struct AdvancedRequest {
 
 const GITHUB_GQL_API: &str = "/graphql";
 
+fn reports_rate_limit(body: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    value
+        .get("errors")
+        .and_then(|errors| errors.as_array())
+        .is_some_and(|errors| {
+            errors.iter().any(|error| {
+                error.get("type").and_then(|kind| kind.as_str()) == Some("RATE_LIMITED")
+            })
+        })
+}
+
 impl Github {
     /// Execute a GraphQL query by calling the GitHub API.
     async fn make_gql_request<T: Serialize>(
@@ -67,25 +81,39 @@ impl Github {
 
         match request {
             Ok(r) => {
-                if r.status() == 200 {
-                    let body = client.body_to_string(r).await.map_err(|e| {
-                        ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                    })?;
+                let status = r.status();
+                let snapshot = RateLimitSnapshot::from_headers(r.headers());
+                let body = match client.body_to_string(r).await {
+                    Ok(body) => body,
+                    Err(e) => {
+                        self.observe_unreadable_body(
+                            &client_id.to_string(),
+                            "graphql",
+                            status,
+                            &snapshot,
+                        );
+                        return Err(ApiError::GitHubError(GitHubError::GraphQLRequestError(
+                            e.to_string(),
+                        )));
+                    }
+                };
 
+                let rate_limited = status == 200 && reports_rate_limit(&body);
+                self.observe_graphql(&client_id.to_string(), status, &snapshot, rate_limited);
+
+                if status == 200 {
                     Ok(body)
                 } else {
-                    let status = r.status();
-                    let body = client.body_to_string(r).await.map_err(|e| {
-                        ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                    })?;
-
                     warn!("Failed GraphQL query from module: {module}. Status Code: {status} Return was: {body}");
                     Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
                         status.as_u16(),
                     )))
                 }
             }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
+            Err(e) => {
+                self.observe_transport_error(&client_id.to_string(), "graphql");
+                Err(ApiError::GitHubError(GitHubError::ClientError(e)))
+            }
         }
     }
 
@@ -141,5 +169,26 @@ impl Github {
 
         self.make_gql_request(&request.client_id, query, module)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reports_rate_limit;
+
+    #[test]
+    fn detects_rate_limit_errors() {
+        assert!(reports_rate_limit(
+            r#"{"errors":[{"type":"RATE_LIMITED","message":"API rate limit exceeded"}]}"#
+        ));
+    }
+
+    #[test]
+    fn ignores_data_and_other_errors() {
+        assert!(!reports_rate_limit(
+            r#"{"data":{"viewer":{"login":"octocat"}}}"#
+        ));
+        assert!(!reports_rate_limit(r#"{"errors":[{"type":"NOT_FOUND"}]}"#));
+        assert!(!reports_rate_limit("not json"));
     }
 }
