@@ -55,4 +55,10 @@ impl MetricsHandle {
             .map_err(EncodeError::Prometheus)?;
         String::from_utf8(buffer).map_err(EncodeError::Utf8)
     }
+
+    /// The registry this handle wraps, for constructing collectors with the
+    /// `register_*_with_registry!` macros.
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
 }

@@ -6,7 +6,9 @@ use crate::parse_duration;
 use lru::LruCache;
 use octocrab::{self, Octocrab};
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
-use prometheus::IntCounter;
+use prometheus::register_int_counter_vec_with_registry;
+use prometheus::register_int_counter_with_registry;
+use prometheus::{IntCounter, IntCounterVec};
 use serde::Deserialize;
 use serde_json::Value;
 use std::cmp::Ordering;
@@ -16,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use time::OffsetDateTime;
 
-use super::{DataGenerator, DataGeneratorLog};
+use super::{DataGenerator, DataGeneratorLog, FetchErrorStage};
 
 /// Represents the event types GitHub will include in the response
 /// to the audit log request
@@ -183,9 +185,18 @@ pub struct Github {
     seen_logs_uuid: LruCache<String, u32>,
     /// Cumulative count of logs sent for processing, when metrics are enabled.
     logs_fetched: Option<IntCounter>,
+    /// Cumulative count of failed fetch attempts by stage, when metrics are enabled.
+    logs_fetch_errors: Option<IntCounterVec>,
 }
 
 impl Github {
+
+    fn record_fetch_error(&self, stage: FetchErrorStage) {
+        if let Some(errors) = &self.logs_fetch_errors {
+            errors.with_label_values(&[stage.as_label()]).inc();
+        }
+    }
+
     pub fn new(
         config: GithubConfig,
         logger: MessageSender,
@@ -206,18 +217,22 @@ impl Github {
             size => NonZeroUsize::new(size).unwrap(),
         };
 
-        let logs_fetched = metrics.map(|handle| {
-            let counter = IntCounter::new(
+        let logs_fetched = metrics.as_deref().map(|handle| {
+            register_int_counter_with_registry!(
                 "plaid_github_logs_fetched_total",
                 "Total number of GitHub logs sent for processing by the data generator",
+                handle.registry(),
             )
-            .expect("valid metric definition");
-
-            handle
-                .register(Box::new(counter.clone()))
-                .expect("expected unique collector");
-
-            counter
+            .expect("expected unique collector")
+        });
+        let logs_fetch_errors = metrics.as_deref().map(|handle| {
+            register_int_counter_vec_with_registry!(
+                "plaid_github_logs_fetch_errors_total",
+                "Total number of failed log fetch attempts; reason is one of the FetchErrorStage label values",
+                &["reason"],
+                handle.registry(),
+            )
+            .expect("expected unique collector")
         });
 
         Ok(Self {
@@ -227,6 +242,7 @@ impl Github {
             seen_logs_uuid: LruCache::new(lru_cache_size),
             logger,
             logs_fetched,
+            logs_fetch_errors,
         })
     }
 }
@@ -242,6 +258,7 @@ impl DataGenerator for Github {
         let since = match since.format(&time::format_description::well_known::Rfc3339) {
             Ok(since) => since,
             Err(e) => {
+                self.record_fetch_error(FetchErrorStage::DateTimeEncoding);
                 error!("Failed to parse 'since' datetime. Error: {e}");
                 return Err(());
             }
@@ -249,6 +266,7 @@ impl DataGenerator for Github {
         let until = match until.format(&time::format_description::well_known::Rfc3339) {
             Ok(until) => until,
             Err(e) => {
+                self.record_fetch_error(FetchErrorStage::DateTimeEncoding);
                 error!("Failed to parse 'until' datetime. Error: {e}");
                 return Err(());
             }
@@ -265,6 +283,7 @@ impl DataGenerator for Github {
         loop {
             if let Some(address) = next {
                 let response = self.client._get(&address).await.map_err(|e| {
+                    self.record_fetch_error(FetchErrorStage::Transport);
                     error!("{}", format!("Could not get logs from GitHub: {}", e));
                 })?;
 
@@ -280,6 +299,7 @@ impl DataGenerator for Github {
                                 .unwrap_or("N/A".to_string())
                         )
                     );
+                    self.record_fetch_error(FetchErrorStage::ResponseStatus);
                     return Err(());
                 }
 
@@ -292,6 +312,7 @@ impl DataGenerator for Github {
 
                 // Parse the response's body
                 let body = self.client.body_to_string(response).await.map_err(|e| {
+                    self.record_fetch_error(FetchErrorStage::ResponseBody);
                     error!(
                         "{}",
                         format!("Failed to read body of GitHub response. Error: {e}")
@@ -299,7 +320,8 @@ impl DataGenerator for Github {
                 })?;
 
                 let logs: Vec<Value> = serde_json::from_str(body.as_str()).map_err(|e| {
-                    error!("{}", format!("Could not parse data from Github: {}", e));
+                    self.record_fetch_error(FetchErrorStage::ResponseParse);
+                        error!("{}", format!("Could not parse data from Github: {}", e));
                 })?;
 
                 if logs.is_empty() {
@@ -404,6 +426,7 @@ impl DataGenerator for Github {
 
         Ok(())
     }
+
 
     fn list_already_seen(&self) -> Vec<String> {
         self.seen_logs_uuid
