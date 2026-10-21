@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 use serde::Serialize;
+use tiny_keccak::{Hasher, Keccak};
 
 /// Possible JRPC methods we can call on nodes
 pub enum RpcMethods {
@@ -42,4 +43,13 @@ impl Serialize for RpcMethods {
     {
         serializer.serialize_str(&self.to_string())
     }
+}
+
+/// Computes the Keccak-256 hash of a raw transaction and returns it as a `0x`-prefixed hex string.
+pub fn compute_transaction_hash(raw_tx: &[u8]) -> String {
+    let mut keccak = Keccak::v256();
+    keccak.update(raw_tx);
+    let mut hash = [0u8; 32];
+    keccak.finalize(&mut hash);
+    format!("0x{}", hex::encode(hash))
 }

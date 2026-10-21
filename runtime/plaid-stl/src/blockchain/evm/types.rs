@@ -431,3 +431,41 @@ pub struct FeeHistory {
     #[serde(rename = "blobGasUsedRatio")]
     pub blob_gas_used_ratio: Option<Vec<f64>>,
 }
+
+/// Request structure for broadcasting a signed transaction and waiting for its receipt.
+#[derive(Serialize, Deserialize)]
+pub struct ConfirmTransactionRequest {
+    /// The chain ID to broadcast the transaction to
+    pub chain_id: ChainId,
+    /// The signed transaction data
+    pub signed_transaction: String,
+    /// Polling behavior while waiting for the transaction to be mined
+    pub options: ConfirmTransactionOptions,
+}
+
+/// Polling parameters for [`ConfirmTransactionRequest`].
+#[derive(Deserialize, Serialize)]
+pub struct ConfirmTransactionOptions {
+    /// How many times to poll for the receipt before giving up
+    pub max_poll_attempts: u8,
+    /// Milliseconds to wait between receipt polls
+    pub poll_interval_ms: u16,
+}
+
+impl ConfirmTransactionOptions {
+    pub fn new(max_poll_attempts: u8, poll_interval_ms: u16) -> Self {
+        Self {
+            max_poll_attempts,
+            poll_interval_ms,
+        }
+    }
+}
+
+impl Default for ConfirmTransactionOptions {
+    fn default() -> Self {
+        Self {
+            max_poll_attempts: 30,
+            poll_interval_ms: 1000,
+        }
+    }
+}

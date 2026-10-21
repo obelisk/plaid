@@ -4032,7 +4032,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "plaid"
-version = "49.0.0"
+version = "49.1.0"
 dependencies = [
  "aes",
  "alkali",
@@ -4081,6 +4081,7 @@ dependencies = [
  "tar",
  "thiserror 2.0.18",
  "time",
+ "tiny-keccak",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-tungstenite 0.24.0",
@@ -4098,7 +4099,7 @@ dependencies = [
 
 [[package]]
 name = "plaid_stl"
-version = "49.0.0"
+version = "49.1.0"
 dependencies = [
  "base64 0.13.1",
  "chrono",
