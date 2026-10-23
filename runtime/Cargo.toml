@@ -3,6 +3,9 @@ resolver = "2"
 
 members = ["plaid", "plaid-stl"]
 
+#[patch.crates-io]
+#aws-smithy-http-client = { git = "https://github.com/smithy-lang/smithy-rs.git", version = "1.5.2" }
+
 [profile.release]
 opt-level = 3
 lto = "fat"
