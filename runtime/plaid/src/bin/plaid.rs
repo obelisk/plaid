@@ -501,11 +501,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             )
                         }
                     });
-            let (_, server) =
-                warp::serve(routes).bind_with_graceful_shutdown(listen_addr, async move {
+            warp::serve(routes)
+                .bind(listen_addr)
+                .await
+                .graceful(async move {
                     token.cancelled().await;
-                });
-            server.await;
+                })
+                .run()
+                .await;
             info!("Metrics server shut down");
         });
     }
@@ -788,13 +791,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             info!("Web Server [{server_name}]: {server_address}");
             let token = cancellation_token.clone();
-            server_tasks.spawn(async move {
-                let (_, server) =
-                    warp::serve(routes).bind_with_graceful_shutdown(server_address, async move {
-                        token.cancelled().await;
-                    });
 
-                server.await;
+            server_tasks.spawn(async move {
+                warp::serve(routes)
+                    .bind(server_address)
+                    .await
+                    .graceful(async move {
+                        token.cancelled().await;
+                    })
+                    .run()
+                    .await;
+
                 info!("Web server [{server_name}] shut down");
             });
         }
