@@ -1,4 +1,4 @@
-FROM rust:1.93.1-slim-bookworm AS builder
+FROM rust:1.95.1-slim-bookworm AS builder
 
 ARG FEATURES=""
 ENV FEATURES=$FEATURES
