@@ -67,8 +67,8 @@ jobs:
 
     - name: Setup Rust
       run: |
-        rustup toolchain install 1.93.1
-        rustup default 1.93.1
+        rustup toolchain install 1.94
+        rustup default 1.94
         rustup target add wasm32-unknown-unknown
 
     - name: Install LLVM
