@@ -8,7 +8,7 @@ use crate::{
     loader::PlaidModule,
 };
 
-use super::{rate_limit::RateLimitSnapshot, Github};
+use super::{body_read_error, Github, Method, Verdict};
 
 /// A GraphQL query ready to be executed.
 #[derive(Serialize)]
@@ -70,7 +70,8 @@ impl Github {
         query: T,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+        let client_id = client_id.to_string();
+        let client = self.clients.get(&client_id).ok_or_else(|| {
             ApiError::GitHubError(GitHubError::InvalidInput(format!(
                 "Client ID not found: {}",
                 client_id
@@ -78,42 +79,36 @@ impl Github {
         })?;
 
         let request = client._post(GITHUB_GQL_API, Some(&query)).await;
-
-        match request {
-            Ok(r) => {
-                let status = r.status();
-                let snapshot = RateLimitSnapshot::from_headers(r.headers());
-                let body = match client.body_to_string(r).await {
-                    Ok(body) => body,
-                    Err(e) => {
-                        self.observe_unreadable_body(
-                            &client_id.to_string(),
-                            "graphql",
-                            status,
-                            &snapshot,
-                        );
-                        return Err(ApiError::GitHubError(GitHubError::GraphQLRequestError(
-                            e.to_string(),
-                        )));
-                    }
-                };
-
-                let rate_limited = status == 200 && reports_rate_limit(&body);
-                self.observe_graphql(&client_id.to_string(), status, &snapshot, rate_limited);
-
-                if status == 200 {
-                    Ok(body)
-                } else {
-                    warn!("Failed GraphQL query from module: {module}. Status Code: {status} Return was: {body}");
-                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
-                        status.as_u16(),
-                    )))
-                }
-            }
+        let (status, snapshot, response) =
+            self.capture_response(&client_id, Method::Graphql, request)?;
+        let body = match client.body_to_string(response).await {
+            Ok(body) => body,
             Err(e) => {
-                self.observe_transport_error(&client_id.to_string(), "graphql");
-                Err(ApiError::GitHubError(GitHubError::ClientError(e)))
+                self.record(
+                    &client_id,
+                    Method::Graphql,
+                    status,
+                    &snapshot,
+                    Verdict::Failed,
+                );
+                return Err(body_read_error(e));
             }
+        };
+
+        let verdict = if status == 200 && reports_rate_limit(&body) {
+            Verdict::GraphqlRateLimited
+        } else {
+            Verdict::Read
+        };
+        self.record(&client_id, Method::Graphql, status, &snapshot, verdict);
+
+        if status == 200 {
+            Ok(body)
+        } else {
+            warn!("Failed GraphQL query from module: {module}. Status Code: {status} Return was: {body}");
+            Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                status.as_u16(),
+            )))
         }
     }
 

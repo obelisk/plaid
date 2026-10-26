@@ -30,6 +30,11 @@ pub struct MetricsConfiguration {
 ///
 /// Subsystems register their own collectors (pull) or counters/gauges (push)
 /// with this handle. The metrics module itself has no domain knowledge.
+///
+/// Typed collectors are registered with the crate's
+/// `register_*_with_registry!` macros against [`MetricsHandle::registry`].
+/// `register` stays for custom `Collector` implementations such as
+/// `QueueMetrics` and for the collectors in `ModuleExecutionMetrics`.
 pub struct MetricsHandle {
     registry: Registry,
     encoder: TextEncoder,

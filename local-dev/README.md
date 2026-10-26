@@ -476,8 +476,9 @@ plaid_github_api_requests_total{client="noauth",method="get",outcome="success",r
 ```
 
 A token-backed client with a higher limit reports the same shape with its own
-`client` label. Named requests do not record GitHub metrics; capture lives in
-the GitHub API client.
+`client` label. These series cover the module-facing GitHub API client only:
+requests made through `general.network.web_requests` or the audit-log data
+generator's own client do not appear in them.
 
 ## Webhook Reference
 

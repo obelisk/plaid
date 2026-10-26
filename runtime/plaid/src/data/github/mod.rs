@@ -190,7 +190,6 @@ pub struct Github {
 }
 
 impl Github {
-
     fn record_fetch_error(&self, stage: FetchErrorStage) {
         if let Some(errors) = &self.logs_fetch_errors {
             errors.with_label_values(&[stage.as_label()]).inc();
@@ -321,7 +320,7 @@ impl DataGenerator for Github {
 
                 let logs: Vec<Value> = serde_json::from_str(body.as_str()).map_err(|e| {
                     self.record_fetch_error(FetchErrorStage::ResponseParse);
-                        error!("{}", format!("Could not parse data from Github: {}", e));
+                    error!("{}", format!("Could not parse data from Github: {}", e));
                 })?;
 
                 if logs.is_empty() {
@@ -427,7 +426,6 @@ impl DataGenerator for Github {
         Ok(())
     }
 
-
     fn list_already_seen(&self) -> Vec<String> {
         self.seen_logs_uuid
             .iter()
@@ -445,5 +443,45 @@ impl DataGenerator for Github {
 
     fn get_time_granularity(&self) -> time::Duration {
         time::Duration::nanoseconds(self.config.time_granularity as i64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::executor::MessageSender;
+    use crate::metrics::MetricsHandle;
+    use time::{Date, Month, Time};
+
+    #[tokio::test]
+    async fn failing_fetch_records_its_stage() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let handle = Arc::new(MetricsHandle::new());
+        let config: GithubConfig =
+            toml::from_str("authentication = {}\norg = \"test-org\"\nlog_type = \"all\"\n")
+                .unwrap();
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+        let github = Github::new(
+            config,
+            MessageSender::new(sender, HashMap::new()),
+            Some(handle.clone()),
+        )
+        .unwrap();
+
+        // RFC3339 cannot encode a negative year, so the fetch fails before it
+        // builds a request.
+        let unencodable = OffsetDateTime::new_utc(
+            Date::from_calendar_date(-1, Month::January, 1).unwrap(),
+            Time::MIDNIGHT,
+        );
+
+        assert!(DataGenerator::fetch_logs(&github, unencodable, unencodable)
+            .await
+            .is_err());
+
+        let encoded = handle.encode().unwrap();
+        assert!(encoded
+            .contains("plaid_github_logs_fetch_errors_total{reason=\"datetime_encoding\"} 1"));
+        assert!(encoded.contains("plaid_github_logs_fetched_total 0"));
     }
 }

@@ -143,7 +143,6 @@ pub struct Okta {
 }
 
 impl Okta {
-
     fn record_fetch_error(&self, stage: FetchErrorStage) {
         if let Some(errors) = &self.logs_fetch_errors {
             errors.with_label_values(&[stage.as_label()]).inc();
@@ -262,13 +261,10 @@ impl DataGenerator for Okta {
                     .and_then(|v| super::get_next_from_link_header(v));
 
                 // Get the body from the response from Okta
-                let body = response
-                    .text()
-                    .await
-                    .map_err(|e| {
-                        self.record_fetch_error(FetchErrorStage::ResponseBody);
-                        error!("Could not get logs from Okta: {e}");
-                    })?;
+                let body = response.text().await.map_err(|e| {
+                    self.record_fetch_error(FetchErrorStage::ResponseBody);
+                    error!("Could not get logs from Okta: {e}");
+                })?;
 
                 // Attempt to deserialize the response from Okta
                 let logs: Vec<Value> = serde_json::from_str(body.as_str()).map_err(|e| {
@@ -383,7 +379,6 @@ impl DataGenerator for Okta {
         Ok(())
     }
 
-
     fn list_already_seen(&self) -> Vec<String> {
         self.seen_logs_uuid
             .iter()
@@ -401,5 +396,45 @@ impl DataGenerator for Okta {
 
     fn get_time_granularity(&self) -> time::Duration {
         time::Duration::nanoseconds(self.config.time_granularity as i64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::executor::MessageSender;
+    use crate::metrics::MetricsHandle;
+    use std::collections::HashMap;
+    use time::{Date, Month, Time};
+
+    #[tokio::test]
+    async fn failing_fetch_records_its_stage() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let handle = Arc::new(MetricsHandle::new());
+        let config: OktaConfig =
+            toml::from_str("token = \"t\"\ndomain = \"example.okta.com\"\n").unwrap();
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+        let okta = Okta::new(
+            config,
+            MessageSender::new(sender, HashMap::new()),
+            Some(handle.clone()),
+        );
+
+        // RFC3339 cannot encode a negative year, so the fetch fails before it
+        // builds a request.
+        let unencodable = OffsetDateTime::new_utc(
+            Date::from_calendar_date(-1, Month::January, 1).unwrap(),
+            Time::MIDNIGHT,
+        );
+
+        assert!(DataGenerator::fetch_logs(&okta, unencodable, unencodable)
+            .await
+            .is_err());
+
+        let encoded = handle.encode().unwrap();
+        assert!(
+            encoded.contains("plaid_okta_logs_fetch_errors_total{reason=\"datetime_encoding\"} 1")
+        );
+        assert!(encoded.contains("plaid_okta_logs_fetched_total 0"));
     }
 }

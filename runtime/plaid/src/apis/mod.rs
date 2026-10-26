@@ -44,7 +44,7 @@ use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 
 use bloom_filter::BloomFilterConfig;
 use general::{General, GeneralConfig};
-use github::{Github, GithubConfig};
+use github::{Github, GithubConfig, GithubMetrics};
 use npm::{Npm, NpmConfig};
 use okta::{Okta, OktaConfig};
 use pagerduty::{PagerDuty, PagerDutyConfig};
@@ -58,7 +58,6 @@ use yubikey::{Yubikey, YubikeyConfig};
 
 use self::rustica::{Rustica, RusticaConfig};
 use crate::apis::cryptography::{Cryptography, CryptographyConfig};
-use crate::metrics::MetricsHandle;
 
 /// All the APIs that Plaid can use
 pub struct Api {
@@ -180,13 +179,9 @@ impl From<gcp::bigquery::BigQueryError> for ApiError {
 }
 
 impl Api {
-    pub async fn new(config: ApiConfigs) -> Result<Self, ApiError> {
-        Self::with_metrics(config, None).await
-    }
-
     pub async fn with_metrics(
         config: ApiConfigs,
-        metrics: Option<Arc<MetricsHandle>>,
+        github_metrics: Option<Arc<GithubMetrics>>,
     ) -> Result<Self, ApiError> {
         let cryptography = match config.cryptography {
             Some(cryptography) => Some(Cryptography::new(cryptography)),
@@ -221,7 +216,7 @@ impl Api {
         };
 
         let github = match config.github {
-            Some(gh) => Some(Github::with_metrics(gh, metrics.clone())?),
+            Some(gh) => Some(Github::with_metrics(gh, github_metrics)?),
             _ => None,
         };
 

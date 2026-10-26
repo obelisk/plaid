@@ -20,6 +20,7 @@ use apis::Api;
 use data::Data;
 use executor::metrics::{ModuleExecutionMetrics, QueueMetrics};
 use executor::*;
+use plaid::apis::github::GithubMetrics;
 use plaid::metrics::MetricsHandle;
 use plaid_stl::messages::LogSource;
 use serde::Deserialize;
@@ -388,6 +389,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .map(|_| Arc::new(MetricsHandle::new()));
 
+    let github_metrics = metrics
+        .as_deref()
+        .map(GithubMetrics::register)
+        .map(Arc::new);
+
     let module_execution_metrics = if let Some(handle) = &metrics {
         QueueMetrics::register(handle, &exec_thread_pools);
         Some(Arc::new(ModuleExecutionMetrics::register(handle)))
@@ -570,7 +576,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::with_metrics(config.apis, metrics.clone())
+    let api = Api::with_metrics(config.apis, github_metrics)
         .await
         .map_err(|e| Errors::FailedToStartApiSystem(e))?;
 
