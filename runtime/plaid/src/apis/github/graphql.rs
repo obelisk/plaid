@@ -97,7 +97,7 @@ impl Github {
             }
         };
 
-        let verdict = if status == 200 && reports_rate_limit(&body) {
+        let verdict = if status == 200 && self.metrics.is_some() && reports_rate_limit(&body) {
             Verdict::GraphqlRateLimited
         } else {
             Verdict::Read

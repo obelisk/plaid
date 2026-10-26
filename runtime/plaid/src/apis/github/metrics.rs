@@ -18,6 +18,9 @@ pub(crate) enum Verdict {
     Failed,
     /// A GraphQL 200 whose body carries a `RATE_LIMITED` error.
     GraphqlRateLimited,
+    /// A 403 whose body names a secondary rate limit instead of sending
+    /// `retry-after`.
+    SecondaryRateLimited,
 }
 
 /// Prometheus collectors for GitHub API quota state. Registered once per
@@ -106,6 +109,7 @@ impl GithubMetrics {
             } else {
                 RateLimitKind::Primary
             }),
+            Verdict::SecondaryRateLimited => Some(RateLimitKind::Secondary),
             Verdict::Read | Verdict::Failed => snapshot.classify(status),
         };
         let resource = snapshot.resource.as_str();
@@ -281,6 +285,18 @@ mod tests {
                 present: &[
                     "plaid_github_api_rate_limited_total{client=\"test\",kind=\"primary\",resource=\"graphql\"} 1",
                     "plaid_github_api_requests_total{client=\"test\",method=\"POST\",outcome=\"rate_limited\",resource=\"graphql\"} 1",
+                ],
+                absent: &[],
+            },
+            Case {
+                name: "403 whose body names a secondary limit",
+                method: Method::GET,
+                status: StatusCode::FORBIDDEN,
+                headers: FULL_HEADERS,
+                verdict: Verdict::SecondaryRateLimited,
+                present: &[
+                    "plaid_github_api_rate_limited_total{client=\"test\",kind=\"secondary\",resource=\"core\"} 1",
+                    "plaid_github_api_requests_total{client=\"test\",method=\"GET\",outcome=\"rate_limited\",resource=\"core\"} 1",
                 ],
                 absent: &[],
             },

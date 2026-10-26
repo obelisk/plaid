@@ -127,6 +127,15 @@ fn parse_i64_header(headers: &HeaderMap, name: &str) -> Option<i64> {
     headers.get(name)?.to_str().ok()?.trim().parse::<i64>().ok()
 }
 
+/// GitHub documents `retry-after` for secondary limits, but also reports them as
+/// a 403 whose body names the limit. Ordinary permission errors share the status
+/// and do not carry this text.
+const SECONDARY_LIMIT_TEXT: &str = "secondary rate limit";
+
+pub(crate) fn reports_secondary_limit(status: StatusCode, body: &str) -> bool {
+    status == StatusCode::FORBIDDEN && body.to_ascii_lowercase().contains(SECONDARY_LIMIT_TEXT)
+}
+
 #[cfg(test)]
 pub(crate) fn header_map(pairs: &[(&str, &str)]) -> HeaderMap {
     let mut headers = HeaderMap::new();
@@ -200,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn classifies_rate_limited_statuses() {
+    fn classifies_rate_limited_responses() {
         let empty = RateLimitSnapshot::from_headers(&HeaderMap::new());
         let exhausted = RateLimitSnapshot {
             remaining: Some(0),
@@ -242,6 +251,25 @@ mod tests {
             empty.classify(StatusCode::INTERNAL_SERVER_ERROR),
             None,
             "500"
+        );
+
+        assert!(
+            reports_secondary_limit(
+                StatusCode::FORBIDDEN,
+                r#"{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}"#
+            ),
+            "403 whose body names a secondary limit"
+        );
+        assert!(
+            !reports_secondary_limit(
+                StatusCode::FORBIDDEN,
+                r#"{"message":"Resource not accessible by integration"}"#
+            ),
+            "403 without a rate-limit message"
+        );
+        assert!(
+            !reports_secondary_limit(StatusCode::OK, "secondary rate limit"),
+            "2xx"
         );
     }
 }
