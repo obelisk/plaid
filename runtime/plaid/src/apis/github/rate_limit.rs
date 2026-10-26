@@ -128,101 +128,120 @@ fn parse_i64_header(headers: &HeaderMap, name: &str) -> Option<i64> {
 }
 
 #[cfg(test)]
+pub(crate) fn header_map(pairs: &[(&str, &str)]) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    for (name, value) in pairs {
+        headers.insert(
+            http::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+            http::header::HeaderValue::from_str(value).unwrap(),
+        );
+    }
+    headers
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    fn header_map(pairs: &[(&str, &str)]) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        for (name, value) in pairs {
-            headers.insert(
-                http::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
-                http::header::HeaderValue::from_str(value).unwrap(),
-            );
-        }
-        headers
-    }
-
     #[test]
-    fn parses_full_core_headers() {
-        let headers = header_map(&[
+    fn parses_rate_limit_headers() {
+        let full = RateLimitSnapshot::from_headers(&header_map(&[
             ("x-ratelimit-limit", "5000"),
             ("x-ratelimit-remaining", "4999"),
             ("x-ratelimit-used", "1"),
             ("x-ratelimit-reset", "1760000000"),
             ("x-ratelimit-resource", "core"),
-        ]);
-        let snapshot = RateLimitSnapshot::from_headers(&headers);
-        assert_eq!(snapshot.limit, Some(5000));
-        assert_eq!(snapshot.remaining, Some(4999));
-        assert_eq!(snapshot.used, Some(1));
-        assert_eq!(snapshot.reset_timestamp_seconds, Some(1760000000));
-        assert_eq!(snapshot.retry_after_seconds, None);
-        assert_eq!(snapshot.resource, RateLimitResource::Core);
-    }
+        ]));
+        assert_eq!(full.limit, Some(5000), "limit");
+        assert_eq!(full.remaining, Some(4999), "remaining");
+        assert_eq!(full.used, Some(1), "used");
+        assert_eq!(full.reset_timestamp_seconds, Some(1760000000), "reset");
+        assert_eq!(full.retry_after_seconds, None, "retry-after");
+        assert_eq!(full.resource, RateLimitResource::Core, "resource");
 
-    #[test]
-    fn empty_headers_yield_unknown_resource() {
-        let snapshot = RateLimitSnapshot::from_headers(&HeaderMap::new());
-        assert_eq!(snapshot.limit, None);
-        assert_eq!(snapshot.remaining, None);
-        assert_eq!(snapshot.used, None);
-        assert_eq!(snapshot.reset_timestamp_seconds, None);
-        assert_eq!(snapshot.retry_after_seconds, None);
-        assert_eq!(snapshot.resource, RateLimitResource::Unknown);
-    }
+        let empty = RateLimitSnapshot::from_headers(&HeaderMap::new());
+        assert_eq!(
+            (
+                empty.limit,
+                empty.remaining,
+                empty.used,
+                empty.reset_timestamp_seconds,
+                empty.retry_after_seconds
+            ),
+            (None, None, None, None, None),
+            "absent headers leave every value unset"
+        );
+        assert_eq!(empty.resource, RateLimitResource::Unknown, "resource");
 
-    #[test]
-    fn malformed_reset_does_not_suppress_remaining() {
-        let headers = header_map(&[
+        let malformed = RateLimitSnapshot::from_headers(&header_map(&[
             ("x-ratelimit-reset", "not-a-number"),
             ("x-ratelimit-remaining", "42"),
-        ]);
-        let snapshot = RateLimitSnapshot::from_headers(&headers);
-        assert_eq!(snapshot.reset_timestamp_seconds, None);
-        assert_eq!(snapshot.remaining, Some(42));
+        ]));
+        assert_eq!(
+            malformed.reset_timestamp_seconds, None,
+            "malformed reset is dropped"
+        );
+        assert_eq!(
+            malformed.remaining,
+            Some(42),
+            "a malformed header does not suppress its siblings"
+        );
+
+        let unmapped = RateLimitSnapshot::from_headers(&header_map(&[(
+            "x-ratelimit-resource",
+            "something_new",
+        )]));
+        assert_eq!(
+            unmapped.resource,
+            RateLimitResource::Other,
+            "an unmapped resource collapses to other"
+        );
+        assert_eq!(unmapped.resource.as_str(), "other", "resource label");
     }
 
     #[test]
-    fn unknown_resource_string_collapses_to_other() {
-        let headers = header_map(&[("x-ratelimit-resource", "something_new")]);
-        let snapshot = RateLimitSnapshot::from_headers(&headers);
-        assert_eq!(snapshot.resource, RateLimitResource::Other);
-        assert_eq!(snapshot.resource.as_str(), "other");
-    }
-
-    #[test]
-    fn classifies_the_full_matrix() {
-        let no_headers = RateLimitSnapshot::from_headers(&HeaderMap::new());
+    fn classifies_rate_limited_statuses() {
+        let empty = RateLimitSnapshot::from_headers(&HeaderMap::new());
         let exhausted = RateLimitSnapshot {
             remaining: Some(0),
-            ..RateLimitSnapshot::from_headers(&HeaderMap::new())
+            ..empty.clone()
         };
         let retry_after = RateLimitSnapshot {
             retry_after_seconds: Some(60),
-            ..RateLimitSnapshot::from_headers(&HeaderMap::new())
+            ..empty.clone()
         };
+
         assert_eq!(
             retry_after.classify(StatusCode::FORBIDDEN),
-            Some(RateLimitKind::Secondary)
+            Some(RateLimitKind::Secondary),
+            "403 with retry-after"
         );
         assert_eq!(
             retry_after.classify(StatusCode::TOO_MANY_REQUESTS),
-            Some(RateLimitKind::Secondary)
+            Some(RateLimitKind::Secondary),
+            "429 with retry-after"
         );
         assert_eq!(
             exhausted.classify(StatusCode::FORBIDDEN),
-            Some(RateLimitKind::Primary)
+            Some(RateLimitKind::Primary),
+            "403 with no remaining quota"
         );
         assert_eq!(
             exhausted.classify(StatusCode::TOO_MANY_REQUESTS),
-            Some(RateLimitKind::Primary)
+            Some(RateLimitKind::Primary),
+            "429 with no remaining quota"
         );
         assert_eq!(
-            no_headers.classify(StatusCode::TOO_MANY_REQUESTS),
-            Some(RateLimitKind::Secondary)
+            empty.classify(StatusCode::TOO_MANY_REQUESTS),
+            Some(RateLimitKind::Secondary),
+            "429 without headers"
         );
-        assert_eq!(no_headers.classify(StatusCode::FORBIDDEN), None);
-        assert_eq!(no_headers.classify(StatusCode::OK), None);
-        assert_eq!(no_headers.classify(StatusCode::INTERNAL_SERVER_ERROR), None);
+        assert_eq!(empty.classify(StatusCode::FORBIDDEN), None, "403");
+        assert_eq!(empty.classify(StatusCode::OK), None, "200");
+        assert_eq!(
+            empty.classify(StatusCode::INTERNAL_SERVER_ERROR),
+            None,
+            "500"
+        );
     }
 }

@@ -7,7 +7,7 @@
 # flake this check.
 
 URL="test_github_rate_limit_metrics"
-SERIES_PREFIX='plaid_github_api_requests_total{client="noauth",method="get",'
+SERIES_PREFIX='plaid_github_api_requests_total{client="noauth",method="GET",'
 
 requests() {
   curl -s http://127.0.0.1:9464/metrics |

@@ -55,6 +55,7 @@ use warp::{
 #[derive(Debug)]
 enum Errors {
     FailedToStartApiSystem(ApiError),
+    MetricsRegistrationFailed(prometheus::Error),
     FailedToLoadModules,
 }
 
@@ -62,6 +63,9 @@ impl std::fmt::Display for Errors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Errors::FailedToStartApiSystem(e) => write!(f, "Failed to start API system: {:?}", e),
+            Errors::MetricsRegistrationFailed(e) => {
+                write!(f, "Failed to register GitHub metrics: {e}")
+            }
             Errors::FailedToLoadModules => write!(f, "Failed to load modules"),
         }
     }
@@ -392,6 +396,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let github_metrics = metrics
         .as_deref()
         .map(GithubMetrics::register)
+        .transpose()
+        .map_err(Errors::MetricsRegistrationFailed)?
         .map(Arc::new);
 
     let module_execution_metrics = if let Some(handle) = &metrics {

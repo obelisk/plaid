@@ -16,7 +16,7 @@ mod secrets;
 mod teams;
 mod validators;
 
-use http::{header::USER_AGENT, HeaderMap, StatusCode};
+use http::{header::USER_AGENT, HeaderMap, Method, StatusCode};
 use jsonwebtoken::EncodingKey;
 use octocrab::{auth::create_jwt, NoAuth, Octocrab};
 
@@ -27,7 +27,7 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 use crate::loader::PlaidModule;
 
 pub use metrics::GithubMetrics;
-use metrics::{Method, Verdict};
+use metrics::Verdict;
 pub(crate) use rate_limit::RateLimitSnapshot;
 
 use super::ApiError;
@@ -136,7 +136,7 @@ impl Github {
     fn capture_response<B>(
         &self,
         client: &str,
-        method: Method,
+        method: &Method,
         request: octocrab::Result<http::Response<B>>,
     ) -> Result<(StatusCode, RateLimitSnapshot, http::Response<B>), ApiError> {
         match request {
@@ -156,7 +156,7 @@ impl Github {
     fn finish(
         &self,
         client: &str,
-        method: Method,
+        method: &Method,
         status: StatusCode,
         snapshot: &RateLimitSnapshot,
         body: Result<String, ApiError>,
@@ -173,7 +173,7 @@ impl Github {
     fn record(
         &self,
         client: &str,
-        method: Method,
+        method: &Method,
         status: StatusCode,
         snapshot: &RateLimitSnapshot,
         verdict: Verdict,
@@ -183,7 +183,7 @@ impl Github {
         }
     }
 
-    fn record_transport_error(&self, client: &str, method: Method) {
+    fn record_transport_error(&self, client: &str, method: &Method) {
         if let Some(metrics) = self.metrics.as_deref() {
             metrics.record_transport_error(client, method);
         }
@@ -237,12 +237,12 @@ impl Github {
 
         let request = client._get_with_headers(uri, headers).await;
         let (status, snapshot, response) =
-            self.capture_response(&client_id, Method::Get, request)?;
+            self.capture_response(&client_id, &Method::GET, request)?;
         let body = client
             .body_to_string(response)
             .await
             .map_err(body_read_error);
-        Ok(self.finish(&client_id, Method::Get, status, &snapshot, body))
+        Ok(self.finish(&client_id, &Method::GET, status, &snapshot, body))
     }
 
     /// Make a generic post request to the GitHub API using the GitHub app library. This exists
@@ -317,9 +317,7 @@ impl Github {
             Some(headers) => {
                 let mut request = client
                     .build_request(
-                        http::Request::builder()
-                            .method(http::Method::POST)
-                            .uri(&uri),
+                        http::Request::builder().method(Method::POST).uri(&uri),
                         Some(&body),
                     )
                     .map_err(|e| ApiError::GitHubError(GitHubError::ClientError(e)))?;
@@ -335,12 +333,12 @@ impl Github {
         };
 
         let (status, snapshot, response) =
-            self.capture_response(&client_id, Method::Post, response)?;
+            self.capture_response(&client_id, &Method::POST, response)?;
         let body = client
             .body_to_string(response)
             .await
             .map_err(body_read_error);
-        Ok(self.finish(&client_id, Method::Post, status, &snapshot, body))
+        Ok(self.finish(&client_id, &Method::POST, status, &snapshot, body))
     }
 
     /// Build an `Authorization: Bearer <JWT>` header for a GitHub App client identified by
@@ -395,12 +393,12 @@ impl Github {
 
         let request = client._put(uri, body).await;
         let (status, snapshot, response) =
-            self.capture_response(&client_id, Method::Put, request)?;
+            self.capture_response(&client_id, &Method::PUT, request)?;
         let body = client
             .body_to_string(response)
             .await
             .map_err(body_read_error);
-        Ok(self.finish(&client_id, Method::Put, status, &snapshot, body))
+        Ok(self.finish(&client_id, &Method::PUT, status, &snapshot, body))
     }
 
     /// Make a generic patch request to the GitHub API using the GitHub app library. This exists
@@ -426,12 +424,12 @@ impl Github {
 
         let request = client._patch(uri, body).await;
         let (status, snapshot, response) =
-            self.capture_response(&client_id, Method::Patch, request)?;
+            self.capture_response(&client_id, &Method::PATCH, request)?;
         let body = client
             .body_to_string(response)
             .await
             .map_err(body_read_error);
-        Ok(self.finish(&client_id, Method::Patch, status, &snapshot, body))
+        Ok(self.finish(&client_id, &Method::PATCH, status, &snapshot, body))
     }
 
     /// Make a generic delete request to the GitHub API using the GitHub app library. This exists
@@ -457,12 +455,12 @@ impl Github {
 
         let request = client._delete(uri, body).await;
         let (status, snapshot, response) =
-            self.capture_response(&client_id, Method::Delete, request)?;
+            self.capture_response(&client_id, &Method::DELETE, request)?;
         let body = client
             .body_to_string(response)
             .await
             .map_err(body_read_error);
-        Ok(self.finish(&client_id, Method::Delete, status, &snapshot, body))
+        Ok(self.finish(&client_id, &Method::DELETE, status, &snapshot, body))
     }
 
     /// Make a DELETE request to the GitHub API with a custom `Authorization: Bearer <token>`
@@ -494,7 +492,7 @@ impl Github {
         let response = match request.send().await {
             Ok(response) => response,
             Err(e) => {
-                self.record_transport_error(UNATTRIBUTED_CLIENT, Method::Delete);
+                self.record_transport_error(UNATTRIBUTED_CLIENT, &Method::DELETE);
                 return Err(ApiError::NetworkError(e));
             }
         };
@@ -505,7 +503,13 @@ impl Github {
             .text()
             .await
             .map_err(|e| ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string())));
-        Ok(self.finish(UNATTRIBUTED_CLIENT, Method::Delete, status, &snapshot, body))
+        Ok(self.finish(
+            UNATTRIBUTED_CLIENT,
+            &Method::DELETE,
+            status,
+            &snapshot,
+            body,
+        ))
     }
 }
 

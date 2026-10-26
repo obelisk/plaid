@@ -8,7 +8,9 @@ use crate::{
     loader::PlaidModule,
 };
 
-use super::{body_read_error, Github, Method, Verdict};
+use http::Method;
+
+use super::{body_read_error, Github, Verdict};
 
 /// A GraphQL query ready to be executed.
 #[derive(Serialize)]
@@ -80,13 +82,13 @@ impl Github {
 
         let request = client._post(GITHUB_GQL_API, Some(&query)).await;
         let (status, snapshot, response) =
-            self.capture_response(&client_id, Method::Graphql, request)?;
+            self.capture_response(&client_id, &Method::POST, request)?;
         let body = match client.body_to_string(response).await {
             Ok(body) => body,
             Err(e) => {
                 self.record(
                     &client_id,
-                    Method::Graphql,
+                    &Method::POST,
                     status,
                     &snapshot,
                     Verdict::Failed,
@@ -100,7 +102,7 @@ impl Github {
         } else {
             Verdict::Read
         };
-        self.record(&client_id, Method::Graphql, status, &snapshot, verdict);
+        self.record(&client_id, &Method::POST, status, &snapshot, verdict);
 
         if status == 200 {
             Ok(body)
@@ -164,26 +166,5 @@ impl Github {
 
         self.make_gql_request(&request.client_id, query, module)
             .await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::reports_rate_limit;
-
-    #[test]
-    fn detects_rate_limit_errors() {
-        assert!(reports_rate_limit(
-            r#"{"errors":[{"type":"RATE_LIMITED","message":"API rate limit exceeded"}]}"#
-        ));
-    }
-
-    #[test]
-    fn ignores_data_and_other_errors() {
-        assert!(!reports_rate_limit(
-            r#"{"data":{"viewer":{"login":"octocat"}}}"#
-        ));
-        assert!(!reports_rate_limit(r#"{"errors":[{"type":"NOT_FOUND"}]}"#));
-        assert!(!reports_rate_limit("not json"));
     }
 }

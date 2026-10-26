@@ -1,4 +1,4 @@
-use http::StatusCode;
+use http::{Method, StatusCode};
 use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, IntCounterVec,
     IntGaugeVec,
@@ -7,31 +7,6 @@ use prometheus::{
 use crate::metrics::MetricsHandle;
 
 use super::rate_limit::{RateLimitKind, RateLimitSnapshot};
-
-/// How a request was sent. A closed enum so the `method` label cannot drift
-/// between the call sites that write it.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Method {
-    Get,
-    Post,
-    Put,
-    Patch,
-    Delete,
-    Graphql,
-}
-
-impl Method {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Get => "get",
-            Self::Post => "post",
-            Self::Put => "put",
-            Self::Patch => "patch",
-            Self::Delete => "delete",
-            Self::Graphql => "graphql",
-        }
-    }
-}
 
 /// What the caller got out of a response, which decides whether a 2XX may be
 /// recorded as `success`.
@@ -58,7 +33,7 @@ pub struct GithubMetrics {
 }
 
 impl GithubMetrics {
-    pub fn register(handle: &MetricsHandle) -> Self {
+    pub fn register(handle: &MetricsHandle) -> Result<Self, prometheus::Error> {
         let registry = handle.registry();
 
         let rate_limit_limit = register_int_gauge_vec_with_registry!(
@@ -66,57 +41,51 @@ impl GithubMetrics {
             "Rate-limit window ceiling reported by GitHub, in requests for REST and points for GraphQL",
             &["client", "resource"],
             registry,
-        )
-        .expect("expected unique collector");
+        )?;
 
         let rate_limit_remaining = register_int_gauge_vec_with_registry!(
             "plaid_github_api_rate_limit_remaining",
             "Quota units remaining in the current rate-limit window",
             &["client", "resource"],
             registry,
-        )
-        .expect("expected unique collector");
+        )?;
 
         let rate_limit_used = register_int_gauge_vec_with_registry!(
             "plaid_github_api_rate_limit_used",
             "Quota units used in the current rate-limit window",
             &["client", "resource"],
             registry,
-        )
-        .expect("expected unique collector");
+        )?;
 
         let rate_limit_reset_timestamp_seconds = register_int_gauge_vec_with_registry!(
             "plaid_github_api_rate_limit_reset_timestamp_seconds",
             "Unix timestamp when the current rate-limit window resets",
             &["client", "resource"],
             registry,
-        )
-        .expect("expected unique collector");
+        )?;
 
         let requests_total = register_int_counter_vec_with_registry!(
             "plaid_github_api_requests_total",
             "Total logical GitHub API requests. octocrab retry attempts are not counted separately",
             &["client", "resource", "method", "outcome"],
             registry,
-        )
-        .expect("expected unique collector");
+        )?;
 
         let rate_limited_total = register_int_counter_vec_with_registry!(
             "plaid_github_api_rate_limited_total",
             "Total GitHub API responses classified as primary or secondary rate limits",
             &["client", "resource", "kind"],
             registry,
-        )
-        .expect("expected unique collector");
+        )?;
 
-        Self {
+        Ok(Self {
             rate_limit_limit,
             rate_limit_remaining,
             rate_limit_used,
             rate_limit_reset_timestamp_seconds,
             requests_total,
             rate_limited_total,
-        }
+        })
     }
 
     /// Record one observed response: the request counter, whatever quota state
@@ -124,7 +93,7 @@ impl GithubMetrics {
     pub(crate) fn record(
         &self,
         client: &str,
-        method: Method,
+        method: &Method,
         status: StatusCode,
         snapshot: &RateLimitSnapshot,
         verdict: Verdict,
@@ -160,7 +129,7 @@ impl GithubMetrics {
     }
 
     /// Record a request that failed before a response arrived.
-    pub(crate) fn record_transport_error(&self, client: &str, method: Method) {
+    pub(crate) fn record_transport_error(&self, client: &str, method: &Method) {
         self.requests_total
             .with_label_values(&[client, "unknown", method.as_str(), "transport_error"])
             .inc();
@@ -211,159 +180,163 @@ fn outcome(status: StatusCode, verdict: Verdict, kind: Option<RateLimitKind>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::apis::github::rate_limit::header_map;
     use crate::metrics::MetricsHandle;
 
-    fn full_rate_limit_headers() -> http::HeaderMap {
-        let mut headers = http::HeaderMap::new();
-        for (name, value) in [
-            ("x-ratelimit-limit", "5000"),
-            ("x-ratelimit-remaining", "4999"),
-            ("x-ratelimit-used", "1"),
-            ("x-ratelimit-reset", "1760000000"),
-            ("x-ratelimit-resource", "core"),
-        ] {
-            headers.insert(
-                http::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
-                http::header::HeaderValue::from_str(value).unwrap(),
-            );
-        }
-        headers
+    const FULL_HEADERS: &[(&str, &str)] = &[
+        ("x-ratelimit-limit", "5000"),
+        ("x-ratelimit-remaining", "4999"),
+        ("x-ratelimit-used", "1"),
+        ("x-ratelimit-reset", "1760000000"),
+        ("x-ratelimit-resource", "core"),
+    ];
+    const EXHAUSTED_HEADERS: &[(&str, &str)] = &[
+        ("x-ratelimit-limit", "5000"),
+        ("x-ratelimit-remaining", "0"),
+        ("x-ratelimit-used", "5000"),
+        ("x-ratelimit-reset", "1760000000"),
+        ("x-ratelimit-resource", "core"),
+    ];
+    const GRAPHQL_EXHAUSTED_HEADERS: &[(&str, &str)] = &[
+        ("x-ratelimit-limit", "5000"),
+        ("x-ratelimit-remaining", "0"),
+        ("x-ratelimit-resource", "graphql"),
+    ];
+
+    struct Case {
+        name: &'static str,
+        method: Method,
+        status: StatusCode,
+        headers: &'static [(&'static str, &'static str)],
+        verdict: Verdict,
+        present: &'static [&'static str],
+        absent: &'static [&'static str],
     }
 
-    fn metrics() -> (MetricsHandle, GithubMetrics) {
+    fn record_one(case: &Case) -> String {
         let handle = MetricsHandle::new();
-        let metrics = GithubMetrics::register(&handle);
-        (handle, metrics)
+        let metrics = GithubMetrics::register(&handle).unwrap();
+        metrics.record(
+            "test",
+            &case.method,
+            case.status,
+            &RateLimitSnapshot::from_headers(&header_map(case.headers)),
+            case.verdict,
+        );
+        handle.encode().unwrap()
     }
 
     #[test]
-    fn full_headers_set_gauges_and_success_counter() {
-        let (handle, metrics) = metrics();
-        metrics.record(
-            "test",
-            Method::Get,
-            StatusCode::OK,
-            &RateLimitSnapshot::from_headers(&full_rate_limit_headers()),
-            Verdict::Read,
-        );
+    fn records_each_observation() {
+        let cases = [
+            Case {
+                name: "success with full headers",
+                method: Method::GET,
+                status: StatusCode::OK,
+                headers: FULL_HEADERS,
+                verdict: Verdict::Read,
+                present: &[
+                    "plaid_github_api_rate_limit_limit{client=\"test\",resource=\"core\"} 5000",
+                    "plaid_github_api_rate_limit_remaining{client=\"test\",resource=\"core\"} 4999",
+                    "plaid_github_api_rate_limit_used{client=\"test\",resource=\"core\"} 1",
+                    "plaid_github_api_rate_limit_reset_timestamp_seconds{client=\"test\",resource=\"core\"} 1760000000",
+                    "plaid_github_api_requests_total{client=\"test\",method=\"GET\",outcome=\"success\",resource=\"core\"} 1",
+                ],
+                absent: &["plaid_github_api_rate_limited_total"],
+            },
+            Case {
+                name: "success without headers",
+                method: Method::GET,
+                status: StatusCode::OK,
+                headers: &[],
+                verdict: Verdict::Read,
+                present: &[
+                    "plaid_github_api_requests_total{client=\"test\",method=\"GET\",outcome=\"success\",resource=\"unknown\"} 1",
+                ],
+                absent: &[
+                    "plaid_github_api_rate_limit_limit{",
+                    "plaid_github_api_rate_limit_remaining{",
+                    "plaid_github_api_rate_limit_used{",
+                    "plaid_github_api_rate_limit_reset_timestamp_seconds{",
+                ],
+            },
+            Case {
+                name: "403 with exhausted quota is a primary limit",
+                method: Method::GET,
+                status: StatusCode::FORBIDDEN,
+                headers: EXHAUSTED_HEADERS,
+                verdict: Verdict::Read,
+                present: &[
+                    "plaid_github_api_rate_limited_total{client=\"test\",kind=\"primary\",resource=\"core\"} 1",
+                    "plaid_github_api_requests_total{client=\"test\",method=\"GET\",outcome=\"rate_limited\",resource=\"core\"} 1",
+                ],
+                absent: &[],
+            },
+            Case {
+                name: "GraphQL 200 with a RATE_LIMITED body is a primary limit",
+                method: Method::POST,
+                status: StatusCode::OK,
+                headers: GRAPHQL_EXHAUSTED_HEADERS,
+                verdict: Verdict::GraphqlRateLimited,
+                present: &[
+                    "plaid_github_api_rate_limited_total{client=\"test\",kind=\"primary\",resource=\"graphql\"} 1",
+                    "plaid_github_api_requests_total{client=\"test\",method=\"POST\",outcome=\"rate_limited\",resource=\"graphql\"} 1",
+                ],
+                absent: &[],
+            },
+            Case {
+                name: "failed body on a 200 is not a success",
+                method: Method::POST,
+                status: StatusCode::OK,
+                headers: FULL_HEADERS,
+                verdict: Verdict::Failed,
+                present: &[
+                    "plaid_github_api_requests_total{client=\"test\",method=\"POST\",outcome=\"other\",resource=\"core\"} 1",
+                    "plaid_github_api_rate_limit_remaining{client=\"test\",resource=\"core\"} 4999",
+                ],
+                absent: &["outcome=\"success\"", "plaid_github_api_rate_limited_total"],
+            },
+            Case {
+                name: "failed body on an exhausted 403 is still a primary limit",
+                method: Method::POST,
+                status: StatusCode::FORBIDDEN,
+                headers: EXHAUSTED_HEADERS,
+                verdict: Verdict::Failed,
+                present: &[
+                    "plaid_github_api_rate_limited_total{client=\"test\",kind=\"primary\",resource=\"core\"} 1",
+                    "plaid_github_api_requests_total{client=\"test\",method=\"POST\",outcome=\"rate_limited\",resource=\"core\"} 1",
+                ],
+                absent: &["outcome=\"success\""],
+            },
+        ];
 
-        let encoded = handle.encode().unwrap();
-        assert!(encoded
-            .contains("plaid_github_api_rate_limit_limit{client=\"test\",resource=\"core\"} 5000"));
-        assert!(encoded.contains(
-            "plaid_github_api_rate_limit_remaining{client=\"test\",resource=\"core\"} 4999"
-        ));
-        assert!(encoded
-            .contains("plaid_github_api_rate_limit_used{client=\"test\",resource=\"core\"} 1"));
-        assert!(encoded.contains("plaid_github_api_rate_limit_reset_timestamp_seconds{client=\"test\",resource=\"core\"} 1760000000"));
-        assert!(encoded.contains("plaid_github_api_requests_total{client=\"test\",method=\"get\",outcome=\"success\",resource=\"core\"} 1"));
-        assert!(!encoded.contains("plaid_github_api_rate_limited_total"));
+        for case in cases {
+            let encoded = record_one(&case);
+            for fragment in case.present {
+                assert!(
+                    encoded.contains(fragment),
+                    "{}: expected {fragment}",
+                    case.name
+                );
+            }
+            for fragment in case.absent {
+                assert!(
+                    !encoded.contains(fragment),
+                    "{}: did not expect {fragment}",
+                    case.name
+                );
+            }
+        }
     }
 
     #[test]
-    fn missing_headers_only_increment_the_request_counter() {
-        let (handle, metrics) = metrics();
-        metrics.record(
-            "test",
-            Method::Get,
-            StatusCode::OK,
-            &RateLimitSnapshot::from_headers(&http::HeaderMap::new()),
-            Verdict::Read,
-        );
+    fn records_transport_errors() {
+        let handle = MetricsHandle::new();
+        let metrics = GithubMetrics::register(&handle).unwrap();
+        metrics.record_transport_error("test", &Method::GET);
 
         let encoded = handle.encode().unwrap();
-        assert!(encoded.contains("plaid_github_api_requests_total{client=\"test\",method=\"get\",outcome=\"success\",resource=\"unknown\"} 1"));
-        assert!(!encoded.contains("plaid_github_api_rate_limit_limit{"));
-        assert!(!encoded.contains("plaid_github_api_rate_limit_remaining{"));
-        assert!(!encoded.contains("plaid_github_api_rate_limit_used{"));
-        assert!(!encoded.contains("plaid_github_api_rate_limit_reset_timestamp_seconds{"));
-    }
-
-    #[test]
-    fn exhausted_403_counts_as_primary_rate_limit() {
-        let (handle, metrics) = metrics();
-        let mut headers = full_rate_limit_headers();
-        headers.insert("x-ratelimit-remaining", "0".parse().unwrap());
-        metrics.record(
-            "test",
-            Method::Get,
-            StatusCode::FORBIDDEN,
-            &RateLimitSnapshot::from_headers(&headers),
-            Verdict::Read,
-        );
-
-        let encoded = handle.encode().unwrap();
-        assert!(encoded.contains("plaid_github_api_rate_limited_total{client=\"test\",kind=\"primary\",resource=\"core\"} 1"));
-        assert!(encoded.contains("plaid_github_api_requests_total{client=\"test\",method=\"get\",outcome=\"rate_limited\",resource=\"core\"} 1"));
-    }
-
-    #[test]
-    fn graphql_body_rate_limit_counts_as_primary() {
-        let (handle, metrics) = metrics();
-        let mut headers = http::HeaderMap::new();
-        headers.insert("x-ratelimit-limit", "5000".parse().unwrap());
-        headers.insert("x-ratelimit-remaining", "0".parse().unwrap());
-        headers.insert("x-ratelimit-resource", "graphql".parse().unwrap());
-
-        let snapshot = RateLimitSnapshot::from_headers(&headers);
-        metrics.record(
-            "test",
-            Method::Graphql,
-            StatusCode::OK,
-            &snapshot,
-            Verdict::GraphqlRateLimited,
-        );
-
-        let encoded = handle.encode().unwrap();
-        assert!(encoded.contains("plaid_github_api_rate_limited_total{client=\"test\",kind=\"primary\",resource=\"graphql\"} 1"));
-        assert!(encoded.contains("plaid_github_api_requests_total{client=\"test\",method=\"graphql\",outcome=\"rate_limited\",resource=\"graphql\"} 1"));
-    }
-
-    #[test]
-    fn failed_response_never_records_success() {
-        let (handle, metrics) = metrics();
-        let headers = full_rate_limit_headers();
-        let snapshot = RateLimitSnapshot::from_headers(&headers);
-
-        metrics.record(
-            "test",
-            Method::Graphql,
-            StatusCode::OK,
-            &snapshot,
-            Verdict::Failed,
-        );
-
-        let encoded = handle.encode().unwrap();
-        assert!(encoded.contains("plaid_github_api_requests_total{client=\"test\",method=\"graphql\",outcome=\"other\",resource=\"core\"} 1"));
-        assert!(!encoded.contains("outcome=\"success\""));
-        assert!(encoded.contains(
-            "plaid_github_api_rate_limit_remaining{client=\"test\",resource=\"core\"} 4999"
-        ));
-        assert!(!encoded.contains("plaid_github_api_rate_limited_total"));
-
-        let mut exhausted = full_rate_limit_headers();
-        exhausted.insert(
-            http::header::HeaderName::from_bytes(b"x-ratelimit-remaining").unwrap(),
-            http::header::HeaderValue::from_str("0").unwrap(),
-        );
-        metrics.record(
-            "test",
-            Method::Graphql,
-            StatusCode::FORBIDDEN,
-            &RateLimitSnapshot::from_headers(&exhausted),
-            Verdict::Failed,
-        );
-        let encoded = handle.encode().unwrap();
-        assert!(encoded.contains("plaid_github_api_rate_limited_total{client=\"test\",kind=\"primary\",resource=\"core\"} 1"));
-    }
-
-    #[test]
-    fn transport_error_increments_only_the_transport_series() {
-        let (handle, metrics) = metrics();
-        metrics.record_transport_error("test", Method::Get);
-
-        let encoded = handle.encode().unwrap();
-        assert!(encoded.contains("plaid_github_api_requests_total{client=\"test\",method=\"get\",outcome=\"transport_error\",resource=\"unknown\"} 1"));
+        assert!(encoded.contains("plaid_github_api_requests_total{client=\"test\",method=\"GET\",outcome=\"transport_error\",resource=\"unknown\"} 1"));
         assert!(!encoded.contains("outcome=\"success\""));
         assert!(!encoded.contains("plaid_github_api_rate_limited_total"));
         assert!(!encoded.contains("plaid_github_api_rate_limit_limit{"));

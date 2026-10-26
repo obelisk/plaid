@@ -472,7 +472,7 @@ Expected series:
 ```
 plaid_github_api_rate_limit_limit{client="noauth",resource="core"} 60
 plaid_github_api_rate_limit_remaining{client="noauth",resource="core"} 58
-plaid_github_api_requests_total{client="noauth",method="get",outcome="success",resource="core"} 1
+plaid_github_api_requests_total{client="noauth",method="GET",outcome="success",resource="core"} 1
 ```
 
 A token-backed client with a higher limit reports the same shape with its own
