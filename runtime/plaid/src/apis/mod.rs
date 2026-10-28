@@ -17,6 +17,8 @@ pub mod splunk;
 pub mod web;
 pub mod yubikey;
 
+use std::sync::Arc;
+
 #[cfg(feature = "aws")]
 use crate::apis::aws::kms::KmsErrors;
 use crate::apis::blockchain::{Blockchain, BlockchainConfig, BlockchainError};
@@ -42,7 +44,7 @@ use aws_sdk_kms::{error::SdkError, operation::sign::SignError};
 
 use bloom_filter::BloomFilterConfig;
 use general::{General, GeneralConfig};
-use github::{Github, GithubConfig};
+use github::{Github, GithubConfig, GithubMetrics};
 use npm::{Npm, NpmConfig};
 use okta::{Okta, OktaConfig};
 use pagerduty::{PagerDuty, PagerDutyConfig};
@@ -177,7 +179,10 @@ impl From<gcp::bigquery::BigQueryError> for ApiError {
 }
 
 impl Api {
-    pub async fn new(config: ApiConfigs) -> Result<Self, ApiError> {
+    pub async fn with_metrics(
+        config: ApiConfigs,
+        github_metrics: Option<Arc<GithubMetrics>>,
+    ) -> Result<Self, ApiError> {
         let cryptography = match config.cryptography {
             Some(cryptography) => Some(Cryptography::new(cryptography)),
             _ => None,
@@ -211,7 +216,7 @@ impl Api {
         };
 
         let github = match config.github {
-            Some(gh) => Some(Github::new(gh)?),
+            Some(gh) => Some(Github::with_metrics(gh, github_metrics)?),
             _ => None,
         };
 

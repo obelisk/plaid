@@ -449,12 +449,44 @@ RUST_LOG=plaid=debug cargo run --bin=plaid \
   -- --config ../local-dev/config --secrets ../local-dev/secrets/secrets.toml
 ```
 
+## GitHub Rate-Limit Metrics
+
+The `github-rate-limit` rule calls GitHub through the API client
+(`github::get_user_id_from_username`). No token is needed. GitHub returns
+`x-ratelimit-*` headers on unauthenticated responses, and Plaid turns them into
+Prometheus series.
+
+```bash
+# Trigger the GitHub call
+curl -X POST http://localhost:8080/webhook/github-rate-limit -d '{}'
+
+# Read the series directly
+curl -s localhost:9464/metrics | grep plaid_github_api
+
+# Or query the bundled Prometheus
+curl -s 'localhost:9090/api/v1/query?query=plaid_github_api_rate_limit_remaining'
+```
+
+Expected series:
+
+```
+plaid_github_api_rate_limit_limit{client="noauth",resource="core"} 60
+plaid_github_api_rate_limit_remaining{client="noauth",resource="core"} 58
+plaid_github_api_requests_total{client="noauth",method="GET",outcome="success",resource="core"} 1
+```
+
+A token-backed client with a higher limit reports the same shape with its own
+`client` label. These series cover the module-facing GitHub API client only:
+requests made through `general.network.web_requests` or the audit-log data
+generator's own client do not appear in them.
+
 ## Webhook Reference
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/webhook/hello` | Triggers `hello_world` rule |
 | POST | `/webhook/default` | Triggers any rule with `log_type = "default"` |
+| POST | `/webhook/github-rate-limit` | Calls GitHub and records rate-limit metrics |
 | GET  | `:8081/live` | Returns `live` while the process is alive |
 | GET  | `:8081/ready` | Returns `ready` once boot completes, then 503 (Service Unavailable) during shutdown |
 

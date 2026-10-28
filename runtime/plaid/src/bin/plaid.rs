@@ -20,6 +20,7 @@ use apis::Api;
 use data::Data;
 use executor::metrics::{ModuleExecutionMetrics, QueueMetrics};
 use executor::*;
+use plaid::apis::github::GithubMetrics;
 use plaid::metrics::MetricsHandle;
 use plaid_stl::messages::LogSource;
 use serde::Deserialize;
@@ -54,6 +55,7 @@ use warp::{
 #[derive(Debug)]
 enum Errors {
     FailedToStartApiSystem(ApiError),
+    MetricsRegistrationFailed(prometheus::Error),
     FailedToLoadModules,
 }
 
@@ -61,6 +63,9 @@ impl std::fmt::Display for Errors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Errors::FailedToStartApiSystem(e) => write!(f, "Failed to start API system: {:?}", e),
+            Errors::MetricsRegistrationFailed(e) => {
+                write!(f, "Failed to register GitHub metrics: {e}")
+            }
             Errors::FailedToLoadModules => write!(f, "Failed to load modules"),
         }
     }
@@ -388,6 +393,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .map(|_| Arc::new(MetricsHandle::new()));
 
+    let github_metrics = metrics
+        .as_deref()
+        .map(GithubMetrics::register)
+        .transpose()
+        .map_err(Errors::MetricsRegistrationFailed)?
+        .map(Arc::new);
+
     let module_execution_metrics = if let Some(handle) = &metrics {
         QueueMetrics::register(handle, &exec_thread_pools);
         Some(Arc::new(ModuleExecutionMetrics::register(handle)))
@@ -570,7 +582,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(config.apis)
+    let api = Api::with_metrics(config.apis, github_metrics)
         .await
         .map_err(|e| Errors::FailedToStartApiSystem(e))?;
 

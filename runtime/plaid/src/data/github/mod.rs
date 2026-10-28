@@ -6,7 +6,9 @@ use crate::parse_duration;
 use lru::LruCache;
 use octocrab::{self, Octocrab};
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
-use prometheus::IntCounter;
+use prometheus::register_int_counter_vec_with_registry;
+use prometheus::register_int_counter_with_registry;
+use prometheus::{IntCounter, IntCounterVec};
 use serde::Deserialize;
 use serde_json::Value;
 use std::cmp::Ordering;
@@ -16,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use time::OffsetDateTime;
 
-use super::{DataGenerator, DataGeneratorLog};
+use super::{DataGenerator, DataGeneratorLog, FetchErrorStage};
 
 /// Represents the event types GitHub will include in the response
 /// to the audit log request
@@ -183,9 +185,17 @@ pub struct Github {
     seen_logs_uuid: LruCache<String, u32>,
     /// Cumulative count of logs sent for processing, when metrics are enabled.
     logs_fetched: Option<IntCounter>,
+    /// Cumulative count of failed fetch attempts by stage, when metrics are enabled.
+    logs_fetch_errors: Option<IntCounterVec>,
 }
 
 impl Github {
+    fn record_fetch_error(&self, stage: FetchErrorStage) {
+        if let Some(errors) = &self.logs_fetch_errors {
+            errors.with_label_values(&[stage.as_label()]).inc();
+        }
+    }
+
     pub fn new(
         config: GithubConfig,
         logger: MessageSender,
@@ -206,18 +216,22 @@ impl Github {
             size => NonZeroUsize::new(size).unwrap(),
         };
 
-        let logs_fetched = metrics.map(|handle| {
-            let counter = IntCounter::new(
+        let logs_fetched = metrics.as_deref().map(|handle| {
+            register_int_counter_with_registry!(
                 "plaid_github_logs_fetched_total",
                 "Total number of GitHub logs sent for processing by the data generator",
+                handle.registry(),
             )
-            .expect("valid metric definition");
-
-            handle
-                .register(Box::new(counter.clone()))
-                .expect("expected unique collector");
-
-            counter
+            .expect("expected unique collector")
+        });
+        let logs_fetch_errors = metrics.as_deref().map(|handle| {
+            register_int_counter_vec_with_registry!(
+                "plaid_github_logs_fetch_errors_total",
+                "Total number of failed log fetch attempts; reason is one of the FetchErrorStage label values",
+                &["reason"],
+                handle.registry(),
+            )
+            .expect("expected unique collector")
         });
 
         Ok(Self {
@@ -227,6 +241,7 @@ impl Github {
             seen_logs_uuid: LruCache::new(lru_cache_size),
             logger,
             logs_fetched,
+            logs_fetch_errors,
         })
     }
 }
@@ -242,6 +257,7 @@ impl DataGenerator for Github {
         let since = match since.format(&time::format_description::well_known::Rfc3339) {
             Ok(since) => since,
             Err(e) => {
+                self.record_fetch_error(FetchErrorStage::DateTimeEncoding);
                 error!("Failed to parse 'since' datetime. Error: {e}");
                 return Err(());
             }
@@ -249,6 +265,7 @@ impl DataGenerator for Github {
         let until = match until.format(&time::format_description::well_known::Rfc3339) {
             Ok(until) => until,
             Err(e) => {
+                self.record_fetch_error(FetchErrorStage::DateTimeEncoding);
                 error!("Failed to parse 'until' datetime. Error: {e}");
                 return Err(());
             }
@@ -265,6 +282,7 @@ impl DataGenerator for Github {
         loop {
             if let Some(address) = next {
                 let response = self.client._get(&address).await.map_err(|e| {
+                    self.record_fetch_error(FetchErrorStage::Transport);
                     error!("{}", format!("Could not get logs from GitHub: {}", e));
                 })?;
 
@@ -280,6 +298,7 @@ impl DataGenerator for Github {
                                 .unwrap_or("N/A".to_string())
                         )
                     );
+                    self.record_fetch_error(FetchErrorStage::ResponseStatus);
                     return Err(());
                 }
 
@@ -292,6 +311,7 @@ impl DataGenerator for Github {
 
                 // Parse the response's body
                 let body = self.client.body_to_string(response).await.map_err(|e| {
+                    self.record_fetch_error(FetchErrorStage::ResponseBody);
                     error!(
                         "{}",
                         format!("Failed to read body of GitHub response. Error: {e}")
@@ -299,6 +319,7 @@ impl DataGenerator for Github {
                 })?;
 
                 let logs: Vec<Value> = serde_json::from_str(body.as_str()).map_err(|e| {
+                    self.record_fetch_error(FetchErrorStage::ResponseParse);
                     error!("{}", format!("Could not parse data from Github: {}", e));
                 })?;
 
@@ -422,5 +443,45 @@ impl DataGenerator for Github {
 
     fn get_time_granularity(&self) -> time::Duration {
         time::Duration::nanoseconds(self.config.time_granularity as i64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::executor::MessageSender;
+    use crate::metrics::MetricsHandle;
+    use time::{Date, Month, Time};
+
+    #[tokio::test]
+    async fn failing_fetch_records_its_stage() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let handle = Arc::new(MetricsHandle::new());
+        let config: GithubConfig =
+            toml::from_str("authentication = {}\norg = \"test-org\"\nlog_type = \"all\"\n")
+                .unwrap();
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+        let github = Github::new(
+            config,
+            MessageSender::new(sender, HashMap::new()),
+            Some(handle.clone()),
+        )
+        .unwrap();
+
+        // RFC3339 cannot encode a negative year, so the fetch fails before it
+        // builds a request.
+        let unencodable = OffsetDateTime::new_utc(
+            Date::from_calendar_date(-1, Month::January, 1).unwrap(),
+            Time::MIDNIGHT,
+        );
+
+        assert!(DataGenerator::fetch_logs(&github, unencodable, unencodable)
+            .await
+            .is_err());
+
+        let encoded = handle.encode().unwrap();
+        assert!(encoded
+            .contains("plaid_github_logs_fetch_errors_total{reason=\"datetime_encoding\"} 1"));
+        assert!(encoded.contains("plaid_github_logs_fetched_total 0"));
     }
 }

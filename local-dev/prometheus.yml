@@ -10,6 +10,12 @@
 #   plaid_execution_queue_depth
 #   plaid_execution_queue_capacity_percentage
 #   plaid_github_logs_fetched_total
+#
+# GitHub API rate limits (per configured client and resource):
+#   plaid_github_api_rate_limit_remaining / plaid_github_api_rate_limit_limit
+#   plaid_github_api_rate_limit_reset_timestamp_seconds - time()
+#   sum by (client, outcome) (rate(plaid_github_api_requests_total[5m]))
+#   sum by (client, kind) (increase(plaid_github_api_rate_limited_total[15m]))
 
 global:
   scrape_interval: 1s

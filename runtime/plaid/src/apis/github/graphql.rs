@@ -8,7 +8,9 @@ use crate::{
     loader::PlaidModule,
 };
 
-use super::Github;
+use http::Method;
+
+use super::{body_read_error, Github, Verdict};
 
 /// A GraphQL query ready to be executed.
 #[derive(Serialize)]
@@ -48,6 +50,20 @@ struct AdvancedRequest {
 
 const GITHUB_GQL_API: &str = "/graphql";
 
+fn reports_rate_limit(body: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    value
+        .get("errors")
+        .and_then(|errors| errors.as_array())
+        .is_some_and(|errors| {
+            errors.iter().any(|error| {
+                error.get("type").and_then(|kind| kind.as_str()) == Some("RATE_LIMITED")
+            })
+        })
+}
+
 impl Github {
     /// Execute a GraphQL query by calling the GitHub API.
     async fn make_gql_request<T: Serialize>(
@@ -56,7 +72,8 @@ impl Github {
         query: T,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+        let client_id = client_id.to_string();
+        let client = self.clients.get(&client_id).ok_or_else(|| {
             ApiError::GitHubError(GitHubError::InvalidInput(format!(
                 "Client ID not found: {}",
                 client_id
@@ -64,28 +81,27 @@ impl Github {
         })?;
 
         let request = client._post(GITHUB_GQL_API, Some(&query)).await;
+        let (status, snapshot, response) =
+            self.capture_response(&client_id, &Method::POST, request)?;
+        let body = client.body_to_string(response).await;
 
-        match request {
-            Ok(r) => {
-                if r.status() == 200 {
-                    let body = client.body_to_string(r).await.map_err(|e| {
-                        ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                    })?;
-
-                    Ok(body)
-                } else {
-                    let status = r.status();
-                    let body = client.body_to_string(r).await.map_err(|e| {
-                        ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                    })?;
-
-                    warn!("Failed GraphQL query from module: {module}. Status Code: {status} Return was: {body}");
-                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
-                        status.as_u16(),
-                    )))
-                }
+        let verdict = match body.as_deref() {
+            Ok(text) if status == 200 && self.metrics.is_some() && reports_rate_limit(text) => {
+                Verdict::GraphqlRateLimited
             }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
+            observed => Verdict::observed(status, &snapshot, observed.ok()),
+        };
+        self.record(&client_id, &Method::POST, status, &snapshot, verdict);
+
+        let body = body.map_err(body_read_error)?;
+
+        if status == 200 {
+            Ok(body)
+        } else {
+            warn!("Failed GraphQL query from module: {module}. Status Code: {status} Return was: {body}");
+            Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                status.as_u16(),
+            )))
         }
     }
 
