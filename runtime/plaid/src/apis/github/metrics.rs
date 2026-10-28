@@ -6,7 +6,7 @@ use prometheus::{
 
 use crate::metrics::MetricsHandle;
 
-use super::rate_limit::{RateLimitKind, RateLimitSnapshot};
+use super::rate_limit::{reports_secondary_limit, RateLimitKind, RateLimitSnapshot};
 
 /// What the caller got out of a response, which decides whether a 2XX may be
 /// recorded as `success`.
@@ -21,6 +21,27 @@ pub(crate) enum Verdict {
     /// A 403 whose body names a secondary rate limit instead of sending
     /// `retry-after`.
     SecondaryRateLimited,
+}
+
+impl Verdict {
+    /// Classify one observed response. `body` is `None` when the body could not
+    /// be read. Header evidence keeps precedence, so an exhausted window stays
+    /// primary even when the body also names the secondary limit.
+    pub(crate) fn observed(
+        status: StatusCode,
+        snapshot: &RateLimitSnapshot,
+        body: Option<&str>,
+    ) -> Self {
+        match body {
+            Some(text)
+                if snapshot.classify(status).is_none() && reports_secondary_limit(status, text) =>
+            {
+                Self::SecondaryRateLimited
+            }
+            Some(_) => Self::Read,
+            None => Self::Failed,
+        }
+    }
 }
 
 /// Prometheus collectors for GitHub API quota state. Registered once per
@@ -343,6 +364,42 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn derives_verdicts_from_observed_responses() {
+        let full = RateLimitSnapshot::from_headers(&header_map(FULL_HEADERS));
+        let exhausted = RateLimitSnapshot::from_headers(&header_map(EXHAUSTED_HEADERS));
+        let named = r#"{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}"#;
+
+        assert!(
+            matches!(
+                Verdict::observed(StatusCode::FORBIDDEN, &full, Some(named)),
+                Verdict::SecondaryRateLimited
+            ),
+            "403 naming a secondary limit without a header signal"
+        );
+        assert!(
+            matches!(
+                Verdict::observed(StatusCode::FORBIDDEN, &full, Some("permission denied")),
+                Verdict::Read
+            ),
+            "plain permission 403"
+        );
+        assert!(
+            matches!(
+                Verdict::observed(StatusCode::FORBIDDEN, &exhausted, Some(named)),
+                Verdict::Read
+            ),
+            "header precedence keeps an exhausted window primary"
+        );
+        assert!(
+            matches!(
+                Verdict::observed(StatusCode::OK, &full, None),
+                Verdict::Failed
+            ),
+            "unreadable body"
+        );
     }
 
     #[test]

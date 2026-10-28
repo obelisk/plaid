@@ -83,26 +83,17 @@ impl Github {
         let request = client._post(GITHUB_GQL_API, Some(&query)).await;
         let (status, snapshot, response) =
             self.capture_response(&client_id, &Method::POST, request)?;
-        let body = match client.body_to_string(response).await {
-            Ok(body) => body,
-            Err(e) => {
-                self.record(
-                    &client_id,
-                    &Method::POST,
-                    status,
-                    &snapshot,
-                    Verdict::Failed,
-                );
-                return Err(body_read_error(e));
-            }
-        };
+        let body = client.body_to_string(response).await;
 
-        let verdict = if status == 200 && self.metrics.is_some() && reports_rate_limit(&body) {
-            Verdict::GraphqlRateLimited
-        } else {
-            Verdict::Read
+        let verdict = match body.as_deref() {
+            Ok(text) if status == 200 && self.metrics.is_some() && reports_rate_limit(text) => {
+                Verdict::GraphqlRateLimited
+            }
+            observed => Verdict::observed(status, &snapshot, observed.ok()),
         };
         self.record(&client_id, &Method::POST, status, &snapshot, verdict);
+
+        let body = body.map_err(body_read_error)?;
 
         if status == 200 {
             Ok(body)

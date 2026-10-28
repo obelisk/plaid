@@ -28,7 +28,6 @@ use crate::loader::PlaidModule;
 
 pub use metrics::GithubMetrics;
 use metrics::Verdict;
-use rate_limit::reports_secondary_limit;
 pub(crate) use rate_limit::RateLimitSnapshot;
 
 use super::ApiError;
@@ -162,17 +161,7 @@ impl Github {
         snapshot: &RateLimitSnapshot,
         body: Result<String, ApiError>,
     ) -> (u16, Result<String, ApiError>) {
-        let verdict = match &body {
-            // Keep the header precedence: an exhausted window is a primary
-            // limit even when the body also mentions the secondary limit.
-            Ok(text)
-                if snapshot.classify(status).is_none() && reports_secondary_limit(status, text) =>
-            {
-                Verdict::SecondaryRateLimited
-            }
-            Ok(_) => Verdict::Read,
-            Err(_) => Verdict::Failed,
-        };
+        let verdict = Verdict::observed(status, snapshot, body.as_deref().ok());
         self.record(client, method, status, snapshot, verdict);
         (status.as_u16(), body)
     }
