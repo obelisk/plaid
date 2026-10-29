@@ -529,3 +529,279 @@ pub struct ListOrgSecretsForRepoParams {
     pub per_page: Option<u32>,
     pub page: Option<u32>,
 }
+
+/*******************************************************************************************
+   DEPENDABOT ALERTS
+*******************************************************************************************/
+
+/// The state of a Dependabot alert.
+/// See https://docs.github.com/en/rest/dependabot/alerts?apiVersion=2026-03-10#list-dependabot-alerts-for-a-repository
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DependabotAlertState {
+    AutoDismissed,
+    Dismissed,
+    Fixed,
+    Open,
+}
+
+impl Display for DependabotAlertState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            Self::AutoDismissed => "auto_dismissed",
+            Self::Dismissed => "dismissed",
+            Self::Fixed => "fixed",
+            Self::Open => "open",
+        };
+        write!(f, "{state}")
+    }
+}
+
+/// The severity of a vulnerability, as reported by GitHub.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdvisorySeverity {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+/// The package affected by a Dependabot alert.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependabotAlertPackage {
+    /// The package's language or package management ecosystem, e.g. "npm" or "pip".
+    pub ecosystem: String,
+    /// The unique package name within its ecosystem, e.g. "lodash".
+    pub name: String,
+}
+
+/// The dependency (i.e. the manifest entry) that a Dependabot alert refers to.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependabotAlertDependency {
+    pub package: DependabotAlertPackage,
+    /// The full path to the manifest file that contains the vulnerable dependency.
+    pub manifest_path: Option<String>,
+    /// The scope of the vulnerable dependency, either "development" or "runtime".
+    pub scope: Option<String>,
+    /// The relationship of the vulnerable dependency to the project, e.g. "direct" or "transitive".
+    pub relationship: Option<String>,
+}
+
+/// An identifier (CVE or GHSA) for a security advisory.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AdvisoryIdentifier {
+    /// The identifier type, either "CVE" or "GHSA".
+    #[serde(rename = "type")]
+    pub type_: String,
+    /// The identifier value, e.g. "CVE-2021-44228".
+    pub value: String,
+}
+
+/// The security advisory that a Dependabot alert is based on.
+/// Note - We only deserialize the fields we care about.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependabotSecurityAdvisory {
+    /// The GitHub Security Advisory ID, e.g. "GHSA-xxxx-yyyy-zzzz".
+    pub ghsa_id: String,
+    /// The Common Vulnerabilities and Exposures (CVE) ID, if one exists.
+    pub cve_id: Option<String>,
+    /// A short, plain-text summary of the advisory.
+    pub summary: String,
+    /// The severity of the advisory.
+    pub severity: AdvisorySeverity,
+    /// All identifiers (CVE and GHSA) associated with this advisory.
+    #[serde(default)]
+    pub identifiers: Vec<AdvisoryIdentifier>,
+    /// When the advisory was published.
+    #[serde(deserialize_with = "datetime::deserialize_rfc3339_timestamp")]
+    pub published_at: DateTime<Utc>,
+    /// When the advisory was last updated.
+    #[serde(deserialize_with = "datetime::deserialize_rfc3339_timestamp")]
+    pub updated_at: DateTime<Utc>,
+}
+
+/// The specific vulnerable version range that a Dependabot alert refers to.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependabotSecurityVulnerability {
+    pub package: DependabotAlertPackage,
+    /// The severity of the vulnerable version range.
+    pub severity: AdvisorySeverity,
+    /// The range of versions that are vulnerable, e.g. "< 4.17.21".
+    pub vulnerable_version_range: String,
+    /// The first version that patches the vulnerability, if one exists.
+    pub first_patched_version: Option<FirstPatchedVersion>,
+}
+
+/// The first version of a package that patches a vulnerability.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FirstPatchedVersion {
+    /// The version identifier of the patched release, e.g. "4.17.21".
+    pub identifier: String,
+}
+
+/// A Dependabot alert for a repository.
+/// Note - We only deserialize the fields we care about. See
+/// https://docs.github.com/en/rest/dependabot/alerts?apiVersion=2026-03-10#list-dependabot-alerts-for-a-repository
+/// for the full response schema.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependabotAlert {
+    /// The unique identifier of the alert within the repository.
+    pub number: u64,
+    /// The current state of the alert.
+    pub state: DependabotAlertState,
+    /// The dependency that the alert refers to.
+    pub dependency: DependabotAlertDependency,
+    /// The advisory that the alert is based on.
+    pub security_advisory: DependabotSecurityAdvisory,
+    /// The vulnerable version range that the alert refers to.
+    pub security_vulnerability: DependabotSecurityVulnerability,
+    /// The API URL for this alert.
+    pub url: String,
+    /// The web URL for this alert.
+    pub html_url: String,
+    /// When the alert was created.
+    #[serde(deserialize_with = "datetime::deserialize_rfc3339_timestamp")]
+    pub created_at: DateTime<Utc>,
+    /// When the alert was last updated.
+    #[serde(deserialize_with = "datetime::deserialize_rfc3339_timestamp")]
+    pub updated_at: DateTime<Utc>,
+    /// When the alert was dismissed, if it has been.
+    #[serde(
+        default,
+        deserialize_with = "datetime::deserialize_option_rfc3339_timestamp"
+    )]
+    pub dismissed_at: Option<DateTime<Utc>>,
+    /// The reason the alert was dismissed, if it has been.
+    pub dismissed_reason: Option<String>,
+    /// When the alert was fixed, if it has been.
+    #[serde(
+        default,
+        deserialize_with = "datetime::deserialize_option_rfc3339_timestamp"
+    )]
+    pub fixed_at: Option<DateTime<Utc>>,
+}
+
+/*******************************************************************************************
+   CODE SCANNING ALERTS
+*******************************************************************************************/
+
+/// The state of a code scanning alert.
+/// See https://docs.github.com/en/rest/code-scanning/code-scanning?apiVersion=2026-03-10#list-code-scanning-alerts-for-a-repository
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeScanningAlertState {
+    Open,
+    Dismissed,
+    Fixed,
+}
+
+impl Display for CodeScanningAlertState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            Self::Open => "open",
+            Self::Dismissed => "dismissed",
+            Self::Fixed => "fixed",
+        };
+        write!(f, "{state}")
+    }
+}
+
+/// The rule that a code scanning alert was raised by.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodeScanningRule {
+    /// A unique identifier for the rule used to detect the alert.
+    pub id: Option<String>,
+    /// The name of the rule used to detect the alert.
+    pub name: String,
+    /// The severity of the alert, e.g. "error" or "warning".
+    pub severity: Option<String>,
+    /// The security severity of the alert, e.g. "high" or "critical".
+    pub security_severity_level: Option<String>,
+    /// A short description of the rule used to detect the alert.
+    pub description: String,
+}
+
+/// The tool that generated a code scanning alert.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodeScanningTool {
+    /// The name of the tool used to generate the code scanning analysis, e.g. "CodeQL".
+    pub name: String,
+    /// The version of the tool used to generate the code scanning analysis.
+    pub version: Option<String>,
+    /// The GUID of the tool used to generate the code scanning analysis.
+    pub guid: Option<String>,
+}
+
+/// The location of a code scanning alert instance within a repository.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodeScanningAlertLocation {
+    /// The file path of the alert, relative to the repository root.
+    pub path: String,
+    /// The start line of the alert in the file.
+    pub start_line: Option<u64>,
+    /// The end line of the alert in the file.
+    pub end_line: Option<u64>,
+    /// The start column of the alert in the file.
+    pub start_column: Option<u64>,
+    /// The end column of the alert in the file.
+    pub end_column: Option<u64>,
+}
+
+/// The most recent instance of a code scanning alert.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodeScanningAlertInstance {
+    /// The Git reference for the analysis that produced the alert.
+    pub r#ref: Option<String>,
+    /// The state of the alert instance.
+    pub state: Option<String>,
+    /// The commit SHA of the analysis that produced the alert.
+    pub commit_sha: Option<String>,
+    /// The location of the alert instance.
+    pub location: Option<CodeScanningAlertLocation>,
+}
+
+/// A code scanning alert for a repository.
+/// Note - We only deserialize the fields we care about. See
+/// https://docs.github.com/en/rest/code-scanning/code-scanning?apiVersion=2026-03-10#list-code-scanning-alerts-for-a-repository
+/// for the full response schema.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodeScanningAlert {
+    /// The unique identifier of the alert within the repository.
+    pub number: u64,
+    /// The current state of the alert.
+    pub state: CodeScanningAlertState,
+    /// The rule that the alert was raised by.
+    pub rule: CodeScanningRule,
+    /// The tool that generated the alert.
+    pub tool: CodeScanningTool,
+    /// The most recent instance of the alert.
+    pub most_recent_instance: Option<CodeScanningAlertInstance>,
+    /// The API URL for this alert.
+    pub url: String,
+    /// The web URL for this alert.
+    pub html_url: String,
+    /// When the alert was created.
+    #[serde(deserialize_with = "datetime::deserialize_rfc3339_timestamp")]
+    pub created_at: DateTime<Utc>,
+    /// When the alert was last updated.
+    #[serde(
+        default,
+        deserialize_with = "datetime::deserialize_option_rfc3339_timestamp"
+    )]
+    pub updated_at: Option<DateTime<Utc>>,
+    /// When the alert was dismissed, if it has been.
+    #[serde(
+        default,
+        deserialize_with = "datetime::deserialize_option_rfc3339_timestamp"
+    )]
+    pub dismissed_at: Option<DateTime<Utc>>,
+    /// The reason the alert was dismissed, if it has been.
+    pub dismissed_reason: Option<String>,
+    /// When the alert was fixed, if it has been.
+    #[serde(
+        default,
+        deserialize_with = "datetime::deserialize_option_rfc3339_timestamp"
+    )]
+    pub fixed_at: Option<DateTime<Utc>>,
+}
