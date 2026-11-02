@@ -327,6 +327,35 @@ pub struct DataGeneratorLog {
     pub payload: Vec<u8>,
 }
 
+/// The stage of a log fetch that failed. Label values for
+/// `plaid_{github,okta}_logs_fetch_errors_total`; both generators fail in the
+/// same five ways, so the vocabulary is defined once, here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FetchErrorStage {
+    /// The `since` or `until` timestamp could not be formatted as RFC3339.
+    DateTimeEncoding,
+    /// The HTTP request could not be sent.
+    Transport,
+    /// The response status was not in the 2XX range.
+    ResponseStatus,
+    /// The response body could not be read.
+    ResponseBody,
+    /// The response body was not valid JSON.
+    ResponseParse,
+}
+
+impl FetchErrorStage {
+    pub(crate) fn as_label(self) -> &'static str {
+        match self {
+            Self::DateTimeEncoding => "datetime_encoding",
+            Self::Transport => "transport",
+            Self::ResponseStatus => "status",
+            Self::ResponseBody => "body_read",
+            Self::ResponseParse => "response_parse",
+        }
+    }
+}
+
 /// This is what data generators have in common
 #[allow(async_fn_in_trait)]
 pub trait DataGenerator {
@@ -706,4 +735,23 @@ fn get_next_from_link_header(hv: &http::HeaderValue) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FetchErrorStage;
+
+    #[test]
+    fn stage_labels_are_pinned() {
+        let labels: &[(FetchErrorStage, &str)] = &[
+            (FetchErrorStage::DateTimeEncoding, "datetime_encoding"),
+            (FetchErrorStage::Transport, "transport"),
+            (FetchErrorStage::ResponseStatus, "status"),
+            (FetchErrorStage::ResponseBody, "body_read"),
+            (FetchErrorStage::ResponseParse, "response_parse"),
+        ];
+        for (stage, label) in labels {
+            assert_eq!(stage.as_label(), *label);
+        }
+    }
 }

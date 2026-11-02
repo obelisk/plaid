@@ -431,6 +431,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "test_github_rate_limit_metrics"
+version = "0.1.0"
+dependencies = [
+ "plaid_stl",
+ "serde_json",
+]
+
+[[package]]
 name = "test_graceful_shutdown"
 version = "0.1.0"
 dependencies = [
