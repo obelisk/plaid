@@ -708,25 +708,31 @@ impl Display for CodeScanningAlertState {
 }
 
 /// The rule that a code scanning alert was raised by.
+///
+/// Note - GitHub does not mark any of these fields as required, and a SARIF rule may identify
+/// itself using only its `id`. All fields are therefore optional so that an alert with a
+/// partially populated rule does not fail deserialization.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodeScanningRule {
     /// A unique identifier for the rule used to detect the alert.
     pub id: Option<String>,
     /// The name of the rule used to detect the alert.
-    pub name: String,
+    pub name: Option<String>,
     /// The severity of the alert, e.g. "error" or "warning".
     pub severity: Option<String>,
     /// The security severity of the alert, e.g. "high" or "critical".
     pub security_severity_level: Option<String>,
     /// A short description of the rule used to detect the alert.
-    pub description: String,
+    pub description: Option<String>,
 }
 
 /// The tool that generated a code scanning alert.
+///
+/// Note - GitHub does not mark any of these fields as required, so they are all optional.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodeScanningTool {
     /// The name of the tool used to generate the code scanning analysis, e.g. "CodeQL".
-    pub name: String,
+    pub name: Option<String>,
     /// The version of the tool used to generate the code scanning analysis.
     pub version: Option<String>,
     /// The GUID of the tool used to generate the code scanning analysis.
@@ -734,10 +740,12 @@ pub struct CodeScanningTool {
 }
 
 /// The location of a code scanning alert instance within a repository.
+///
+/// Note - GitHub does not mark any of these fields as required, so they are all optional.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CodeScanningAlertLocation {
     /// The file path of the alert, relative to the repository root.
-    pub path: String,
+    pub path: Option<String>,
     /// The start line of the alert in the file.
     pub start_line: Option<u64>,
     /// The end line of the alert in the file.

@@ -43,17 +43,14 @@ impl Github {
             address.push_str("&state=open");
         }
 
-        // The cursor is opaque and comes from a previous response's Link header, so we only
-        // need to make sure it cannot be used to alter the request in unexpected ways.
+        // The cursor is opaque: GitHub hands it back to us in the Link header and we must
+        // return it verbatim. It is percent-encoded as a query value rather than validated
+        // against an alphabet, because a base64 cursor can legitimately contain characters
+        // such as '+' and '/'. Encoding also prevents the cursor from injecting extra
+        // query parameters.
         if let Some(cursor) = request.params.after.as_deref() {
-            if !cursor
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '=' || c == '-' || c == '_')
-            {
-                return Err(ApiError::BadRequest);
-            }
             address.push_str("&after=");
-            address.push_str(cursor);
+            address.push_str(&urlencoding::encode(cursor));
         }
 
         info!("Fetching Dependabot alerts for repo [{owner}/{repo}] on behalf of {module}");

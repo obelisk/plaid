@@ -639,6 +639,27 @@ mod tests {
     }
 
     #[test]
+    fn extracts_after_cursor_containing_plus_and_slash() {
+        // Base64 cursors can contain '+' and '/'. The Link header percent-encodes them, and
+        // extract_next_cursor must decode them back to the raw cursor value.
+        let header = "<https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=%2B%2F%2B%2B>; rel=\"next\"";
+        assert_eq!(extract_next_cursor(header), Some("+/++".to_string()));
+    }
+
+    #[test]
+    fn round_trips_cursor_through_encode_and_extract() {
+        // Whatever extract_next_cursor produces must survive being percent-encoded back into
+        // a query value, which is what the runtime does when requesting the next page.
+        for raw in ["+/++", "//79", "Y3Vyc29yOnYyOpHOABc=", "a b&c=d"] {
+            let encoded = urlencoding::encode(raw);
+            let header = format!(
+                "<https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after={encoded}>; rel=\"next\""
+            );
+            assert_eq!(extract_next_cursor(&header), Some(raw.to_string()));
+        }
+    }
+
+    #[test]
     fn returns_none_when_there_is_no_next_link() {
         let header = "<https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=abc>; rel=\"prev\"";
         assert_eq!(extract_next_cursor(header), None);

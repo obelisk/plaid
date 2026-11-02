@@ -331,12 +331,71 @@ mod tests {
         let alert: CodeScanningAlert = serde_json::from_str(CODE_SCANNING_ALERT).unwrap();
         assert_eq!(alert.number, 4);
         assert_eq!(alert.state, crate::github::CodeScanningAlertState::Open);
-        assert_eq!(alert.rule.name, "js/unused-local-variable");
+        assert_eq!(alert.rule.name.as_deref(), Some("js/unused-local-variable"));
         assert!(alert.rule.security_severity_level.is_none());
-        assert_eq!(alert.tool.name, "CodeQL");
+        assert_eq!(alert.tool.name.as_deref(), Some("CodeQL"));
         let instance = alert.most_recent_instance.as_ref().unwrap();
         assert_eq!(instance.r#ref.as_deref(), Some("refs/heads/main"));
-        assert_eq!(instance.location.as_ref().unwrap().path, "src/index.js");
+        assert_eq!(
+            instance.location.as_ref().unwrap().path.as_deref(),
+            Some("src/index.js")
+        );
+    }
+
+    #[test]
+    fn deserializes_code_scanning_alert_with_rule_identified_only_by_id() {
+        // A SARIF rule may identify itself using only its id, in which case GitHub omits
+        // `name` and `description` entirely. This must not fail the whole page.
+        let json = CODE_SCANNING_ALERT.replace(
+            r#""name": "js/unused-local-variable",
+            "severity": "note","#,
+            r#""severity": "note","#,
+        );
+        let json = json.replace(
+            r#""description": "Unused variable, import, function or class""#,
+            r#""full_description": "Unused variable, import, function or class""#,
+        );
+        let alert: CodeScanningAlert = serde_json::from_str(&json).unwrap();
+        assert_eq!(alert.rule.id.as_deref(), Some("js/unused-local-variable"));
+        assert!(alert.rule.name.is_none());
+        assert!(alert.rule.description.is_none());
+    }
+
+    #[test]
+    fn deserializes_code_scanning_alert_without_tool_name() {
+        // GitHub allows `tool.name` to be null or omitted.
+        let json = CODE_SCANNING_ALERT.replace(
+            r#""tool": { "name": "CodeQL", "version": "2.11.5", "guid": null },"#,
+            r#""tool": { "version": "2.11.5", "guid": null },"#,
+        );
+        let alert: CodeScanningAlert = serde_json::from_str(&json).unwrap();
+        assert!(alert.tool.name.is_none());
+        assert_eq!(alert.tool.version.as_deref(), Some("2.11.5"));
+    }
+
+    #[test]
+    fn deserializes_code_scanning_alert_with_null_tool_name() {
+        let json = CODE_SCANNING_ALERT.replace(
+            r#""tool": { "name": "CodeQL", "version": "2.11.5", "guid": null },"#,
+            r#""tool": { "name": null, "version": "2.11.5", "guid": null },"#,
+        );
+        let alert: CodeScanningAlert = serde_json::from_str(&json).unwrap();
+        assert!(alert.tool.name.is_none());
+    }
+
+    #[test]
+    fn deserializes_code_scanning_alert_without_location_path() {
+        let json = CODE_SCANNING_ALERT.replace(r#""path": "src/index.js","#, "");
+        let alert: CodeScanningAlert = serde_json::from_str(&json).unwrap();
+        let location = alert
+            .most_recent_instance
+            .as_ref()
+            .unwrap()
+            .location
+            .as_ref()
+            .unwrap();
+        assert!(location.path.is_none());
+        assert_eq!(location.start_line, Some(10));
     }
 
     #[test]
