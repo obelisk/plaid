@@ -184,9 +184,15 @@ impl ApiError {
             Self::ConfigurationError(_) | Self::CouldNotInstatiateRuntime(_) => "configuration",
             Self::NetworkResponseTooLarge => "response_too_large",
             Self::TestMode => "test_mode",
-            Self::OktaError(okta::OktaError::AuthenticationFailure(_))
-            | Self::OktaError(okta::OktaError::JwtSignatureFailure)
+            Self::OktaError(okta::OktaError::JwtSignatureFailure)
             | Self::YubikeyError(yubikey::YubikeyError::OperationNotAllowed) => "auth",
+            Self::OktaError(okta::OktaError::NetworkError(e)) => {
+                if e.is_timeout() {
+                    "timeout"
+                } else {
+                    "network"
+                }
+            }
             Self::GitHubError(github::GitHubError::UnexpectedStatusCode(s))
             | Self::OktaError(okta::OktaError::UnexpectedStatusCode(s))
             | Self::SlackError(slack::SlackError::UnexpectedStatusCode(s))
