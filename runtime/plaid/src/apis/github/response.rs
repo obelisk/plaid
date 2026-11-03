@@ -104,14 +104,14 @@ impl RateLimitSnapshot {
     }
 
     /// Classify a response as a primary or secondary rate limit, if it is one.
-    /// A `retry-after` header means GitHub said so, so it wins over `remaining`.
+    /// An exhausted window wins over `retry-after`; a bare 429 is secondary.
     pub(crate) fn classify(&self, status: StatusCode) -> Option<RateLimitKind> {
         match status.as_u16() {
             403 | 429 => {
-                if self.retry_after_seconds.is_some() {
-                    Some(RateLimitKind::Secondary)
-                } else if self.remaining == Some(0) {
+                if self.remaining == Some(0) {
                     Some(RateLimitKind::Primary)
+                } else if self.retry_after_seconds.is_some() {
+                    Some(RateLimitKind::Secondary)
                 } else if status.as_u16() == 429 {
                     Some(RateLimitKind::Secondary)
                 } else {
@@ -138,7 +138,7 @@ pub(crate) fn reports_secondary_limit(status: StatusCode, body: &str) -> bool {
 
 /// GitHub reports a GraphQL primary limit as a 200 whose `errors` array names
 /// `RATE_LIMITED`, and a secondary limit as a 200 whose error message names it.
-/// A GraphQL body is JSON, so a parse failure is not a limit.
+/// An exhausted window wins over both; a parse failure is not a limit.
 pub(crate) fn graphql_limit(snapshot: &RateLimitSnapshot, body: &str) -> Option<RateLimitKind> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     let errors = value.get("errors")?.as_array()?;
@@ -151,7 +151,9 @@ pub(crate) fn graphql_limit(snapshot: &RateLimitSnapshot, body: &str) -> Option<
             .and_then(|message| message.as_str())
             .is_some_and(|message| message.to_ascii_lowercase().contains(SECONDARY_LIMIT_TEXT))
     });
-    if secondary || (primary && snapshot.retry_after_seconds.is_some()) {
+    if snapshot.remaining == Some(0) && (primary || secondary) {
+        Some(RateLimitKind::Primary)
+    } else if secondary || (primary && snapshot.retry_after_seconds.is_some()) {
         Some(RateLimitKind::Secondary)
     } else if primary {
         Some(RateLimitKind::Primary)
@@ -203,8 +205,8 @@ pub(crate) enum ApiKind {
 }
 
 /// Classify one response. `body` is `None` when it could not be read. The
-/// rate-limit signals win over the status class. `retry-after` wins over an
-/// exhausted window because GitHub documents it first.
+/// rate-limit signals win over the status class. An exhausted window wins over
+/// `retry-after`; a bare 429 is secondary.
 pub(crate) fn classify(
     api: ApiKind,
     status: StatusCode,
@@ -331,8 +333,8 @@ mod tests {
 
         assert_eq!(
             paired.classify(StatusCode::FORBIDDEN),
-            Some(RateLimitKind::Secondary),
-            "retry-after wins over an exhausted window"
+            Some(RateLimitKind::Primary),
+            "an exhausted window wins over retry-after"
         );
         assert_eq!(
             retry_after.classify(StatusCode::FORBIDDEN),
@@ -394,6 +396,15 @@ mod tests {
             retry_after_seconds: Some(60),
             ..empty.clone()
         };
+        let exhausted = RateLimitSnapshot {
+            remaining: Some(0),
+            ..empty.clone()
+        };
+        let paired = RateLimitSnapshot {
+            remaining: Some(0),
+            retry_after_seconds: Some(60),
+            ..empty.clone()
+        };
 
         assert_eq!(
             graphql_limit(&empty, r#"{"errors":[{"type":"RATE_LIMITED"}]}"#),
@@ -420,6 +431,24 @@ mod tests {
             graphql_limit(&retry_after, r#"{"errors":[{"type":"RATE_LIMITED"}]}"#),
             Some(RateLimitKind::Secondary),
             "RATE_LIMITED with retry-after"
+        );
+        assert_eq!(
+            graphql_limit(&exhausted, r#"{"errors":[{"type":"RATE_LIMITED"}]}"#),
+            Some(RateLimitKind::Primary),
+            "RATE_LIMITED with an exhausted window"
+        );
+        assert_eq!(
+            graphql_limit(&paired, r#"{"errors":[{"type":"RATE_LIMITED"}]}"#),
+            Some(RateLimitKind::Primary),
+            "an exhausted window wins over retry-after"
+        );
+        assert_eq!(
+            graphql_limit(
+                &paired,
+                r#"{"errors":[{"type":"FORBIDDEN","message":"You have exceeded a secondary rate limit."}]}"#
+            ),
+            Some(RateLimitKind::Primary),
+            "an exhausted window wins over a secondary message"
         );
         assert_eq!(
             graphql_limit(&empty, r#"{"errors":[{"type":"FORBIDDEN"}]}"#),
@@ -493,6 +522,16 @@ mod tests {
             ),
             Outcome::RateLimited(RateLimitKind::Secondary),
             "GraphQL 200 whose error message names a secondary limit"
+        );
+        assert_eq!(
+            classify(
+                ApiKind::GraphQL,
+                StatusCode::OK,
+                &exhausted,
+                Some(r#"{"errors":[{"type":"RATE_LIMITED"}]}"#)
+            ),
+            Outcome::RateLimited(RateLimitKind::Primary),
+            "GraphQL 200 with an exhausted window"
         );
         assert_eq!(
             observed(StatusCode::INTERNAL_SERVER_ERROR, full, Some("boom")),
