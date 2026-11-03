@@ -137,19 +137,27 @@ pub(crate) fn reports_secondary_limit(status: StatusCode, body: &str) -> bool {
 }
 
 /// GitHub reports a GraphQL primary limit as a 200 whose `errors` array names
-/// `RATE_LIMITED`. A GraphQL body is JSON, so a parse failure is not a limit.
-pub(crate) fn reports_graphql_rate_limit(body: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
-        return false;
-    };
-    value
-        .get("errors")
-        .and_then(|errors| errors.as_array())
-        .is_some_and(|errors| {
-            errors.iter().any(|error| {
-                error.get("type").and_then(|kind| kind.as_str()) == Some("RATE_LIMITED")
-            })
-        })
+/// `RATE_LIMITED`, and a secondary limit as a 200 whose error message names it.
+/// A GraphQL body is JSON, so a parse failure is not a limit.
+pub(crate) fn graphql_limit(snapshot: &RateLimitSnapshot, body: &str) -> Option<RateLimitKind> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let errors = value.get("errors")?.as_array()?;
+    let primary = errors
+        .iter()
+        .any(|error| error.get("type").and_then(|kind| kind.as_str()) == Some("RATE_LIMITED"));
+    let secondary = errors.iter().any(|error| {
+        error
+            .get("message")
+            .and_then(|message| message.as_str())
+            .is_some_and(|message| message.to_ascii_lowercase().contains(SECONDARY_LIMIT_TEXT))
+    });
+    if secondary || (primary && snapshot.retry_after_seconds.is_some()) {
+        Some(RateLimitKind::Secondary)
+    } else if primary {
+        Some(RateLimitKind::Primary)
+    } else {
+        None
+    }
 }
 
 /// The observable result of one GitHub response. The variants are the closed
@@ -186,53 +194,28 @@ impl Outcome {
     }
 }
 
-/// The rate-limit state and outcome of one response. The snapshot is parsed
-/// before the body is consumed; the outcome carries the classification.
-#[derive(Debug, Clone)]
-pub(crate) struct Observation {
-    pub(crate) snapshot: RateLimitSnapshot,
-    pub(crate) outcome: Outcome,
+/// The API family a response came from. GraphQL carries rate limits inside a
+/// 200 body; REST reports them in the status and headers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ApiKind {
+    Rest,
+    GraphQL,
 }
 
-impl Observation {
-    /// Classify a REST response, or any response whose body is not a GraphQL
-    /// payload. `body` is `None` when the body could not be read.
-    pub(crate) fn from_response(
-        status: StatusCode,
-        snapshot: RateLimitSnapshot,
-        body: Option<&str>,
-    ) -> Self {
-        let outcome = classify_observed(status, &snapshot, body);
-        Self { snapshot, outcome }
-    }
-
-    /// Classify a GraphQL response. A 200 whose body names `RATE_LIMITED` is a
-    /// rate limit even though the status is success; every other response uses
-    /// the shared status and header rules.
-    pub(crate) fn from_graphql(
-        status: StatusCode,
-        snapshot: RateLimitSnapshot,
-        body: Option<&str>,
-    ) -> Self {
-        let outcome = match body {
-            Some(text) if status == StatusCode::OK && reports_graphql_rate_limit(text) => {
-                Outcome::RateLimited(if snapshot.retry_after_seconds.is_some() {
-                    RateLimitKind::Secondary
-                } else {
-                    RateLimitKind::Primary
-                })
-            }
-            _ => classify_observed(status, &snapshot, body),
-        };
-        Self { snapshot, outcome }
-    }
-}
-
-fn classify_observed(
+/// Classify one response. `body` is `None` when it could not be read. The
+/// rate-limit signals win over the status class. `retry-after` wins over an
+/// exhausted window because GitHub documents it first.
+pub(crate) fn classify(
+    api: ApiKind,
     status: StatusCode,
     snapshot: &RateLimitSnapshot,
     body: Option<&str>,
 ) -> Outcome {
+    if api == ApiKind::GraphQL && status == StatusCode::OK {
+        if let Some(kind) = body.and_then(|body| graphql_limit(snapshot, body)) {
+            return Outcome::RateLimited(kind);
+        }
+    }
     if let Some(kind) = snapshot.classify(status) {
         return Outcome::RateLimited(kind);
     }
@@ -268,6 +251,10 @@ pub(crate) fn header_map(pairs: &[(&str, &str)]) -> HeaderMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn observed(status: StatusCode, snapshot: RateLimitSnapshot, body: Option<&str>) -> Outcome {
+        classify(ApiKind::Rest, status, &snapshot, body)
+    }
 
     #[test]
     fn parses_rate_limit_headers() {
@@ -336,7 +323,17 @@ mod tests {
             retry_after_seconds: Some(60),
             ..empty.clone()
         };
+        let paired = RateLimitSnapshot {
+            remaining: Some(0),
+            retry_after_seconds: Some(60),
+            ..empty.clone()
+        };
 
+        assert_eq!(
+            paired.classify(StatusCode::FORBIDDEN),
+            Some(RateLimitKind::Secondary),
+            "retry-after wins over an exhausted window"
+        );
         assert_eq!(
             retry_after.classify(StatusCode::FORBIDDEN),
             Some(RateLimitKind::Secondary),
@@ -392,32 +389,57 @@ mod tests {
 
     #[test]
     fn classifies_graphql_rate_limited_bodies() {
-        assert!(
-            reports_graphql_rate_limit(r#"{"errors":[{"type":"RATE_LIMITED"}]}"#),
+        let empty = RateLimitSnapshot::from_headers(&HeaderMap::new());
+        let retry_after = RateLimitSnapshot {
+            retry_after_seconds: Some(60),
+            ..empty.clone()
+        };
+
+        assert_eq!(
+            graphql_limit(&empty, r#"{"errors":[{"type":"RATE_LIMITED"}]}"#),
+            Some(RateLimitKind::Primary),
             "RATE_LIMITED error"
         );
-        assert!(
-            reports_graphql_rate_limit(
+        assert_eq!(
+            graphql_limit(
+                &empty,
                 r#"{"data":null,"errors":[{"type":"FORBIDDEN"},{"type":"RATE_LIMITED"}]}"#
             ),
+            Some(RateLimitKind::Primary),
             "RATE_LIMITED beside another error"
         );
-        assert!(
-            !reports_graphql_rate_limit(r#"{"errors":[{"type":"FORBIDDEN"}]}"#),
+        assert_eq!(
+            graphql_limit(
+                &empty,
+                r#"{"errors":[{"type":"FORBIDDEN","message":"You have exceeded a secondary rate limit."}]}"#
+            ),
+            Some(RateLimitKind::Secondary),
+            "a secondary-limit message without the type"
+        );
+        assert_eq!(
+            graphql_limit(&retry_after, r#"{"errors":[{"type":"RATE_LIMITED"}]}"#),
+            Some(RateLimitKind::Secondary),
+            "RATE_LIMITED with retry-after"
+        );
+        assert_eq!(
+            graphql_limit(&empty, r#"{"errors":[{"type":"FORBIDDEN"}]}"#),
+            None,
             "other GraphQL error"
         );
-        assert!(
-            !reports_graphql_rate_limit(r#"{"data":{"viewer":{"login":"octocat"}}}"#),
+        assert_eq!(
+            graphql_limit(&empty, r#"{"data":{"viewer":{"login":"octocat"}}}"#),
+            None,
             "a successful GraphQL payload"
         );
-        assert!(
-            !reports_graphql_rate_limit("not json"),
+        assert_eq!(
+            graphql_limit(&empty, "not json"),
+            None,
             "a non-JSON body is not a limit"
         );
     }
 
     #[test]
-    fn derives_outcomes_from_observations() {
+    fn derives_outcomes() {
         let full = RateLimitSnapshot::from_headers(&header_map(&[
             ("x-ratelimit-limit", "5000"),
             ("x-ratelimit-remaining", "4999"),
@@ -432,43 +454,53 @@ mod tests {
         let named = r#"{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}"#;
 
         assert_eq!(
-            Observation::from_response(
+            observed(
                 StatusCode::FORBIDDEN,
                 full.clone(),
                 Some("permission denied")
-            )
-            .outcome,
+            ),
             Outcome::ClientError,
             "plain permission 403"
         );
         assert_eq!(
-            Observation::from_response(StatusCode::FOUND, full.clone(), Some("")).outcome,
+            observed(StatusCode::FOUND, full.clone(), Some("")),
             Outcome::Redirection,
             "readable redirection"
         );
         assert_eq!(
-            Observation::from_response(StatusCode::BAD_REQUEST, full.clone(), Some("")).outcome,
+            observed(StatusCode::BAD_REQUEST, full.clone(), Some("")),
             Outcome::ClientError,
             "readable client error"
         );
         assert_eq!(
-            Observation::from_graphql(
+            classify(
+                ApiKind::GraphQL,
                 StatusCode::OK,
-                full.clone(),
+                &full,
                 Some(r#"{"data":{"viewer":{"login":"octocat"}}}"#)
-            )
-            .outcome,
+            ),
             Outcome::Success,
             "GraphQL 200 without a rate limit"
         );
         assert_eq!(
-            Observation::from_response(StatusCode::INTERNAL_SERVER_ERROR, full, Some("boom"))
-                .outcome,
+            classify(
+                ApiKind::GraphQL,
+                StatusCode::OK,
+                &full,
+                Some(
+                    r#"{"errors":[{"type":"FORBIDDEN","message":"You have exceeded a secondary rate limit."}]}"#
+                )
+            ),
+            Outcome::RateLimited(RateLimitKind::Secondary),
+            "GraphQL 200 whose error message names a secondary limit"
+        );
+        assert_eq!(
+            observed(StatusCode::INTERNAL_SERVER_ERROR, full, Some("boom")),
             Outcome::ServerError,
             "server error"
         );
         assert_eq!(
-            Observation::from_response(StatusCode::FORBIDDEN, exhausted, Some(named)).outcome,
+            observed(StatusCode::FORBIDDEN, exhausted, Some(named)),
             Outcome::RateLimited(RateLimitKind::Primary),
             "header precedence keeps an exhausted window primary"
         );

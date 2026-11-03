@@ -10,7 +10,7 @@ use crate::{
 
 use http::Method;
 
-use super::{body_read_error, Github, Observation};
+use super::{body_read_error, classify, ApiKind, Github};
 
 /// A GraphQL query ready to be executed.
 #[derive(Serialize)]
@@ -72,8 +72,8 @@ impl Github {
         let body = client.body_to_string(response).await;
 
         if self.metrics.is_some() {
-            let observation = Observation::from_graphql(status, snapshot, body.as_deref().ok());
-            self.record(&client_id, &Method::POST, &observation);
+            let outcome = classify(ApiKind::GraphQL, status, &snapshot, body.as_deref().ok());
+            self.record(&client_id, &Method::POST, &snapshot, outcome);
         }
 
         let body = body.map_err(body_read_error)?;

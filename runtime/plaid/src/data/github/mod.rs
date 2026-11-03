@@ -1,5 +1,5 @@
 use crate::apis::github::{
-    build_github_clients, Authentication, Observation, RateLimitKind, RateLimitSnapshot,
+    build_github_clients, classify, ApiKind, Authentication, RateLimitKind, RateLimitSnapshot,
 };
 use crate::apis::ApiError;
 use crate::executor::{Message, MessageSender};
@@ -300,11 +300,10 @@ impl DataGenerator for Github {
                             "Call to get GitHub logs failed with code: {status}. The body was [{body_text}]"
                         )
                     );
-                    let observation =
-                        Observation::from_response(status, snapshot, body.as_deref().ok());
+                    let outcome = classify(ApiKind::Rest, status, &snapshot, body.as_deref().ok());
                     self.record_fetch_error(
                         FetchErrorStage::ResponseStatus,
-                        observation.outcome.rate_limit_kind(),
+                        outcome.rate_limit_kind(),
                     );
                     return Err(());
                 }

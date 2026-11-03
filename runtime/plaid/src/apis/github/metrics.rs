@@ -6,7 +6,7 @@ use prometheus::{
 
 use crate::metrics::MetricsHandle;
 
-use super::response::{Observation, Outcome, RateLimitSnapshot};
+use super::response::{Outcome, RateLimitSnapshot};
 
 /// Prometheus collectors for GitHub API quota state. Registered once per
 /// runtime; gauges are only written from observed responses so an absent
@@ -78,22 +78,22 @@ impl GithubMetrics {
 
     /// Record one observed response: the request counter, whatever quota state
     /// GitHub reported, and the rate-limited counter when the response is one.
-    pub(crate) fn record(&self, client: &str, method: &Method, observation: &Observation) {
-        let snapshot = &observation.snapshot;
+    pub(crate) fn record(
+        &self,
+        client: &str,
+        method: &Method,
+        snapshot: &RateLimitSnapshot,
+        outcome: Outcome,
+    ) {
         let resource = snapshot.resource.as_str();
 
         self.requests_total
-            .with_label_values(&[
-                client,
-                resource,
-                method.as_str(),
-                observation.outcome.as_str(),
-            ])
+            .with_label_values(&[client, resource, method.as_str(), outcome.as_str()])
             .inc();
 
         self.update_gauges(client, snapshot);
 
-        if let Some(kind) = observation.outcome.rate_limit_kind() {
+        if let Some(kind) = outcome.rate_limit_kind() {
             self.rate_limited_total
                 .with_label_values(&[client, resource, kind.as_str()])
                 .inc();
@@ -143,7 +143,7 @@ impl GithubMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::apis::github::response::{header_map, Observation};
+    use crate::apis::github::response::{classify, header_map, ApiKind, Outcome};
     use crate::metrics::MetricsHandle;
     use http::StatusCode;
 
@@ -171,7 +171,8 @@ mod tests {
     struct Case {
         name: &'static str,
         method: Method,
-        observation: Observation,
+        snapshot: RateLimitSnapshot,
+        outcome: Outcome,
         present: &'static [&'static str],
         absent: &'static [&'static str],
     }
@@ -180,117 +181,136 @@ mod tests {
         RateLimitSnapshot::from_headers(&header_map(headers))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn case(
+        name: &'static str,
+        method: Method,
+        api: ApiKind,
+        status: StatusCode,
+        snapshot: RateLimitSnapshot,
+        body: Option<&str>,
+        present: &'static [&'static str],
+        absent: &'static [&'static str],
+    ) -> Case {
+        let outcome = classify(api, status, &snapshot, body);
+        Case {
+            name,
+            method,
+            snapshot,
+            outcome,
+            present,
+            absent,
+        }
+    }
+
     fn record_one(case: &Case) -> String {
         let handle = MetricsHandle::new();
         let metrics = GithubMetrics::register(&handle).unwrap();
-        metrics.record("test", &case.method, &case.observation);
+        metrics.record("test", &case.method, &case.snapshot, case.outcome);
         handle.encode().unwrap()
     }
 
     #[test]
-    fn records_each_observation() {
+    fn records_each_outcome() {
         let cases = [
-            Case {
-                name: "success with full headers",
-                method: Method::GET,
-                observation: Observation::from_response(
-                    StatusCode::OK,
-                    snapshot(FULL_HEADERS),
-                    Some(""),
-                ),
-                present: &[
+            case(
+                "success with full headers",
+                Method::GET,
+                ApiKind::Rest,
+                StatusCode::OK,
+                snapshot(FULL_HEADERS),
+                Some(""),
+                &[
                     "plaid_github_api_rate_limit_limit{client=\"test\",resource=\"core\"} 5000",
                     "plaid_github_api_rate_limit_remaining{client=\"test\",resource=\"core\"} 4999",
                     "plaid_github_api_rate_limit_used{client=\"test\",resource=\"core\"} 1",
                     "plaid_github_api_rate_limit_reset_timestamp_seconds{client=\"test\",resource=\"core\"} 1760000000",
                     "plaid_github_api_requests_total{client=\"test\",method=\"GET\",outcome=\"success\",resource=\"core\"} 1",
                 ],
-                absent: &["plaid_github_api_rate_limited_total"],
-            },
-            Case {
-                name: "success without headers",
-                method: Method::GET,
-                observation: Observation::from_response(StatusCode::OK, snapshot(&[]), Some("")),
-                present: &[
+                &["plaid_github_api_rate_limited_total"],
+            ),
+            case(
+                "success without headers",
+                Method::GET,
+                ApiKind::Rest,
+                StatusCode::OK,
+                snapshot(&[]),
+                Some(""),
+                &[
                     "plaid_github_api_requests_total{client=\"test\",method=\"GET\",outcome=\"success\",resource=\"unknown\"} 1",
                 ],
-                absent: &[
+                &[
                     "plaid_github_api_rate_limit_limit{",
                     "plaid_github_api_rate_limit_remaining{",
                     "plaid_github_api_rate_limit_used{",
                     "plaid_github_api_rate_limit_reset_timestamp_seconds{",
                 ],
-            },
-            Case {
-                name: "403 with exhausted quota is a primary limit",
-                method: Method::GET,
-                observation: Observation::from_response(
-                    StatusCode::FORBIDDEN,
-                    snapshot(EXHAUSTED_HEADERS),
-                    Some(""),
-                ),
-                present: &[
+            ),
+            case(
+                "403 with exhausted quota is a primary limit",
+                Method::GET,
+                ApiKind::Rest,
+                StatusCode::FORBIDDEN,
+                snapshot(EXHAUSTED_HEADERS),
+                Some(""),
+                &[
                     "plaid_github_api_rate_limited_total{client=\"test\",kind=\"primary\",resource=\"core\"} 1",
                     "plaid_github_api_requests_total{client=\"test\",method=\"GET\",outcome=\"rate_limited\",resource=\"core\"} 1",
                 ],
-                absent: &[],
-            },
-            Case {
-                name: "GraphQL 200 with a RATE_LIMITED body is a primary limit",
-                method: Method::POST,
-                observation: Observation::from_graphql(
-                    StatusCode::OK,
-                    snapshot(GRAPHQL_EXHAUSTED_HEADERS),
-                    Some(r#"{"errors":[{"type":"RATE_LIMITED"}]}"#),
-                ),
-                present: &[
+                &[],
+            ),
+            case(
+                "GraphQL 200 with a RATE_LIMITED body is a primary limit",
+                Method::POST,
+                ApiKind::GraphQL,
+                StatusCode::OK,
+                snapshot(GRAPHQL_EXHAUSTED_HEADERS),
+                Some(r#"{"errors":[{"type":"RATE_LIMITED"}]}"#),
+                &[
                     "plaid_github_api_rate_limited_total{client=\"test\",kind=\"primary\",resource=\"graphql\"} 1",
                     "plaid_github_api_requests_total{client=\"test\",method=\"POST\",outcome=\"rate_limited\",resource=\"graphql\"} 1",
                 ],
-                absent: &[],
-            },
-            Case {
-                name: "403 whose body names a secondary limit",
-                method: Method::GET,
-                observation: Observation::from_response(
-                    StatusCode::FORBIDDEN,
-                    snapshot(FULL_HEADERS),
-                    Some(NAMED_SECONDARY),
-                ),
-                present: &[
+                &[],
+            ),
+            case(
+                "403 whose body names a secondary limit",
+                Method::GET,
+                ApiKind::Rest,
+                StatusCode::FORBIDDEN,
+                snapshot(FULL_HEADERS),
+                Some(NAMED_SECONDARY),
+                &[
                     "plaid_github_api_rate_limited_total{client=\"test\",kind=\"secondary\",resource=\"core\"} 1",
                     "plaid_github_api_requests_total{client=\"test\",method=\"GET\",outcome=\"rate_limited\",resource=\"core\"} 1",
                 ],
-                absent: &[],
-            },
-            Case {
-                name: "failed body on a 200 is not a success",
-                method: Method::POST,
-                observation: Observation::from_response(
-                    StatusCode::OK,
-                    snapshot(FULL_HEADERS),
-                    None,
-                ),
-                present: &[
+                &[],
+            ),
+            case(
+                "failed body on a 200 is not a success",
+                Method::POST,
+                ApiKind::Rest,
+                StatusCode::OK,
+                snapshot(FULL_HEADERS),
+                None,
+                &[
                     "plaid_github_api_requests_total{client=\"test\",method=\"POST\",outcome=\"other\",resource=\"core\"} 1",
                     "plaid_github_api_rate_limit_remaining{client=\"test\",resource=\"core\"} 4999",
                 ],
-                absent: &["outcome=\"success\"", "plaid_github_api_rate_limited_total"],
-            },
-            Case {
-                name: "failed body on an exhausted 403 is still a primary limit",
-                method: Method::POST,
-                observation: Observation::from_response(
-                    StatusCode::FORBIDDEN,
-                    snapshot(EXHAUSTED_HEADERS),
-                    None,
-                ),
-                present: &[
+                &["outcome=\"success\"", "plaid_github_api_rate_limited_total"],
+            ),
+            case(
+                "failed body on an exhausted 403 is still a primary limit",
+                Method::POST,
+                ApiKind::Rest,
+                StatusCode::FORBIDDEN,
+                snapshot(EXHAUSTED_HEADERS),
+                None,
+                &[
                     "plaid_github_api_rate_limited_total{client=\"test\",kind=\"primary\",resource=\"core\"} 1",
                     "plaid_github_api_requests_total{client=\"test\",method=\"POST\",outcome=\"rate_limited\",resource=\"core\"} 1",
                 ],
-                absent: &["outcome=\"success\""],
-            },
+                &["outcome=\"success\""],
+            ),
         ];
 
         for case in cases {

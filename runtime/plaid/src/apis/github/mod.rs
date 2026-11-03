@@ -27,7 +27,7 @@ use std::{collections::HashMap, fmt::Display, sync::Arc};
 use crate::loader::PlaidModule;
 
 pub use metrics::GithubMetrics;
-pub(crate) use response::{Observation, RateLimitKind, RateLimitSnapshot};
+pub(crate) use response::{classify, ApiKind, Outcome, RateLimitKind, RateLimitSnapshot};
 
 use super::ApiError;
 
@@ -164,15 +164,20 @@ impl Github {
         snapshot: &RateLimitSnapshot,
         body: Result<String, ApiError>,
     ) -> (u16, Result<String, ApiError>) {
-        let observation =
-            Observation::from_response(status, snapshot.clone(), body.as_deref().ok());
-        self.record(client, method, &observation);
+        let outcome = classify(ApiKind::Rest, status, snapshot, body.as_deref().ok());
+        self.record(client, method, snapshot, outcome);
         (status.as_u16(), body)
     }
 
-    fn record(&self, client: &str, method: &Method, observation: &Observation) {
+    fn record(
+        &self,
+        client: &str,
+        method: &Method,
+        snapshot: &RateLimitSnapshot,
+        outcome: Outcome,
+    ) {
         if let Some(metrics) = self.metrics.as_deref() {
-            metrics.record(client, method, observation);
+            metrics.record(client, method, snapshot, outcome);
         }
     }
 
