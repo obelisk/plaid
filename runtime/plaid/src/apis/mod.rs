@@ -168,6 +168,15 @@ fn classify_status_code(status: u16) -> &'static str {
     }
 }
 
+/// Map a transport-level `reqwest::Error` to a coarse error class used as a metric label.
+fn classify_reqwest_error(e: &reqwest::Error) -> &'static str {
+    if e.is_timeout() {
+        "timeout"
+    } else {
+        "network"
+    }
+}
+
 impl ApiError {
     /// A coarse, low-cardinality classification of this error, used as the `error` label
     /// on `plaid_api_failures_total`.
@@ -177,8 +186,7 @@ impl ApiError {
     /// that do not fit are reported as `other`; the full error is logged by the caller.
     pub fn kind(&self) -> &'static str {
         match self {
-            Self::NetworkError(e) if e.is_timeout() => "timeout",
-            Self::NetworkError(_) => "network",
+            Self::NetworkError(e) => classify_reqwest_error(e),
             Self::TlsError(_) => "tls",
             Self::BadRequest | Self::MissingParameter(_) => "bad_request",
             Self::ConfigurationError(_) | Self::CouldNotInstatiateRuntime(_) => "configuration",
@@ -186,12 +194,13 @@ impl ApiError {
             Self::TestMode => "test_mode",
             Self::OktaError(okta::OktaError::JwtSignatureFailure)
             | Self::YubikeyError(yubikey::YubikeyError::OperationNotAllowed) => "auth",
-            Self::OktaError(okta::OktaError::NetworkError(e)) => {
-                if e.is_timeout() {
-                    "timeout"
-                } else {
-                    "network"
-                }
+            Self::OktaError(okta::OktaError::NetworkError(e))
+            | Self::JiraError(jira::JiraError::NetworkError(e))
+            | Self::PagerDutyError(pagerduty::PagerDutyError::NetworkError(e))
+            | Self::BlockchainError(BlockchainError::NetworkError(e)) => classify_reqwest_error(e),
+            #[cfg(feature = "gcp")]
+            Self::GoogleDocsError(gcp::google_docs::GoogleDocsError::Reqwest(e)) => {
+                classify_reqwest_error(e)
             }
             Self::GitHubError(github::GitHubError::UnexpectedStatusCode(s))
             | Self::OktaError(okta::OktaError::UnexpectedStatusCode(s))
