@@ -8,6 +8,7 @@ pub mod gcp;
 pub mod general;
 pub mod github;
 pub mod jira;
+pub mod metrics;
 pub mod npm;
 pub mod okta;
 pub mod pagerduty;
@@ -57,10 +58,15 @@ use yubikey::{Yubikey, YubikeyConfig};
 
 use self::rustica::{Rustica, RusticaConfig};
 use crate::apis::cryptography::{Cryptography, CryptographyConfig};
+use crate::metrics::MetricsHandle;
+use metrics::ApiMetrics;
+use std::sync::Arc;
 
 /// All the APIs that Plaid can use
 pub struct Api {
     pub runtime: Runtime,
+    /// Metrics for module-facing external API calls, when metrics are enabled.
+    pub metrics: Option<Arc<ApiMetrics>>,
     pub cryptography: Option<Cryptography>,
     #[cfg(feature = "aws")]
     pub aws: Option<Aws>,
@@ -150,6 +156,53 @@ pub enum ApiError {
     CouldNotInstatiateRuntime(String),
 }
 
+/// Map an HTTP status code to a coarse error class used as a metric label.
+fn classify_status_code(status: u16) -> &'static str {
+    match status {
+        401 | 403 => "auth",
+        404 => "not_found",
+        429 => "rate_limited",
+        400 | 422 => "bad_request",
+        500..=599 => "server",
+        _ => "other",
+    }
+}
+
+impl ApiError {
+    /// A coarse, low-cardinality classification of this error, used as the `error` label
+    /// on `plaid_api_failures_total`.
+    ///
+    /// Only categories that change what an operator would do are distinguished: permanent
+    /// failures that need a config or code fix, and transient ones worth retrying. Errors
+    /// that do not fit are reported as `other`; the full error is logged by the caller.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::NetworkError(e) if e.is_timeout() => "timeout",
+            Self::NetworkError(_) => "network",
+            Self::TlsError(_) => "tls",
+            Self::BadRequest | Self::MissingParameter(_) => "bad_request",
+            Self::ConfigurationError(_) | Self::CouldNotInstatiateRuntime(_) => "configuration",
+            Self::NetworkResponseTooLarge => "response_too_large",
+            Self::TestMode => "test_mode",
+            Self::OktaError(okta::OktaError::AuthenticationFailure(_))
+            | Self::OktaError(okta::OktaError::JwtSignatureFailure)
+            | Self::YubikeyError(yubikey::YubikeyError::OperationNotAllowed) => "auth",
+            Self::GitHubError(github::GitHubError::UnexpectedStatusCode(s))
+            | Self::OktaError(okta::OktaError::UnexpectedStatusCode(s))
+            | Self::SlackError(slack::SlackError::UnexpectedStatusCode(s))
+            | Self::JiraError(jira::JiraError::UnexpectedStatusCode(s))
+            | Self::SplunkError(splunk::SplunkError::UnexpectedStatusCode(s))
+            | Self::PagerDutyError(pagerduty::PagerDutyError::UnexpectedStatusCode(s)) => {
+                classify_status_code(*s)
+            }
+            Self::BlockchainError(BlockchainError::CallFailed { status, .. }) => {
+                classify_status_code(status.as_u16())
+            }
+            _ => "other",
+        }
+    }
+}
+
 impl From<BlockchainError> for ApiError {
     fn from(e: BlockchainError) -> Self {
         ApiError::BlockchainError(e)
@@ -178,7 +231,12 @@ impl From<gcp::bigquery::BigQueryError> for ApiError {
 }
 
 impl Api {
-    pub async fn new(config: ApiConfigs) -> Result<Self, ApiError> {
+    pub async fn new(
+        config: ApiConfigs,
+        metrics: Option<Arc<MetricsHandle>>,
+    ) -> Result<Self, ApiError> {
+        let metrics = metrics.map(|handle| Arc::new(ApiMetrics::register(&handle)));
+
         let cryptography = match config.cryptography {
             Some(cryptography) => Some(Cryptography::new(cryptography)),
             _ => None,
@@ -275,8 +333,9 @@ impl Api {
 
         Ok(Self {
             runtime: Runtime::new().map_err(|e| {
-                ApiError::CouldNotInstatiateRuntime(format!("Failed to create runtime: {}", e))
+                ApiError::CouldNotInstatiateRuntime(format!("Failed to create runtime: {e}"))
             })?,
+            metrics,
             #[cfg(feature = "aws")]
             aws,
             #[cfg(feature = "gcp")]

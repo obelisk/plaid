@@ -60,10 +60,24 @@ macro_rules! impl_new_function {
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
                 let module = env_data.module.clone();
+                let metrics = env_data.api.metrics.clone();
+                let module_name = env_data.module.name.clone();
                 // Run the function on the Tokio runtime and wait for the result
+                let start = std::time::Instant::now();
                 let result = env_api.runtime.block_on(async move {
                     api.$function_name(&params, module).await
                 });
+                let elapsed = start.elapsed();
+
+                if let Some(metrics) = &metrics {
+                    metrics.record(
+                        stringify!($api),
+                        stringify!([< $api _ $function_name >]),
+                        &module_name,
+                        elapsed,
+                        result.as_ref().err().map(|e| e.kind()),
+                    );
+                }
 
                 let return_data = match result {
                     Ok(return_data) => return_data,
@@ -146,10 +160,24 @@ macro_rules! impl_new_function_with_error_buffer {
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
                 let module = env_data.module.clone();
+                let metrics = env_data.api.metrics.clone();
+                let module_name = env_data.module.name.clone();
                 // Run the function on the Tokio runtime and wait for the result
+                let start = std::time::Instant::now();
                 let result = env_api.runtime.block_on(async move {
                     api.$function_name(&params, module).await
                 });
+                let elapsed = start.elapsed();
+
+                if let Some(metrics) = &metrics {
+                    metrics.record(
+                        stringify!($api),
+                        stringify!([< $api _ $function_name >]),
+                        &module_name,
+                        elapsed,
+                        result.as_ref().err().map(|e| e.kind()),
+                    );
+                }
 
                 let return_data = match result {
                     Ok(return_data) => return_data,
@@ -245,10 +273,24 @@ macro_rules! impl_new_sub_module_function_with_error_buffer {
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
                 let module = env_data.module.clone();
+                let metrics = env_data.api.metrics.clone();
+                let module_name = env_data.module.name.clone();
                 // Run the function on the Tokio runtime and wait for the result
+                let start = std::time::Instant::now();
                 let result = env_api.runtime.block_on(async move {
                     sub_module.$function_name(&params, module).await
                 });
+                let elapsed = start.elapsed();
+
+                if let Some(metrics) = &metrics {
+                    metrics.record(
+                        stringify!($api),
+                        stringify!([< $api _ $sub_module _ $function_name >]),
+                        &module_name,
+                        elapsed,
+                        result.as_ref().err().map(|e| e.kind()),
+                    );
+                }
 
                 let return_data = match result {
                     Ok(return_data) => return_data,
@@ -341,10 +383,24 @@ macro_rules! impl_new_sub_module_function {
                 // Clone the APIs Arc to use in Tokio closure
                 let env_api = env_data.api.clone();
                 let module = env_data.module.clone();
+                let metrics = env_data.api.metrics.clone();
+                let module_name = env_data.module.name.clone();
                 // Run the function on the Tokio runtime and wait for the result
+                let start = std::time::Instant::now();
                 let result = env_api.runtime.block_on(async move {
                     sub_module.$function_name(&params, module).await
                 });
+                let elapsed = start.elapsed();
+
+                if let Some(metrics) = &metrics {
+                    metrics.record(
+                        stringify!($api),
+                        stringify!([< $api _ $sub_module _ $function_name >]),
+                        &module_name,
+                        elapsed,
+                        result.as_ref().err().map(|e| e.kind()),
+                    );
+                }
 
                 let return_data = match result {
                     Ok(return_data) => return_data,
