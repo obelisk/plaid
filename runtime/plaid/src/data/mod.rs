@@ -67,6 +67,7 @@ pub struct Data {}
 pub enum DataError {
     StorageError(StorageError),
     ApiError(ApiError),
+    MetricsRegistrationError(prometheus::Error),
 }
 
 impl std::fmt::Display for DataError {
@@ -74,6 +75,9 @@ impl std::fmt::Display for DataError {
         match self {
             Self::StorageError(e) => write!(f, "DataError | StorageError: {}", e),
             Self::ApiError(e) => write!(f, "DataError | ApiError: {:?}", e),
+            Self::MetricsRegistrationError(e) => {
+                write!(f, "DataError | MetricsRegistrationError: {}", e)
+            }
         }
     }
 }
@@ -90,17 +94,12 @@ impl DataInternal {
     ) -> Result<Self, DataError> {
         let github = config
             .github
-            .map(|gh| {
-                github::Github::new(gh, logger.clone(), metrics.clone())
-                    .map_err(DataError::ApiError)
-            })
+            .map(|gh| github::Github::new(gh, logger.clone(), metrics.clone()))
             .transpose()?;
 
         let okta = config
             .okta
-            .map(|okta| {
-                okta::Okta::new(okta, logger.clone(), metrics.clone()).map_err(DataError::ApiError)
-            })
+            .map(|okta| okta::Okta::new(okta, logger.clone(), metrics.clone()))
             .transpose()?;
 
         let internal = internal::Internal::new(

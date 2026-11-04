@@ -1,5 +1,4 @@
 use crate::{
-    apis::ApiError,
     data::DataGeneratorLog,
     executor::{Message, MessageSender},
     metrics::{LabelSet, MetricsHandle},
@@ -17,7 +16,7 @@ use std::sync::Arc;
 use std::{num::NonZeroUsize, time::Duration};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-use super::{DataGenerator, FetchErrorStage};
+use super::{DataError, DataGenerator, FetchErrorStage};
 
 struct FetchErrorLabels {
     reason: FetchErrorStage,
@@ -170,7 +169,7 @@ impl Okta {
         config: OktaConfig,
         logger: MessageSender,
         metrics: Option<Arc<MetricsHandle>>,
-    ) -> Result<Self, ApiError> {
+    ) -> Result<Self, DataError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
             .build()
@@ -185,7 +184,7 @@ impl Okta {
                     "Total number of Okta logs sent for processing by the data generator",
                     handle.registry(),
                 )
-                .map_err(ApiError::MetricsRegistrationError)
+                .map_err(DataError::MetricsRegistrationError)
             })
             .transpose()?;
         let logs_fetch_errors = metrics
@@ -197,7 +196,7 @@ impl Okta {
                     FetchErrorLabels::NAMES,
                     handle.registry(),
                 )
-                .map_err(ApiError::MetricsRegistrationError)
+                .map_err(DataError::MetricsRegistrationError)
             })
             .transpose()?;
 
@@ -455,7 +454,7 @@ mod tests {
             toml::from_str("token = \"t\"\ndomain = \"example.okta.com\"\n").unwrap();
         assert!(matches!(
             Okta::new(config, sender, Some(handle)),
-            Err(ApiError::MetricsRegistrationError(_))
+            Err(DataError::MetricsRegistrationError(_))
         ));
     }
 

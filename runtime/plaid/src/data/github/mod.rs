@@ -1,7 +1,6 @@
 use crate::apis::github::{
     build_github_clients, classify, ApiKind, Authentication, RateLimitKind, RateLimitSnapshot,
 };
-use crate::apis::ApiError;
 use crate::executor::{Message, MessageSender};
 use crate::metrics::{LabelSet, MetricsHandle};
 use crate::parse_duration;
@@ -20,23 +19,26 @@ use std::sync::Arc;
 use std::time::Duration;
 use time::OffsetDateTime;
 
-use super::{DataGenerator, DataGeneratorLog, FetchErrorStage};
+use super::{DataError, DataGenerator, DataGeneratorLog, FetchErrorStage};
 
-struct FetchErrorLabels {
-    reason: FetchErrorStage,
-    kind: Option<RateLimitKind>,
+/// Why a fetch attempt failed. Only a status failure can also report which
+/// rate limit GitHub classified the response as, so the enum pairs the two
+/// labels instead of letting every stage carry a meaningless kind.
+enum FetchError {
+    Status(Option<RateLimitKind>),
+    Stage(FetchErrorStage),
 }
 
-impl FetchErrorLabels {
+impl FetchError {
     fn values(&self) -> [&str; 2] {
-        [
-            self.reason.as_label(),
-            self.kind.map_or("none", |k| k.as_str()),
-        ]
+        match self {
+            Self::Status(kind) => ["status", kind.map_or("none", |kind| kind.as_str())],
+            Self::Stage(stage) => [stage.as_label(), "none"],
+        }
     }
 }
 
-impl LabelSet for FetchErrorLabels {
+impl LabelSet for FetchError {
     const NAMES: &'static [&'static str] = &["reason", "kind"];
 }
 
@@ -210,13 +212,9 @@ pub struct Github {
 }
 
 impl Github {
-    fn record_fetch_error(&self, stage: FetchErrorStage, kind: Option<RateLimitKind>) {
+    fn record_fetch_error(&self, error: FetchError) {
         if let Some(errors) = &self.logs_fetch_errors {
-            let labels = FetchErrorLabels {
-                reason: stage,
-                kind,
-            };
-            errors.with_label_values(&labels.values()).inc();
+            errors.with_label_values(&error.values()).inc();
         }
     }
 
@@ -224,13 +222,13 @@ impl Github {
         config: GithubConfig,
         logger: MessageSender,
         metrics: Option<Arc<MetricsHandle>>,
-    ) -> Result<Self, ApiError> {
+    ) -> Result<Self, DataError> {
         let default_client_auth: HashMap<String, Authentication> = [(
             "gh_data_generator".to_string(),
             config.authentication.clone(),
         )]
         .into();
-        let clients = build_github_clients(&default_client_auth)?;
+        let clients = build_github_clients(&default_client_auth).map_err(DataError::ApiError)?;
         let client = clients.into_iter().next().unwrap().1; // we know there is at least one client because we just built it with one entry
         let lru_cache_size = match config.lru_cache_size {
             0 => {
@@ -248,7 +246,7 @@ impl Github {
                     "Total number of GitHub logs sent for processing by the data generator",
                     handle.registry(),
                 )
-                .map_err(ApiError::MetricsRegistrationError)
+                .map_err(DataError::MetricsRegistrationError)
             })
             .transpose()?;
         let logs_fetch_errors = metrics
@@ -257,10 +255,10 @@ impl Github {
                 register_int_counter_vec_with_registry!(
                     "plaid_github_logs_fetch_errors_total",
                     "Total number of failed GitHub log fetch attempts; reason is datetime_encoding, transport, status, body_read, or response_parse; kind is none, primary, or secondary when the status classified as a rate limit",
-                    FetchErrorLabels::NAMES,
+                    FetchError::NAMES,
                     handle.registry(),
                 )
-                .map_err(ApiError::MetricsRegistrationError)
+                .map_err(DataError::MetricsRegistrationError)
             })
             .transpose()?;
 
@@ -287,7 +285,7 @@ impl DataGenerator for Github {
         let since = match since.format(&time::format_description::well_known::Rfc3339) {
             Ok(since) => since,
             Err(e) => {
-                self.record_fetch_error(FetchErrorStage::DateTimeEncoding, None);
+                self.record_fetch_error(FetchError::Stage(FetchErrorStage::DateTimeEncoding));
                 error!("Failed to parse 'since' datetime. Error: {e}");
                 return Err(());
             }
@@ -295,7 +293,7 @@ impl DataGenerator for Github {
         let until = match until.format(&time::format_description::well_known::Rfc3339) {
             Ok(until) => until,
             Err(e) => {
-                self.record_fetch_error(FetchErrorStage::DateTimeEncoding, None);
+                self.record_fetch_error(FetchError::Stage(FetchErrorStage::DateTimeEncoding));
                 error!("Failed to parse 'until' datetime. Error: {e}");
                 return Err(());
             }
@@ -312,7 +310,7 @@ impl DataGenerator for Github {
         loop {
             if let Some(address) = next {
                 let response = self.client._get(&address).await.map_err(|e| {
-                    self.record_fetch_error(FetchErrorStage::Transport, None);
+                    self.record_fetch_error(FetchError::Stage(FetchErrorStage::Transport));
                     error!("{}", format!("Could not get logs from GitHub: {}", e));
                 })?;
 
@@ -328,10 +326,7 @@ impl DataGenerator for Github {
                         )
                     );
                     let outcome = classify(ApiKind::Rest, status, &snapshot, body.as_deref().ok());
-                    self.record_fetch_error(
-                        FetchErrorStage::ResponseStatus,
-                        outcome.rate_limit_kind(),
-                    );
+                    self.record_fetch_error(FetchError::Status(outcome.rate_limit_kind()));
                     return Err(());
                 }
 
@@ -344,7 +339,7 @@ impl DataGenerator for Github {
 
                 // Parse the response's body
                 let body = self.client.body_to_string(response).await.map_err(|e| {
-                    self.record_fetch_error(FetchErrorStage::ResponseBody, None);
+                    self.record_fetch_error(FetchError::Stage(FetchErrorStage::ResponseBody));
                     error!(
                         "{}",
                         format!("Failed to read body of GitHub response. Error: {e}")
@@ -352,7 +347,7 @@ impl DataGenerator for Github {
                 })?;
 
                 let logs: Vec<Value> = serde_json::from_str(body.as_str()).map_err(|e| {
-                    self.record_fetch_error(FetchErrorStage::ResponseParse, None);
+                    self.record_fetch_error(FetchError::Stage(FetchErrorStage::ResponseParse));
                     error!("{}", format!("Could not parse data from Github: {}", e));
                 })?;
 
@@ -489,21 +484,21 @@ mod tests {
 
     #[test]
     fn fetch_error_labels_pair_names_with_values() {
-        let classified = FetchErrorLabels {
-            reason: FetchErrorStage::ResponseStatus,
-            kind: Some(RateLimitKind::Primary),
-        };
+        let classified = FetchError::Status(Some(RateLimitKind::Primary));
         assert_eq!(
-            label_pairs(FetchErrorLabels::NAMES, &classified.values()),
+            label_pairs(FetchError::NAMES, &classified.values()),
             [("reason", "status"), ("kind", "primary")]
         );
 
-        let unclassified = FetchErrorLabels {
-            reason: FetchErrorStage::Transport,
-            kind: None,
-        };
+        let unclassified = FetchError::Status(None);
         assert_eq!(
-            label_pairs(FetchErrorLabels::NAMES, &unclassified.values()),
+            label_pairs(FetchError::NAMES, &unclassified.values()),
+            [("reason", "status"), ("kind", "none")]
+        );
+
+        let staged = FetchError::Stage(FetchErrorStage::Transport);
+        assert_eq!(
+            label_pairs(FetchError::NAMES, &staged.values()),
             [("reason", "transport"), ("kind", "none")]
         );
     }
@@ -524,7 +519,7 @@ mod tests {
                 .unwrap();
         assert!(matches!(
             Github::new(config, sender, Some(handle)),
-            Err(ApiError::MetricsRegistrationError(_))
+            Err(DataError::MetricsRegistrationError(_))
         ));
     }
 

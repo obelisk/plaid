@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 
-use crate::loader::PlaidModule;
+use crate::{loader::PlaidModule, metrics::MetricsHandle};
 
 pub use metrics::GithubMetrics;
 pub(crate) use response::{classify, ApiKind, Outcome, RateLimitKind, RateLimitSnapshot};
@@ -95,9 +95,10 @@ pub struct AppAuth {
     pub key: EncodingKey,
 }
 
-/// All the errors that can be encountered while executing GitHub calls
+/// All the errors that can be encountered while initializing or executing GitHub calls
 #[derive(Debug)]
 pub enum GitHubError {
+    MetricsRegistration(prometheus::Error),
     GraphQLUnserializable,
     GraphQLQueryUnknown(String),
     GraphQLInvalidCharacters(String),
@@ -115,7 +116,7 @@ impl Github {
 
     pub(crate) fn with_metrics(
         config: GithubConfig,
-        metrics: Option<Arc<GithubMetrics>>,
+        metrics: Option<&MetricsHandle>,
     ) -> Result<Self, ApiError> {
         let clients = build_github_clients(&config.authentication)?;
         let app_auth = build_app_auth(&config.authentication)?;
@@ -123,6 +124,12 @@ impl Github {
         // Create all the validators and compile all the regexes. If the module contains
         // any invalid regexes it will panic.
         let validators = validators::create_validators();
+
+        let metrics = metrics
+            .map(GithubMetrics::register)
+            .transpose()
+            .map_err(|e| ApiError::GitHubError(GitHubError::MetricsRegistration(e)))?
+            .map(Arc::new);
 
         Ok(Self {
             config,
@@ -615,4 +622,27 @@ fn build_app_auth(
             _ => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> GithubConfig {
+        GithubConfig {
+            authentication: HashMap::from([("test".to_string(), Authentication::NoAuth {})]),
+            graphql_queries: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn with_metrics_registers_github_metrics_from_the_handle() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let handle = MetricsHandle::new();
+        assert!(Github::with_metrics(test_config(), Some(&handle)).is_ok());
+        assert!(matches!(
+            Github::with_metrics(test_config(), Some(&handle)),
+            Err(ApiError::GitHubError(GitHubError::MetricsRegistration(_)))
+        ));
+    }
 }
