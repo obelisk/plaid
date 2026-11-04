@@ -38,13 +38,10 @@ impl Github {
 
         // The next page URL comes from a previous response's Link header, so it is opaque.
         // We must not blindly follow it: a module could pass an arbitrary URL and turn this
-        // into a request to an unintended host. We therefore only accept a URL that points at
-        // the Dependabot alerts endpoint for the same repository.
+        // into a request to an unintended host. We therefore validate the origin and rebuild
+        // the path from the requested owner/repo, keeping only the pagination query.
         let address = match request.params.next_page.as_deref() {
-            Some(next_page) => {
-                validate_next_page_url(next_page, owner, repo)?;
-                next_page.to_string()
-            }
+            Some(next_page) => trusted_next_page_url(next_page, owner, repo)?,
             None => {
                 let mut address =
                     format!("/repos/{owner}/{repo}/dependabot/alerts?per_page={per_page}");
@@ -143,36 +140,60 @@ impl Github {
     }
 }
 
-/// Validate a `next_page` URL supplied by a module.
+/// Validate a `next_page` URL supplied by a module and rewrite it to the trusted
+/// owner/repo endpoint.
 ///
-/// The URL originates from a previous response's `Link` header, but it is round-tripped
-/// through the module, so it must be treated as untrusted input. We only accept an `https`
-/// URL on `api.github.com` whose path is the Dependabot alerts endpoint for the same
-/// repository that was requested. This prevents a module from using this function to make
-/// requests to arbitrary hosts or to read alerts for a different repository.
-fn validate_next_page_url(next_page: &str, owner: &str, repo: &str) -> Result<(), ApiError> {
-    let expected_path = format!("/repos/{owner}/{repo}/dependabot/alerts");
+/// GitHub's `Link` header uses the canonical `/repositories/{repository_id}/...` form even
+/// when the initial request used `/repos/{owner}/{repo}/...`, so comparing paths directly
+/// would reject valid pagination links. Instead we validate the origin, which is the actual
+/// security boundary, and then apply the returned query string to the endpoint we construct
+/// ourselves. This keeps the request pinned to the repository that was requested while still
+/// following GitHub's pagination.
+fn trusted_next_page_url(next_page: &str, owner: &str, repo: &str) -> Result<String, ApiError> {
     let url = reqwest::Url::parse(next_page).map_err(|_| ApiError::BadRequest)?;
 
-    if url.scheme() != "https"
-        || url.host_str() != Some("api.github.com")
-        || url.path() != expected_path
-    {
+    // The URL is round-tripped through the module, so it must be treated as untrusted input.
+    // Restricting the origin prevents a module from turning this into a request to an
+    // arbitrary host.
+    if url.scheme() != "https" || url.host_str() != Some("api.github.com") {
         return Err(ApiError::BadRequest);
     }
 
-    Ok(())
+    // We deliberately ignore the path from the untrusted URL and rebuild it from the
+    // validated owner/repo, so a module cannot use this to read alerts for another
+    // repository. Only the query string (which carries the pagination cursor) is reused.
+    let mut trusted = format!("/repos/{owner}/{repo}/dependabot/alerts");
+    if let Some(query) = url.query() {
+        trusted.push('?');
+        trusted.push_str(query);
+    }
+
+    Ok(trusted)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::validate_next_page_url;
+    use super::trusted_next_page_url;
 
     const OK: &str = "https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=abc";
 
     #[test]
     fn accepts_url_for_same_repo() {
-        assert!(validate_next_page_url(OK, "o", "r").is_ok());
+        assert_eq!(
+            trusted_next_page_url(OK, "o", "r").unwrap(),
+            "/repos/o/r/dependabot/alerts?per_page=100&after=abc"
+        );
+    }
+
+    #[test]
+    fn accepts_canonical_repository_id_form() {
+        // GitHub rewrites the path to the canonical /repositories/{id}/ form in Link headers.
+        let url =
+            "https://api.github.com/repositories/1300192/dependabot/alerts?per_page=100&after=abc";
+        assert_eq!(
+            trusted_next_page_url(url, "o", "r").unwrap(),
+            "/repos/o/r/dependabot/alerts?per_page=100&after=abc"
+        );
     }
 
     #[test]
@@ -180,41 +201,55 @@ mod tests {
         // Base64 cursors can contain '+' and '/', which arrive percent-encoded.
         let url =
             "https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=%2B%2F%2B%2B";
-        assert!(validate_next_page_url(url, "o", "r").is_ok());
+        assert_eq!(
+            trusted_next_page_url(url, "o", "r").unwrap(),
+            "/repos/o/r/dependabot/alerts?per_page=100&after=%2B%2F%2B%2B"
+        );
     }
 
     #[test]
     fn rejects_other_host() {
         let url = "https://evil.example.com/repos/o/r/dependabot/alerts?after=abc";
-        assert!(validate_next_page_url(url, "o", "r").is_err());
+        assert!(trusted_next_page_url(url, "o", "r").is_err());
     }
 
     #[test]
     fn rejects_plain_http() {
         let url = "http://api.github.com/repos/o/r/dependabot/alerts?after=abc";
-        assert!(validate_next_page_url(url, "o", "r").is_err());
+        assert!(trusted_next_page_url(url, "o", "r").is_err());
     }
 
     #[test]
-    fn rejects_other_repository() {
+    fn rewrites_other_repository_to_requested_one() {
+        // A module cannot use next_page to read alerts for a different repository: the path
+        // is rebuilt from the validated owner/repo.
         let url = "https://api.github.com/repos/o/other/dependabot/alerts?after=abc";
-        assert!(validate_next_page_url(url, "o", "r").is_err());
+        assert_eq!(
+            trusted_next_page_url(url, "o", "r").unwrap(),
+            "/repos/o/r/dependabot/alerts?after=abc"
+        );
     }
 
     #[test]
-    fn rejects_other_endpoint() {
+    fn rewrites_other_endpoint_to_dependabot_alerts() {
         let url = "https://api.github.com/repos/o/r/code-scanning/alerts?after=abc";
-        assert!(validate_next_page_url(url, "o", "r").is_err());
+        assert_eq!(
+            trusted_next_page_url(url, "o", "r").unwrap(),
+            "/repos/o/r/dependabot/alerts?after=abc"
+        );
     }
 
     #[test]
-    fn rejects_path_traversal_attempt() {
-        let url = "https://api.github.com/repos/o/r/dependabot/alerts/../../../../user";
-        assert!(validate_next_page_url(url, "o", "r").is_err());
+    fn accepts_url_without_query() {
+        let url = "https://api.github.com/repos/o/r/dependabot/alerts";
+        assert_eq!(
+            trusted_next_page_url(url, "o", "r").unwrap(),
+            "/repos/o/r/dependabot/alerts"
+        );
     }
 
     #[test]
     fn rejects_garbage() {
-        assert!(validate_next_page_url("not a url", "o", "r").is_err());
+        assert!(trusted_next_page_url("not a url", "o", "r").is_err());
     }
 }
