@@ -6,7 +6,7 @@ use prometheus::{
 
 use crate::metrics::{LabelSet, MetricsHandle};
 
-use super::response::{Outcome, RateLimitKind, RateLimitResource, RateLimitSnapshot};
+use super::response::{Outcome, RateLimitResource, RateLimitSnapshot};
 
 struct GaugeLabels<'a> {
     client: &'a str,
@@ -43,22 +43,6 @@ impl RequestLabels<'_> {
 
 impl LabelSet for RequestLabels<'_> {
     const NAMES: &'static [&'static str] = &["client", "resource", "method", "outcome"];
-}
-
-struct KindLabels<'a> {
-    client: &'a str,
-    resource: RateLimitResource,
-    kind: RateLimitKind,
-}
-
-impl KindLabels<'_> {
-    fn values(&self) -> [&str; 3] {
-        [self.client, self.resource.as_str(), self.kind.as_str()]
-    }
-}
-
-impl LabelSet for KindLabels<'_> {
-    const NAMES: &'static [&'static str] = &["client", "resource", "kind"];
 }
 
 /// Prometheus collectors for GitHub API quota state. Registered once per
@@ -115,7 +99,7 @@ impl GithubMetrics {
         let rate_limited_total = register_int_counter_vec_with_registry!(
             "plaid_github_api_rate_limited_total",
             "Total GitHub API responses classified as primary or secondary rate limits",
-            KindLabels::NAMES,
+            &["client", "resource", "kind"],
             registry,
         )?;
 
@@ -151,13 +135,8 @@ impl GithubMetrics {
         self.update_gauges(client, snapshot);
 
         if let Some(kind) = outcome.rate_limit_kind() {
-            let labels = KindLabels {
-                client,
-                resource: snapshot.resource,
-                kind,
-            };
             self.rate_limited_total
-                .with_label_values(&labels.values())
+                .with_label_values(&[client, snapshot.resource.as_str(), kind.as_str()])
                 .inc();
         }
     }
@@ -493,20 +472,6 @@ mod tests {
                 ("resource", "search"),
                 ("method", "POST"),
                 ("outcome", "rate_limited"),
-            ]
-        );
-
-        let kind = KindLabels {
-            client: "client-c",
-            resource: RateLimitResource::Graphql,
-            kind: RateLimitKind::Secondary,
-        };
-        assert_eq!(
-            label_pairs(KindLabels::NAMES, &kind.values()),
-            [
-                ("client", "client-c"),
-                ("resource", "graphql"),
-                ("kind", "secondary"),
             ]
         );
     }
