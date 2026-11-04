@@ -1,7 +1,8 @@
 use crate::{
+    apis::ApiError,
     data::DataGeneratorLog,
     executor::{Message, MessageSender},
-    metrics::MetricsHandle,
+    metrics::{LabelSet, MetricsHandle},
     parse_duration,
 };
 use lru::LruCache;
@@ -17,6 +18,20 @@ use std::{num::NonZeroUsize, time::Duration};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use super::{DataGenerator, FetchErrorStage};
+
+struct FetchErrorLabels {
+    reason: FetchErrorStage,
+}
+
+impl FetchErrorLabels {
+    fn values(&self) -> [&str; 1] {
+        [self.reason.as_label()]
+    }
+}
+
+impl LabelSet for FetchErrorLabels {
+    const NAMES: &'static [&'static str] = &["reason"];
+}
 
 const OKTA_LOG_PUBLISHED_FIELD_KEY: &str = "published";
 const OKTA_LOG_UUID_FIELD_KEY: &str = "uuid";
@@ -145,7 +160,9 @@ pub struct Okta {
 impl Okta {
     fn record_fetch_error(&self, stage: FetchErrorStage) {
         if let Some(errors) = &self.logs_fetch_errors {
-            errors.with_label_values(&[stage.as_label()]).inc();
+            errors
+                .with_label_values(&FetchErrorLabels { reason: stage }.values())
+                .inc();
         }
     }
 
@@ -153,32 +170,38 @@ impl Okta {
         config: OktaConfig,
         logger: MessageSender,
         metrics: Option<Arc<MetricsHandle>>,
-    ) -> Self {
+    ) -> Result<Self, ApiError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
             .build()
             .unwrap();
         let lru_cache_size = config.lru_cache_size;
 
-        let logs_fetched = metrics.as_deref().map(|handle| {
-            register_int_counter_with_registry!(
-                "plaid_okta_logs_fetched_total",
-                "Total number of Okta logs sent for processing by the data generator",
-                handle.registry(),
-            )
-            .expect("expected unique collector")
-        });
-        let logs_fetch_errors = metrics.as_deref().map(|handle| {
-            register_int_counter_vec_with_registry!(
-                "plaid_okta_logs_fetch_errors_total",
-                "Total number of failed Okta log fetch attempts; reason is datetime_encoding, transport, status, body_read, or response_parse",
-                &["reason"],
-                handle.registry(),
-            )
-            .expect("expected unique collector")
-        });
+        let logs_fetched = metrics
+            .as_deref()
+            .map(|handle| {
+                register_int_counter_with_registry!(
+                    "plaid_okta_logs_fetched_total",
+                    "Total number of Okta logs sent for processing by the data generator",
+                    handle.registry(),
+                )
+                .map_err(ApiError::MetricsRegistrationError)
+            })
+            .transpose()?;
+        let logs_fetch_errors = metrics
+            .as_deref()
+            .map(|handle| {
+                register_int_counter_vec_with_registry!(
+                    "plaid_okta_logs_fetch_errors_total",
+                    "Total number of failed Okta log fetch attempts; reason is datetime_encoding, transport, status, body_read, or response_parse",
+                    FetchErrorLabels::NAMES,
+                    handle.registry(),
+                )
+                .map_err(ApiError::MetricsRegistrationError)
+            })
+            .transpose()?;
 
-        Self {
+        Ok(Self {
             client,
             config,
             last_seen: OffsetDateTime::now_utc(),
@@ -186,7 +209,7 @@ impl Okta {
             seen_logs_uuid: LruCache::new(NonZeroUsize::new(lru_cache_size).unwrap()),
             logs_fetched,
             logs_fetch_errors,
-        }
+        })
     }
 }
 
@@ -403,9 +426,38 @@ impl DataGenerator for Okta {
 mod tests {
     use super::*;
     use crate::executor::MessageSender;
-    use crate::metrics::MetricsHandle;
+    use crate::metrics::{label_pairs, MetricsHandle};
     use std::collections::HashMap;
     use time::{Date, Month, Time};
+
+    #[test]
+    fn fetch_error_labels_pair_names_with_values() {
+        let labels = FetchErrorLabels {
+            reason: FetchErrorStage::ResponseParse,
+        };
+        assert_eq!(
+            label_pairs(FetchErrorLabels::NAMES, &labels.values()),
+            [("reason", "response_parse")]
+        );
+    }
+
+    #[test]
+    fn duplicate_metric_registration_returns_an_error() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let handle = Arc::new(MetricsHandle::new());
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+        let sender = MessageSender::new(sender, HashMap::new());
+        let config: OktaConfig =
+            toml::from_str("token = \"t\"\ndomain = \"example.okta.com\"\n").unwrap();
+        assert!(Okta::new(config, sender.clone(), Some(handle.clone())).is_ok());
+
+        let config: OktaConfig =
+            toml::from_str("token = \"t\"\ndomain = \"example.okta.com\"\n").unwrap();
+        assert!(matches!(
+            Okta::new(config, sender, Some(handle)),
+            Err(ApiError::MetricsRegistrationError(_))
+        ));
+    }
 
     #[tokio::test]
     async fn failing_fetch_records_its_stage() {
@@ -418,7 +470,8 @@ mod tests {
             config,
             MessageSender::new(sender, HashMap::new()),
             Some(handle.clone()),
-        );
+        )
+        .unwrap();
 
         // RFC3339 cannot encode a negative year, so the fetch fails before it
         // builds a request.

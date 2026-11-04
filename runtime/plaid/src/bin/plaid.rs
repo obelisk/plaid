@@ -64,7 +64,7 @@ impl std::fmt::Display for Errors {
         match self {
             Errors::FailedToStartApiSystem(e) => write!(f, "Failed to start API system: {:?}", e),
             Errors::MetricsRegistrationFailed(e) => {
-                write!(f, "Failed to register GitHub metrics: {e}")
+                write!(f, "Failed to register metrics: {e}")
             }
             Errors::FailedToLoadModules => write!(f, "Failed to load modules"),
         }
@@ -401,8 +401,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(Arc::new);
 
     let module_execution_metrics = if let Some(handle) = &metrics {
-        QueueMetrics::register(handle, &exec_thread_pools);
-        Some(Arc::new(ModuleExecutionMetrics::register(handle)))
+        QueueMetrics::register(handle, &exec_thread_pools)
+            .map_err(Errors::MetricsRegistrationFailed)?;
+        Some(Arc::new(
+            ModuleExecutionMetrics::register(handle).map_err(Errors::MetricsRegistrationFailed)?,
+        ))
     } else {
         None
     };

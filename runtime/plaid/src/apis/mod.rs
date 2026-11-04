@@ -112,6 +112,7 @@ pub enum ApiError {
     ImpossibleError,
     ConfigurationError(String),
     MissingParameter(String),
+    MetricsRegistrationError(prometheus::Error),
     GitHubError(github::GitHubError),
     #[cfg(feature = "aws")]
     SerdeError(String),

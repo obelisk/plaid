@@ -98,7 +98,10 @@ impl DataInternal {
 
         let okta = config
             .okta
-            .map(|okta| okta::Okta::new(okta, logger.clone(), metrics.clone()));
+            .map(|okta| {
+                okta::Okta::new(okta, logger.clone(), metrics.clone()).map_err(DataError::ApiError)
+            })
+            .transpose()?;
 
         let internal = internal::Internal::new(
             logger.clone(),

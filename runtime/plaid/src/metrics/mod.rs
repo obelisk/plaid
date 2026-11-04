@@ -20,10 +20,31 @@ impl std::fmt::Display for EncodeError {
     }
 }
 
+impl std::error::Error for EncodeError {}
+
 #[derive(Deserialize)]
 pub struct MetricsConfiguration {
     /// The address and port to listen on for Prometheus metrics scraping.
     pub listen_address: SocketAddr,
+}
+
+pub(crate) trait LabelSet {
+    const NAMES: &'static [&'static str];
+}
+
+/// Zips each declared name with the value in the same slot, so a reordered
+/// `NAMES` or a swapped `values()` fails the caller's expected pairs.
+#[cfg(test)]
+pub(crate) fn label_pairs<'a>(
+    names: &'static [&'static str],
+    values: &'a [&'a str],
+) -> Vec<(&'static str, &'a str)> {
+    assert_eq!(
+        names.len(),
+        values.len(),
+        "label names and values differ in length"
+    );
+    names.iter().copied().zip(values.iter().copied()).collect()
 }
 
 /// A generic handle to the Prometheus metrics registry.

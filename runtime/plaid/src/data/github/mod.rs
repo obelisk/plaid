@@ -3,7 +3,7 @@ use crate::apis::github::{
 };
 use crate::apis::ApiError;
 use crate::executor::{Message, MessageSender};
-use crate::metrics::MetricsHandle;
+use crate::metrics::{LabelSet, MetricsHandle};
 use crate::parse_duration;
 use lru::LruCache;
 use octocrab::{self, Octocrab};
@@ -21,6 +21,24 @@ use std::time::Duration;
 use time::OffsetDateTime;
 
 use super::{DataGenerator, DataGeneratorLog, FetchErrorStage};
+
+struct FetchErrorLabels {
+    reason: FetchErrorStage,
+    kind: Option<RateLimitKind>,
+}
+
+impl FetchErrorLabels {
+    fn values(&self) -> [&str; 2] {
+        [
+            self.reason.as_label(),
+            self.kind.map_or("none", |k| k.as_str()),
+        ]
+    }
+}
+
+impl LabelSet for FetchErrorLabels {
+    const NAMES: &'static [&'static str] = &["reason", "kind"];
+}
 
 /// Represents the event types GitHub will include in the response
 /// to the audit log request
@@ -194,8 +212,11 @@ pub struct Github {
 impl Github {
     fn record_fetch_error(&self, stage: FetchErrorStage, kind: Option<RateLimitKind>) {
         if let Some(errors) = &self.logs_fetch_errors {
-            let kind = kind.map(|kind| kind.as_str()).unwrap_or("none");
-            errors.with_label_values(&[stage.as_label(), kind]).inc();
+            let labels = FetchErrorLabels {
+                reason: stage,
+                kind,
+            };
+            errors.with_label_values(&labels.values()).inc();
         }
     }
 
@@ -219,23 +240,29 @@ impl Github {
             size => NonZeroUsize::new(size).unwrap(),
         };
 
-        let logs_fetched = metrics.as_deref().map(|handle| {
-            register_int_counter_with_registry!(
-                "plaid_github_logs_fetched_total",
-                "Total number of GitHub logs sent for processing by the data generator",
-                handle.registry(),
-            )
-            .expect("expected unique collector")
-        });
-        let logs_fetch_errors = metrics.as_deref().map(|handle| {
-            register_int_counter_vec_with_registry!(
-                "plaid_github_logs_fetch_errors_total",
-                "Total number of failed GitHub log fetch attempts; reason is datetime_encoding, transport, status, body_read, or response_parse; kind is none, primary, or secondary when the status classified as a rate limit",
-                &["reason", "kind"],
-                handle.registry(),
-            )
-            .expect("expected unique collector")
-        });
+        let logs_fetched = metrics
+            .as_deref()
+            .map(|handle| {
+                register_int_counter_with_registry!(
+                    "plaid_github_logs_fetched_total",
+                    "Total number of GitHub logs sent for processing by the data generator",
+                    handle.registry(),
+                )
+                .map_err(ApiError::MetricsRegistrationError)
+            })
+            .transpose()?;
+        let logs_fetch_errors = metrics
+            .as_deref()
+            .map(|handle| {
+                register_int_counter_vec_with_registry!(
+                    "plaid_github_logs_fetch_errors_total",
+                    "Total number of failed GitHub log fetch attempts; reason is datetime_encoding, transport, status, body_read, or response_parse; kind is none, primary, or secondary when the status classified as a rate limit",
+                    FetchErrorLabels::NAMES,
+                    handle.registry(),
+                )
+                .map_err(ApiError::MetricsRegistrationError)
+            })
+            .transpose()?;
 
         Ok(Self {
             config,
@@ -456,9 +483,50 @@ impl DataGenerator for Github {
 mod tests {
     use super::*;
     use crate::executor::MessageSender;
-    use crate::metrics::MetricsHandle;
+    use crate::metrics::{label_pairs, MetricsHandle};
     use time::{Date, Month, Time};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn fetch_error_labels_pair_names_with_values() {
+        let classified = FetchErrorLabels {
+            reason: FetchErrorStage::ResponseStatus,
+            kind: Some(RateLimitKind::Primary),
+        };
+        assert_eq!(
+            label_pairs(FetchErrorLabels::NAMES, &classified.values()),
+            [("reason", "status"), ("kind", "primary")]
+        );
+
+        let unclassified = FetchErrorLabels {
+            reason: FetchErrorStage::Transport,
+            kind: None,
+        };
+        assert_eq!(
+            label_pairs(FetchErrorLabels::NAMES, &unclassified.values()),
+            [("reason", "transport"), ("kind", "none")]
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_metric_registration_returns_an_error() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let handle = Arc::new(MetricsHandle::new());
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+        let sender = MessageSender::new(sender, HashMap::new());
+        let config: GithubConfig =
+            toml::from_str("authentication = {}\norg = \"test-org\"\nlog_type = \"all\"\n")
+                .unwrap();
+        assert!(Github::new(config, sender.clone(), Some(handle.clone())).is_ok());
+
+        let config: GithubConfig =
+            toml::from_str("authentication = {}\norg = \"test-org\"\nlog_type = \"all\"\n")
+                .unwrap();
+        assert!(matches!(
+            Github::new(config, sender, Some(handle)),
+            Err(ApiError::MetricsRegistrationError(_))
+        ));
+    }
 
     #[tokio::test]
     async fn failing_fetch_records_its_stage() {

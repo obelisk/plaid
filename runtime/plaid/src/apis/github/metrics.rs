@@ -4,9 +4,62 @@ use prometheus::{
     IntGaugeVec,
 };
 
-use crate::metrics::MetricsHandle;
+use crate::metrics::{LabelSet, MetricsHandle};
 
-use super::response::{Outcome, RateLimitSnapshot};
+use super::response::{Outcome, RateLimitKind, RateLimitResource, RateLimitSnapshot};
+
+struct GaugeLabels<'a> {
+    client: &'a str,
+    resource: RateLimitResource,
+}
+
+impl GaugeLabels<'_> {
+    fn values(&self) -> [&str; 2] {
+        [self.client, self.resource.as_str()]
+    }
+}
+
+impl LabelSet for GaugeLabels<'_> {
+    const NAMES: &'static [&'static str] = &["client", "resource"];
+}
+
+struct RequestLabels<'a> {
+    client: &'a str,
+    resource: RateLimitResource,
+    method: &'a Method,
+    outcome: Outcome,
+}
+
+impl RequestLabels<'_> {
+    fn values(&self) -> [&str; 4] {
+        [
+            self.client,
+            self.resource.as_str(),
+            self.method.as_str(),
+            self.outcome.as_str(),
+        ]
+    }
+}
+
+impl LabelSet for RequestLabels<'_> {
+    const NAMES: &'static [&'static str] = &["client", "resource", "method", "outcome"];
+}
+
+struct KindLabels<'a> {
+    client: &'a str,
+    resource: RateLimitResource,
+    kind: RateLimitKind,
+}
+
+impl KindLabels<'_> {
+    fn values(&self) -> [&str; 3] {
+        [self.client, self.resource.as_str(), self.kind.as_str()]
+    }
+}
+
+impl LabelSet for KindLabels<'_> {
+    const NAMES: &'static [&'static str] = &["client", "resource", "kind"];
+}
 
 /// Prometheus collectors for GitHub API quota state. Registered once per
 /// runtime; gauges are only written from observed responses so an absent
@@ -27,42 +80,42 @@ impl GithubMetrics {
         let rate_limit_limit = register_int_gauge_vec_with_registry!(
             "plaid_github_api_rate_limit_limit",
             "Rate-limit window ceiling reported by GitHub, in requests for REST and points for GraphQL",
-            &["client", "resource"],
+            GaugeLabels::NAMES,
             registry,
         )?;
 
         let rate_limit_remaining = register_int_gauge_vec_with_registry!(
             "plaid_github_api_rate_limit_remaining",
             "Quota units remaining in the current rate-limit window",
-            &["client", "resource"],
+            GaugeLabels::NAMES,
             registry,
         )?;
 
         let rate_limit_used = register_int_gauge_vec_with_registry!(
             "plaid_github_api_rate_limit_used",
             "Quota units used in the current rate-limit window",
-            &["client", "resource"],
+            GaugeLabels::NAMES,
             registry,
         )?;
 
         let rate_limit_reset_timestamp_seconds = register_int_gauge_vec_with_registry!(
             "plaid_github_api_rate_limit_reset_timestamp_seconds",
             "Unix timestamp when the current rate-limit window resets",
-            &["client", "resource"],
+            GaugeLabels::NAMES,
             registry,
         )?;
 
         let requests_total = register_int_counter_vec_with_registry!(
             "plaid_github_api_requests_total",
             "Total logical GitHub API requests. octocrab retry attempts are not counted separately",
-            &["client", "resource", "method", "outcome"],
+            RequestLabels::NAMES,
             registry,
         )?;
 
         let rate_limited_total = register_int_counter_vec_with_registry!(
             "plaid_github_api_rate_limited_total",
             "Total GitHub API responses classified as primary or secondary rate limits",
-            &["client", "resource", "kind"],
+            KindLabels::NAMES,
             registry,
         )?;
 
@@ -85,56 +138,64 @@ impl GithubMetrics {
         snapshot: &RateLimitSnapshot,
         outcome: Outcome,
     ) {
-        let resource = snapshot.resource.as_str();
-
+        let labels = RequestLabels {
+            client,
+            resource: snapshot.resource,
+            method,
+            outcome,
+        };
         self.requests_total
-            .with_label_values(&[client, resource, method.as_str(), outcome.as_str()])
+            .with_label_values(&labels.values())
             .inc();
 
         self.update_gauges(client, snapshot);
 
         if let Some(kind) = outcome.rate_limit_kind() {
+            let labels = KindLabels {
+                client,
+                resource: snapshot.resource,
+                kind,
+            };
             self.rate_limited_total
-                .with_label_values(&[client, resource, kind.as_str()])
+                .with_label_values(&labels.values())
                 .inc();
         }
     }
 
     /// Record a request that failed before a response arrived.
     pub(crate) fn record_transport_error(&self, client: &str, method: &Method) {
+        let labels = RequestLabels {
+            client,
+            resource: RateLimitResource::Unknown,
+            method,
+            outcome: Outcome::TransportError,
+        };
         self.requests_total
-            .with_label_values(&[
-                client,
-                "unknown",
-                method.as_str(),
-                Outcome::TransportError.as_str(),
-            ])
+            .with_label_values(&labels.values())
             .inc();
     }
 
     fn update_gauges(&self, client: &str, snapshot: &RateLimitSnapshot) {
-        let resource = snapshot.resource.as_str();
+        let labels = GaugeLabels {
+            client,
+            resource: snapshot.resource,
+        };
+        let values = labels.values();
 
-        // Only write a gauge when the response carried the header. Zero is a
-        // meaningful exhaustion signal, so there is no zero-initialization.
         if let Some(limit) = snapshot.limit {
-            self.rate_limit_limit
-                .with_label_values(&[client, resource])
-                .set(limit);
+            self.rate_limit_limit.with_label_values(&values).set(limit);
         }
         if let Some(remaining) = snapshot.remaining {
             self.rate_limit_remaining
-                .with_label_values(&[client, resource])
+                .with_label_values(&values)
                 .set(remaining);
         }
         if let Some(used) = snapshot.used {
-            self.rate_limit_used
-                .with_label_values(&[client, resource])
-                .set(used);
+            self.rate_limit_used.with_label_values(&values).set(used);
         }
         if let Some(reset) = snapshot.reset_timestamp_seconds {
             self.rate_limit_reset_timestamp_seconds
-                .with_label_values(&[client, resource])
+                .with_label_values(&values)
                 .set(reset);
         }
     }
@@ -143,8 +204,8 @@ impl GithubMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::apis::github::response::{classify, header_map, ApiKind, Outcome};
-    use crate::metrics::MetricsHandle;
+    use crate::apis::github::response::{classify, header_map, ApiKind, Outcome, RateLimitKind};
+    use crate::metrics::{label_pairs, MetricsHandle};
     use http::StatusCode;
 
     const FULL_HEADERS: &[(&str, &str)] = &[
@@ -203,15 +264,15 @@ mod tests {
         }
     }
 
-    fn record_one(case: &Case) -> String {
+    fn record_one(case: &Case) -> Result<String, Box<dyn std::error::Error>> {
         let handle = MetricsHandle::new();
-        let metrics = GithubMetrics::register(&handle).unwrap();
+        let metrics = GithubMetrics::register(&handle)?;
         metrics.record("test", &case.method, &case.snapshot, case.outcome);
-        handle.encode().unwrap()
+        Ok(handle.encode()?)
     }
 
     #[test]
-    fn records_each_outcome() {
+    fn records_each_outcome() -> Result<(), Box<dyn std::error::Error>> {
         let cases = [
             case(
                 "success with full headers",
@@ -314,7 +375,7 @@ mod tests {
         ];
 
         for case in cases {
-            let encoded = record_one(&case);
+            let encoded = record_one(&case)?;
             for fragment in case.present {
                 assert!(
                     encoded.contains(fragment),
@@ -330,18 +391,123 @@ mod tests {
                 );
             }
         }
+
+        Ok(())
     }
 
     #[test]
-    fn records_transport_errors() {
+    fn records_transport_errors() -> Result<(), Box<dyn std::error::Error>> {
         let handle = MetricsHandle::new();
-        let metrics = GithubMetrics::register(&handle).unwrap();
+        let metrics = GithubMetrics::register(&handle)?;
         metrics.record_transport_error("test", &Method::GET);
 
-        let encoded = handle.encode().unwrap();
+        let encoded = handle.encode()?;
         assert!(encoded.contains("plaid_github_api_requests_total{client=\"test\",method=\"GET\",outcome=\"transport_error\",resource=\"unknown\"} 1"));
         assert!(!encoded.contains("outcome=\"success\""));
         assert!(!encoded.contains("plaid_github_api_rate_limited_total"));
         assert!(!encoded.contains("plaid_github_api_rate_limit_limit{"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn every_series_is_registered() -> Result<(), Box<dyn std::error::Error>> {
+        let handle = MetricsHandle::new();
+        let metrics = GithubMetrics::register(&handle)?;
+        metrics.record(
+            "test",
+            &Method::GET,
+            &snapshot(FULL_HEADERS),
+            Outcome::RateLimited(RateLimitKind::Primary),
+        );
+
+        let encoded = handle.encode()?;
+        let expected = [
+            (
+                "gauge",
+                "plaid_github_api_rate_limit_limit",
+                "Rate-limit window ceiling reported by GitHub, in requests for REST and points for GraphQL",
+            ),
+            (
+                "gauge",
+                "plaid_github_api_rate_limit_remaining",
+                "Quota units remaining in the current rate-limit window",
+            ),
+            (
+                "gauge",
+                "plaid_github_api_rate_limit_used",
+                "Quota units used in the current rate-limit window",
+            ),
+            (
+                "gauge",
+                "plaid_github_api_rate_limit_reset_timestamp_seconds",
+                "Unix timestamp when the current rate-limit window resets",
+            ),
+            (
+                "counter",
+                "plaid_github_api_requests_total",
+                "Total logical GitHub API requests. octocrab retry attempts are not counted separately",
+            ),
+            (
+                "counter",
+                "plaid_github_api_rate_limited_total",
+                "Total GitHub API responses classified as primary or secondary rate limits",
+            ),
+        ];
+
+        for (kind, name, help) in expected {
+            assert!(
+                encoded.contains(&format!("# TYPE {name} {kind}")),
+                "missing # TYPE for {name}"
+            );
+            assert!(
+                encoded.contains(&format!("# HELP {name} {help}")),
+                "missing # HELP for {name}"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn every_label_set_pairs_its_names_with_values() {
+        let gauge = GaugeLabels {
+            client: "client-a",
+            resource: RateLimitResource::Core,
+        };
+        assert_eq!(
+            label_pairs(GaugeLabels::NAMES, &gauge.values()),
+            [("client", "client-a"), ("resource", "core")]
+        );
+
+        let request = RequestLabels {
+            client: "client-b",
+            resource: RateLimitResource::Search,
+            method: &Method::POST,
+            outcome: Outcome::RateLimited(RateLimitKind::Primary),
+        };
+        assert_eq!(
+            label_pairs(RequestLabels::NAMES, &request.values()),
+            [
+                ("client", "client-b"),
+                ("resource", "search"),
+                ("method", "POST"),
+                ("outcome", "rate_limited"),
+            ]
+        );
+
+        let kind = KindLabels {
+            client: "client-c",
+            resource: RateLimitResource::Graphql,
+            kind: RateLimitKind::Secondary,
+        };
+        assert_eq!(
+            label_pairs(KindLabels::NAMES, &kind.values()),
+            [
+                ("client", "client-c"),
+                ("resource", "graphql"),
+                ("kind", "secondary"),
+            ]
+        );
     }
 }
