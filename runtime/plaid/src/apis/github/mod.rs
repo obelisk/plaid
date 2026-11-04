@@ -129,44 +129,6 @@ impl Github {
             .await
     }
 
-    /// Make a generic get request to the GitHub API and also return the value of the `Link`
-    /// response header, if GitHub provided one. This is needed to follow cursor-based
-    /// pagination, where the next page is identified by a cursor embedded in the `Link`
-    /// header rather than by a page number (as is the case for Dependabot alerts).
-    async fn make_generic_get_request_with_link_header(
-        &self,
-        client_id: impl Display,
-        uri: String,
-        module: Arc<PlaidModule>,
-    ) -> Result<(u16, Option<String>, Result<String, ApiError>), ApiError> {
-        info!("Making a get request to {uri} on behalf of {module}");
-
-        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
-            ApiError::GitHubError(GitHubError::InvalidInput(format!(
-                "Client ID not found: {}",
-                client_id
-            )))
-        })?;
-
-        let request = client._get_with_headers(uri, None).await;
-
-        match request {
-            Ok(r) => {
-                let status = r.status().as_u16();
-                let link = r
-                    .headers()
-                    .get(http::header::LINK)
-                    .and_then(|value| value.to_str().ok())
-                    .map(str::to_string);
-                let body = client.body_to_string(r).await.map_err(|e| {
-                    ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                });
-                Ok((status, link, body))
-            }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
-        }
-    }
-
     /// Make a GET request with custom headers to the GitHub API using the GitHub app library.
     /// Note - This function does not do any validation on the provided headers. That's because
     /// it's not exposed to the rules but only callable from within the runtime itself. Therefore
@@ -484,39 +446,6 @@ impl Github {
     }
 }
 
-/// Extract the value of the `after` cursor from a GitHub `Link` response header.
-///
-/// GitHub returns a header of the form:
-/// `<https://api.github.com/...?after=Y3Vyc29yOnYyOpHOABc...&per_page=100>; rel="next"`
-///
-/// This function returns the `after` cursor of the `rel="next"` link, or `None` if there is
-/// no next page. Only the `after` cursor is extracted because that is the only cursor
-/// supported by the endpoints that need this (e.g. Dependabot alerts).
-fn extract_next_cursor(link_header: &str) -> Option<String> {
-    link_header
-        .split(',')
-        .filter_map(|link| {
-            let mut parts = link.split(';');
-            let url = parts.next()?.trim();
-            let is_next = parts.any(|param| {
-                let param = param.trim();
-                param
-                    .strip_prefix("rel=")
-                    .map(|rel| rel.trim_matches('"') == "next")
-                    .unwrap_or(false)
-            });
-            if !is_next {
-                return None;
-            }
-            let url = url.strip_prefix('<')?.strip_suffix('>')?;
-            let url = reqwest::Url::parse(url).ok()?;
-            url.query_pairs()
-                .find(|(key, _)| key == "after")
-                .map(|(_, value)| value.into_owned())
-        })
-        .next()
-}
-
 /// Builds an instance of a Github API client
 pub fn build_github_clients(
     authentication: &HashMap<String, Authentication>,
@@ -617,63 +546,4 @@ fn build_app_auth(
             _ => None,
         })
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::extract_next_cursor;
-
-    #[test]
-    fn extracts_after_cursor_from_next_link() {
-        let header = "<https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=Y3Vyc29yOnYyOpHOABc%3D>; rel=\"next\"";
-        assert_eq!(
-            extract_next_cursor(header),
-            Some("Y3Vyc29yOnYyOpHOABc=".to_string())
-        );
-    }
-
-    #[test]
-    fn extracts_after_cursor_when_next_link_is_not_first() {
-        let header = "<https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=abc>; rel=\"prev\", <https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=def>; rel=\"next\"";
-        assert_eq!(extract_next_cursor(header), Some("def".to_string()));
-    }
-
-    #[test]
-    fn extracts_after_cursor_containing_plus_and_slash() {
-        // Base64 cursors can contain '+' and '/'. The Link header percent-encodes them, and
-        // extract_next_cursor must decode them back to the raw cursor value.
-        let header = "<https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=%2B%2F%2B%2B>; rel=\"next\"";
-        assert_eq!(extract_next_cursor(header), Some("+/++".to_string()));
-    }
-
-    #[test]
-    fn round_trips_cursor_through_encode_and_extract() {
-        // Whatever extract_next_cursor produces must survive being percent-encoded back into
-        // a query value, which is what the runtime does when requesting the next page.
-        for raw in ["+/++", "//79", "Y3Vyc29yOnYyOpHOABc=", "a b&c=d"] {
-            let encoded = urlencoding::encode(raw);
-            let header = format!(
-                "<https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after={encoded}>; rel=\"next\""
-            );
-            assert_eq!(extract_next_cursor(&header), Some(raw.to_string()));
-        }
-    }
-
-    #[test]
-    fn returns_none_when_there_is_no_next_link() {
-        let header = "<https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=abc>; rel=\"prev\"";
-        assert_eq!(extract_next_cursor(header), None);
-    }
-
-    #[test]
-    fn returns_none_for_empty_header() {
-        assert_eq!(extract_next_cursor(""), None);
-    }
-
-    #[test]
-    fn returns_none_when_next_link_has_no_after_cursor() {
-        let header =
-            "<https://api.github.com/repos/o/r/dependabot/alerts?per_page=100>; rel=\"next\"";
-        assert_eq!(extract_next_cursor(header), None);
-    }
 }

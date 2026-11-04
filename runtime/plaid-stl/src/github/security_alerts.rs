@@ -16,9 +16,9 @@ pub struct GetDependabotAlertsParams {
     pub only_open: bool,
     /// The number of results per page (max 100).
     pub per_page: Option<u8>,
-    /// The cursor identifying the page to fetch. This is opaque and is obtained from a
-    /// previous call; rule authors should use `get_dependabot_alerts` instead of setting it.
-    pub after: Option<String>,
+    /// The URL of the page to fetch, as returned in `next_page` by a previous call. This is
+    /// opaque and rule authors should use `get_dependabot_alerts` instead of setting it.
+    pub next_page: Option<String>,
 }
 
 /// Parameters sent to the runtime when listing code scanning alerts for a repository.
@@ -38,7 +38,7 @@ pub struct GetCodeScanningAlertsParams {
 #[derive(Deserialize)]
 struct DependabotAlertsPage {
     alerts: Vec<DependabotAlert>,
-    next_cursor: Option<String>,
+    next_page: Option<String>,
 }
 
 /// Get all the Dependabot alerts for a repository.
@@ -73,7 +73,7 @@ pub fn get_dependabot_alerts(
     const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
 
     let mut alerts = Vec::<DependabotAlert>::new();
-    let mut after: Option<String> = None;
+    let mut next_page: Option<String> = None;
 
     loop {
         let params = GetDependabotAlertsParams {
@@ -81,7 +81,7 @@ pub fn get_dependabot_alerts(
             repo: repo.to_string(),
             only_open,
             per_page: Some(per_page),
-            after: after.clone(),
+            next_page: next_page.clone(),
         };
 
         let wrapper = GithubApiWrapper {
@@ -115,9 +115,9 @@ pub fn get_dependabot_alerts(
 
         alerts.extend(this_page.alerts);
 
-        // If GitHub did not give us a cursor for the next page then we are done.
-        match this_page.next_cursor {
-            Some(cursor) => after = Some(cursor),
+        // If GitHub did not give us a link to the next page then we are done.
+        match this_page.next_page {
+            Some(page) => next_page = Some(page),
             None => break,
         }
     }
@@ -399,18 +399,23 @@ mod tests {
     }
 
     #[test]
-    fn deserializes_dependabot_page_with_cursor() {
-        let json = format!(r#"{{"alerts": [{DEPENDABOT_ALERT}], "next_cursor": "abc"}}"#);
+    fn deserializes_dependabot_page_with_next_page() {
+        let json = format!(
+            r#"{{"alerts": [{DEPENDABOT_ALERT}], "next_page": "https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=abc"}}"#
+        );
         let page: DependabotAlertsPage = serde_json::from_str(&json).unwrap();
         assert_eq!(page.alerts.len(), 1);
-        assert_eq!(page.next_cursor.as_deref(), Some("abc"));
+        assert_eq!(
+            page.next_page.as_deref(),
+            Some("https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=abc")
+        );
     }
 
     #[test]
-    fn deserializes_dependabot_page_without_cursor() {
-        let json = format!(r#"{{"alerts": [{DEPENDABOT_ALERT}], "next_cursor": null}}"#);
+    fn deserializes_dependabot_page_without_next_page() {
+        let json = format!(r#"{{"alerts": [{DEPENDABOT_ALERT}], "next_page": null}}"#);
         let page: DependabotAlertsPage = serde_json::from_str(&json).unwrap();
         assert_eq!(page.alerts.len(), 1);
-        assert!(page.next_cursor.is_none());
+        assert!(page.next_page.is_none());
     }
 }
