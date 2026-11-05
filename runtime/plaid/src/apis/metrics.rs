@@ -20,6 +20,11 @@ pub struct ApiMetrics {
 }
 
 impl ApiMetrics {
+    /// Register the API metrics with the global registry.
+    ///
+    /// Only called once at boot (from `Api::new` in `main`). Panics if the metric
+    /// definitions are invalid or if the collectors are already registered, so it
+    /// must not be called again after startup.
     pub fn register(handle: &MetricsHandle) -> Self {
         let calls = IntCounterVec::new(
             Opts::new(
