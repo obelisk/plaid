@@ -20,16 +20,42 @@ impl std::fmt::Display for EncodeError {
     }
 }
 
+impl std::error::Error for EncodeError {}
+
 #[derive(Deserialize)]
 pub struct MetricsConfiguration {
     /// The address and port to listen on for Prometheus metrics scraping.
     pub listen_address: SocketAddr,
 }
 
+pub(crate) trait LabelSet {
+    const NAMES: &'static [&'static str];
+}
+
+/// Zips each declared name with the value in the same slot, so a reordered
+/// `NAMES` or a swapped `values()` fails the caller's expected pairs.
+#[cfg(test)]
+pub(crate) fn label_pairs<'a>(
+    names: &'static [&'static str],
+    values: &'a [&'a str],
+) -> Vec<(&'static str, &'a str)> {
+    assert_eq!(
+        names.len(),
+        values.len(),
+        "label names and values differ in length"
+    );
+    names.iter().copied().zip(values.iter().copied()).collect()
+}
+
 /// A generic handle to the Prometheus metrics registry.
 ///
 /// Subsystems register their own collectors (pull) or counters/gauges (push)
 /// with this handle. The metrics module itself has no domain knowledge.
+///
+/// Typed collectors are registered with the crate's
+/// `register_*_with_registry!` macros against [`MetricsHandle::registry`].
+/// `register` stays for custom `Collector` implementations such as
+/// `QueueMetrics` and for the collectors in `ModuleExecutionMetrics`.
 pub struct MetricsHandle {
     registry: Registry,
     encoder: TextEncoder,
@@ -54,5 +80,11 @@ impl MetricsHandle {
             .encode(&metric_families, &mut buffer)
             .map_err(EncodeError::Prometheus)?;
         String::from_utf8(buffer).map_err(EncodeError::Utf8)
+    }
+
+    /// The registry this handle wraps, for constructing collectors with the
+    /// `register_*_with_registry!` macros.
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
 }
