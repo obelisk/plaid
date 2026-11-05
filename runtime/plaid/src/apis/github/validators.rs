@@ -2,42 +2,12 @@ use std::collections::HashMap;
 
 use plaid_stl::github::PullRequestReviewEvent;
 
-use crate::apis::ApiError;
+use crate::apis::{
+    validators::{create_regex_validator_func, define_regex_validator},
+    ApiError,
+};
 
 use super::{GitHubError, Github};
-
-/// Macro that compiles a regex validator and inserts it into a list of available validators.
-macro_rules! define_regex_validator {
-    ($validators:expr,$validator:tt,$regex: tt) => {
-        $validators.insert(
-            $validator,
-            regex::Regex::new($regex)
-                .expect(format!("Failed to create {} validator", stringify!($validator)).as_str()),
-        );
-    };
-}
-
-/// Macro that creates a function which uses a given validator to validate an input.
-macro_rules! create_regex_validator_func {
-    ($validator:ident) => {
-        paste::item! {
-            impl Github {
-                pub fn [< validate_ $validator>]<'a> (&self, value_to_validate: &'a str) -> Result<&'a str, ApiError> {
-                    let validator = if let Some(validator) = self.validators.get(stringify!($validator)) {
-                        validator
-                    } else {
-                        error!("Validator {} not found in GitHub API. This should be impossible.", stringify!($validator));
-                        return Err(ApiError::ImpossibleError);
-                    };
-
-                    validator.is_match(value_to_validate)
-                        .then(|| value_to_validate)
-                        .ok_or(ApiError::GitHubError(GitHubError::InvalidInput(value_to_validate.to_string())))
-                }
-            }
-        }
-    }
-}
 
 /// Initialize all available validators.
 pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
@@ -85,20 +55,29 @@ pub fn create_validators() -> HashMap<&'static str, regex::Regex> {
     validators
 }
 
-create_regex_validator_func!(repository_name);
-create_regex_validator_func!(username);
-create_regex_validator_func!(org);
-create_regex_validator_func!(team_slug);
-create_regex_validator_func!(commit_hash);
-create_regex_validator_func!(pint);
-create_regex_validator_func!(branch_name);
-create_regex_validator_func!(environment_name);
-create_regex_validator_func!(secret_name);
-create_regex_validator_func!(filename);
-create_regex_validator_func!(extension);
-create_regex_validator_func!(path);
-create_regex_validator_func!(event_type);
-create_regex_validator_func!(contains_parent_directory_component);
+/// Register a GitHub validator, mapping rejections to `GitHubError::InvalidInput`.
+macro_rules! github_validator {
+    ($validator:ident) => {
+        create_regex_validator_func!(Github, $validator, |value| ApiError::GitHubError(
+            GitHubError::InvalidInput(value)
+        ));
+    };
+}
+
+github_validator!(repository_name);
+github_validator!(username);
+github_validator!(org);
+github_validator!(team_slug);
+github_validator!(commit_hash);
+github_validator!(pint);
+github_validator!(branch_name);
+github_validator!(environment_name);
+github_validator!(secret_name);
+github_validator!(filename);
+github_validator!(extension);
+github_validator!(path);
+github_validator!(event_type);
+github_validator!(contains_parent_directory_component);
 
 impl Github {
     pub fn validate_user_id<'a>(&self, user_id: &'a str) -> Result<&'a str, ApiError> {
