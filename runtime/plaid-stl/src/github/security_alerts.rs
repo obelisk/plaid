@@ -14,11 +14,6 @@ pub struct GetDependabotAlertsParams {
     pub repo: String,
     /// When true, only open alerts are returned.
     pub only_open: bool,
-    /// The number of results per page (max 100).
-    pub per_page: Option<u8>,
-    /// The URL of the page to fetch, as returned in `next_page` by a previous call. This is
-    /// opaque and rule authors should use `get_dependabot_alerts` instead of setting it.
-    pub next_page: Option<String>,
 }
 
 /// Parameters sent to the runtime when listing code scanning alerts for a repository.
@@ -28,23 +23,13 @@ pub struct GetCodeScanningAlertsParams {
     pub repo: String,
     /// When true, only open alerts are returned.
     pub only_open: bool,
-    /// The number of results per page (max 100).
-    pub per_page: Option<u8>,
-    /// The page number of the results to fetch.
-    pub page: Option<u16>,
-}
-
-/// The response returned by the runtime when listing Dependabot alerts.
-#[derive(Deserialize)]
-struct DependabotAlertsPage {
-    alerts: Vec<DependabotAlert>,
-    next_page: Option<String>,
 }
 
 /// Get all the Dependabot alerts for a repository.
 ///
-/// This function transparently walks through all the pages of results, so the returned
-/// vector contains every alert that matches the request.
+/// The runtime walks every page of results internally, so a single call returns the full
+/// list. At most 2000 alerts are returned; if the repository has more, the first 2000 are
+/// returned and the runtime logs a warning.
 ///
 /// See https://docs.github.com/en/rest/dependabot/alerts?apiVersion=2026-03-10#list-dependabot-alerts-for-a-repository
 ///
@@ -67,68 +52,50 @@ pub fn get_dependabot_alerts(
         new_host_function_with_error_buffer!(github, get_dependabot_alerts);
     }
 
-    // Use the largest page size to make as few requests as possible.
-    let per_page = 100;
+    // Sized for the runtime's 2000-alert cap. A fully populated Dependabot alert is roughly
+    // 2.5 KiB of JSON, so 2000 of them need about 5 MiB.
+    const RETURN_BUFFER_SIZE: usize = 8 * 1024 * 1024; // 8 MiB
 
-    const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
+    let params = GetDependabotAlertsParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        only_open,
+    };
 
-    let mut alerts = Vec::<DependabotAlert>::new();
-    let mut next_page: Option<String> = None;
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
 
-    loop {
-        let params = GetDependabotAlertsParams {
-            owner: owner.to_string(),
-            repo: repo.to_string(),
-            only_open,
-            per_page: Some(per_page),
-            next_page: next_page.clone(),
-        };
+    let request = serde_json::to_string(&wrapper).unwrap(); // safe unwrap
 
-        let wrapper = GithubApiWrapper {
-            client_id: client_id.to_string(),
-            params,
-        };
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-        let request = serde_json::to_string(&wrapper).unwrap(); // safe unwrap
+    let res = unsafe {
+        github_get_dependabot_alerts(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
 
-        let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
-
-        let res = unsafe {
-            github_get_dependabot_alerts(
-                request.as_bytes().as_ptr(),
-                request.as_bytes().len(),
-                return_buffer.as_mut_ptr(),
-                RETURN_BUFFER_SIZE,
-            )
-        };
-
-        if res < 0 {
-            return Err(res.into());
-        }
-
-        return_buffer.truncate(res as usize);
-        // This should be safe because unless the Plaid runtime is expressly trying
-        // to mess with us, this came from a String in the API module.
-        let this_page = String::from_utf8(return_buffer).unwrap();
-        let this_page = serde_json::from_str::<DependabotAlertsPage>(&this_page)
-            .map_err(|_| PlaidFunctionError::InternalApiError)?;
-
-        alerts.extend(this_page.alerts);
-
-        // If GitHub did not give us a link to the next page then we are done.
-        match this_page.next_page {
-            Some(page) => next_page = Some(page),
-            None => break,
-        }
+    if res < 0 {
+        return Err(res.into());
     }
 
-    Ok(alerts)
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response = String::from_utf8(return_buffer).unwrap();
+    serde_json::from_str(&response).map_err(|_| PlaidFunctionError::InternalApiError)
 }
 
 /// Get all the code scanning alerts for a repository.
 ///
-/// This function transparently walks through all the pages of results, so the returned
-/// vector contains every alert that matches the request.
+/// The runtime walks every page of results internally, so a single call returns the full
+/// list. At most 2000 alerts are returned; if the repository has more, the first 2000 are
+/// returned and the runtime logs a warning.
 ///
 /// See https://docs.github.com/en/rest/code-scanning/code-scanning?apiVersion=2026-03-10#list-code-scanning-alerts-for-a-repository
 ///
@@ -151,64 +118,43 @@ pub fn get_code_scanning_alerts(
         new_host_function_with_error_buffer!(github, get_code_scanning_alerts);
     }
 
-    // Use the largest page size to make as few requests as possible.
-    let per_page = 100;
+    // Sized for the runtime's 2000-alert cap. A fully populated code scanning alert is
+    // roughly 1.5 KiB of JSON, so 2000 of them need about 3 MiB.
+    const RETURN_BUFFER_SIZE: usize = 8 * 1024 * 1024; // 8 MiB
 
-    const RETURN_BUFFER_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
+    let params = GetCodeScanningAlertsParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        only_open,
+    };
 
-    let mut alerts = Vec::<CodeScanningAlert>::new();
-    let mut page: u16 = 1;
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
 
-    loop {
-        let params = GetCodeScanningAlertsParams {
-            owner: owner.to_string(),
-            repo: repo.to_string(),
-            only_open,
-            per_page: Some(per_page),
-            page: Some(page),
-        };
+    let request = serde_json::to_string(&wrapper).unwrap(); // safe unwrap
 
-        let wrapper = GithubApiWrapper {
-            client_id: client_id.to_string(),
-            params,
-        };
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
-        let request = serde_json::to_string(&wrapper).unwrap(); // safe unwrap
+    let res = unsafe {
+        github_get_code_scanning_alerts(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
 
-        let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
-
-        let res = unsafe {
-            github_get_code_scanning_alerts(
-                request.as_bytes().as_ptr(),
-                request.as_bytes().len(),
-                return_buffer.as_mut_ptr(),
-                RETURN_BUFFER_SIZE,
-            )
-        };
-
-        if res < 0 {
-            return Err(res.into());
-        }
-
-        return_buffer.truncate(res as usize);
-        // This should be safe because unless the Plaid runtime is expressly trying
-        // to mess with us, this came from a String in the API module.
-        let this_page = String::from_utf8(return_buffer).unwrap();
-        let this_page = serde_json::from_str::<Vec<CodeScanningAlert>>(&this_page)
-            .map_err(|_| PlaidFunctionError::InternalApiError)?;
-
-        let alerts_returned = this_page.len();
-        alerts.extend(this_page);
-
-        // If we did not fill this page, we know there won't be a next one.
-        if alerts_returned < per_page as usize {
-            break;
-        }
-
-        page += 1;
+    if res < 0 {
+        return Err(res.into());
     }
 
-    Ok(alerts)
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response = String::from_utf8(return_buffer).unwrap();
+    serde_json::from_str(&response).map_err(|_| PlaidFunctionError::InternalApiError)
 }
 
 #[cfg(test)]
@@ -399,23 +345,19 @@ mod tests {
     }
 
     #[test]
-    fn deserializes_dependabot_page_with_next_page() {
-        let json = format!(
-            r#"{{"alerts": [{DEPENDABOT_ALERT}], "next_page": "https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=abc"}}"#
-        );
-        let page: DependabotAlertsPage = serde_json::from_str(&json).unwrap();
-        assert_eq!(page.alerts.len(), 1);
-        assert_eq!(
-            page.next_page.as_deref(),
-            Some("https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=abc")
-        );
+    fn deserializes_dependabot_alert_list() {
+        // The runtime returns a bare JSON array of alerts.
+        let json = format!(r#"[{DEPENDABOT_ALERT}]"#);
+        let alerts: Vec<DependabotAlert> = serde_json::from_str(&json).unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].number, 1);
     }
 
     #[test]
-    fn deserializes_dependabot_page_without_next_page() {
-        let json = format!(r#"{{"alerts": [{DEPENDABOT_ALERT}], "next_page": null}}"#);
-        let page: DependabotAlertsPage = serde_json::from_str(&json).unwrap();
-        assert_eq!(page.alerts.len(), 1);
-        assert!(page.next_page.is_none());
+    fn deserializes_code_scanning_alert_list() {
+        let json = format!(r#"[{CODE_SCANNING_ALERT}]"#);
+        let alerts: Vec<CodeScanningAlert> = serde_json::from_str(&json).unwrap();
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].number, 4);
     }
 }

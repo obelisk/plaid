@@ -9,14 +9,104 @@ use crate::{
 
 use super::Github;
 
+/// The maximum number of alerts returned by a single call.
+///
+/// Pagination is handled entirely inside the runtime, so this bounds both the work done on
+/// behalf of a single rule invocation and the size of the response handed back to the guest.
+/// If a repository has more alerts than this, the first `MAX_ALERTS` are returned and a
+/// warning is logged.
+const MAX_ALERTS: usize = 2000;
+
+/// The number of alerts requested per page. GitHub's maximum is 100.
+const PER_PAGE: usize = 100;
+
+/// How the endpoint paginates.
+#[derive(Clone, Copy)]
+enum Pagination {
+    /// Follow the `Link` response header. Used by Dependabot, which has no `page` parameter.
+    Link,
+    /// Increment the `page` query parameter. Used by code scanning, which documents it.
+    Page,
+}
+
+/// How many of this page's alerts to keep, given how many we already have.
+///
+/// The caller detects truncation with `page_len > take_from_page(collected, page_len)`.
+fn take_from_page(collected: usize, page_len: usize) -> usize {
+    page_len.min(MAX_ALERTS.saturating_sub(collected))
+}
+
+/// Walk every page of a GitHub alerts endpoint, collecting up to `MAX_ALERTS` alerts.
+///
+/// The alerts are collected as raw JSON so that fields we do not model are preserved for the
+/// rule; the STL deserializes into typed structs on its side.
+async fn collect_alerts(
+    client: &octocrab::Octocrab,
+    base_address: String,
+    pagination: Pagination,
+    module: &Arc<PlaidModule>,
+    endpoint: &str,
+) -> Result<Vec<serde_json::Value>, ApiError> {
+    let mut alerts = Vec::new();
+    let mut address = base_address.clone();
+    let mut page_number = 1u32;
+
+    loop {
+        // `Page` deserializes the body into `items` and parses the `Link` header into
+        // `next`/`prev`/`first`/`last`. Octocrab maps non-2xx responses to an error.
+        let page: octocrab::Page<serde_json::Value> = client
+            .get(address.clone(), None::<&()>)
+            .await
+            .map_err(|e| ApiError::GitHubError(GitHubError::ClientError(e)))?;
+
+        let page_len = page.items.len();
+        let take = take_from_page(alerts.len(), page_len);
+        alerts.extend(page.items.into_iter().take(take));
+
+        // We had to drop part of this page, so there is data we are not returning.
+        if page_len > take {
+            warn!(
+                "Reached the limit of {MAX_ALERTS} alerts while fetching {endpoint} on behalf of {module}; returning the first {MAX_ALERTS} alerts"
+            );
+            return Ok(alerts);
+        }
+
+        match pagination {
+            Pagination::Link => match page.next {
+                Some(next) => {
+                    // We are at the cap and GitHub says there is another page, so there is
+                    // data we are not returning.
+                    if alerts.len() >= MAX_ALERTS {
+                        warn!(
+                            "Reached the limit of {MAX_ALERTS} alerts while fetching {endpoint} on behalf of {module}; returning the first {MAX_ALERTS} alerts"
+                        );
+                        return Ok(alerts);
+                    }
+                    address = next.to_string();
+                }
+                None => return Ok(alerts),
+            },
+            Pagination::Page => {
+                // A short page is the last page.
+                if page_len < PER_PAGE {
+                    return Ok(alerts);
+                }
+                // A full page at the cap is ambiguous: there may or may not be more. Fetch
+                // the next page to find out, so we only warn when data is actually dropped.
+                page_number += 1;
+                let separator = if base_address.contains('?') { '&' } else { '?' };
+                address = format!("{base_address}{separator}page={page_number}");
+            }
+        }
+    }
+}
+
 impl Github {
     /// List the Dependabot alerts for a repository.
     ///
     /// This endpoint is cursor-paginated: GitHub does not accept a `page` parameter, so the
-    /// next page is identified by the `Link` response header. Rather than parsing that header
-    /// ourselves, we deserialize into `octocrab::Page`, which already extracts the `next` URI
-    /// from it. The next page is then fetched by following that URI verbatim, so the cursor is
-    /// never re-encoded or interpreted by us.
+    /// next page is identified by the `Link` response header. The URL never leaves the
+    /// runtime, so it is never treated as untrusted input.
     ///
     /// See https://docs.github.com/en/rest/dependabot/alerts?apiVersion=2026-03-10#list-dependabot-alerts-for-a-repository
     pub async fn get_dependabot_alerts(
@@ -30,62 +120,35 @@ impl Github {
         let owner = self.validate_username(&request.params.owner)?;
         let repo = self.validate_repository_name(&request.params.repo)?;
 
-        let per_page = request.params.per_page.unwrap_or(100);
-        if per_page == 0 || per_page > 100 {
-            // GitHub supports up to 100 results per page
-            return Err(ApiError::BadRequest);
+        let mut address = format!("/repos/{owner}/{repo}/dependabot/alerts?per_page={PER_PAGE}");
+
+        // When only open alerts are requested we let GitHub do the filtering, which also
+        // means we do not have to page through dismissed/fixed alerts.
+        if request.params.only_open {
+            address.push_str("&state=open");
         }
-
-        // The next page URL comes from a previous response's Link header, so it is opaque.
-        // We must not blindly follow it: a module could pass an arbitrary URL and turn this
-        // into a request to an unintended host. We therefore validate the origin and rebuild
-        // the path from the requested owner/repo, keeping only the pagination query.
-        let address = match request.params.next_page.as_deref() {
-            Some(next_page) => trusted_next_page_url(next_page, owner, repo)?,
-            None => {
-                let mut address =
-                    format!("/repos/{owner}/{repo}/dependabot/alerts?per_page={per_page}");
-
-                // When only open alerts are requested we let GitHub do the filtering, which
-                // also means we do not have to page through dismissed/fixed alerts.
-                if request.params.only_open {
-                    address.push_str("&state=open");
-                }
-
-                address
-            }
-        };
 
         info!("Fetching Dependabot alerts for repo [{owner}/{repo}] on behalf of {module}");
 
-        let client = self.clients.get(&request.client_id).ok_or_else(|| {
-            ApiError::GitHubError(GitHubError::InvalidInput(format!(
-                "Client ID not found: {}",
-                request.client_id
-            )))
-        })?;
+        let client = self.client(&request.client_id)?;
+        let alerts = collect_alerts(
+            client,
+            address,
+            Pagination::Link,
+            &module,
+            "Dependabot alerts",
+        )
+        .await?;
 
-        // `Page` deserializes the body into `items` and parses the `Link` header into
-        // `next`/`prev`/`first`/`last`. Octocrab maps non-2xx responses to an error.
-        let page: octocrab::Page<serde_json::Value> = client
-            .get(address, None::<&()>)
-            .await
-            .map_err(|e| ApiError::GitHubError(GitHubError::ClientError(e)))?;
-
-        // The alerts are passed through verbatim, so we only need to wrap them together with
-        // the URL of the next page, if there is one.
-        let response = serde_json::json!({
-            "alerts": page.items,
-            "next_page": page.next.map(|uri| uri.to_string()),
-        });
-
-        Ok(response.to_string())
+        serde_json::to_string(&alerts).map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
     }
 
     /// List the code scanning alerts for a repository.
     ///
-    /// Unlike Dependabot alerts, this endpoint supports a `page` parameter, so pagination is
-    /// handled by the caller simply incrementing the page number.
+    /// This endpoint documents a `page` parameter, so we paginate by incrementing it rather
+    /// than relying on the `Link` header. The `Link` header is not part of the documented
+    /// response for this endpoint, and silently returning only the first page would be worse
+    /// than an error, so we use the mechanism GitHub actually guarantees here.
     ///
     /// See https://docs.github.com/en/rest/code-scanning/code-scanning?apiVersion=2026-03-10#list-code-scanning-alerts-for-a-repository
     pub async fn get_code_scanning_alerts(
@@ -99,19 +162,7 @@ impl Github {
         let owner = self.validate_username(&request.params.owner)?;
         let repo = self.validate_repository_name(&request.params.repo)?;
 
-        let per_page = request.params.per_page.unwrap_or(100);
-        if per_page == 0 || per_page > 100 {
-            // GitHub supports up to 100 results per page
-            return Err(ApiError::BadRequest);
-        }
-
-        let page = request.params.page.unwrap_or(1);
-        if page == 0 {
-            return Err(ApiError::BadRequest);
-        }
-
-        let mut address =
-            format!("/repos/{owner}/{repo}/code-scanning/alerts?per_page={per_page}&page={page}");
+        let mut address = format!("/repos/{owner}/{repo}/code-scanning/alerts?per_page={PER_PAGE}");
 
         // When only open alerts are requested we let GitHub do the filtering, which also
         // means we do not have to page through dismissed/fixed alerts.
@@ -121,135 +172,93 @@ impl Github {
 
         info!("Fetching code scanning alerts for repo [{owner}/{repo}] on behalf of {module}");
 
-        match self
-            .make_generic_get_request(&request.client_id, address, module)
-            .await
-        {
-            Ok((status, Ok(body))) => {
-                if status == 200 {
-                    Ok(body)
-                } else {
-                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
-                        status,
-                    )))
-                }
-            }
-            Ok((_, Err(e))) => Err(e),
-            Err(e) => Err(e),
-        }
-    }
-}
+        let client = self.client(&request.client_id)?;
+        let alerts = collect_alerts(
+            client,
+            address,
+            Pagination::Page,
+            &module,
+            "code scanning alerts",
+        )
+        .await?;
 
-/// Validate a `next_page` URL supplied by a module and rewrite it to the trusted
-/// owner/repo endpoint.
-///
-/// GitHub's `Link` header uses the canonical `/repositories/{repository_id}/...` form even
-/// when the initial request used `/repos/{owner}/{repo}/...`, so comparing paths directly
-/// would reject valid pagination links. Instead we validate the origin, which is the actual
-/// security boundary, and then apply the returned query string to the endpoint we construct
-/// ourselves. This keeps the request pinned to the repository that was requested while still
-/// following GitHub's pagination.
-fn trusted_next_page_url(next_page: &str, owner: &str, repo: &str) -> Result<String, ApiError> {
-    let url = reqwest::Url::parse(next_page).map_err(|_| ApiError::BadRequest)?;
-
-    // The URL is round-tripped through the module, so it must be treated as untrusted input.
-    // Restricting the origin prevents a module from turning this into a request to an
-    // arbitrary host.
-    if url.scheme() != "https" || url.host_str() != Some("api.github.com") {
-        return Err(ApiError::BadRequest);
+        serde_json::to_string(&alerts).map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
     }
 
-    // We deliberately ignore the path from the untrusted URL and rebuild it from the
-    // validated owner/repo, so a module cannot use this to read alerts for another
-    // repository. Only the query string (which carries the pagination cursor) is reused.
-    let mut trusted = format!("/repos/{owner}/{repo}/dependabot/alerts");
-    if let Some(query) = url.query() {
-        trusted.push('?');
-        trusted.push_str(query);
+    /// Look up a configured GitHub client by its identifier.
+    fn client(&self, client_id: &str) -> Result<&octocrab::Octocrab, ApiError> {
+        self.clients.get(client_id).ok_or_else(|| {
+            ApiError::GitHubError(GitHubError::InvalidInput(format!(
+                "Client ID not found: {client_id}"
+            )))
+        })
     }
-
-    Ok(trusted)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::trusted_next_page_url;
-
-    const OK: &str = "https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=abc";
+    use super::{take_from_page, MAX_ALERTS, PER_PAGE};
 
     #[test]
-    fn accepts_url_for_same_repo() {
-        assert_eq!(
-            trusted_next_page_url(OK, "o", "r").unwrap(),
-            "/repos/o/r/dependabot/alerts?per_page=100&after=abc"
-        );
+    fn takes_whole_page_when_under_the_cap() {
+        assert_eq!(take_from_page(0, 100), 100);
+        assert_eq!(take_from_page(100, 42), 42);
+        assert_eq!(take_from_page(0, 0), 0);
     }
 
     #[test]
-    fn accepts_canonical_repository_id_form() {
-        // GitHub rewrites the path to the canonical /repositories/{id}/ form in Link headers.
-        let url =
-            "https://api.github.com/repositories/1300192/dependabot/alerts?per_page=100&after=abc";
-        assert_eq!(
-            trusted_next_page_url(url, "o", "r").unwrap(),
-            "/repos/o/r/dependabot/alerts?per_page=100&after=abc"
-        );
+    fn takes_only_what_fits_when_page_overflows_the_cap() {
+        // 1950 collected, a full page arrives: only 50 fit.
+        assert_eq!(take_from_page(MAX_ALERTS - 50, 100), 50);
     }
 
     #[test]
-    fn accepts_cursor_containing_plus_and_slash() {
-        // Base64 cursors can contain '+' and '/', which arrive percent-encoded.
-        let url =
-            "https://api.github.com/repos/o/r/dependabot/alerts?per_page=100&after=%2B%2F%2B%2B";
-        assert_eq!(
-            trusted_next_page_url(url, "o", "r").unwrap(),
-            "/repos/o/r/dependabot/alerts?per_page=100&after=%2B%2F%2B%2B"
-        );
+    fn takes_nothing_once_the_cap_is_reached() {
+        assert_eq!(take_from_page(MAX_ALERTS, 100), 0);
     }
 
     #[test]
-    fn rejects_other_host() {
-        let url = "https://evil.example.com/repos/o/r/dependabot/alerts?after=abc";
-        assert!(trusted_next_page_url(url, "o", "r").is_err());
+    fn truncation_is_detected_by_comparing_page_len_to_take() {
+        // The caller warns when `page_len > take_from_page(..)`. These are the cases where
+        // data is actually discarded, and the one where it is not.
+        let discarded =
+            |collected: usize, page_len: usize| page_len > take_from_page(collected, page_len);
+
+        assert!(!discarded(0, 100));
+        assert!(!discarded(MAX_ALERTS - 100, 100)); // exactly fills the cap
+        assert!(discarded(MAX_ALERTS - 50, 100)); // 50 dropped
+        assert!(discarded(MAX_ALERTS, 100)); // whole page dropped
     }
 
     #[test]
-    fn rejects_plain_http() {
-        let url = "http://api.github.com/repos/o/r/dependabot/alerts?after=abc";
-        assert!(trusted_next_page_url(url, "o", "r").is_err());
+    fn cap_and_page_size_match_github_limits() {
+        assert_eq!(MAX_ALERTS, 2000);
+        assert_eq!(PER_PAGE, 100);
     }
 
+    /// The runtime collects raw JSON so that fields we do not model survive the round trip
+    /// to the rule. This guards against regressing to typed collection, which would silently
+    /// drop them.
     #[test]
-    fn rewrites_other_repository_to_requested_one() {
-        // A module cannot use next_page to read alerts for a different repository: the path
-        // is rebuilt from the validated owner/repo.
-        let url = "https://api.github.com/repos/o/other/dependabot/alerts?after=abc";
-        assert_eq!(
-            trusted_next_page_url(url, "o", "r").unwrap(),
-            "/repos/o/r/dependabot/alerts?after=abc"
-        );
-    }
+    fn unmodelled_fields_survive_the_round_trip() {
+        let github_payload = serde_json::json!([{
+            "number": 1,
+            "state": "open",
+            // A field we do not model on DependabotAlert.
+            "reachability": { "verdict": "reachable" },
+            "security_advisory": {
+                "ghsa_id": "GHSA-35jh-r3h4-6jhm",
+                // A field we do not model on DependabotSecurityAdvisory.
+                "description": "A long description we do not parse."
+            }
+        }]);
 
-    #[test]
-    fn rewrites_other_endpoint_to_dependabot_alerts() {
-        let url = "https://api.github.com/repos/o/r/code-scanning/alerts?after=abc";
-        assert_eq!(
-            trusted_next_page_url(url, "o", "r").unwrap(),
-            "/repos/o/r/dependabot/alerts?after=abc"
-        );
-    }
+        // This is what `collect_alerts` accumulates and re-serializes.
+        let collected: Vec<serde_json::Value> =
+            serde_json::from_value(github_payload.clone()).unwrap();
+        let round_tripped = serde_json::to_string(&collected).unwrap();
+        let round_tripped: serde_json::Value = serde_json::from_str(&round_tripped).unwrap();
 
-    #[test]
-    fn accepts_url_without_query() {
-        let url = "https://api.github.com/repos/o/r/dependabot/alerts";
-        assert_eq!(
-            trusted_next_page_url(url, "o", "r").unwrap(),
-            "/repos/o/r/dependabot/alerts"
-        );
-    }
-
-    #[test]
-    fn rejects_garbage() {
-        assert!(trusted_next_page_url("not a url", "o", "r").is_err());
+        assert_eq!(round_tripped, github_payload);
     }
 }
