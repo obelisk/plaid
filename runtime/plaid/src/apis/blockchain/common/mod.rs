@@ -300,7 +300,7 @@ impl<C: ChainFamily> BlockchainClient<C> {
                 max_retries,
             } => {
                 if let Some(selector) = overrides.get(&identifier) {
-                    trace!(
+                    info!(
                         "RPC call [{}] via override node pool on behalf of module [{module}]",
                         json_rpc_request.method,
                     );
