@@ -10,6 +10,10 @@ SECRET_WORKING_PATH="/tmp/plaid_config/secrets.example.toml"
 export REQUEST_HANDLER=$(pwd)/runtime/target/release/request_handler
 REPO_ROOT="$(pwd)"
 
+# Shared helpers (wait_for_port, wait_for_lines, ...) used by this script and by
+# the per-module harnesses it invokes.
+source "$REPO_ROOT/modules/tests/common/harness_lib.sh"
+
 start_plaid() {
   RUST_LOG=plaid=debug,aws_config=debug,aws_sdk_dynamodb=debug cargo run --release --bin plaid \
     --no-default-features \
@@ -20,7 +24,10 @@ start_plaid() {
   PLAID_PID=$!
 
   local url="http://localhost:8081/ready"
-  local timeout=120
+  # The LLVM backend compiles every module at boot, which takes minutes on a
+  # 4-vCPU CI runner. A short deadline here shows up as a spurious "did not
+  # return HTTP 200" failure on the llvm legs.
+  local timeout=600
   local interval=5
   local deadline=$((SECONDS + timeout))
 
@@ -262,7 +269,13 @@ if [ $? -ne 0 ]; then
 fi
 RH_PID=$!
 
-sleep 2
+# The handler must be accepting connections before Plaid's logbacks are sent,
+# otherwise they are dropped and the test fails with a confusing diff.
+wait_for_port 8998 30 || {
+  echo "Request handler never started listening on 127.0.0.1:8998"
+  kill "$RH_PID" 2>/dev/null || true
+  exit 1
+}
 
 # Flood Plaid with logs then immediately send the SIGTERM
 echo "Submitting $LOG_COUNT logs..."
@@ -284,14 +297,28 @@ echo "Sending SIGTERM to Plaid..."
 kill "$PLAID_PID"
 wait "$PLAID_PID"
 
-# Kill request handler before checking file
-kill "$RH_PID"
+# Kill request handler before checking file, and wait for it to actually exit so
+# that every line it received has been flushed to disk.
+kill "$RH_PID" 2>/dev/null || true
+wait "$RH_PID" 2>/dev/null || true
 
 # Validate all expected outputs were written
 if [ ! -f "$FILE" ]; then
   echo "Expected output file not found: $FILE"
   exit 1
 fi
+
+# Give the handler a moment to flush the last logbacks rather than assuming the
+# file is complete the instant the process is signalled.
+deadline=$((SECONDS + 30))
+while (( SECONDS < deadline )); do
+  webhook_count=$(grep -c "^webhook_[0-9]\+$" "$FILE" || true)
+  logback_count=$(grep -c "^logback_[0-9]\+$" "$FILE" || true)
+  if (( webhook_count >= LOG_COUNT && logback_count >= LOG_COUNT )); then
+    break
+  fi
+  sleep 0.1
+done
 
 expected=$(mktemp)
 seq 1 "$LOG_COUNT" > "$expected"
