@@ -1,5 +1,8 @@
 #!/bin/bash
 set -e
+
+source "$(dirname "$0")/../../common/harness_lib.sh"
+
 # If GITHUB_ACTIONS is not set, skip because Plaid won't be running
 # with the Slack API properly configured
 if [ -z "$GITHUB_ACTIONS" ]; then
@@ -24,13 +27,12 @@ if [ $? -ne 0 ]; then
 fi
 
 RH_PID=$!
-
-
+wait_for_request_handler $RH_PID
 
 # Call the webhook
 OUTPUT=$(curl -XPOST -d 'slack_input' http://$PLAID_LOCATION/webhook/$URL)
-sleep 2
-kill $RH_PID 2>&1 > /dev/null
+wait_for_lines $FILE 5 60
+stop_request_handler $RH_PID
 
 echo -e "OK\nOK\nOK\nOK\nOK" > expected.txt
 diff expected.txt $FILE

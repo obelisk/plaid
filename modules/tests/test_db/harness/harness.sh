@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source "$(dirname "$0")/../../common/harness_lib.sh"
+
 # Define what webhook within Plaid we're going to call
 URL="testdb"
 FILE="received_data.$URL.txt"
@@ -13,8 +15,8 @@ if [ $? -ne 0 ]; then
 fi
 
 RH_PID=$!
+wait_for_request_handler $RH_PID
 
-sleep 2
 # Call the webhook
 curl -d "get:some_key" http://$PLAID_LOCATION/webhook/$URL
 curl -d "insert:my_key:first_value" http://$PLAID_LOCATION/webhook/$URL
@@ -67,9 +69,9 @@ curl -d "get:key1" http://$PLAID_LOCATION/webhook/$URL
 curl -d "get:key2" http://$PLAID_LOCATION/webhook/$URL
 curl -d "get:key3" http://$PLAID_LOCATION/webhook/$URL
 
-sleep 2
+wait_for_lines $FILE 18
 
-kill $RH_PID 2>&1 > /dev/null
+stop_request_handler $RH_PID
 
 # The response from the webhook should be the following:
 # Empty

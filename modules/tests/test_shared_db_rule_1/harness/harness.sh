@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source "$(dirname "$0")/../../common/harness_lib.sh"
+
 # Define what webhook within Plaid we're going to call
 URL1="testshareddb_1"
 FILE="received_data.$URL1.txt"
@@ -14,9 +16,9 @@ if [ $? -ne 0 ]; then
 fi
 
 RH_PID=$!
+wait_for_request_handler $RH_PID
 
 # Call the webhook
-sleep 2
 curl -d "read and fail to write" http://$PLAID_LOCATION/webhook/$URL1
 sleep 2
 curl -d "write and check" http://$PLAID_LOCATION/webhook/$URL2
@@ -40,7 +42,7 @@ sleep 2
 curl -d "write to non-existing db" http://$PLAID_LOCATION/webhook/$URL2
 sleep 2
 
-kill $RH_PID 2>&1 > /dev/null
+stop_request_handler $RH_PID
 
 echo -e "OK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK\nOK" > expected.txt
 diff expected.txt $FILE
