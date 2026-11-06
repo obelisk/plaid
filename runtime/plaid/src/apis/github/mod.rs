@@ -11,6 +11,7 @@ mod pull_requests;
 mod refs;
 mod repos;
 mod secrets;
+mod security_alerts;
 mod teams;
 mod validators;
 
@@ -422,18 +423,25 @@ impl Github {
         let mut request = client
             .delete(&uri)
             .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
-            .header(USER_AGENT, format!("Rust/Plaid{}", env!("CARGO_PKG_VERSION")));
+            .header(
+                USER_AGENT,
+                format!("Rust/Plaid{}", env!("CARGO_PKG_VERSION")),
+            );
 
         if let Some(body) = body {
             request = request.json(body);
         }
 
-        let response = request.send().await.map_err(|e| ApiError::NetworkError(e))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|e| ApiError::NetworkError(e))?;
 
         let status = response.status().as_u16();
-        let body = response.text().await.map_err(|e| {
-            ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-        });
+        let body = response
+            .text()
+            .await
+            .map_err(|e| ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string())));
         Ok((status, body))
     }
 }

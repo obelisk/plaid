@@ -423,6 +423,8 @@ impl_new_function_with_error_buffer!(
 impl_new_function_with_error_buffer!(github, get_branch_protection_rules, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_branch_protection_ruleset, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_repository_collaborators, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_dependabot_alerts, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_code_scanning_alerts, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, search_code, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, list_seats_in_org_copilot, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, add_users_to_org_copilot, DISALLOW_IN_TEST_MODE);
@@ -896,6 +898,8 @@ define_api_functions! {
         "github_get_branch_protection_rules"               => github_get_branch_protection_rules,
         "github_get_branch_protection_ruleset"             => github_get_branch_protection_ruleset,
         "github_get_repository_collaborators"              => github_get_repository_collaborators,
+        "github_get_dependabot_alerts"                     => github_get_dependabot_alerts,
+        "github_get_code_scanning_alerts"                  => github_get_code_scanning_alerts,
         "github_get_custom_properties_values"              => github_get_custom_properties_values,
         "github_check_codeowners_file"                     => github_check_codeowners_file,
         "github_update_branch_protection_rule"             => github_update_branch_protection_rule,
