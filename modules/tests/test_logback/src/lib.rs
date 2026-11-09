@@ -24,12 +24,18 @@ fn handle_get() -> Result<Option<String>, i32> {
 fn handle_logback() -> Result<Option<String>, i32> {
     plaid::cache::insert(CACHE_KEY, "1").unwrap();
 
+    // Emit a marker so the harness can observe that the log back has actually
+    // been delivered. The delayed-logback processor polls on an interval, so
+    // the log back can arrive well after the delay requested above; without a
+    // marker the harness has no way to know when it is safe to continue.
+    make_named_request("test-response", "LOGBACK", HashMap::new()).unwrap();
+
     /*
     This is meant to test the case where the budget is limited.
     With an insufficient budget, this call should probably fail, so that the
     rule knows the log back will not happen. In reality, the current behavior
     is that the call will succeed, but the runtime may not honour the request.
-    
+
     match plaid::log_back("test_logback", b"something", 0) {
         Ok(_) => { panic!("this should not happen") },
         Err(_) => {
@@ -37,7 +43,7 @@ fn handle_logback() -> Result<Option<String>, i32> {
         }
     };
     */
-    
+
     Ok(Some("OK".to_string()))
 }
 

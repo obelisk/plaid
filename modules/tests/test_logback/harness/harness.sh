@@ -23,19 +23,19 @@ curl http://$PLAID_LOCATION/webhook/$URL
 wait_for_lines $FILE 1 30
 
 # The log back is what populates the cache with "1", so the second call can only
-# return "1" once it has been delivered. The rule asks for a 3 second delay and
-# the log back is not observable from here, so wait comfortably past that delay
-# before making the second call. This is a genuine minimum delay in the rule
-# rather than a startup race, so a fixed wait is appropriate.
-sleep 10
+# return "1" once it has been delivered. The delayed-logback processor polls on
+# an interval (10s by default), so the log back can arrive well after the 3s
+# delay the rule asked for. Wait for the marker the rule emits when it handles
+# the log back rather than guessing a duration.
+wait_for_line "$FILE" "LOGBACK" 60
 
 # Call the webhook
 curl http://$PLAID_LOCATION/webhook/$URL
-wait_for_lines $FILE 2 30
+wait_for_lines $FILE 3 30
 
 stop_request_handler $RH_PID
 
-echo -e "0\n1" > expected.txt
+echo -e "0\nLOGBACK\n1" > expected.txt
 diff expected.txt $FILE
 RESULT=$?
 

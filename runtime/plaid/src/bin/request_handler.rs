@@ -73,10 +73,44 @@ async fn main() {
         .or(mnr_vars_route)
         .or(mnr_headers_route)
         .or(mnr_route);
-    warp::serve(routes)
+
+    // Shut down gracefully on SIGTERM/SIGINT. The handlers print a line before
+    // the HTTP reply is sent, so a hard kill can interrupt a response that is
+    // still in flight. That makes the rule's named request fail even though the
+    // output the test asserts on was already written. Draining in-flight
+    // requests before exiting keeps the two consistent.
+    let (_, server) = warp::serve(routes)
         .tls()
         .cert(cert)
         .key(key)
-        .run(([127, 0, 0, 1], 8998))
-        .await;
+        .bind_with_graceful_shutdown(([127, 0, 0, 1], 8998), async {
+            shutdown_signal().await;
+        });
+
+    server.await;
+}
+
+/// Resolve when the process is asked to terminate.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }

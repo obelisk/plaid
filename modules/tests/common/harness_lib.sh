@@ -77,6 +77,43 @@ wait_for_lines() {
   return 1
 }
 
+# Wait until a file contains a line matching <pattern>.
+#
+# Use this when the number of lines is not known in advance, or when a specific
+# marker must be observed before continuing.
+#
+# Usage: wait_for_line <file> <pattern> [timeout_seconds]
+wait_for_line() {
+  local file="$1"
+  local pattern="$2"
+  local timeout="${3:-30}"
+  local deadline=$((SECONDS + timeout))
+
+  while (( SECONDS < deadline )); do
+    if [[ -f "$file" ]] && grep -q -- "$pattern" "$file"; then
+      return 0
+    fi
+    sleep 0.05
+  done
+
+  echo "Timed out after ${timeout}s waiting for '${pattern}' in ${file}" >&2
+  return 1
+}
+
+# Ensure the request handler is stopped even if the harness exits early.
+#
+# Harnesses that run under `set -e` abort as soon as a wait helper times out.
+# Without this trap the handler would be left running and holding port 8998,
+# which makes the *next* harness fail with a bind conflict. Registering the
+# cleanup on EXIT keeps a single failure from cascading.
+#
+# Usage: register_handler_cleanup <pid>
+register_handler_cleanup() {
+  local pid="$1"
+  # shellcheck disable=SC2064  # expand $pid now, not at trap time
+  trap "stop_request_handler ${pid} >/dev/null 2>&1 || true" EXIT
+}
+
 # Stop the request handler and wait for the port to be released.
 #
 # Harnesses run back to back and all bind 127.0.0.1:8998. A bare `kill` only

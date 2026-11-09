@@ -18,6 +18,7 @@ fi
 
 RH_PID=$!
 wait_for_request_handler $RH_PID
+register_handler_cleanup $RH_PID
 
 # The cron job fires on the 5th, 11th, 36th, 41st and 57th second of every
 # minute, so a full minute of output is needed to observe all five.
