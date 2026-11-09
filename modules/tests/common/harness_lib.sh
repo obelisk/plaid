@@ -77,29 +77,6 @@ wait_for_lines() {
   return 1
 }
 
-# Wait until a file contains a line matching <pattern>.
-#
-# Use this when the number of lines is not known in advance, or when a specific
-# marker must be observed before continuing.
-#
-# Usage: wait_for_line <file> <pattern> [timeout_seconds]
-wait_for_line() {
-  local file="$1"
-  local pattern="$2"
-  local timeout="${3:-30}"
-  local deadline=$((SECONDS + timeout))
-
-  while (( SECONDS < deadline )); do
-    if [[ -f "$file" ]] && grep -q -- "$pattern" "$file"; then
-      return 0
-    fi
-    sleep 0.05
-  done
-
-  echo "Timed out after ${timeout}s waiting for '${pattern}' in ${file}" >&2
-  return 1
-}
-
 # Ensure the request handler is stopped even if the harness exits early.
 #
 # Harnesses that run under `set -e` abort as soon as a wait helper times out.

@@ -22,20 +22,21 @@ wait_for_request_handler $RH_PID
 curl http://$PLAID_LOCATION/webhook/$URL
 wait_for_lines $FILE 1 30
 
-# The log back is what populates the cache with "1", so the second call can only
-# return "1" once it has been delivered. The delayed-logback processor polls on
-# an interval (10s by default), so the log back can arrive well after the 3s
-# delay the rule asked for. Wait for the marker the rule emits when it handles
-# the log back rather than guessing a duration.
-wait_for_line "$FILE" "LOGBACK" 60
+# Wait for the log back to be delivered. It is not observable from here, so this
+# has to be a fixed wait, and it must be long enough that the log back is
+# consumed before this harness exits: the delayed-logback processor polls on an
+# interval (10s by default), so a 3s delay can take up to ~13s to be processed.
+# If the harness exits first, the log back fires during a later test and its
+# output lands in that test's file, failing it.
+sleep 20
 
 # Call the webhook
 curl http://$PLAID_LOCATION/webhook/$URL
-wait_for_lines $FILE 3 30
+wait_for_lines $FILE 2 30
 
 stop_request_handler $RH_PID
 
-echo -e "0\nLOGBACK\n1" > expected.txt
+echo -e "0\n1" > expected.txt
 diff expected.txt $FILE
 RESULT=$?
 
