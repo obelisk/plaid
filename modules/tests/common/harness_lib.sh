@@ -39,9 +39,16 @@ wait_for_port() {
 # before it starts listening, instead of letting the test fail later with a
 # confusing diff.
 #
+# This also registers the EXIT cleanup, so every caller gets failure-path
+# cleanup for free. Without it, a harness running under `set -e` that aborts on
+# a wait timeout would leave the handler holding port 8998 and make the next
+# harness fail with a bind conflict.
+#
 # Usage: wait_for_request_handler <pid>
 wait_for_request_handler() {
   local pid="$1"
+
+  register_handler_cleanup "$pid"
 
   if ! wait_for_port 8998 30; then
     echo "Request handler (pid ${pid}) never started listening on 127.0.0.1:8998" >&2

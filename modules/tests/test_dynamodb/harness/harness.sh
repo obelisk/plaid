@@ -18,7 +18,6 @@ fi
 
 RH_PID=$!
 wait_for_request_handler $RH_PID
-register_handler_cleanup $RH_PID
 
 # Call the webhook
 curl -X POST -H "Content-Type: application/json" -d '' http://$PLAID_LOCATION/webhook/$URL
