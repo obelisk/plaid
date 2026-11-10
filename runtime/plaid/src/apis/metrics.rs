@@ -11,8 +11,8 @@ use crate::metrics::MetricsHandle;
 /// host function name, so a single family answers both "which external API is in the hot
 /// path" and "which APIs carry breaking-change risk".
 ///
-/// Calls rejected because the module is in test mode are recorded with
-/// `error="test_mode"`, since the rejection is still a call the module attempted.
+/// Calls that return `ApiError::TestMode` from an API implementation are recorded with
+/// `error="test_mode"`. Calls rejected by a host macro's test-mode guard are not recorded.
 pub struct ApiMetrics {
     calls: IntCounterVec,
     failures: IntCounterVec,
