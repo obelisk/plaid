@@ -2,6 +2,8 @@
 
 set -e
 
+source "$(dirname "$0")/../../common/harness_lib.sh"
+
 # Define what webhook within Plaid we're going to call
 URL="test_dynamodb"
 FILE="received_data.$URL.txt"
@@ -15,12 +17,12 @@ if [ $? -ne 0 ]; then
 fi
 
 RH_PID=$!
+wait_for_request_handler $RH_PID
 
-sleep 2
 # Call the webhook
 curl -X POST -H "Content-Type: application/json" -d '' http://$PLAID_LOCATION/webhook/$URL
-sleep 1
-kill $RH_PID 2>&1 > /dev/null
+wait_for_lines $FILE 1
+stop_request_handler $RH_PID
 
 RESULT=$(head -n 1 $FILE)
 rm -f $FILE

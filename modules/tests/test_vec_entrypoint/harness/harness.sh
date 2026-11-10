@@ -1,4 +1,7 @@
 #!/bin/bash
+set -e
+
+source "$(dirname "$0")/../../common/harness_lib.sh"
 
 # Define what webhook within Plaid we're going to call
 URL="test_vec_entrypoint"
@@ -13,14 +16,15 @@ if [ $? -ne 0 ]; then
 fi
 
 RH_PID=$!
+wait_for_request_handler $RH_PID
 
 # Call the webhook
 head -c 16 /dev/urandom | curl -X POST "http://$PLAID_LOCATION/webhook/$URL" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @-
-sleep 2
+wait_for_lines $FILE 1
 
-kill $RH_PID 2>&1 > /dev/null
+stop_request_handler $RH_PID
 
 RESULT=$(head -n 1 $FILE)
 rm -f $FILE

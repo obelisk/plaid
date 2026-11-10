@@ -29,7 +29,7 @@ fn handle_logback() -> Result<Option<String>, i32> {
     With an insufficient budget, this call should probably fail, so that the
     rule knows the log back will not happen. In reality, the current behavior
     is that the call will succeed, but the runtime may not honour the request.
-    
+
     match plaid::log_back("test_logback", b"something", 0) {
         Ok(_) => { panic!("this should not happen") },
         Err(_) => {
@@ -37,7 +37,7 @@ fn handle_logback() -> Result<Option<String>, i32> {
         }
     };
     */
-    
+
     Ok(Some("OK".to_string()))
 }
 

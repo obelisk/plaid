@@ -1,4 +1,7 @@
 #!/bin/bash
+set -e
+
+source "$(dirname "$0")/../../common/harness_lib.sh"
 
 # Define what webhook within Plaid we're going to call
 URL="test_jwt"
@@ -13,12 +16,13 @@ if [ $? -ne 0 ]; then
 fi
 
 RH_PID=$!
+wait_for_request_handler $RH_PID
 
 # Call the webhook
 curl -d "{}" http://$PLAID_LOCATION/webhook/$URL
-sleep 2
+wait_for_lines $FILE 12
 
-kill $RH_PID 2>&1 > /dev/null
+stop_request_handler $RH_PID
 
 expected="OK - simple request (es256)
 OK - simple request (rs256)
@@ -45,8 +49,8 @@ if [ "$DEBUG" = "true" ]; then
   echo ""
 fi
 
-diff expected.txt $FILE
-RESULT=$?
+diff expected.txt $FILE || RESULT=$?
+RESULT=${RESULT:-0}
 
 rm -f $FILE expected.txt
 

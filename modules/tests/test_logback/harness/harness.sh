@@ -1,4 +1,7 @@
 #!/bin/bash
+set -e
+
+source "$(dirname "$0")/../../common/harness_lib.sh"
 
 # Define what webhook within Plaid we're going to call
 URL="testlogback"
@@ -13,24 +16,30 @@ if [ $? -ne 0 ]; then
 fi
 
 RH_PID=$!
+wait_for_request_handler $RH_PID
 
-sleep 2
-# Call the webhook
+# Call the webhook. The rule replies with the current cache value ("0") and then
+# schedules a log back with a 3 second delay.
 curl http://$PLAID_LOCATION/webhook/$URL
-sleep 1
+wait_for_lines $FILE 1 30
 
-# Wait for the log back to arrive
+# Wait for the log back to be delivered. It is not observable from here, so this
+# has to be a fixed wait, and it must be long enough that the log back is
+# consumed before this harness exits: the delayed-logback processor polls on an
+# interval (10s by default), so a 3s delay can take up to ~13s to be processed.
+# If the harness exits first, the log back fires during a later test and its
+# output lands in that test's file, failing it.
 sleep 20
 
 # Call the webhook
 curl http://$PLAID_LOCATION/webhook/$URL
-sleep 3
+wait_for_lines $FILE 2 30
 
-kill $RH_PID 2>&1 > /dev/null
+stop_request_handler $RH_PID
 
 echo -e "0\n1" > expected.txt
-diff expected.txt $FILE
-RESULT=$?
+diff expected.txt $FILE || RESULT=$?
+RESULT=${RESULT:-0}
 
 rm -f $FILE expected.txt
 
