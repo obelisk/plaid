@@ -20,8 +20,10 @@ wait_for_port() {
   local deadline=$((SECONDS + timeout))
 
   while (( SECONDS < deadline )); do
+    # The connect runs in a subshell so the file descriptor is scoped to it and
+    # the "Connection refused" noise is suppressed. Do not close FD 3 in this
+    # shell: it was never opened here.
     if (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
-      exec 3<&- 3>&-
       return 0
     fi
     sleep 0.05
@@ -108,10 +110,10 @@ stop_request_handler() {
 
   local deadline=$((SECONDS + 10))
   while (( SECONDS < deadline )); do
+    # Same subshell scoping as wait_for_port: the FD belongs to the subshell.
     if ! (exec 3<>"/dev/tcp/127.0.0.1/8998") 2>/dev/null; then
       return 0
     fi
-    exec 3<&- 3>&-
     sleep 0.05
   done
 

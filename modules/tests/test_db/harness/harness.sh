@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 source "$(dirname "$0")/../../common/harness_lib.sh"
 
@@ -94,8 +95,8 @@ stop_request_handler $RH_PID
 # value3
 
 echo -e "Empty\nEmpty\nfirst_value\nEmpty\nsecond_value\nEmpty\nEmpty\nEmpty\na\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nOK\nOK\nOK\nOK\nOK\nvalue1\nvalue2\nvalue3" > expected.txt
-diff expected.txt $FILE
-RESULT=$?
+diff expected.txt $FILE || RESULT=$?
+RESULT=${RESULT:-0}
 
 rm -f $FILE expected.txt
 

@@ -298,7 +298,8 @@ kill "$PLAID_PID"
 wait "$PLAID_PID"
 
 # Kill request handler before checking file, and wait for it to actually exit so
-# that every line it received has been flushed to disk.
+# that every line it received has been flushed to disk. `wait` guarantees the
+# process is gone, so the file is complete at this point.
 kill "$RH_PID" 2>/dev/null || true
 wait "$RH_PID" 2>/dev/null || true
 
@@ -307,18 +308,6 @@ if [ ! -f "$FILE" ]; then
   echo "Expected output file not found: $FILE"
   exit 1
 fi
-
-# Give the handler a moment to flush the last logbacks rather than assuming the
-# file is complete the instant the process is signalled.
-deadline=$((SECONDS + 30))
-while (( SECONDS < deadline )); do
-  webhook_count=$(grep -c "^webhook_[0-9]\+$" "$FILE" || true)
-  logback_count=$(grep -c "^logback_[0-9]\+$" "$FILE" || true)
-  if (( webhook_count >= LOG_COUNT && logback_count >= LOG_COUNT )); then
-    break
-  fi
-  sleep 0.1
-done
 
 expected=$(mktemp)
 seq 1 "$LOG_COUNT" > "$expected"

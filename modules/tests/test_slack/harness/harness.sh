@@ -36,8 +36,8 @@ wait_for_lines $FILE 5 60
 stop_request_handler $RH_PID
 
 echo -e "OK\nOK\nOK\nOK\nOK" > expected.txt
-diff expected.txt $FILE
-RESULT=$?
+diff expected.txt $FILE || RESULT=$?
+RESULT=${RESULT:-0}
 
 rm -f $FILE expected.txt
 

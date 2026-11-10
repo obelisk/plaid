@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 source "$(dirname "$0")/../../common/harness_lib.sh"
 

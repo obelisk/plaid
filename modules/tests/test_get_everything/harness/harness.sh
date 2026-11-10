@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 source "$(dirname "$0")/../../common/harness_lib.sh"
 
@@ -26,8 +27,8 @@ wait_for_lines $FILE 2
 stop_request_handler $RH_PID
 
 echo -e "OK\nOK" > expected.txt
-diff expected.txt $FILE
-RESULT=$?
+diff expected.txt $FILE || RESULT=$?
+RESULT=${RESULT:-0}
 
 rm -f $FILE expected.txt
 
