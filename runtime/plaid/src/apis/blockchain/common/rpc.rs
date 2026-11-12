@@ -12,6 +12,10 @@ use crate::apis::blockchain::common::BlockchainError;
 pub struct JsonRpcRequest<'a, M: Serialize, P: Serialize> {
     pub jsonrpc: &'a str,
     pub method: M,
+    // Omit (not `null`) when the method takes no params — JSON-RPC 2.0 makes
+    // `params` optional, and strict relays (e.g. Hedera's) reject `"params":
+    // null` with -32600 Invalid Request, while `[]`/omitted is accepted.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<P>,
     pub id: u8,
 }
