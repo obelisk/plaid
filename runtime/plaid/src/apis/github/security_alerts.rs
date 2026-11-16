@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use http::HeaderMap;
 use plaid_stl::github::{GetCodeScanningAlertsParams, GetDependabotAlertsParams, GithubApiWrapper};
 
 use crate::{
@@ -36,72 +37,101 @@ fn take_from_page(collected: usize, page_len: usize) -> usize {
     page_len.min(MAX_ALERTS.saturating_sub(collected))
 }
 
-/// Walk every page of a GitHub alerts endpoint, collecting up to `MAX_ALERTS` alerts.
-///
-/// The alerts are collected as raw JSON so that fields we do not model are preserved for the
-/// rule; the STL deserializes into typed structs on its side.
-async fn collect_alerts(
-    client: &octocrab::Octocrab,
-    base_address: String,
-    pagination: Pagination,
-    module: &Arc<PlaidModule>,
-    endpoint: &str,
-) -> Result<Vec<serde_json::Value>, ApiError> {
-    let mut alerts = Vec::new();
-    let mut address = base_address.clone();
-    let mut page_number = 1u32;
-
-    loop {
-        // `Page` deserializes the body into `items` and parses the `Link` header into
-        // `next`/`prev`/`first`/`last`. Octocrab maps non-2xx responses to an error.
-        let page: octocrab::Page<serde_json::Value> = client
-            .get(address.clone(), None::<&()>)
-            .await
-            .map_err(|e| ApiError::GitHubError(GitHubError::ClientError(e)))?;
-
-        let page_len = page.items.len();
-        let take = take_from_page(alerts.len(), page_len);
-        alerts.extend(page.items.into_iter().take(take));
-
-        // We had to drop part of this page, so there is data we are not returning.
-        if page_len > take {
-            warn!(
-                "Reached the limit of {MAX_ALERTS} alerts while fetching {endpoint} on behalf of {module}; returning the first {MAX_ALERTS} alerts"
-            );
-            return Ok(alerts);
-        }
-
-        match pagination {
-            Pagination::Link => match page.next {
-                Some(next) => {
-                    // We are at the cap and GitHub says there is another page, so there is
-                    // data we are not returning.
-                    if alerts.len() >= MAX_ALERTS {
-                        warn!(
-                            "Reached the limit of {MAX_ALERTS} alerts while fetching {endpoint} on behalf of {module}; returning the first {MAX_ALERTS} alerts"
-                        );
-                        return Ok(alerts);
-                    }
-                    address = next.to_string();
-                }
-                None => return Ok(alerts),
-            },
-            Pagination::Page => {
-                // A short page is the last page.
-                if page_len < PER_PAGE {
-                    return Ok(alerts);
-                }
-                // A full page at the cap is ambiguous: there may or may not be more. Fetch
-                // the next page to find out, so we only warn when data is actually dropped.
-                page_number += 1;
-                let separator = if base_address.contains('?') { '&' } else { '?' };
-                address = format!("{base_address}{separator}page={page_number}");
-            }
-        }
-    }
+/// The `next` URL advertised by GitHub's `Link` response header, if any.
+fn next_link(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(http::header::LINK)?
+        .to_str()
+        .ok()?
+        .split(',')
+        .find_map(|link| {
+            let (url, params) = link.split_once(';')?;
+            let url = url.trim().strip_prefix('<')?.strip_suffix('>')?;
+            let is_next = params.split(';').any(|param| {
+                param
+                    .trim()
+                    .strip_prefix("rel=")
+                    .is_some_and(|rel| rel.trim_matches('"').split(' ').any(|r| r == "next"))
+            });
+            is_next.then_some(url)
+        })
 }
 
 impl Github {
+    /// Walk every page of a GitHub alerts endpoint, collecting up to `MAX_ALERTS` alerts.
+    ///
+    /// The alerts are collected as raw JSON so that fields we do not model are preserved for the
+    /// rule; the STL deserializes into typed structs on its side. Every page goes through the
+    /// shared GET path, which records rate-limit state and one request per page.
+    async fn collect_alerts(
+        &self,
+        client_id: &str,
+        base_address: String,
+        pagination: Pagination,
+        module: &Arc<PlaidModule>,
+        endpoint: &str,
+    ) -> Result<Vec<serde_json::Value>, ApiError> {
+        let mut alerts = Vec::new();
+        let mut address = base_address.clone();
+        let mut page_number = 1u32;
+
+        loop {
+            let (status, body, headers) = self
+                .make_get_request(client_id, address.clone(), None, module.clone())
+                .await?;
+            let body = match body {
+                Ok(body) if status == 200 => body,
+                Ok(_) => {
+                    return Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+                Err(e) => return Err(e),
+            };
+            let page: Vec<serde_json::Value> = serde_json::from_str(&body)
+                .map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))?;
+
+            let page_len = page.len();
+            let take = take_from_page(alerts.len(), page_len);
+            alerts.extend(page.into_iter().take(take));
+
+            // We had to drop part of this page, so there is data we are not returning.
+            if page_len > take {
+                warn!(
+                    "Reached the limit of {MAX_ALERTS} alerts while fetching {endpoint} on behalf of {module}; returning the first {MAX_ALERTS} alerts"
+                );
+                return Ok(alerts);
+            }
+
+            match pagination {
+                Pagination::Link => match next_link(&headers) {
+                    Some(next) => {
+                        // We are at the cap and GitHub says there is another page, so there is
+                        // data we are not returning.
+                        if alerts.len() >= MAX_ALERTS {
+                            warn!(
+                                "Reached the limit of {MAX_ALERTS} alerts while fetching {endpoint} on behalf of {module}; returning the first {MAX_ALERTS} alerts"
+                            );
+                            return Ok(alerts);
+                        }
+                        address = next.to_string();
+                    }
+                    None => return Ok(alerts),
+                },
+                Pagination::Page => {
+                    // A short page is the last page.
+                    if page_len < PER_PAGE {
+                        return Ok(alerts);
+                    }
+                    // A full page at the cap is ambiguous: there may or may not be more. Fetch
+                    // the next page to find out, so we only warn when data is actually dropped.
+                    page_number += 1;
+                    let separator = if base_address.contains('?') { '&' } else { '?' };
+                    address = format!("{base_address}{separator}page={page_number}");
+                }
+            }
+        }
+    }
     /// List the Dependabot alerts for a repository.
     ///
     /// This endpoint is cursor-paginated: GitHub does not accept a `page` parameter, so the
@@ -130,15 +160,15 @@ impl Github {
 
         info!("Fetching Dependabot alerts for repo [{owner}/{repo}] on behalf of {module}");
 
-        let client = self.client(&request.client_id)?;
-        let alerts = collect_alerts(
-            client,
-            address,
-            Pagination::Link,
-            &module,
-            "Dependabot alerts",
-        )
-        .await?;
+        let alerts = self
+            .collect_alerts(
+                &request.client_id,
+                address,
+                Pagination::Link,
+                &module,
+                "Dependabot alerts",
+            )
+            .await?;
 
         serde_json::to_string(&alerts).map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
     }
@@ -172,32 +202,30 @@ impl Github {
 
         info!("Fetching code scanning alerts for repo [{owner}/{repo}] on behalf of {module}");
 
-        let client = self.client(&request.client_id)?;
-        let alerts = collect_alerts(
-            client,
-            address,
-            Pagination::Page,
-            &module,
-            "code scanning alerts",
-        )
-        .await?;
+        let alerts = self
+            .collect_alerts(
+                &request.client_id,
+                address,
+                Pagination::Page,
+                &module,
+                "code scanning alerts",
+            )
+            .await?;
 
         serde_json::to_string(&alerts).map_err(|_| ApiError::GitHubError(GitHubError::BadResponse))
-    }
-
-    /// Look up a configured GitHub client by its identifier.
-    fn client(&self, client_id: &str) -> Result<&octocrab::Octocrab, ApiError> {
-        self.clients.get(client_id).ok_or_else(|| {
-            ApiError::GitHubError(GitHubError::InvalidInput(format!(
-                "Client ID not found: {client_id}"
-            )))
-        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{take_from_page, MAX_ALERTS, PER_PAGE};
+    use super::{next_link, take_from_page, MAX_ALERTS, PER_PAGE};
+    use http::{HeaderMap, HeaderValue};
+
+    fn link_header(value: &'static str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(http::header::LINK, HeaderValue::from_static(value));
+        headers
+    }
 
     #[test]
     fn takes_whole_page_when_under_the_cap() {
@@ -234,6 +262,26 @@ mod tests {
     fn cap_and_page_size_match_github_limits() {
         assert_eq!(MAX_ALERTS, 2000);
         assert_eq!(PER_PAGE, 100);
+    }
+
+    #[test]
+    fn follows_the_next_relation_past_the_other_links() {
+        let headers = link_header(
+            "<https://api.github.com/repos/1/alerts?page=2>; rel=\"next\", <https://api.github.com/repos/1/alerts?page=9>; rel=\"last\"",
+        );
+        assert_eq!(
+            next_link(&headers),
+            Some("https://api.github.com/repos/1/alerts?page=2")
+        );
+    }
+
+    #[test]
+    fn stops_when_no_next_relation_is_advertised() {
+        let headers = link_header(
+            "<https://api.github.com/repos/1/alerts?page=1>; rel=\"first\", <https://api.github.com/repos/1/alerts?page=7>; rel=\"last\"",
+        );
+        assert_eq!(next_link(&headers), None);
+        assert_eq!(next_link(&HeaderMap::new()), None);
     }
 
     /// The runtime collects raw JSON so that fields we do not model survive the round trip

@@ -205,21 +205,22 @@ impl Github {
         uri: String,
         module: Arc<PlaidModule>,
     ) -> Result<(u16, Result<String, ApiError>), ApiError> {
-        self.make_get_request_with_headers(client_id, uri, None, module)
-            .await
+        let (status, body, _) = self.make_get_request(client_id, uri, None, module).await?;
+        Ok((status, body))
     }
 
-    /// Make a GET request with custom headers to the GitHub API using the GitHub app library.
+    /// Make a GET request to the GitHub API using the GitHub app library. The response headers
+    /// are returned too, for endpoints that paginate on the `Link` header.
     /// Note - This function does not do any validation on the provided headers. That's because
     /// it's not exposed to the rules but only callable from within the runtime itself. Therefore
     /// we assume that all necessary validation has already been performed by the calling function.
-    async fn make_get_request_with_headers(
+    async fn make_get_request(
         &self,
         client_id: impl Display,
         uri: String,
         headers: Option<HeaderMap>,
         module: Arc<PlaidModule>,
-    ) -> Result<(u16, Result<String, ApiError>), ApiError> {
+    ) -> Result<(u16, Result<String, ApiError>, HeaderMap), ApiError> {
         // We log the header names we are passing but not the values, in case they are sensitive.
         info!(
             "Making a get request to {uri} on behalf of {module}. Provided headers: {:?}",
@@ -244,11 +245,13 @@ impl Github {
         let request = client._get_with_headers(uri, headers).await;
         let (status, snapshot, response) =
             self.capture_response(&client_id, &Method::GET, request)?;
+        let response_headers = response.headers().clone();
         let body = client
             .body_to_string(response)
             .await
             .map_err(body_read_error);
-        Ok(self.finish(&client_id, &Method::GET, status, &snapshot, body))
+        let (status, body) = self.finish(&client_id, &Method::GET, status, &snapshot, body);
+        Ok((status, body, response_headers))
     }
 
     /// Make a generic post request to the GitHub API using the GitHub app library. This exists

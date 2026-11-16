@@ -238,10 +238,10 @@ impl Github {
         );
 
         match self
-            .make_get_request_with_headers(&request.client_id, address, Some(headers), module)
+            .make_get_request(&request.client_id, address, Some(headers), module)
             .await
         {
-            Ok((status, Ok(body))) => {
+            Ok((status, Ok(body), _)) => {
                 if status == 200 {
                     Ok(body)
                 } else {
@@ -250,7 +250,7 @@ impl Github {
                     )))
                 }
             }
-            Ok((_, Err(e))) => Err(e),
+            Ok((_, Err(e), _)) => Err(e),
             Err(e) => Err(e),
         }
     }
