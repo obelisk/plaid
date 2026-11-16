@@ -14,6 +14,7 @@ pub mod pagerduty;
 pub mod rustica;
 pub mod slack;
 pub mod splunk;
+mod validators;
 pub mod web;
 pub mod yubikey;
 

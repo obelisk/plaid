@@ -176,6 +176,17 @@ secret_key = ""
 # [apis."blockchain"."evm".routing]
 # type = "proxy"
 # url = "https://some.rpc.proxy"
+#
+# Optional per-chain overrides: a chain listed under `routing.overrides` routes
+# through its own node pool (with `max_retries` retry semantics) instead of the
+# proxy. All other chains keep flowing through the proxy. Overrides are only
+# meaningful in proxy mode.
+# max_retries = 3
+# [apis."blockchain"."evm".routing.overrides.1] # Ethereum
+# selection_strategy = "RoundRobin"
+# [[apis."blockchain"."evm".routing.overrides.1.nodes]]
+# uri = "https://dedicated-eth-node"
+# name = "Dedicated Ethereum node"
 
 # BLOCKCHAIN SOLANA EXAMPLE CONFIGURATION
 # [apis."blockchain"."solana"]
@@ -210,6 +221,17 @@ secret_key = ""
 # [apis."blockchain"."solana".routing]
 # type = "proxy"
 # url = "https://some.rpc.proxy"
+#
+# Optional per-chain overrides: a cluster listed under `routing.overrides` routes
+# through its own node pool (with `max_retries` retry semantics) instead of the
+# proxy. All other clusters keep flowing through the proxy. Overrides are only
+# meaningful in proxy mode.
+# max_retries = 3
+# [apis."blockchain"."solana".routing.overrides.devnet]
+# selection_strategy = "RoundRobin"
+# [[apis."blockchain"."solana".routing.overrides.devnet.nodes]]
+# uri = "https://dedicated-solana-node"
+# name = "Dedicated Solana node"
 
 # KMS USING IAM
 

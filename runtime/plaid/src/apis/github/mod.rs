@@ -13,6 +13,7 @@ mod refs;
 mod repos;
 pub(crate) mod response;
 mod secrets;
+mod security_alerts;
 mod teams;
 mod validators;
 

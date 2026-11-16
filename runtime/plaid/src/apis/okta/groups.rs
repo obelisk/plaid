@@ -19,6 +19,10 @@ impl Okta {
         let user_id = request.get("user_id").ok_or(ApiError::BadRequest)?;
         let group_id = request.get("group_id").ok_or(ApiError::BadRequest)?;
 
+        // Validate that user and group ID look correct
+        let user_id = self.validate_okta_id(user_id)?;
+        let group_id = self.validate_okta_id(group_id)?;
+
         let res = self
             .client
             .delete(format!(

@@ -1,5 +1,6 @@
 mod groups;
 mod users;
+mod validators;
 
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 
@@ -7,6 +8,7 @@ use reqwest::{Client, StatusCode};
 use serde::{de, Deserialize, Serialize};
 
 use std::{
+    collections::HashMap,
     string::FromUtf8Error,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -64,6 +66,8 @@ pub struct Okta {
     config: OktaConfig,
     /// Client to make requests with
     client: Client,
+    /// Validators used to check parameters passed by modules
+    validators: HashMap<&'static str, regex::Regex>,
 }
 
 /// All the errors that can be encountered while interacting with Okta API
@@ -74,6 +78,7 @@ pub enum OktaError {
     AuthenticationFailure(String),
     JwtSignatureFailure,
     BadJsonResponse,
+    InvalidInput(String),
 }
 
 /// Which operation we will execute through the API. This is used to determine
@@ -102,7 +107,15 @@ impl Okta {
             .build()
             .unwrap();
 
-        Self { config, client }
+        // Create all the validators and compile all the regexes. If any regex is
+        // invalid it will panic.
+        let validators = validators::create_validators();
+
+        Self {
+            config,
+            client,
+            validators,
+        }
     }
 
     /// Return an appropriate authorization header, to be used when making a REST call.
