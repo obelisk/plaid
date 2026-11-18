@@ -25,7 +25,7 @@ RUN cargo build \
     --release \
     --bin=plaid \
     --no-default-features \
-    --features=cranelift,sled
+    --features=cranelift,sled,postgres
 
 # ── Stage 2: Build WASM modules ─────────────────────────────────────────────
 ARG RUST_VERSION=1.93.1
