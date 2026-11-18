@@ -14,6 +14,7 @@ probe_listen_address = "0.0.0.0:8081"
 "request_logger.wasm" = "request_logger"
 "todo_api.wasm" = "todo_api"
 "http_proxy.wasm" = "http_proxy"
+"github_rate_limit.wasm" = "github_rate_limit"
 "error_handling.wasm" = "error_handling"
 
 [loading.computation_amount]

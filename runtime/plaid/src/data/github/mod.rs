@@ -1,12 +1,15 @@
-use crate::apis::github::{build_github_clients, Authentication};
-use crate::apis::ApiError;
+use crate::apis::github::{
+    build_github_clients, classify, ApiKind, Authentication, RateLimitKind, RateLimitSnapshot,
+};
 use crate::executor::{Message, MessageSender};
-use crate::metrics::MetricsHandle;
+use crate::metrics::{LabelSet, MetricsHandle};
 use crate::parse_duration;
 use lru::LruCache;
 use octocrab::{self, Octocrab};
 use plaid_stl::messages::{Generator, LogSource, LogbacksAllowed};
-use prometheus::IntCounter;
+use prometheus::register_int_counter_vec_with_registry;
+use prometheus::register_int_counter_with_registry;
+use prometheus::{IntCounter, IntCounterVec};
 use serde::Deserialize;
 use serde_json::Value;
 use std::cmp::Ordering;
@@ -16,7 +19,28 @@ use std::sync::Arc;
 use std::time::Duration;
 use time::OffsetDateTime;
 
-use super::{DataGenerator, DataGeneratorLog};
+use super::{DataError, DataGenerator, DataGeneratorLog, FetchErrorStage};
+
+/// Why a fetch attempt failed. Only a status failure can also report which
+/// rate limit GitHub classified the response as, so the enum pairs the two
+/// labels instead of letting every stage carry a meaningless kind.
+enum FetchError {
+    Status(Option<RateLimitKind>),
+    Stage(FetchErrorStage),
+}
+
+impl FetchError {
+    fn values(&self) -> [&str; 2] {
+        match self {
+            Self::Status(kind) => ["status", kind.map_or("none", |kind| kind.as_str())],
+            Self::Stage(stage) => [stage.as_label(), "none"],
+        }
+    }
+}
+
+impl LabelSet for FetchError {
+    const NAMES: &'static [&'static str] = &["reason", "kind"];
+}
 
 /// Represents the event types GitHub will include in the response
 /// to the audit log request
@@ -183,20 +207,28 @@ pub struct Github {
     seen_logs_uuid: LruCache<String, u32>,
     /// Cumulative count of logs sent for processing, when metrics are enabled.
     logs_fetched: Option<IntCounter>,
+    /// Cumulative count of failed fetch attempts by stage, when metrics are enabled.
+    logs_fetch_errors: Option<IntCounterVec>,
 }
 
 impl Github {
+    fn record_fetch_error(&self, error: FetchError) {
+        if let Some(errors) = &self.logs_fetch_errors {
+            errors.with_label_values(&error.values()).inc();
+        }
+    }
+
     pub fn new(
         config: GithubConfig,
         logger: MessageSender,
         metrics: Option<Arc<MetricsHandle>>,
-    ) -> Result<Self, ApiError> {
+    ) -> Result<Self, DataError> {
         let default_client_auth: HashMap<String, Authentication> = [(
             "gh_data_generator".to_string(),
             config.authentication.clone(),
         )]
         .into();
-        let clients = build_github_clients(&default_client_auth)?;
+        let clients = build_github_clients(&default_client_auth).map_err(DataError::ApiError)?;
         let client = clients.into_iter().next().unwrap().1; // we know there is at least one client because we just built it with one entry
         let lru_cache_size = match config.lru_cache_size {
             0 => {
@@ -206,19 +238,29 @@ impl Github {
             size => NonZeroUsize::new(size).unwrap(),
         };
 
-        let logs_fetched = metrics.map(|handle| {
-            let counter = IntCounter::new(
-                "plaid_github_logs_fetched_total",
-                "Total number of GitHub logs sent for processing by the data generator",
-            )
-            .expect("valid metric definition");
-
-            handle
-                .register(Box::new(counter.clone()))
-                .expect("expected unique collector");
-
-            counter
-        });
+        let logs_fetched = metrics
+            .as_deref()
+            .map(|handle| {
+                register_int_counter_with_registry!(
+                    "plaid_github_logs_fetched_total",
+                    "Total number of GitHub logs sent for processing by the data generator",
+                    handle.registry(),
+                )
+                .map_err(DataError::MetricsRegistrationError)
+            })
+            .transpose()?;
+        let logs_fetch_errors = metrics
+            .as_deref()
+            .map(|handle| {
+                register_int_counter_vec_with_registry!(
+                    "plaid_github_logs_fetch_errors_total",
+                    "Total number of failed GitHub log fetch attempts; reason is datetime_encoding, transport, status, body_read, or response_parse; kind is none, primary, or secondary when the status classified as a rate limit",
+                    FetchError::NAMES,
+                    handle.registry(),
+                )
+                .map_err(DataError::MetricsRegistrationError)
+            })
+            .transpose()?;
 
         Ok(Self {
             config,
@@ -227,6 +269,7 @@ impl Github {
             seen_logs_uuid: LruCache::new(lru_cache_size),
             logger,
             logs_fetched,
+            logs_fetch_errors,
         })
     }
 }
@@ -242,6 +285,7 @@ impl DataGenerator for Github {
         let since = match since.format(&time::format_description::well_known::Rfc3339) {
             Ok(since) => since,
             Err(e) => {
+                self.record_fetch_error(FetchError::Stage(FetchErrorStage::DateTimeEncoding));
                 error!("Failed to parse 'since' datetime. Error: {e}");
                 return Err(());
             }
@@ -249,13 +293,14 @@ impl DataGenerator for Github {
         let until = match until.format(&time::format_description::well_known::Rfc3339) {
             Ok(until) => until,
             Err(e) => {
+                self.record_fetch_error(FetchError::Stage(FetchErrorStage::DateTimeEncoding));
                 error!("Failed to parse 'until' datetime. Error: {e}");
                 return Err(());
             }
         };
 
         let address = format!(
-            "https://api.github.com/orgs/{}/audit-log?include={}&per_page=100&order=asc&phrase=created:{since}..{until}",
+            "/orgs/{}/audit-log?include={}&per_page=100&order=asc&phrase=created:{since}..{until}",
             self.config.org, self.config.log_type
         );
 
@@ -265,21 +310,23 @@ impl DataGenerator for Github {
         loop {
             if let Some(address) = next {
                 let response = self.client._get(&address).await.map_err(|e| {
+                    self.record_fetch_error(FetchError::Stage(FetchErrorStage::Transport));
                     error!("{}", format!("Could not get logs from GitHub: {}", e));
                 })?;
 
-                if !response.status().is_success() {
+                let status = response.status();
+                if !status.is_success() {
+                    let snapshot = RateLimitSnapshot::from_headers(response.headers());
+                    let body = self.client.body_to_string(response).await;
+                    let body_text = body.as_deref().unwrap_or("N/A");
                     error!(
                         "{}",
                         format!(
-                            "Call to get GitHub logs failed with code: {}. The body was [{}]",
-                            response.status(),
-                            self.client
-                                .body_to_string(response)
-                                .await
-                                .unwrap_or("N/A".to_string())
+                            "Call to get GitHub logs failed with code: {status}. The body was [{body_text}]"
                         )
                     );
+                    let outcome = classify(ApiKind::Rest, status, &snapshot, body.as_deref().ok());
+                    self.record_fetch_error(FetchError::Status(outcome.rate_limit_kind()));
                     return Err(());
                 }
 
@@ -292,6 +339,7 @@ impl DataGenerator for Github {
 
                 // Parse the response's body
                 let body = self.client.body_to_string(response).await.map_err(|e| {
+                    self.record_fetch_error(FetchError::Stage(FetchErrorStage::ResponseBody));
                     error!(
                         "{}",
                         format!("Failed to read body of GitHub response. Error: {e}")
@@ -299,6 +347,7 @@ impl DataGenerator for Github {
                 })?;
 
                 let logs: Vec<Value> = serde_json::from_str(body.as_str()).map_err(|e| {
+                    self.record_fetch_error(FetchError::Stage(FetchErrorStage::ResponseParse));
                     error!("{}", format!("Could not parse data from Github: {}", e));
                 })?;
 
@@ -422,5 +471,148 @@ impl DataGenerator for Github {
 
     fn get_time_granularity(&self) -> time::Duration {
         time::Duration::nanoseconds(self.config.time_granularity as i64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::executor::MessageSender;
+    use crate::metrics::{label_pairs, MetricsHandle};
+    use time::{Date, Month, Time};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn fetch_error_labels_pair_names_with_values() {
+        let classified = FetchError::Status(Some(RateLimitKind::Primary));
+        assert_eq!(
+            label_pairs(FetchError::NAMES, &classified.values()),
+            [("reason", "status"), ("kind", "primary")]
+        );
+
+        let unclassified = FetchError::Status(None);
+        assert_eq!(
+            label_pairs(FetchError::NAMES, &unclassified.values()),
+            [("reason", "status"), ("kind", "none")]
+        );
+
+        let staged = FetchError::Stage(FetchErrorStage::Transport);
+        assert_eq!(
+            label_pairs(FetchError::NAMES, &staged.values()),
+            [("reason", "transport"), ("kind", "none")]
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_metric_registration_returns_an_error() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let handle = Arc::new(MetricsHandle::new());
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+        let sender = MessageSender::new(sender, HashMap::new());
+        let config: GithubConfig =
+            toml::from_str("authentication = {}\norg = \"test-org\"\nlog_type = \"all\"\n")
+                .unwrap();
+        assert!(Github::new(config, sender.clone(), Some(handle.clone())).is_ok());
+
+        let config: GithubConfig =
+            toml::from_str("authentication = {}\norg = \"test-org\"\nlog_type = \"all\"\n")
+                .unwrap();
+        assert!(matches!(
+            Github::new(config, sender, Some(handle)),
+            Err(DataError::MetricsRegistrationError(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn failing_fetch_records_its_stage() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let handle = Arc::new(MetricsHandle::new());
+        let config: GithubConfig =
+            toml::from_str("authentication = {}\norg = \"test-org\"\nlog_type = \"all\"\n")
+                .unwrap();
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+        let github = Github::new(
+            config,
+            MessageSender::new(sender, HashMap::new()),
+            Some(handle.clone()),
+        )
+        .unwrap();
+
+        // RFC3339 cannot encode a negative year, so the fetch fails before it
+        // builds a request.
+        let unencodable = OffsetDateTime::new_utc(
+            Date::from_calendar_date(-1, Month::January, 1).unwrap(),
+            Time::MIDNIGHT,
+        );
+
+        assert!(DataGenerator::fetch_logs(&github, unencodable, unencodable)
+            .await
+            .is_err());
+
+        let encoded = handle.encode().unwrap();
+        assert!(encoded.contains(
+            "plaid_github_logs_fetch_errors_total{kind=\"none\",reason=\"datetime_encoding\"} 1"
+        ));
+        assert!(encoded.contains("plaid_github_logs_fetched_total 0"));
+    }
+
+    #[tokio::test]
+    async fn status_failure_records_its_rate_limit_kind() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let handle = Arc::new(MetricsHandle::new());
+        let config: GithubConfig =
+            toml::from_str("authentication = {}\norg = \"test-org\"\nlog_type = \"all\"\n")
+                .unwrap();
+        let (sender, _receiver) = crossbeam_channel::unbounded();
+        let mut github = Github::new(
+            config,
+            MessageSender::new(sender, HashMap::new()),
+            Some(handle.clone()),
+        )
+        .unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) =
+                tokio::time::timeout(std::time::Duration::from_secs(5), listener.accept())
+                    .await
+                    .expect("the data generator did not reach the local server")
+                    .unwrap();
+            let mut request = [0u8; 2048];
+            let read = socket.read(&mut request).await.unwrap();
+            let request = String::from_utf8_lossy(&request[..read]);
+            assert!(
+                request.contains("/orgs/test-org/audit-log"),
+                "request path: {request}"
+            );
+            let body = r#"{"message":"API rate limit exceeded"}"#;
+            let response = format!(
+                "HTTP/1.1 403 Forbidden\r\ncontent-type: application/json\r\ncontent-length: {}\r\nx-ratelimit-limit: 5000\r\nx-ratelimit-remaining: 0\r\nx-ratelimit-used: 5000\r\nx-ratelimit-reset: 1760000000\r\nx-ratelimit-resource: core\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        github.client = Octocrab::builder()
+            .base_uri(format!("http://{addr}"))
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let now = OffsetDateTime::now_utc();
+        let since = now - time::Duration::hours(1);
+        assert!(DataGenerator::fetch_logs(&github, since, now)
+            .await
+            .is_err());
+        server.await.unwrap();
+
+        let encoded = handle.encode().unwrap();
+        assert!(
+            encoded.contains(
+                "plaid_github_logs_fetch_errors_total{kind=\"primary\",reason=\"status\"} 1"
+            ),
+            "a 403 with exhausted quota must record a primary rate limit"
+        );
     }
 }

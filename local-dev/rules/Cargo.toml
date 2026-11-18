@@ -9,6 +9,7 @@ members = [
     "request-logger",
     "todo-api",
     "http-proxy",
+    "github-rate-limit",
     "error-handling",
 ]
 resolver = "2"

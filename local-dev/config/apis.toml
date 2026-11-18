@@ -31,6 +31,17 @@ allowed_rules = ["http_proxy.wasm"]
 [apis."general".network.web_requests."httpbin_post".headers]
 Content-Type = "application/json"
 
+# ──────────────────────────────────────────────────────────────
+# GitHub rate-limit metrics example
+# ──────────────────────────────────────────────────────────────
+# No token is needed: the unauthenticated client still returns
+# x-ratelimit-* headers, so the metrics endpoint shows quota state
+# after the github-rate-limit webhook runs.
+
+[apis."github"]
+[apis."github".authentication.noauth]
+[apis."github".graphql_queries]
+
 # Example: Slack integration
 # [apis."slack"]
 # [apis."slack".webhooks]

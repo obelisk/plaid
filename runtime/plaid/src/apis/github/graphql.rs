@@ -8,7 +8,9 @@ use crate::{
     loader::PlaidModule,
 };
 
-use super::Github;
+use http::Method;
+
+use super::{body_read_error, classify, ApiKind, Github};
 
 /// A GraphQL query ready to be executed.
 #[derive(Serialize)]
@@ -56,7 +58,8 @@ impl Github {
         query: T,
         module: Arc<PlaidModule>,
     ) -> Result<String, ApiError> {
-        let client = self.clients.get(&client_id.to_string()).ok_or_else(|| {
+        let client_id = client_id.to_string();
+        let client = self.clients.get(&client_id).ok_or_else(|| {
             ApiError::GitHubError(GitHubError::InvalidInput(format!(
                 "Client ID not found: {}",
                 client_id
@@ -64,28 +67,24 @@ impl Github {
         })?;
 
         let request = client._post(GITHUB_GQL_API, Some(&query)).await;
+        let (status, snapshot, response) =
+            self.capture_response(&client_id, &Method::POST, request)?;
+        let body = client.body_to_string(response).await;
 
-        match request {
-            Ok(r) => {
-                if r.status() == 200 {
-                    let body = client.body_to_string(r).await.map_err(|e| {
-                        ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                    })?;
+        if self.metrics.is_some() {
+            let outcome = classify(ApiKind::GraphQL, status, &snapshot, body.as_deref().ok());
+            self.record(&client_id, &Method::POST, &snapshot, outcome);
+        }
 
-                    Ok(body)
-                } else {
-                    let status = r.status();
-                    let body = client.body_to_string(r).await.map_err(|e| {
-                        ApiError::GitHubError(GitHubError::GraphQLRequestError(e.to_string()))
-                    })?;
+        let body = body.map_err(body_read_error)?;
 
-                    warn!("Failed GraphQL query from module: {module}. Status Code: {status} Return was: {body}");
-                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
-                        status.as_u16(),
-                    )))
-                }
-            }
-            Err(e) => Err(ApiError::GitHubError(GitHubError::ClientError(e))),
+        if status == 200 {
+            Ok(body)
+        } else {
+            warn!("Failed GraphQL query from module: {module}. Status Code: {status} Return was: {body}");
+            Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                status.as_u16(),
+            )))
         }
     }
 

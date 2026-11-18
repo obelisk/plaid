@@ -54,6 +54,7 @@ use warp::{
 #[derive(Debug)]
 enum Errors {
     FailedToStartApiSystem(ApiError),
+    MetricsRegistrationFailed(prometheus::Error),
     FailedToLoadModules,
 }
 
@@ -61,6 +62,9 @@ impl std::fmt::Display for Errors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Errors::FailedToStartApiSystem(e) => write!(f, "Failed to start API system: {:?}", e),
+            Errors::MetricsRegistrationFailed(e) => {
+                write!(f, "Failed to register metrics: {e}")
+            }
             Errors::FailedToLoadModules => write!(f, "Failed to load modules"),
         }
     }
@@ -389,8 +393,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|_| Arc::new(MetricsHandle::new()));
 
     let module_execution_metrics = if let Some(handle) = &metrics {
-        QueueMetrics::register(handle, &exec_thread_pools);
-        Some(Arc::new(ModuleExecutionMetrics::register(handle)))
+        QueueMetrics::register(handle, &exec_thread_pools)
+            .map_err(Errors::MetricsRegistrationFailed)?;
+        Some(Arc::new(
+            ModuleExecutionMetrics::register(handle).map_err(Errors::MetricsRegistrationFailed)?,
+        ))
     } else {
         None
     };
@@ -570,7 +577,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     info!("Configuring APIs for Modules");
     // Create the API that powers all the wrapped calls that modules can make
-    let api = Api::new(config.apis)
+    let api = Api::with_metrics(config.apis, metrics.clone())
         .await
         .map_err(|e| Errors::FailedToStartApiSystem(e))?;
 
