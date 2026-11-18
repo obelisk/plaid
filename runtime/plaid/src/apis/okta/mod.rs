@@ -75,7 +75,8 @@ pub struct Okta {
 pub enum OktaError {
     BadData(FromUtf8Error),
     UnexpectedStatusCode(u16),
-    AuthenticationFailure(String),
+    /// A transport-level failure (connection refused, timeout, ...) while talking to Okta.
+    NetworkError(reqwest::Error),
     JwtSignatureFailure,
     BadJsonResponse,
     InvalidInput(String),
@@ -196,18 +197,13 @@ impl Okta {
             .post(format!("https://{}/oauth2/v1/token", self.config.domain))
             .header("Accept", "application/json")
             .form(&form);
-        let res = req
-            .send()
-            .await
-            .map_err(|e| OktaError::AuthenticationFailure(e.to_string()))?;
-        
+        let res = req.send().await.map_err(OktaError::NetworkError)?;
+
         let status = res.status();
         if status != StatusCode::OK {
-            let text = res.text().await.map_err(|e| OktaError::AuthenticationFailure(e.to_string()))?;
+            let text = res.text().await.map_err(OktaError::NetworkError)?;
             error!("Okta API Error fetching access token: {text}");
-            return Err(OktaError::UnexpectedStatusCode(
-                status.as_u16(),
-            ));
+            return Err(OktaError::UnexpectedStatusCode(status.as_u16()));
         }
 
         let access_token = res
