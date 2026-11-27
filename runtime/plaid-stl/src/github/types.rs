@@ -427,6 +427,7 @@ pub struct RepositoryCollaboratorPermission {
     /// The assigned role name, including custom organization roles.
     pub role_name: String,
     /// The collaborator whose permission was requested.
+    /// This is `None` when GitHub does not return a user object.
     pub user: Option<GitHubUser>,
 }
 
