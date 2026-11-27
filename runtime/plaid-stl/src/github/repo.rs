@@ -131,65 +131,6 @@ pub struct GetRepoCollaboratorsParams {
     pub affiliation: Option<String>,
 }
 
-/// Parameters sent to the runtime when listing a repository's pending invitations.
-#[derive(Deserialize, Serialize)]
-pub struct GetRepoInvitationsParams {
-    /// The account owner of the repository. The name is not case sensitive.
-    pub owner: String,
-    /// The name of the repository without the .git extension. The name is not case sensitive.
-    pub repo: String,
-    /// The number of results per page (default=30, max=100).
-    pub per_page: Option<u8>,
-    /// The page of results to return (default=1).
-    pub page: Option<u16>,
-}
-
-/// Parameters sent to the runtime when updating a repository invitation.
-#[derive(Deserialize, Serialize)]
-pub struct UpdateRepoInvitationParams {
-    /// The account owner of the repository. The name is not case sensitive.
-    pub owner: String,
-    /// The name of the repository without the .git extension. The name is not case sensitive.
-    pub repo: String,
-    /// The unique identifier of the invitation to update.
-    pub invitation_id: String,
-    /// The permissions to grant to the invitee.
-    pub permissions: String,
-}
-
-/// Parameters sent to the runtime when deleting a repository invitation.
-#[derive(Deserialize, Serialize)]
-pub struct DeleteRepoInvitationParams {
-    /// The account owner of the repository. The name is not case sensitive.
-    pub owner: String,
-    /// The name of the repository without the .git extension. The name is not case sensitive.
-    pub repo: String,
-    /// The unique identifier of the invitation to delete.
-    pub invitation_id: String,
-}
-
-/// Parameters sent to the runtime when checking a repository collaborator.
-#[derive(Deserialize, Serialize)]
-pub struct CheckRepoCollaboratorParams {
-    /// The account owner of the repository. The name is not case sensitive.
-    pub owner: String,
-    /// The name of the repository without the .git extension. The name is not case sensitive.
-    pub repo: String,
-    /// The GitHub username to check.
-    pub user: String,
-}
-
-/// Parameters sent to the runtime when getting a repository collaborator's permissions.
-#[derive(Deserialize, Serialize)]
-pub struct GetRepoCollaboratorPermissionParams {
-    /// The account owner of the repository. The name is not case sensitive.
-    pub owner: String,
-    /// The name of the repository without the .git extension. The name is not case sensitive.
-    pub repo: String,
-    /// The GitHub username whose permissions should be retrieved.
-    pub user: String,
-}
-
 /// DEPRECATED - DO NOT USE. Instead, use get_all_repository_collaborators
 /// Get first 30 collaborators on a repository
 /// ## Arguments
@@ -344,6 +285,17 @@ pub fn get_all_repository_collaborators_detailed(
     Ok(collaborators)
 }
 
+/// Parameters sent to the runtime when checking a repository collaborator.
+#[derive(Deserialize, Serialize)]
+pub struct CheckRepoCollaboratorParams {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the .git extension. The name is not case sensitive.
+    pub repo: String,
+    /// The GitHub username to check.
+    pub user: String,
+}
+
 /// Check whether a user is a collaborator on a repository.
 ///
 /// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#check-if-a-user-is-a-repository-collaborator
@@ -357,6 +309,9 @@ pub fn get_all_repository_collaborators_detailed(
 /// ## Returns
 /// * `Ok(true)` if the user is a collaborator, `Ok(false)` if they are not, or
 /// * `Err(PlaidFunctionError)` if the request fails.
+///
+/// A `false` result can also mean the repository or user does not exist, or is not
+/// visible to the configured GitHub client.
 pub fn check_repo_collaborator(
     client_id: impl Display,
     owner: impl Display,
@@ -388,6 +343,17 @@ pub fn check_repo_collaborator(
     }
 
     Ok(res != 0)
+}
+
+/// Parameters sent to the runtime when getting a repository collaborator's permissions.
+#[derive(Deserialize, Serialize)]
+pub struct GetRepoCollaboratorPermissionParams {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the .git extension. The name is not case sensitive.
+    pub repo: String,
+    /// The GitHub username whose permissions should be retrieved.
+    pub user: String,
 }
 
 /// Get a user's calculated permission and role on a repository.
@@ -449,6 +415,19 @@ pub fn get_repo_collaborator_permission(
     let response = String::from_utf8(return_buffer).unwrap();
     serde_json::from_str::<RepositoryCollaboratorPermission>(&response)
         .map_err(|_| PlaidFunctionError::InternalApiError)
+}
+
+/// Parameters sent to the runtime when listing a repository's pending invitations.
+#[derive(Deserialize, Serialize)]
+pub struct GetRepoInvitationsParams {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the .git extension. The name is not case sensitive.
+    pub repo: String,
+    /// The number of results per page (default=30, max=100).
+    pub per_page: Option<u8>,
+    /// The page of results to return (default=1).
+    pub page: Option<u16>,
 }
 
 /// Get all pending invitations on a repository.
@@ -513,16 +492,28 @@ pub fn get_repo_invitations(
         // This should be safe because unless the Plaid runtime is expressly trying
         // to mess with us, this came from a String in the API module.
         let this_page = String::from_utf8(return_buffer).unwrap();
-        if this_page == "[]" {
+        let page_invitations = serde_json::from_str::<Vec<RepositoryInvitation>>(&this_page)
+            .map_err(|_| PlaidFunctionError::InternalApiError)?;
+        if page_invitations.is_empty() {
             break;
         }
-        invitations.extend(
-            serde_json::from_str::<Vec<RepositoryInvitation>>(&this_page)
-                .map_err(|_| PlaidFunctionError::InternalApiError)?,
-        );
+        invitations.extend(page_invitations);
     }
 
     Ok(invitations)
+}
+
+/// Parameters sent to the runtime when updating a repository invitation.
+#[derive(Deserialize, Serialize)]
+pub struct UpdateRepoInvitationParams {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the .git extension. The name is not case sensitive.
+    pub repo: String,
+    /// The unique identifier of the invitation to update.
+    pub invitation_id: String,
+    /// The permissions to grant to the invitee.
+    pub permissions: String,
 }
 
 /// Update the permissions of a pending repository invitation.
@@ -587,6 +578,17 @@ pub fn update_repo_invitation(
     let response = String::from_utf8(return_buffer).unwrap();
     serde_json::from_str::<RepositoryInvitation>(&response)
         .map_err(|_| PlaidFunctionError::InternalApiError)
+}
+
+/// Parameters sent to the runtime when deleting a repository invitation.
+#[derive(Deserialize, Serialize)]
+pub struct DeleteRepoInvitationParams {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the .git extension. The name is not case sensitive.
+    pub repo: String,
+    /// The unique identifier of the invitation to delete.
+    pub invitation_id: String,
 }
 
 /// Delete a pending repository invitation.

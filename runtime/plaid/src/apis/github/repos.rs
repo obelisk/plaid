@@ -398,6 +398,8 @@ impl Github {
         );
         let address = format!("/repos/{owner}/{repo}/collaborators/{user}");
 
+        // GitHub uses 404 both for "not a collaborator" and for resources the token
+        // cannot see, so false should not be treated as proof the user is absent.
         match self
             .make_generic_get_request(&request.client_id, address, module)
             .await
@@ -475,7 +477,7 @@ impl Github {
             return Err(ApiError::BadRequest);
         }
 
-        info!("Fetching invitations for [{repo}] on behalf of {module}");
+        info!("Fetching invitations for [{owner}/{repo}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/invitations?per_page={per_page}&page={page}");
 
         match self
