@@ -418,6 +418,24 @@ pub struct RepositoryCollaborator {
     pub permissions: Permission,
 }
 
+/// A pending invitation to collaborate on a GitHub repository.
+/// Note - We only deserialize the fields we care about.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RepositoryInvitation {
+    /// The unique identifier of the invitation.
+    pub id: i64,
+    /// The user being invited, if the invitation was sent to a GitHub account.
+    /// This is `None` for invitations sent to an email address that does not
+    /// (yet) belong to a GitHub account.
+    pub invitee: Option<GitHubUser>,
+    /// GitHub returns one of read|write|admin|triage|moderate|maintain.
+    pub permissions: String,
+    /// Whether the invitation has expired.
+    pub expired: bool,
+    /// When the invitation was created, as an ISO 8601 timestamp.
+    pub created_at: String,
+}
+
 /// Parameters sent to the runtime when triggering a GHA via repository_dispatch.
 /// See https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#create-a-repository-dispatch-event for more details
 #[derive(Serialize, Deserialize)]

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     github::{
         CreateOrUpdateFileRequest, FetchFileCustomMediaType, FetchFileRequest, GithubApiWrapper,
-        RepositoryCollaborator, RepositoryCustomProperty, SbomResponse,
+        RepositoryCollaborator, RepositoryCustomProperty, RepositoryInvitation, SbomResponse,
     },
     PlaidFunctionError,
 };
@@ -128,6 +128,19 @@ pub struct GetRepoCollaboratorsParams {
     pub per_page: Option<u8>,
     pub page: Option<u16>,
     pub affiliation: Option<String>,
+}
+
+/// Parameters sent to the runtime when listing a repository's pending invitations.
+#[derive(Deserialize, Serialize)]
+pub struct GetRepoInvitationsParams {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the .git extension. The name is not case sensitive.
+    pub repo: String,
+    /// The number of results per page (default=30, max=100).
+    pub per_page: Option<u8>,
+    /// The page of results to return (default=1).
+    pub page: Option<u16>,
 }
 
 /// DEPRECATED - DO NOT USE. Instead, use get_all_repository_collaborators
@@ -282,6 +295,74 @@ pub fn get_all_repository_collaborators_detailed(
     }
 
     Ok(collaborators)
+}
+
+/// Get all pending invitations on a repository.
+/// ## Arguments
+///
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+pub fn get_repo_invitations(
+    client_id: impl Display,
+    owner: impl Display,
+    repo: impl Display,
+) -> Result<Vec<RepositoryInvitation>, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_repo_invitations);
+    }
+
+    let mut invitations = Vec::<RepositoryInvitation>::new();
+    let mut page = 0;
+
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+
+    loop {
+        page += 1;
+
+        let params = GetRepoInvitationsParams {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            per_page: None,
+            page: Some(page),
+        };
+
+        let wrapper = GithubApiWrapper {
+            client_id: client_id.to_string(),
+            params,
+        };
+
+        let request = serde_json::to_string(&wrapper).unwrap();
+
+        let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+        let res = unsafe {
+            github_get_repo_invitations(
+                request.as_bytes().as_ptr(),
+                request.as_bytes().len(),
+                return_buffer.as_mut_ptr(),
+                RETURN_BUFFER_SIZE,
+            )
+        };
+
+        if res < 0 {
+            return Err(res.into());
+        }
+
+        return_buffer.truncate(res as usize);
+        // This should be safe because unless the Plaid runtime is expressly trying
+        // to mess with us, this came from a String in the API module.
+        let this_page = String::from_utf8(return_buffer).unwrap();
+        if this_page == "[]" {
+            break;
+        }
+        invitations.extend(
+            serde_json::from_str::<Vec<RepositoryInvitation>>(&this_page)
+                .map_err(|_| PlaidFunctionError::InternalApiError)?,
+        );
+    }
+
+    Ok(invitations)
 }
 
 #[derive(Deserialize, Serialize)]

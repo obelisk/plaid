@@ -6,9 +6,10 @@ use plaid_stl::github::{
     CommentOnPullRequestRequest, CreateOrUpdateFileRequest, FetchCommitParams,
     FetchFileCustomMediaType, FetchFileRequest, GetBranchProtectionRulesParams,
     GetBranchProtectionRulesetParams, GetCustomPropertiesValuesParams, GetRepoCollaboratorsParams,
-    GetRepoIdFromRepoNameParams, GetRepoNameFromRepoIdParams, GetRepoSbomParams,
-    GetWeeklyCommitCountParams, GithubApiWrapper, GithubRepository, ListFilesParams,
-    RemoveUserFromRepoParams, RequireSignedCommitsParams, UpdateBranchProtectionRuleParams,
+    GetRepoIdFromRepoNameParams, GetRepoInvitationsParams, GetRepoNameFromRepoIdParams,
+    GetRepoSbomParams, GetWeeklyCommitCountParams, GithubApiWrapper, GithubRepository,
+    ListFilesParams, RemoveUserFromRepoParams, RequireSignedCommitsParams,
+    UpdateBranchProtectionRuleParams,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -357,6 +358,49 @@ impl Github {
         info!("Fetching collaborators for [{repo}] on behalf of {module}");
         let address =
             format!("/repos/{owner}/{repo}/collaborators?per_page={per_page}&affiliation={affiliation}&page={page}");
+
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get pending invitations for a repository, with support for paginated responses.
+    /// Optionally supports specifying how many results each page should contain (default=30, max=100) and which page is requested (default=1).
+    /// Repeatedly calling this function with different page numbers allows one to get all pending invitations for a repository.
+    /// See https://docs.github.com/en/rest/collaborators/invitations?apiVersion=2022-11-28#list-repository-invitations for more detail
+    pub async fn get_repo_invitations(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: GithubApiWrapper<GetRepoInvitationsParams> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let per_page: u8 = request.params.per_page.unwrap_or(30);
+        let page: u16 = request.params.page.unwrap_or(1);
+
+        if per_page > 100 {
+            // GitHub supports up to 100 results per page
+            return Err(ApiError::BadRequest);
+        }
+
+        info!("Fetching invitations for [{repo}] on behalf of {module}");
+        let address = format!("/repos/{owner}/{repo}/invitations?per_page={per_page}&page={page}");
 
         match self
             .make_generic_get_request(&request.client_id, address, module)
