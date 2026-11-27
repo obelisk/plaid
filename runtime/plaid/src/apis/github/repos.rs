@@ -2,14 +2,16 @@ use std::sync::Arc;
 
 use http::{HeaderMap, HeaderValue};
 use plaid_stl::github::{
-    AddUserToRepoParams, CheckCodeownersParams, CodeownersErrorsResponse, CodeownersStatus,
-    CommentOnPullRequestRequest, CreateOrUpdateFileRequest, FetchCommitParams,
+    AddUserToRepoParams, CheckCodeownersParams, CheckRepoCollaboratorParams,
+    CodeownersErrorsResponse, CodeownersStatus, CommentOnPullRequestRequest,
+    CreateOrUpdateFileRequest, DeleteRepoInvitationParams, FetchCommitParams,
     FetchFileCustomMediaType, FetchFileRequest, GetBranchProtectionRulesParams,
-    GetBranchProtectionRulesetParams, GetCustomPropertiesValuesParams, GetRepoCollaboratorsParams,
-    GetRepoIdFromRepoNameParams, GetRepoInvitationsParams, GetRepoNameFromRepoIdParams,
-    GetRepoSbomParams, GetWeeklyCommitCountParams, GithubApiWrapper, GithubRepository,
-    ListFilesParams, RemoveUserFromRepoParams, RequireSignedCommitsParams,
-    UpdateBranchProtectionRuleParams,
+    GetBranchProtectionRulesetParams, GetCustomPropertiesValuesParams,
+    GetRepoCollaboratorPermissionParams, GetRepoCollaboratorsParams, GetRepoIdFromRepoNameParams,
+    GetRepoInvitationsParams, GetRepoNameFromRepoIdParams, GetRepoSbomParams,
+    GetWeeklyCommitCountParams, GithubApiWrapper, GithubRepository, ListFilesParams,
+    RemoveUserFromRepoParams, RequireSignedCommitsParams, UpdateBranchProtectionRuleParams,
+    UpdateRepoInvitationParams,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -377,10 +379,84 @@ impl Github {
         }
     }
 
+    /// Check whether a user is a collaborator on a repository.
+    /// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#check-a-user-is-a-repository-collaborator for more detail
+    pub async fn check_repo_collaborator(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<bool, ApiError> {
+        let request: GithubApiWrapper<CheckRepoCollaboratorParams> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let user = self.validate_username(&request.params.user)?;
+
+        info!(
+            "Checking if user [{user}] is a collaborator on [{owner}/{repo}] on behalf of {module}"
+        );
+        let address = format!("/repos/{owner}/{repo}/collaborators/{user}");
+
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
+            Ok((status, Ok(_))) => {
+                if status == 204 {
+                    Ok(true)
+                } else if status == 404 {
+                    Ok(false)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Get a user's calculated permission and role on a repository.
+    /// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#get-repository-permissions-for-a-user for more detail
+    pub async fn get_repo_collaborator_permission(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: GithubApiWrapper<GetRepoCollaboratorPermissionParams> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let user = self.validate_username(&request.params.user)?;
+
+        info!("Fetching repository permissions for user [{user}] on [{owner}/{repo}] on behalf of {module}");
+        let address = format!("/repos/{owner}/{repo}/collaborators/{user}/permission");
+
+        match self
+            .make_generic_get_request(&request.client_id, address, module)
+            .await
+        {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Get pending invitations for a repository, with support for paginated responses.
     /// Optionally supports specifying how many results each page should contain (default=30, max=100) and which page is requested (default=1).
     /// Repeatedly calling this function with different page numbers allows one to get all pending invitations for a repository.
-    /// See https://docs.github.com/en/rest/collaborators/invitations?apiVersion=2022-11-28#list-repository-invitations for more detail
+    /// See https://docs.github.com/en/rest/collaborators/invitations?apiVersion=2026-03-10#list-repository-invitations for more detail
     pub async fn get_repo_invitations(
         &self,
         params: &str,
@@ -416,6 +492,77 @@ impl Github {
                 }
             }
             Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Update the permissions of a pending repository invitation.
+    /// See https://docs.github.com/en/rest/collaborators/invitations?apiVersion=2026-03-10#update-a-repository-invitation for more detail
+    pub async fn update_repo_invitation(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<String, ApiError> {
+        let request: GithubApiWrapper<UpdateRepoInvitationParams> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let invitation_id = self.validate_pint(&request.params.invitation_id)?;
+        let permissions = request.params.permissions.as_str();
+
+        info!("Updating invitation [{invitation_id}] for [{owner}/{repo}] with permissions [{permissions}] on behalf of {module}");
+        let address = format!("/repos/{owner}/{repo}/invitations/{invitation_id}");
+        let body = json!({ "permissions": permissions });
+
+        match self
+            .make_generic_patch_request(&request.client_id, address, Some(&body), module)
+            .await
+        {
+            Ok((status, Ok(body))) => {
+                if status == 200 {
+                    Ok(body)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
+            Ok((_, Err(e))) => Err(e),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Delete a pending repository invitation.
+    /// See https://docs.github.com/en/rest/collaborators/invitations?apiVersion=2026-03-10#delete-a-repository-invitation for more detail
+    pub async fn delete_repo_invitation(
+        &self,
+        params: &str,
+        module: Arc<PlaidModule>,
+    ) -> Result<u32, ApiError> {
+        let request: GithubApiWrapper<DeleteRepoInvitationParams> =
+            serde_json::from_str(params).map_err(|_| ApiError::BadRequest)?;
+
+        let owner = self.validate_username(&request.params.owner)?;
+        let repo = self.validate_repository_name(&request.params.repo)?;
+        let invitation_id = self.validate_pint(&request.params.invitation_id)?;
+
+        info!("Deleting invitation [{invitation_id}] for [{owner}/{repo}] on behalf of {module}");
+        let address = format!("/repos/{owner}/{repo}/invitations/{invitation_id}");
+
+        match self
+            .make_generic_delete_request::<&str>(&request.client_id, address, None, module)
+            .await
+        {
+            Ok((status, _)) => {
+                if status == 204 {
+                    Ok(0)
+                } else {
+                    Err(ApiError::GitHubError(GitHubError::UnexpectedStatusCode(
+                        status,
+                    )))
+                }
+            }
             Err(e) => Err(e),
         }
     }

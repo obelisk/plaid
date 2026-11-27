@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     github::{
         CreateOrUpdateFileRequest, FetchFileCustomMediaType, FetchFileRequest, GithubApiWrapper,
-        RepositoryCollaborator, RepositoryCustomProperty, RepositoryInvitation, SbomResponse,
+        RepositoryCollaborator, RepositoryCollaboratorPermission, RepositoryCustomProperty,
+        RepositoryInvitation, SbomResponse,
     },
     PlaidFunctionError,
 };
@@ -141,6 +142,52 @@ pub struct GetRepoInvitationsParams {
     pub per_page: Option<u8>,
     /// The page of results to return (default=1).
     pub page: Option<u16>,
+}
+
+/// Parameters sent to the runtime when updating a repository invitation.
+#[derive(Deserialize, Serialize)]
+pub struct UpdateRepoInvitationParams {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the .git extension. The name is not case sensitive.
+    pub repo: String,
+    /// The unique identifier of the invitation to update.
+    pub invitation_id: String,
+    /// The permissions to grant to the invitee.
+    pub permissions: String,
+}
+
+/// Parameters sent to the runtime when deleting a repository invitation.
+#[derive(Deserialize, Serialize)]
+pub struct DeleteRepoInvitationParams {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the .git extension. The name is not case sensitive.
+    pub repo: String,
+    /// The unique identifier of the invitation to delete.
+    pub invitation_id: String,
+}
+
+/// Parameters sent to the runtime when checking a repository collaborator.
+#[derive(Deserialize, Serialize)]
+pub struct CheckRepoCollaboratorParams {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the .git extension. The name is not case sensitive.
+    pub repo: String,
+    /// The GitHub username to check.
+    pub user: String,
+}
+
+/// Parameters sent to the runtime when getting a repository collaborator's permissions.
+#[derive(Deserialize, Serialize)]
+pub struct GetRepoCollaboratorPermissionParams {
+    /// The account owner of the repository. The name is not case sensitive.
+    pub owner: String,
+    /// The name of the repository without the .git extension. The name is not case sensitive.
+    pub repo: String,
+    /// The GitHub username whose permissions should be retrieved.
+    pub user: String,
 }
 
 /// DEPRECATED - DO NOT USE. Instead, use get_all_repository_collaborators
@@ -297,12 +344,125 @@ pub fn get_all_repository_collaborators_detailed(
     Ok(collaborators)
 }
 
-/// Get all pending invitations on a repository.
-/// ## Arguments
+/// Check whether a user is a collaborator on a repository.
 ///
+/// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#check-a-user-is-a-repository-collaborator
+///
+/// ## Arguments
 /// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
 /// * `owner` - The account owner of the repository. The name is not case sensitive.
 /// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `user` - The GitHub username to check.
+///
+/// ## Returns
+/// * `Ok(true)` if the user is a collaborator, `Ok(false)` if they are not, or
+/// * `Err(PlaidFunctionError)` if the request fails.
+pub fn check_repo_collaborator(
+    client_id: impl Display,
+    owner: impl Display,
+    repo: impl Display,
+    user: impl Display,
+) -> Result<bool, PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, check_repo_collaborator);
+    }
+
+    let params = CheckRepoCollaboratorParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        user: user.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap(); // safe unwrap
+    let res = unsafe {
+        github_check_repo_collaborator(request.as_bytes().as_ptr(), request.as_bytes().len())
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(res != 0)
+}
+
+/// Get a user's calculated permission and role on a repository.
+///
+/// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#get-repository-permissions-for-a-user
+///
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `user` - The GitHub username whose permissions should be retrieved.
+///
+/// ## Returns
+/// * `Ok(RepositoryCollaboratorPermission)` with the user's permission and role, or
+/// * `Err(PlaidFunctionError)` if the request fails.
+pub fn get_repo_collaborator_permission(
+    client_id: impl Display,
+    owner: impl Display,
+    repo: impl Display,
+    user: impl Display,
+) -> Result<RepositoryCollaboratorPermission, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, get_repo_collaborator_permission);
+    }
+
+    let params = GetRepoCollaboratorPermissionParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        user: user.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap(); // safe unwrap
+
+    // A collaborator permission response is small, so 64 KiB is sufficient.
+    const RETURN_BUFFER_SIZE: usize = 64 * 1024; // 64 KiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_get_repo_collaborator_permission(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response = String::from_utf8(return_buffer).unwrap();
+    serde_json::from_str::<RepositoryCollaboratorPermission>(&response)
+        .map_err(|_| PlaidFunctionError::InternalApiError)
+}
+
+/// Get all pending invitations on a repository.
+///
+/// See https://docs.github.com/en/rest/collaborators/invitations?apiVersion=2026-03-10#list-repository-invitations
+///
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+///
+/// ## Returns
+/// * `Ok(Vec<RepositoryInvitation>)` with all pending invitations, or
+/// * `Err(PlaidFunctionError)` if the request fails.
 pub fn get_repo_invitations(
     client_id: impl Display,
     owner: impl Display,
@@ -332,7 +492,7 @@ pub fn get_repo_invitations(
             params,
         };
 
-        let request = serde_json::to_string(&wrapper).unwrap();
+        let request = serde_json::to_string(&wrapper).unwrap(); // safe unwrap
 
         let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
 
@@ -363,6 +523,116 @@ pub fn get_repo_invitations(
     }
 
     Ok(invitations)
+}
+
+/// Update the permissions of a pending repository invitation.
+///
+/// See https://docs.github.com/en/rest/collaborators/invitations?apiVersion=2026-03-10#update-a-repository-invitation
+///
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `invitation_id` - The unique identifier of the invitation to update.
+/// * `permissions` - The permissions to grant, such as "read", "write", "triage", "maintain", "moderate", or "admin".
+///
+/// ## Returns
+/// * `Ok(RepositoryInvitation)` with the updated invitation, or
+/// * `Err(PlaidFunctionError)` if the request fails.
+pub fn update_repo_invitation(
+    client_id: impl Display,
+    owner: impl Display,
+    repo: impl Display,
+    invitation_id: impl Display,
+    permissions: impl Display,
+) -> Result<RepositoryInvitation, PlaidFunctionError> {
+    extern "C" {
+        new_host_function_with_error_buffer!(github, update_repo_invitation);
+    }
+
+    let params = UpdateRepoInvitationParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        invitation_id: invitation_id.to_string(),
+        permissions: permissions.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap(); // safe unwrap
+
+    // Invitation responses include repository metadata; match the listing API's buffer.
+    const RETURN_BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+    let mut return_buffer = vec![0; RETURN_BUFFER_SIZE];
+
+    let res = unsafe {
+        github_update_repo_invitation(
+            request.as_bytes().as_ptr(),
+            request.as_bytes().len(),
+            return_buffer.as_mut_ptr(),
+            RETURN_BUFFER_SIZE,
+        )
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    return_buffer.truncate(res as usize);
+    // This should be safe because unless the Plaid runtime is expressly trying
+    // to mess with us, this came from a String in the API module.
+    let response = String::from_utf8(return_buffer).unwrap();
+    serde_json::from_str::<RepositoryInvitation>(&response)
+        .map_err(|_| PlaidFunctionError::InternalApiError)
+}
+
+/// Delete a pending repository invitation.
+///
+/// See https://docs.github.com/en/rest/collaborators/invitations?apiVersion=2026-03-10#delete-a-repository-invitation
+///
+/// ## Arguments
+/// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).
+/// * `owner` - The account owner of the repository. The name is not case sensitive.
+/// * `repo` - The name of the repository without the .git extension. The name is not case sensitive.
+/// * `invitation_id` - The unique identifier of the invitation to delete.
+///
+/// ## Returns
+/// * `Ok(())` if the invitation was deleted, or
+/// * `Err(PlaidFunctionError)` if the request fails.
+pub fn delete_repo_invitation(
+    client_id: impl Display,
+    owner: impl Display,
+    repo: impl Display,
+    invitation_id: impl Display,
+) -> Result<(), PlaidFunctionError> {
+    extern "C" {
+        new_host_function!(github, delete_repo_invitation);
+    }
+
+    let params = DeleteRepoInvitationParams {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        invitation_id: invitation_id.to_string(),
+    };
+
+    let wrapper = GithubApiWrapper {
+        client_id: client_id.to_string(),
+        params,
+    };
+
+    let request = serde_json::to_string(&wrapper).unwrap(); // safe unwrap
+    let res = unsafe {
+        github_delete_repo_invitation(request.as_bytes().as_ptr(), request.as_bytes().len())
+    };
+
+    if res < 0 {
+        return Err(res.into());
+    }
+
+    Ok(())
 }
 
 #[derive(Deserialize, Serialize)]

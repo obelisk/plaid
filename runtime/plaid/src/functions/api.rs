@@ -423,7 +423,11 @@ impl_new_function_with_error_buffer!(
 impl_new_function_with_error_buffer!(github, get_branch_protection_rules, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_branch_protection_ruleset, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_repository_collaborators, ALLOW_IN_TEST_MODE);
+impl_new_function!(github, check_repo_collaborator, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, get_repo_collaborator_permission, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_repo_invitations, ALLOW_IN_TEST_MODE);
+impl_new_function_with_error_buffer!(github, update_repo_invitation, DISALLOW_IN_TEST_MODE);
+impl_new_function!(github, delete_repo_invitation, DISALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_dependabot_alerts, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, get_code_scanning_alerts, ALLOW_IN_TEST_MODE);
 impl_new_function_with_error_buffer!(github, search_code, ALLOW_IN_TEST_MODE);
@@ -899,7 +903,11 @@ define_api_functions! {
         "github_get_branch_protection_rules"               => github_get_branch_protection_rules,
         "github_get_branch_protection_ruleset"             => github_get_branch_protection_ruleset,
         "github_get_repository_collaborators"              => github_get_repository_collaborators,
+        "github_check_repo_collaborator"                   => github_check_repo_collaborator,
+        "github_get_repo_collaborator_permission"          => github_get_repo_collaborator_permission,
         "github_get_repo_invitations"                      => github_get_repo_invitations,
+        "github_update_repo_invitation"                    => github_update_repo_invitation,
+        "github_delete_repo_invitation"                    => github_delete_repo_invitation,
         "github_get_dependabot_alerts"                     => github_get_dependabot_alerts,
         "github_get_code_scanning_alerts"                  => github_get_code_scanning_alerts,
         "github_get_custom_properties_values"              => github_get_custom_properties_values,

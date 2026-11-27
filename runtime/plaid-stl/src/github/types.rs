@@ -418,6 +418,18 @@ pub struct RepositoryCollaborator {
     pub permissions: Permission,
 }
 
+/// A user's calculated permission and role on a repository.
+/// Note - We only deserialize the fields we care about.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RepositoryCollaboratorPermission {
+    /// The legacy base permission, such as "admin", "write", "read", or "none".
+    pub permission: String,
+    /// The assigned role name, including custom organization roles.
+    pub role_name: String,
+    /// The collaborator whose permission was requested.
+    pub user: Option<GitHubUser>,
+}
+
 /// A pending invitation to collaborate on a GitHub repository.
 /// Note - We only deserialize the fields we care about.
 #[derive(Debug, Serialize, Deserialize)]
