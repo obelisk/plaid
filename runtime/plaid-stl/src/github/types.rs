@@ -442,7 +442,8 @@ pub struct RepositoryInvitation {
     pub invitee: Option<GitHubUser>,
     /// GitHub returns one of read|write|admin|triage|moderate|maintain.
     pub permissions: String,
-    /// Whether the invitation has expired.
+    /// Whether the invitation has expired. GitHub may omit this field.
+    #[serde(default)]
     pub expired: bool,
     /// When the invitation was created, as an ISO 8601 timestamp.
     pub created_at: String,

@@ -346,7 +346,7 @@ pub fn get_all_repository_collaborators_detailed(
 
 /// Check whether a user is a collaborator on a repository.
 ///
-/// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#check-a-user-is-a-repository-collaborator
+/// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#check-if-a-user-is-a-repository-collaborator
 ///
 /// ## Arguments
 /// * `client_id` - Selects which configured GitHub client to use (supports multiple clients).

@@ -380,7 +380,7 @@ impl Github {
     }
 
     /// Check whether a user is a collaborator on a repository.
-    /// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#check-a-user-is-a-repository-collaborator for more detail
+    /// See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#check-if-a-user-is-a-repository-collaborator for more detail
     pub async fn check_repo_collaborator(
         &self,
         params: &str,
@@ -510,6 +510,11 @@ impl Github {
         let repo = self.validate_repository_name(&request.params.repo)?;
         let invitation_id = self.validate_pint(&request.params.invitation_id)?;
         let permissions = request.params.permissions.as_str();
+        // See https://docs.github.com/en/rest/collaborators/invitations?apiVersion=2026-03-10#update-a-repository-invitation
+        // for the permissions accepted by this endpoint.
+        if !["read", "write", "maintain", "triage", "moderate", "admin"].contains(&permissions) {
+            return Err(ApiError::BadRequest);
+        }
 
         info!("Updating invitation [{invitation_id}] for [{owner}/{repo}] with permissions [{permissions}] on behalf of {module}");
         let address = format!("/repos/{owner}/{repo}/invitations/{invitation_id}");
